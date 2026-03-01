@@ -91,7 +91,7 @@ function SearchableCustomerDropdown({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search by name or city…"
-                  className="w-full h-11 pl-9 pr-3 rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] text-sm border-none outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
+                  className="w-full min-h-[48px] pl-9 pr-3 rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] text-base border-none outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
                   autoFocus
                 />
               </div>

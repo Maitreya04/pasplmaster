@@ -166,6 +166,13 @@ body {
   font-family: "Geist Sans", sans-serif;
 }
 
+/* Prevent mobile browser auto-zoom on input focus (iOS Safari zooms when font-size < 16px) */
+input,
+textarea,
+select {
+  font-size: 16px;
+}
+
 .font-mono {
   font-family: "Geist Mono", monospace;
 }

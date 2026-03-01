@@ -149,7 +149,7 @@ export function InlineQtyEditor({
         onKeyDown={handleKeyDown}
         aria-label="Quantity"
         className="
-          w-14 h-9 text-center font-mono text-sm font-semibold
+          w-14 h-9 text-center font-mono text-base font-semibold
           bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]
           text-[var(--content-primary)] rounded-lg
           focus:outline-none focus:ring-1 focus:ring-[var(--border-subtle)]
