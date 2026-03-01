@@ -1,0 +1,194 @@
+@import "@fontsource/geist-sans/400.css";
+@import "@fontsource/geist-sans/500.css";
+@import "@fontsource/geist-sans/600.css";
+@import "@fontsource/geist-sans/700.css";
+@import "@fontsource/geist-mono/400.css";
+@import "@fontsource/geist-mono/700.css";
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.theme-dark, .theme-dark *));
+
+/* ─── Primitive palette (never use directly in components) ─── */
+:root {
+  --navy-950: #0a0e1a;
+  --navy-900: #0f1629;
+  --navy-800: #1a2240;
+  --navy-700: #253054;
+  --navy-600: #2e3d6b;
+  --navy-500: #3b4f8a;
+  --navy-400: #5a6da8;
+  --navy-300: #8896c1;
+  --navy-200: #b5beda;
+  --navy-100: #dce0ee;
+  --navy-50: #eef0f7;
+}
+
+/* ─── Semantic tokens: Light theme ─── */
+.theme-light {
+  /* Background */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f9fafb;
+  --bg-tertiary: #f3f4f6;
+  --bg-inverse-primary: #111827;
+  --bg-inverse-secondary: #1f2937;
+  --bg-overlay: rgba(0, 0, 0, 0.5);
+  --bg-elevated: #ffffff;
+
+  /* Content */
+  --content-primary: #000000;
+  --content-secondary: #1f2937;
+  --content-tertiary: #6b7280;
+  --content-quaternary: #9ca3af;
+  --content-inverse-primary: #ffffff;
+  --content-inverse-secondary: #d1d5db;
+  --content-on-color: #ffffff;
+  --content-disabled: #9ca3af;
+
+  /* Border */
+  --border-opaque: #e5e7eb;
+  --border-subtle: #f3f4f6;
+  --border-selected: #000000;
+  --border-disabled: #e5e7eb;
+
+  /* Intent — Accent (blue) */
+  --bg-accent: #2563eb;
+  --bg-accent-subtle: rgba(37, 99, 235, 0.1);
+  --content-accent: #2563eb;
+  --border-accent: #3b82f6;
+
+  /* Intent — Positive (green) */
+  --bg-positive: #16a34a;
+  --bg-positive-subtle: rgba(22, 163, 74, 0.1);
+  --content-positive: #16a34a;
+  --border-positive: #16a34a;
+
+  /* Intent — Warning (amber) */
+  --bg-warning: #d97706;
+  --bg-warning-subtle: rgba(217, 119, 6, 0.1);
+  --content-warning: #d97706;
+  --border-warning: #d97706;
+
+  /* Intent — Negative (red) */
+  --bg-negative: #dc2626;
+  --bg-negative-subtle: rgba(220, 38, 38, 0.1);
+  --content-negative: #dc2626;
+  --border-negative: #dc2626;
+
+  /* Role accent (overridden per role) */
+  --role-primary: #2563eb;
+  --role-primary-subtle: rgba(37, 99, 235, 0.1);
+  --role-content: #2563eb;
+}
+
+/* ─── Semantic tokens: Dark theme ─── */
+.theme-dark {
+  /* Background */
+  --bg-primary: var(--navy-950);
+  --bg-secondary: var(--navy-900);
+  --bg-tertiary: var(--navy-800);
+  --bg-inverse-primary: #ffffff;
+  --bg-inverse-secondary: var(--navy-50);
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+  --bg-elevated: var(--navy-800);
+
+  /* Content */
+  --content-primary: #ffffff;
+  --content-secondary: var(--navy-200);
+  --content-tertiary: var(--navy-400);
+  --content-quaternary: var(--navy-500);
+  --content-inverse-primary: #000000;
+  --content-inverse-secondary: var(--navy-800);
+  --content-on-color: #ffffff;
+  --content-disabled: var(--navy-600);
+
+  /* Border */
+  --border-opaque: var(--navy-800);
+  --border-subtle: var(--navy-700);
+  --border-selected: #ffffff;
+  --border-disabled: var(--navy-700);
+
+  /* Intent — Accent (blue) */
+  --bg-accent: #3b82f6;
+  --bg-accent-subtle: rgba(59, 130, 246, 0.15);
+  --content-accent: #60a5fa;
+  --border-accent: #3b82f6;
+
+  /* Intent — Positive (green) */
+  --bg-positive: #22c55e;
+  --bg-positive-subtle: rgba(34, 197, 94, 0.15);
+  --content-positive: #4ade80;
+  --border-positive: #22c55e;
+
+  /* Intent — Warning (amber) */
+  --bg-warning: #f59e0b;
+  --bg-warning-subtle: rgba(245, 158, 11, 0.15);
+  --content-warning: #fbbf24;
+  --border-warning: #f59e0b;
+
+  /* Intent — Negative (red) */
+  --bg-negative: #ef4444;
+  --bg-negative-subtle: rgba(239, 68, 68, 0.15);
+  --content-negative: #f87171;
+  --border-negative: #ef4444;
+
+  /* Role accent (overridden per role) */
+  --role-primary: #3b82f6;
+  --role-primary-subtle: rgba(59, 130, 246, 0.15);
+  --role-content: #60a5fa;
+}
+
+/* ─── Role accent overrides ─── */
+.role-sales {
+  --role-primary: #4f46e5;
+  --role-primary-subtle: rgba(79, 70, 229, 0.15);
+  --role-content: #818cf8;
+}
+
+.role-billing {
+  --role-primary: #2563eb;
+  --role-primary-subtle: rgba(37, 99, 235, 0.15);
+  --role-content: #60a5fa;
+}
+
+.role-picking {
+  --role-primary: #f59e0b;
+  --role-primary-subtle: rgba(245, 158, 11, 0.15);
+  --role-content: #fbbf24;
+}
+
+.role-admin {
+  --role-primary: #6b7280;
+  --role-primary-subtle: rgba(107, 114, 128, 0.15);
+  --role-content: #9ca3af;
+}
+
+body {
+  font-family: "Geist Sans", sans-serif;
+}
+
+.font-mono {
+  font-family: "Geist Mono", monospace;
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 200ms ease-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 50%, 90% { transform: translateX(-6px); }
+  30%, 70% { transform: translateX(6px); }
+}
+
+.animate-shake {
+  animation: shake 400ms ease-in-out;
+}
