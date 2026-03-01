@@ -12,7 +12,7 @@ import {
   NumberStepper,
   BigButton,
 } from '../../components/shared';
-import type { Customer, Transport } from '../../types';
+import type { Customer } from '../../types';
 
 function formatCurrency(n: number) {
   return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;

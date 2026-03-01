@@ -9,7 +9,7 @@ export default function AdminPasscodePage() {
   const [checking, setChecking] = useState(false);
   const navigate = useNavigate();
   const { role, adminUnlocked, unlockAdmin } = useAuth();
-  const errorTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const errorTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     return () => {

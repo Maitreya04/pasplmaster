@@ -9,7 +9,7 @@ export default function LoginPage() {
   const [checking, setChecking] = useState(false);
   const navigate = useNavigate();
   const { login, isAuthenticated } = useAuth();
-  const errorTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const errorTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     return () => {
