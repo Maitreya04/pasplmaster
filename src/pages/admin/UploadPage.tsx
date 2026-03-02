@@ -16,6 +16,7 @@ import { detectFileType, type DetectionResult } from '../../lib/import/fileDetec
 import { importItems, type ImportProgress } from '../../lib/import/itemImporter';
 import { importCustomers } from '../../lib/import/customerImporter';
 import { importStock } from '../../lib/import/stockImporter';
+import { importSalesTargets } from '../../lib/import/salesTargetsImporter';
 
 type UploadState = 'idle' | 'detected' | 'uploading' | 'done' | 'error';
 
@@ -60,23 +61,24 @@ export default function UploadPage() {
       setDetection(result);
       if (result.type === 'unknown') {
         setState('error');
-        setErrorMsg('Could not identify this file. Expected a Price List, Customer List, or Stock file.');
+        setErrorMsg('Could not identify this file. Expected a Price List, Customer List, Stock file, or Sales Plan.');
       } else {
         setState('detected');
       }
     } catch {
       setState('error');
-      setErrorMsg('Failed to read the Excel file. Please check the format.');
+      setErrorMsg('Failed to read the file. Please check the format.');
     }
   }, []);
 
   const handleConfirm = useCallback(async () => {
     if (!workbook || !detection) return;
     setState('uploading');
-    const totalBatches = Math.ceil(detection.rowCount / 500) || 1;
+    const totalRows = detection.type === 'sales_plan' ? 1 : detection.rowCount;
+    const totalBatches = detection.type === 'sales_plan' ? 1 : Math.ceil(detection.rowCount / 500) || 1;
     setProgress({
       ...EMPTY_PROGRESS,
-      total: detection.rowCount,
+      total: totalRows,
       batchIndex: 0,
       totalBatches,
     });
@@ -86,6 +88,8 @@ export default function UploadPage() {
         result = await importItems(workbook, fileName, detection.headerRowIndex, setProgress);
       } else if (detection.type === 'items_stock') {
         result = await importStock(workbook, fileName, detection.headerRowIndex, setProgress);
+      } else if (detection.type === 'sales_plan') {
+        result = await importSalesTargets(workbook, fileName, setProgress);
       } else {
         result = await importCustomers(workbook, fileName, setProgress);
       }
@@ -93,11 +97,13 @@ export default function UploadPage() {
       setState('done');
       if (result.failedCount > 0) {
         toast.info(
-          `Import finished. ${result.processed.toLocaleString()} rows imported successfully, ${result.failedCount.toLocaleString()} failed.`,
+          `Import finished. ${result.processed.toLocaleString()} ${detection.type === 'sales_plan' ? 'targets' : 'rows'} imported successfully, ${result.failedCount.toLocaleString()} failed.`,
         );
       } else {
         toast.success(
-          `Import complete! ${result.processed.toLocaleString()} rows imported (${result.newCount} new, ${result.updatedCount} updated).`,
+          detection.type === 'sales_plan'
+            ? `Import complete! ${result.processed.toLocaleString()} targets imported.`
+            : `Import complete! ${result.processed.toLocaleString()} rows imported (${result.newCount} new, ${result.updatedCount} updated).`,
         );
       }
     } catch (err) {
@@ -133,7 +139,7 @@ export default function UploadPage() {
           </button>
           <h1 className="text-2xl font-bold text-[var(--content-primary)]">Upload Data</h1>
           <p className="text-sm text-[var(--content-tertiary)] mt-1">
-            Import Excel files for items, stock &amp; customers
+            Import Excel files for items, stock, customers &amp; sales targets
           </p>
         </div>
 
@@ -141,7 +147,7 @@ export default function UploadPage() {
           <Card className="border-2 border-dashed border-[var(--border-opaque)] text-center py-12">
             <UploadSimple size={48} weight="thin" className="mx-auto mb-4 text-[var(--content-quaternary)]" />
             <p className="text-[var(--content-secondary)] font-medium mb-1">Select an Excel file</p>
-            <p className="text-sm text-[var(--content-tertiary)] mb-4">Supports .xlsx and .xls files</p>
+            <p className="text-sm text-[var(--content-tertiary)] mb-4">Supports .xlsx, .xls and .csv files</p>
             <BigButton
               variant="secondary"
               onClick={() => inputRef.current?.click()}
@@ -152,7 +158,7 @@ export default function UploadPage() {
             <input
               ref={inputRef}
               type="file"
-              accept=".xlsx,.xls"
+              accept=".xlsx,.xls,.csv"
               onChange={handleFileChange}
               className="hidden"
             />
@@ -172,7 +178,9 @@ export default function UploadPage() {
                     {detection.label}
                   </p>
                   <p className="text-sm text-[var(--content-tertiary)] mt-1">
-                    {detection.rowCount.toLocaleString()} data rows detected
+                    {detection.type === 'sales_plan'
+                      ? 'Imports from 4WF and 2Wf sheets'
+                      : `${detection.rowCount.toLocaleString()} data rows detected`}
                   </p>
                 </div>
               </div>
@@ -229,21 +237,25 @@ export default function UploadPage() {
                 <div>
                   <p className="font-semibold text-[var(--content-primary)]">Import Complete</p>
                   <p className="text-sm text-[var(--content-tertiary)] mt-1">
-                    Total rows successfully imported: {progress.processed.toLocaleString()}
+                    {detection?.type === 'sales_plan'
+                      ? `Targets imported: ${progress.processed.toLocaleString()}`
+                      : `Total rows successfully imported: ${progress.processed.toLocaleString()}`}
                   </p>
-                  <div className="flex gap-4 mt-2 text-sm">
-                    <span className="text-[var(--content-positive)] font-medium">
-                      {progress.newCount.toLocaleString()} new
-                    </span>
-                    <span className="text-[var(--content-accent)] font-medium">
-                      {progress.updatedCount.toLocaleString()} updated
-                    </span>
-                    {progress.failedCount > 0 && (
-                      <span className="text-[var(--content-negative)] font-medium">
-                        {progress.failedCount.toLocaleString()} failed
+                  {detection?.type !== 'sales_plan' && (
+                    <div className="flex gap-4 mt-2 text-sm">
+                      <span className="text-[var(--content-positive)] font-medium">
+                        {progress.newCount.toLocaleString()} new
                       </span>
-                    )}
-                  </div>
+                      <span className="text-[var(--content-accent)] font-medium">
+                        {progress.updatedCount.toLocaleString()} updated
+                      </span>
+                      {progress.failedCount > 0 && (
+                        <span className="text-[var(--content-negative)] font-medium">
+                          {progress.failedCount.toLocaleString()} failed
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </Card>

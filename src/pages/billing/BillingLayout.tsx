@@ -4,7 +4,7 @@ import { BottomNav } from '../../components/shared';
 
 const NAV_ITEMS = [
   { icon: SquaresFour, label: 'Dashboard', path: '/billing' },
-  { icon: ClipboardText, label: 'Review', path: '/billing/review' },
+  { icon: ClipboardText, label: 'Needs Review', path: '/billing/needs-review' },
   { icon: ClockCounterClockwise, label: 'History', path: '/billing/history' },
 ];
 

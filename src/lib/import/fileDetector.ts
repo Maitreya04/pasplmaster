@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 
-export type DetectedFileType = 'items_price' | 'items_stock' | 'customers' | 'unknown';
+export type DetectedFileType = 'items_price' | 'items_stock' | 'customers' | 'sales_plan' | 'unknown';
 
 export interface DetectionResult {
   type: DetectedFileType;
@@ -50,6 +50,29 @@ export function detectFileType(workbook: XLSX.WorkBook): DetectionResult {
   const row1 = getStringRow(data, 0);
   if (row1.includes('Name') && row1.includes('Parent Group')) {
     return { type: 'customers', label: 'Customer List', rowCount: countDataRows(data, 1), headerRowIndex: 0 };
+  }
+
+  // Sales plan: first 5 rows contain "SATISHJI" or "Item Group" with multiple salesperson names
+  const salesPlanNames = ['SATISHJI', 'HEMANTJI', 'MANKARJI', 'RAJUJI', 'GUDDU', 'REHAN', 'MANISH', 'HARDEEPJI'];
+  const scan5 = Math.min(5, data.length);
+  for (let i = 0; i < scan5; i++) {
+    const row = getStringRow(data, i);
+    const rowUpper = row.map(c => c.toUpperCase());
+    if (rowUpper.some(c => c.includes('SATISHJI'))) {
+      return { type: 'sales_plan', label: 'Sales Plan / Targets', rowCount: 0, headerRowIndex: -1 };
+    }
+    if (rowUpper.some(c => c.includes('ITEM GROUP'))) {
+      const matchCount = salesPlanNames.filter(n => rowUpper.some(c => c.includes(n))).length;
+      if (matchCount >= 2) {
+        return { type: 'sales_plan', label: 'Sales Plan / Targets', rowCount: 0, headerRowIndex: -1 };
+      }
+    }
+  }
+
+  // Sales plan fallback: workbook has 4WF or 2Wf sheet
+  const sheetNamesLower = workbook.SheetNames.map(s => s.toLowerCase());
+  if (sheetNamesLower.includes('4wf') || sheetNamesLower.includes('2wf')) {
+    return { type: 'sales_plan', label: 'Sales Plan / Targets', rowCount: 0, headerRowIndex: -1 };
   }
 
   return { type: 'unknown', label: 'Unknown file format', rowCount: 0, headerRowIndex: -1 };

@@ -25,6 +25,11 @@ function ToastNotification({ toast, onDismiss }: ToastNotificationProps) {
     setTimeout(() => onDismiss(toast.id), 200);
   };
 
+  const handleAction = () => {
+    toast.action?.onClick();
+    handleDismiss();
+  };
+
   return (
     <div
       className={`
@@ -36,6 +41,14 @@ function ToastNotification({ toast, onDismiss }: ToastNotificationProps) {
     >
       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColorMap[toast.type]}`} />
       <span className="text-sm font-medium flex-1">{toast.message}</span>
+      {toast.action && (
+        <button
+          onClick={handleAction}
+          className="text-sm font-semibold text-white hover:opacity-90 shrink-0"
+        >
+          {toast.action.label}
+        </button>
+      )}
       <button
         onClick={handleDismiss}
         className="p-1 rounded opacity-40 hover:opacity-80 transition-opacity duration-150 shrink-0"

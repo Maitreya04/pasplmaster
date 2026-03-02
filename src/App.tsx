@@ -12,6 +12,7 @@ import MyOrdersPage from './pages/sales/MyOrdersPage';
 
 import BillingLayout from './pages/billing/BillingLayout';
 import DashboardPage from './pages/billing/DashboardPage';
+import NeedsReviewPage from './pages/billing/NeedsReviewPage';
 import ReviewPage from './pages/billing/ReviewPage';
 import HistoryPage from './pages/billing/HistoryPage';
 
@@ -95,7 +96,8 @@ export default function App() {
         }
       >
         <Route index element={<DashboardPage />} />
-        <Route path="review" element={<ReviewPage />} />
+        <Route path="needs-review" element={<NeedsReviewPage />} />
+        <Route path="review/:id" element={<ReviewPage />} />
         <Route path="history" element={<HistoryPage />} />
       </Route>
 
@@ -109,7 +111,7 @@ export default function App() {
         }
       >
         <Route index element={<QueuePage />} />
-        <Route path="pick" element={<PickPage />} />
+        <Route path="pick/:id" element={<PickPage />} />
       </Route>
 
       <Route

@@ -34,7 +34,13 @@ export interface Transport {
   is_active: boolean;
 }
 
-export type OrderStatus = 'submitted' | 'approved' | 'picking' | 'completed' | 'dispatched';
+export type OrderStatus =
+  | 'submitted'
+  | 'approved'
+  | 'picking'
+  | 'completed'
+  | 'dispatched'
+  | 'flagged';
 export type OrderPriority = 'normal' | 'urgent';
 export type OrderItemState = 'pending' | 'picked' | 'flagged';
 
@@ -83,6 +89,8 @@ export interface ScanResult {
   confidence: number;
   isMatch: boolean;
   matchedAgainst: string;
+  matchStrategy: string;
+  ocrExtracted: { partNumber: string | null; mrp: number | null };
   timestamp: string;
 }
 

@@ -26,7 +26,10 @@ export function BottomNav({ items }: BottomNavProps) {
       "
     >
       {items.map((item) => {
-        const isActive = location.pathname === item.path;
+        const currentFull = location.pathname + location.search;
+        const isActive = item.path.includes('?')
+          ? currentFull === item.path
+          : location.pathname === item.path;
         const IconCmp = item.icon;
 
         return (
