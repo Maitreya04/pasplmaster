@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -19,9 +19,14 @@ import {
   Skeleton,
   StatusBadge,
 } from '../../components/shared';
-import { scanImage } from '../../lib/ocr/ocrEngine';
-import { matchOcrToItem } from '../../lib/ocr/ocrMatcher';
 import type { OrderItem, ScanResult } from '../../types';
+import { LiveOcrScanner } from './LiveOcrScanner';
+
+interface ItemMeta {
+  mrp: number | null;
+  main_group: string | null;
+}
+type ItemMetaMap = Map<number, ItemMeta>;
 
 const FLAG_REASONS = [
   'Out of Stock',
@@ -94,12 +99,32 @@ export default function PickPage() {
   const orderId = id ? parseInt(id, 10) : null;
   const { data: order, isLoading, error } = useOrderDetail(orderId);
 
+  const [itemMeta, setItemMeta] = useState<ItemMetaMap>(new Map());
+
+  useEffect(() => {
+    if (!order?.items?.length) return;
+    const ids = order.items.map((oi) => oi.item_id);
+    supabase
+      .from('items')
+      .select('id,mrp,main_group')
+      .in('id', ids)
+      .then(({ data }) => {
+        if (!data) return;
+        const m: ItemMetaMap = new Map();
+        for (const row of data) {
+          m.set(row.id, { mrp: row.mrp ?? null, main_group: row.main_group ?? null });
+        }
+        setItemMeta(m);
+      });
+  }, [order?.items]);
+
   const [localItems, setLocalItems] = useState<Map<number, Partial<PickItemLocal>>>(
     new Map(),
   );
   const [flagTarget, setFlagTarget] = useState<number | null>(null);
   const [flagReason, setFlagReason] = useState('');
   const [flagNotes, setFlagNotes] = useState('');
+  const [liveScanTarget, setLiveScanTarget] = useState<OrderItem | null>(null);
 
   const pickItems = useMemo(() => {
     if (!order?.items) return [];
@@ -251,45 +276,13 @@ export default function PickPage() {
     },
   });
 
-  /* ─── OCR scan handler ───────────────────────────────────── */
+  const openLiveScan = useCallback((orderItem: OrderItem) => {
+    setLiveScanTarget(orderItem);
+  }, []);
 
-  const handleScan = useCallback(
-    async (itemId: number, file: File, orderItem: OrderItem) => {
-      const thumbUrl = URL.createObjectURL(file);
-      updateLocalItem(itemId, { uiState: 'scanning', thumbnailUrl: thumbUrl });
-
-      try {
-        const { rawText } = await scanImage(file);
-
-        const matchResult = matchOcrToItem(rawText, orderItem);
-
-        const scanResult: ScanResult = {
-          scannedText: rawText,
-          confidence: matchResult.confidence,
-          isMatch: matchResult.isMatch,
-          matchedAgainst: matchResult.matchedFields.join(', ') || orderItem.item_alias || orderItem.item_name,
-          matchStrategy: matchResult.matchStrategy,
-          ocrExtracted: {
-            partNumber: matchResult.ocrExtracted.partNumber,
-            mrp: matchResult.ocrExtracted.mrp,
-          },
-          timestamp: new Date().toISOString(),
-        };
-
-        updateLocalItem(itemId, {
-          uiState: matchResult.isMatch ? 'matched' : 'not_matched',
-          scanResult,
-          thumbnailUrl: thumbUrl,
-        });
-
-        saveScanResultMutation.mutate({ itemId, scanResult });
-      } catch {
-        updateLocalItem(itemId, { uiState: 'pending', thumbnailUrl: null });
-        toast.error('OCR scan failed — try again or verify manually');
-      }
-    },
-    [updateLocalItem, saveScanResultMutation, toast],
-  );
+  const closeLiveScan = useCallback(() => {
+    setLiveScanTarget(null);
+  }, []);
 
   const handlePick = useCallback(
     (itemId: number) => {
@@ -399,9 +392,7 @@ export default function PickPage() {
               setFlagReason('');
               setFlagNotes('');
             }}
-            onScan={(file: File) =>
-              handleScan(pi.orderItem.id, file, pi.orderItem)
-            }
+            onScan={() => openLiveScan(pi.orderItem)}
             onOverride={() => handleOverride(pi.orderItem.id)}
           />
         ))}
@@ -509,6 +500,28 @@ export default function PickPage() {
           </BigButton>
         </div>
       </BottomSheet>
+
+      {/* Live scan bottom sheet */}
+      {liveScanTarget && (
+        <LiveOcrScanner
+          isOpen={liveScanTarget !== null}
+          expectedItem={liveScanTarget}
+          itemMrp={itemMeta.get(liveScanTarget.item_id)?.mrp ?? undefined}
+          itemMainGroup={itemMeta.get(liveScanTarget.item_id)?.main_group ?? null}
+          onClose={closeLiveScan}
+          onFinal={({ scanResult, thumbnailUrl }) => {
+            updateLocalItem(liveScanTarget.id, {
+              uiState: scanResult.isMatch ? 'matched' : 'not_matched',
+              scanResult,
+              thumbnailUrl,
+            });
+            saveScanResultMutation.mutate({
+              itemId: liveScanTarget.id,
+              scanResult,
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -525,11 +538,10 @@ function PickItemCard({
   item: PickItemLocal;
   onPick: () => void;
   onFlag: () => void;
-  onScan: (file: File) => void;
+  onScan: () => void;
   onOverride: () => void;
 }) {
   const oi = item.orderItem;
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const isDone =
     item.uiState === 'picked' ||
     item.uiState === 'flagged' ||
@@ -553,20 +565,6 @@ function PickItemCard({
         transition-all duration-200
       `}
     >
-      {/* Hidden file input for camera */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) onScan(file);
-          e.target.value = '';
-        }}
-      />
-
       <div className="flex items-start gap-3">
         {/* Rack location */}
         <div className="shrink-0 w-16 text-center">
@@ -622,6 +620,27 @@ function PickItemCard({
             )}
           </div>
 
+          {/* Signal breakdown for scanned items */}
+          {(item.uiState === 'matched' || item.uiState === 'not_matched') &&
+            item.scanResult?.signals && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {item.scanResult.signals
+                  .filter((s) => s.score > 0)
+                  .map((s) => (
+                    <span
+                      key={s.signal}
+                      className="text-[10px] px-1.5 py-0.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--content-tertiary)] font-mono"
+                      title={s.detail}
+                    >
+                      {s.signal} {s.score}/{s.maxScore}
+                    </span>
+                  ))}
+                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--content-tertiary)] font-mono font-bold">
+                  = {item.scanResult.confidence}
+                </span>
+              </div>
+            )}
+
           {/* Thumbnail for scanned items */}
           {item.thumbnailUrl && (item.uiState === 'matched' || item.uiState === 'not_matched') && (
             <img
@@ -652,7 +671,7 @@ function PickItemCard({
             <>
               {/* Camera scan button */}
               <button
-                onClick={() => fileInputRef.current?.click()}
+                onClick={onScan}
                 disabled={item.uiState === 'scanning'}
                 className="
                   min-h-[44px] min-w-[44px] flex items-center justify-center

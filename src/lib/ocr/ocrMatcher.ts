@@ -1,25 +1,219 @@
 import type { OrderItem } from '../../types';
+import {
+  BRANDS,
+  VEHICLE_TOKENS,
+  PRODUCT_TYPE_TOKENS,
+  NOISE_LINE_PATTERNS,
+  NOISE_PHRASES,
+  BATCH_CODE_RE,
+  MRP_PATTERNS,
+  PER_NUMBER_RE,
+  QUANTITY_PATTERNS,
+  type BrandConfig,
+} from './brandPatterns';
+import {
+  extractPartNumberCandidates,
+  normalizeForPartMatch,
+} from './partNumberExtractor';
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  Public types
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+export interface SignalDetail {
+  signal: string;
+  score: number;
+  maxScore: number;
+  detail: string;
+}
 
 export interface OcrMatchResult {
   isMatch: boolean;
   confidence: number;
   matchedFields: string[];
+  signals: SignalDetail[];
   ocrExtracted: {
     partNumber: string | null;
     description: string | null;
     mrp: number | null;
+    brand: string | null;
+    vehicleModel: string | null;
   };
   matchStrategy: string;
 }
 
+/* ─── Internal extracted fields ───────────────────────────────────────── */
+
 interface ExtractedFields {
+  brand: BrandConfig | null;
   partNumbers: string[];
-  description: string | null;
-  mrp: number | null;
+  vehicleTokens: string[];
+  productTypeTokens: string[];
+  unitMrp: number | null;
+  rawMrp: number | null;
+  quantity: number | null;
+  perNumberPrice: number | null;
+  cleanedText: string;
   allText: string;
 }
 
-/* ─── Normalization ──────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  Layer 1 — Noise removal
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+function removeNoise(text: string): string {
+  let cleaned = text;
+
+  const lines = cleaned.split('\n');
+  const kept: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (BATCH_CODE_RE.test(trimmed)) continue;
+    if (NOISE_LINE_PATTERNS.some((re) => re.test(trimmed))) continue;
+    kept.push(trimmed);
+  }
+  cleaned = kept.join('\n');
+
+  for (const re of NOISE_PHRASES) {
+    cleaned = cleaned.replace(re, ' ');
+  }
+
+  return cleaned.replace(/\s{2,}/g, ' ').trim();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  Layer 2 — Brand-aware field extraction
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+function detectBrand(text: string): BrandConfig | null {
+  for (const brand of BRANDS) {
+    for (const re of brand.detect) {
+      if (re.test(text)) return brand;
+    }
+  }
+  return null;
+}
+
+function extractPartNumbers(
+  text: string,
+  brand: BrandConfig | null,
+): string[] {
+  const results: string[] = extractPartNumberCandidates(text).map((c) => c.value);
+
+  // Ensure brand patterns are still applied even if brand detection fails inside
+  // the extractor due to partial OCR.
+  if (brand) {
+    for (const re of brand.partNumberPatterns) {
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text)) !== null) {
+        results.push((m[0] ?? '').trim());
+      }
+    }
+  }
+
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const r of results) {
+    const key = normalizeForPartMatch(r);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    ordered.push(r);
+  }
+  return ordered;
+}
+
+function extractMrp(text: string): number | null {
+  for (const re of MRP_PATTERNS) {
+    re.lastIndex = 0;
+    const m = re.exec(text);
+    if (m) {
+      const val = parseFloat(m[1].replace(/,/g, ''));
+      if (!isNaN(val) && val > 0) return val;
+    }
+  }
+  return null;
+}
+
+function extractPerNumberPrice(text: string): number | null {
+  PER_NUMBER_RE.lastIndex = 0;
+  const m = PER_NUMBER_RE.exec(text);
+  if (!m) return null;
+  const val = parseFloat(m[1].replace(/,/g, ''));
+  return isNaN(val) ? null : val;
+}
+
+function extractQuantity(text: string): number | null {
+  for (const re of QUANTITY_PATTERNS) {
+    re.lastIndex = 0;
+    const m = re.exec(text);
+    if (m) {
+      const val = parseInt(m[1], 10);
+      if (val > 0 && val <= 10000) return val;
+    }
+  }
+  return null;
+}
+
+function extractVehicleTokens(text: string): string[] {
+  const tokens: string[] = [];
+  for (const [re, toks] of VEHICLE_TOKENS) {
+    re.lastIndex = 0;
+    if (re.test(text)) {
+      tokens.push(...toks);
+    }
+  }
+  return [...new Set(tokens)];
+}
+
+function extractProductTypeTokens(text: string): string[] {
+  const tokens: string[] = [];
+  for (const [re, toks] of PRODUCT_TYPE_TOKENS) {
+    re.lastIndex = 0;
+    if (re.test(text)) {
+      tokens.push(...toks);
+    }
+  }
+  return [...new Set(tokens)];
+}
+
+function extractFields(ocrText: string): ExtractedFields {
+  const cleanedText = removeNoise(ocrText);
+  const brand = detectBrand(ocrText);
+  const partNumbers = extractPartNumbers(ocrText, brand);
+  const vehicleTokens = extractVehicleTokens(ocrText);
+  const productTypeTokens = extractProductTypeTokens(ocrText);
+  const rawMrp = extractMrp(ocrText);
+  const quantity = extractQuantity(ocrText);
+  const perNumberPrice = extractPerNumberPrice(ocrText);
+
+  let unitMrp: number | null = null;
+  if (perNumberPrice !== null) {
+    unitMrp = perNumberPrice;
+  } else if (rawMrp !== null && quantity !== null && quantity > 1) {
+    unitMrp = Math.round((rawMrp / quantity) * 100) / 100;
+  } else {
+    unitMrp = rawMrp;
+  }
+
+  return {
+    brand,
+    partNumbers,
+    vehicleTokens,
+    productTypeTokens,
+    unitMrp,
+    rawMrp,
+    quantity,
+    perNumberPrice,
+    cleanedText,
+    allText: ocrText,
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  Utility helpers
+ * ═══════════════════════════════════════════════════════════════════════════ */
 
 function normalize(s: string): string {
   return s.replace(/[\s.\-/\\(),:;'"]+/g, '').toLowerCase();
@@ -31,8 +225,6 @@ function tokenize(s: string): string[] {
     .split(/[\s.\-/\\(),:;'"]+/)
     .filter((t) => t.length > 0);
 }
-
-/* ─── Levenshtein Distance ───────────────────────────────────── */
 
 function levenshtein(a: string, b: string): number {
   const la = a.length;
@@ -57,10 +249,6 @@ function levenshtein(a: string, b: string): number {
   return prev[lb];
 }
 
-/**
- * Proportional fuzzy threshold: short codes need exact/near-exact,
- * longer strings allow more tolerance to avoid matching S75 -> S73.
- */
 function maxAllowedDistance(length: number): number {
   if (length <= 3) return 0;
   if (length <= 6) return 1;
@@ -68,228 +256,308 @@ function maxAllowedDistance(length: number): number {
   return 3;
 }
 
-/* ─── Field Extraction ───────────────────────────────────────── */
-
-function extractPartNumbers(text: string): string[] {
-  const results: string[] = [];
-
-  // Labeled "PART NUMBER:" or "PART NO.:" values
-  const labeledRe = /PART\s*(?:NUMBER|NO\.?)\s*[:.]?\s*([A-Z0-9/\-\s]+)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = labeledRe.exec(text)) !== null) {
-    const val = m[1].trim().split(/\n/)[0].trim();
-    if (val.length >= 2) results.push(val);
-  }
-
-  // Slash-separated codes: ASK/NA/DBP/0538
-  const slashRe = /\b[A-Z]{2,5}\/[A-Z0-9]+(?:\/[A-Z0-9]+)+\b/gi;
-  while ((m = slashRe.exec(text)) !== null) {
-    results.push(m[0]);
-  }
-
-  // Pure numeric 4-6 digit codes (but not years like 2025, 2026 or phone fragments)
-  const numericRe = /\b(\d{4,6})\b/g;
-  while ((m = numericRe.exec(text)) !== null) {
-    const val = m[1];
-    const num = parseInt(val, 10);
-    if (num >= 2020 && num <= 2035) continue;
-    if (val.length >= 4) results.push(val);
-  }
-
-  // Short alphanumeric codes: S75 NC, S75NC
-  const shortRe = /\b([A-Z]\d{2,3}\s?[A-Z]{1,3})\b/gi;
-  while ((m = shortRe.exec(text)) !== null) {
-    results.push(m[1]);
-  }
-
-  // Deduplicate
-  const seen = new Set<string>();
-  return results.filter((r) => {
-    const key = normalize(r);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function extractMRP(text: string): number | null {
-  const mrpRe = /M\.?R\.?P\.?\s*[:.]?\s*(?:Rs\.?|₹)\s*([\d,]+(?:\.\d{1,2})?)/gi;
-  const m = mrpRe.exec(text);
-  if (!m) return null;
-  const val = parseFloat(m[1].replace(/,/g, ''));
-  return isNaN(val) ? null : val;
-}
-
-function extractDescription(text: string): string | null {
-  const descRe = /DESCRIPTION\s*[:.]?\s*(.+)/i;
-  const m = descRe.exec(text);
-  if (!m) return null;
-  return m[1].trim().split(/\n/)[0].trim() || null;
-}
-
-function extractFields(ocrText: string): ExtractedFields {
-  return {
-    partNumbers: extractPartNumbers(ocrText),
-    description: extractDescription(ocrText),
-    mrp: extractMRP(ocrText),
-    allText: ocrText,
-  };
-}
-
-/* ─── Matching Strategies ────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  Layer 3 — Multi-signal matching
+ * ═══════════════════════════════════════════════════════════════════════════ */
 
 function getCandidates(item: OrderItem): string[] {
-  return [item.item_alias, item.item_name]
-    .filter((s): s is string => !!s && s.length > 0);
+  return [item.item_alias, item.item_name].filter(
+    (s): s is string => !!s && s.length > 0,
+  );
 }
 
-function tryExactPartNumber(
+/* Signal 1: Part number (max 40) ─────────────────────────────────────── */
+
+function scorePartNumber(
   extracted: ExtractedFields,
   candidates: string[],
-): { score: number; matched: string; field: string } | null {
+): SignalDetail {
+  const MAX = 40;
+
   for (const partNum of extracted.partNumbers) {
     const normPart = normalize(partNum);
     for (const cand of candidates) {
       if (normalize(cand) === normPart) {
-        return { score: 100, matched: cand, field: 'partNumber' };
+        return {
+          signal: 'partNumber',
+          score: MAX,
+          maxScore: MAX,
+          detail: `exact: "${partNum}" = "${cand}"`,
+        };
       }
     }
   }
-  return null;
-}
 
-function tryNormalizedContainment(
-  extracted: ExtractedFields,
-  candidates: string[],
-): { score: number; matched: string; field: string } | null {
-  const normOcr = normalize(extracted.allText);
-  for (const cand of candidates) {
-    const normCand = normalize(cand);
-    if (normCand.length >= 3 && normOcr.includes(normCand)) {
-      return { score: 90, matched: cand, field: 'containment' };
-    }
-  }
-
-  // Also check if extracted part numbers are contained in candidates
   for (const partNum of extracted.partNumbers) {
     const normPart = normalize(partNum);
     for (const cand of candidates) {
       const normCand = normalize(cand);
-      if (normCand.includes(normPart) && normPart.length >= 3) {
-        return { score: 85, matched: cand, field: 'partNumber' };
+      if (
+        (normCand.length >= 3 && normPart.includes(normCand)) ||
+        (normPart.length >= 3 && normCand.includes(normPart))
+      ) {
+        return {
+          signal: 'partNumber',
+          score: 35,
+          maxScore: MAX,
+          detail: `contained: "${partNum}" ~ "${cand}"`,
+        };
       }
     }
   }
 
-  return null;
-}
-
-function tryTokenOverlap(
-  extracted: ExtractedFields,
-  candidates: string[],
-): { score: number; matched: string; field: string } | null {
-  const ocrTokens = new Set(tokenize(extracted.allText));
-
-  let bestScore = 0;
-  let bestMatched = '';
-
+  const normOcr = normalize(extracted.cleanedText);
   for (const cand of candidates) {
-    const candTokens = tokenize(cand);
-    if (candTokens.length === 0) continue;
-    let matchCount = 0;
-    for (const token of candTokens) {
-      if (ocrTokens.has(token)) matchCount++;
-    }
-    const overlap = matchCount / candTokens.length;
-    if (overlap > bestScore) {
-      bestScore = overlap;
-      bestMatched = cand;
+    const normCand = normalize(cand);
+    if (normCand.length >= 4 && normOcr.includes(normCand)) {
+      return {
+        signal: 'partNumber',
+        score: 30,
+        maxScore: MAX,
+        detail: `text-contains: "${cand}" in cleaned OCR`,
+      };
     }
   }
 
-  if (bestScore >= 0.8) {
-    return { score: 75, matched: bestMatched, field: 'tokenOverlap' };
-  }
-  if (bestScore >= 0.6) {
-    return { score: 55, matched: bestMatched, field: 'tokenOverlap' };
-  }
-
-  return null;
-}
-
-function tryFuzzyPartNumber(
-  extracted: ExtractedFields,
-  candidates: string[],
-): { score: number; matched: string; field: string } | null {
   for (const partNum of extracted.partNumbers) {
     const normPart = normalize(partNum);
     for (const cand of candidates) {
       const normCand = normalize(cand);
       const dist = levenshtein(normPart, normCand);
-      const maxDist = maxAllowedDistance(Math.min(normPart.length, normCand.length));
-      if (dist <= maxDist && dist > 0) {
-        return { score: 60, matched: cand, field: 'fuzzy' };
+      const maxDist = maxAllowedDistance(
+        Math.min(normPart.length, normCand.length),
+      );
+      if (dist > 0 && dist <= maxDist) {
+        return {
+          signal: 'partNumber',
+          score: 25,
+          maxScore: MAX,
+          detail: `fuzzy(d=${dist}): "${partNum}" ~ "${cand}"`,
+        };
       }
     }
   }
-  return null;
+
+  return { signal: 'partNumber', score: 0, maxScore: MAX, detail: 'no match' };
 }
 
-/* ─── Main Matcher ───────────────────────────────────────────── */
+/* Signal 2: Brand (max 15) ───────────────────────────────────────────── */
 
-const STRATEGY_MAP: Record<string, string> = {
-  partNumber: 'exact_alias',
-  containment: 'normalized_containment',
-  tokenOverlap: 'token_overlap',
-  fuzzy: 'fuzzy',
-};
+function scoreBrand(
+  extracted: ExtractedFields,
+  itemName: string,
+  mainGroup: string | null,
+): SignalDetail {
+  const MAX = 15;
+  if (!extracted.brand) {
+    return { signal: 'brand', score: 0, maxScore: MAX, detail: 'no brand detected' };
+  }
+
+  const nameLower = itemName.toLowerCase();
+  const groupLower = (mainGroup ?? '').toLowerCase();
+
+  for (const token of extracted.brand.nameTokens) {
+    if (nameLower.includes(token) || groupLower.includes(token)) {
+      return {
+        signal: 'brand',
+        score: MAX,
+        maxScore: MAX,
+        detail: `${extracted.brand.id} matches item`,
+      };
+    }
+  }
+
+  return {
+    signal: 'brand',
+    score: 0,
+    maxScore: MAX,
+    detail: `${extracted.brand.id} not in item name/group`,
+  };
+}
+
+/* Signal 3: Vehicle model (max 20) ───────────────────────────────────── */
+
+function scoreVehicleModel(
+  extracted: ExtractedFields,
+  itemName: string,
+): SignalDetail {
+  const MAX = 20;
+  if (extracted.vehicleTokens.length === 0) {
+    return { signal: 'vehicle', score: 0, maxScore: MAX, detail: 'no vehicle detected' };
+  }
+
+  const nameTokens = new Set(tokenize(itemName));
+  let hits = 0;
+  const matched: string[] = [];
+
+  for (const vt of extracted.vehicleTokens) {
+    if (nameTokens.has(vt)) {
+      hits++;
+      matched.push(vt);
+    }
+  }
+
+  if (hits === 0) {
+    return {
+      signal: 'vehicle',
+      score: 0,
+      maxScore: MAX,
+      detail: `OCR:[${extracted.vehicleTokens.join(',')}] none in item`,
+    };
+  }
+
+  const ratio = hits / extracted.vehicleTokens.length;
+  const score = Math.round(MAX * Math.min(1, ratio * 1.5));
+  return {
+    signal: 'vehicle',
+    score: Math.min(score, MAX),
+    maxScore: MAX,
+    detail: `matched:[${matched.join(',')}] ${hits}/${extracted.vehicleTokens.length}`,
+  };
+}
+
+/* Signal 4: MRP (max 15) ─────────────────────────────────────────────── */
+
+function scoreMrp(
+  extracted: ExtractedFields,
+  itemMrp: number | undefined,
+): SignalDetail {
+  const MAX = 15;
+  if (extracted.unitMrp === null || !itemMrp || itemMrp <= 0) {
+    return { signal: 'mrp', score: 0, maxScore: MAX, detail: 'no MRP to compare' };
+  }
+
+  const tolerance = itemMrp * 0.02;
+  if (Math.abs(extracted.unitMrp - itemMrp) <= tolerance) {
+    return {
+      signal: 'mrp',
+      score: MAX,
+      maxScore: MAX,
+      detail: `OCR:${extracted.unitMrp} ~ DB:${itemMrp} (within 2%)`,
+    };
+  }
+
+  const looseTolerance = itemMrp * 0.05;
+  if (Math.abs(extracted.unitMrp - itemMrp) <= looseTolerance) {
+    return {
+      signal: 'mrp',
+      score: 10,
+      maxScore: MAX,
+      detail: `OCR:${extracted.unitMrp} ~ DB:${itemMrp} (within 5%)`,
+    };
+  }
+
+  return {
+    signal: 'mrp',
+    score: 0,
+    maxScore: MAX,
+    detail: `OCR:${extracted.unitMrp} vs DB:${itemMrp} (mismatch)`,
+  };
+}
+
+/* Signal 5: Product type (max 10) ────────────────────────────────────── */
+
+function scoreProductType(
+  extracted: ExtractedFields,
+  itemName: string,
+): SignalDetail {
+  const MAX = 10;
+  if (extracted.productTypeTokens.length === 0) {
+    return { signal: 'productType', score: 0, maxScore: MAX, detail: 'no type detected' };
+  }
+
+  const nameTokens = new Set(tokenize(itemName));
+  let hits = 0;
+  const matched: string[] = [];
+
+  for (const pt of extracted.productTypeTokens) {
+    if (nameTokens.has(pt)) {
+      hits++;
+      matched.push(pt);
+    }
+  }
+
+  if (hits === 0) {
+    return {
+      signal: 'productType',
+      score: 0,
+      maxScore: MAX,
+      detail: `OCR:[${extracted.productTypeTokens.join(',')}] none in item`,
+    };
+  }
+
+  const ratio = hits / extracted.productTypeTokens.length;
+  const score = ratio >= 0.5 ? MAX : Math.round(MAX * ratio);
+  return {
+    signal: 'productType',
+    score: Math.min(score, MAX),
+    maxScore: MAX,
+    detail: `matched:[${matched.join(',')}]`,
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  Layer 4 — Confidence aggregation & public API
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const MIN_SIGNALS_FOR_MATCH = 2;
+const MATCH_THRESHOLD = 55;
 
 export function matchOcrToItem(
   ocrText: string,
   expectedItem: OrderItem,
   itemMrp?: number,
+  itemMainGroup?: string | null,
 ): OcrMatchResult {
   const extracted = extractFields(ocrText);
   const candidates = getCandidates(expectedItem);
 
-  const strategies = [
-    tryExactPartNumber,
-    tryNormalizedContainment,
-    tryTokenOverlap,
-    tryFuzzyPartNumber,
+  const signals: SignalDetail[] = [
+    scorePartNumber(extracted, candidates),
+    scoreBrand(extracted, expectedItem.item_name, itemMainGroup ?? null),
+    scoreVehicleModel(extracted, expectedItem.item_name),
+    scoreMrp(extracted, itemMrp),
+    scoreProductType(extracted, expectedItem.item_name),
   ];
 
-  let bestResult: { score: number; matched: string; field: string } | null = null;
+  const totalScore = signals.reduce((sum, s) => sum + s.score, 0);
+  const firingSignals = signals.filter((s) => s.score > 0);
+  const confidence = Math.min(100, totalScore);
 
-  for (const strategy of strategies) {
-    const result = strategy(extracted, candidates);
-    if (result && (!bestResult || result.score > bestResult.score)) {
-      bestResult = result;
-      if (result.score >= 90) break;
-    }
-  }
+  const isMatch =
+    firingSignals.length >= MIN_SIGNALS_FOR_MATCH &&
+    confidence >= MATCH_THRESHOLD;
 
-  let score = bestResult?.score ?? 0;
-  const matchedFields: string[] = bestResult ? [bestResult.field] : [];
+  const bestSignal = signals.reduce((best, s) =>
+    s.score > best.score ? s : best,
+  );
 
-  // MRP bonus: if extracted MRP matches item MRP within 1%
-  if (extracted.mrp !== null && itemMrp && itemMrp > 0) {
-    const tolerance = itemMrp * 0.01;
-    if (Math.abs(extracted.mrp - itemMrp) <= tolerance) {
-      score = Math.min(100, score + 15);
-      matchedFields.push('mrp');
-    }
-  }
+  const matchedFields = firingSignals.map((s) => s.signal);
+
+  const strategyMap: Record<string, string> = {
+    partNumber: 'part_number',
+    brand: 'brand',
+    vehicle: 'vehicle_model',
+    mrp: 'mrp',
+    productType: 'product_type',
+  };
 
   return {
-    isMatch: score >= 60,
-    confidence: score,
+    isMatch,
+    confidence,
     matchedFields,
+    signals,
     ocrExtracted: {
       partNumber: extracted.partNumbers[0] ?? null,
-      description: extracted.description,
-      mrp: extracted.mrp,
+      description: null,
+      mrp: extracted.unitMrp,
+      brand: extracted.brand?.id ?? null,
+      vehicleModel: extracted.vehicleTokens.length > 0
+        ? extracted.vehicleTokens.join(' ')
+        : null,
     },
-    matchStrategy: bestResult ? (STRATEGY_MAP[bestResult.field] ?? bestResult.field) : 'none',
+    matchStrategy: bestSignal.score > 0
+      ? (strategyMap[bestSignal.signal] ?? bestSignal.signal)
+      : 'none',
   };
 }

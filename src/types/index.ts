@@ -84,13 +84,26 @@ export interface OrderItem {
   scan_result: ScanResult | null;
 }
 
+export interface ScanSignal {
+  signal: string;
+  score: number;
+  maxScore: number;
+  detail: string;
+}
+
 export interface ScanResult {
   scannedText: string;
   confidence: number;
   isMatch: boolean;
   matchedAgainst: string;
   matchStrategy: string;
-  ocrExtracted: { partNumber: string | null; mrp: number | null };
+  ocrExtracted: {
+    partNumber: string | null;
+    mrp: number | null;
+    brand?: string | null;
+    vehicleModel?: string | null;
+  };
+  signals?: ScanSignal[];
   timestamp: string;
 }
 
