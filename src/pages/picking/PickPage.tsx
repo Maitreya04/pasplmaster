@@ -11,7 +11,6 @@ import {
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
-import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import {
   BigButton,
@@ -91,7 +90,6 @@ export default function PickPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { userName } = useAuth();
 
   const orderId = id ? parseInt(id, 10) : null;
   const { data: order, isLoading, error } = useOrderDetail(orderId);
@@ -261,7 +259,7 @@ export default function PickPage() {
       updateLocalItem(itemId, { uiState: 'scanning', thumbnailUrl: thumbUrl });
 
       try {
-        const { rawText, confidence: ocrConfidence } = await scanImage(file);
+        const { rawText } = await scanImage(file);
 
         const matchResult = matchOcrToItem(rawText, orderItem);
 
