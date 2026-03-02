@@ -1,5 +1,4 @@
 {
-  "//": "Ensure client-side routes like /select-role work on hard refresh by rewriting non-file URLs to index.html.",
   "rewrites": [
     {
       "source": "/(?!.*\\.(?:js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|map)$).*",
