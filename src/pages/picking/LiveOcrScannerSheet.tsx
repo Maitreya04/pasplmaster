@@ -225,7 +225,7 @@ export function LiveOcrScannerSheet({
         </button>
 
         <p className="text-center text-[11px] text-[var(--content-tertiary)]">
-          Photo gives the best accuracy — live mode also runs in the background
+          {statusText}
         </p>
 
         {/* ── Manual entry (collapsed by default) ── */}
