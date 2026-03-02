@@ -94,6 +94,7 @@ export function useContinuousOcr({
   expectedItem,
   itemMrp,
   itemMainGroup,
+  itemAlias1,
   intervalMs = 750,
   onStableResult,
 }: {
@@ -102,6 +103,7 @@ export function useContinuousOcr({
   expectedItem: OrderItem;
   itemMrp?: number;
   itemMainGroup?: string | null;
+  itemAlias1?: string | null;
   intervalMs?: number;
   onStableResult: (scanResult: ScanResult) => void;
 }): ContinuousOcrState {
@@ -127,8 +129,11 @@ export function useContinuousOcr({
   }, []);
 
   const enabledKey = useMemo(
-    () => (enabled ? `${expectedItem.id}:${itemMrp ?? ''}:${itemMainGroup ?? ''}` : 'off'),
-    [enabled, expectedItem.id, itemMainGroup, itemMrp],
+    () =>
+      enabled
+        ? `${expectedItem.id}:${itemMrp ?? ''}:${itemMainGroup ?? ''}:${itemAlias1 ?? ''}`
+        : 'off',
+    [enabled, expectedItem.id, itemAlias1, itemMainGroup, itemMrp],
   );
 
   useEffect(() => {
@@ -163,6 +168,7 @@ export function useContinuousOcr({
           expectedItem,
           itemMrp,
           itemMainGroup ?? null,
+          itemAlias1 ?? null,
         );
 
         const scanResult = buildScanResultFromMatch({

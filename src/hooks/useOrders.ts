@@ -17,6 +17,12 @@ interface UseOrdersOptions {
   overdueOnly?: boolean;
   /** Max number of orders to fetch (for History pagination) */
   limit?: number;
+  /**
+   * Sort order for created_at.
+   * - 'newest-first' (default) shows most recent orders at the top
+   * - 'oldest-first' shows oldest orders at the top
+   */
+  sort?: 'newest-first' | 'oldest-first';
 }
 
 function getTodayStartIso(): string {
@@ -39,11 +45,13 @@ export function useOrders(options?: UseOrdersOptions | OrderStatus) {
       opts.dateTo ?? 'none',
       opts.overdueOnly ?? false,
       opts.limit ?? 'none',
+      opts.sort ?? 'default',
     ],
     queryFn: async () => {
       const todayIso = getTodayStartIso();
 
-      const orderAsc = opts.overdueOnly;
+      const sort = opts.sort ?? 'newest-first';
+      const orderAsc = sort === 'oldest-first';
       let q = supabase
         .from('orders')
         .select('*')
@@ -99,7 +107,7 @@ export function useOrders(options?: UseOrdersOptions | OrderStatus) {
   return result;
 }
 
-/** Returns submitted orders created before today (overdue), sorted oldest first */
+/** Returns submitted orders created before today (overdue), sorted newest first by default */
 export function useOverdueOrders() {
-  return useOrders({ overdueOnly: true });
+  return useOrders({ overdueOnly: true, sort: 'newest-first' });
 }

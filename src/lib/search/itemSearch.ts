@@ -5,15 +5,19 @@ export type MatchLayer =
   | 'exact-alias'
   | 'normalized'
   | 'prefix'
+  | 'word-prefix'
   | 'substring'
   | 'keywords'
   | 'partial'
   | 'fuzzy';
 
+export type MatchedField = 'name' | 'alias' | 'alias1' | 'name+alias';
+
 export interface SearchResult {
   item: Item;
   score: number;
   matchType: MatchLayer;
+  matchedField: MatchedField;
 }
 
 const MAX_RESULTS = 20;
@@ -241,24 +245,23 @@ function fuzzyMatchItem(
 }
 
 // ---------------------------------------------------------------------------
-// 8-layer cascade search
+// 9-layer cascade search
 //
 //  Phase 1 — O(1) hash-map lookups (layers 0-2)
-//    Layer 0  Exact name match                         → 100
-//    Layer 1  Exact alias / alias1 match               → 100
-//    Layer 2  Normalized alias / alias1 match          →  95
+//    Layer 0  Exact name match                              → 100  field: name
+//    Layer 1  Exact alias / alias1 match                   → 100  field: alias/alias1
+//    Layer 2  Normalized alias / alias1 match              →  95  field: alias/alias1
 //
-//  Phase 2 — Linear scan (layers 3-6), with normalized fallback so
-//            "activa100" and "activa 100" hit the same items.
-//    Layer 3  Prefix (raw then normalized)             →  85
-//    Layer 4  Substring (raw then normalized)          →  75
-//    Layer 5  All keywords present in name             →  60
-//    Layer 6  60%+ keywords present in name            →  40
+//  Phase 2 — Linear scan (layers 3-6)
+//    Layer 3a Prefix on name (raw/norm)                    →  85  field: name
+//    Layer 3a Prefix on alias/alias1 (raw/norm)            →  88  field: alias/alias1  ← boosted
+//    Layer 3b Word-boundary prefix in name words           →  80  field: name           ← NEW
+//    Layer 4  Substring (name/alias/alias1, raw/norm)      →  75  field: whichever
+//    Layer 5  All keywords in name+alias                   →  60  field: name+alias
+//    Layer 6  ≥60% keywords in name+alias                  →  40  field: name+alias
 //
 //  Phase 3 — Fuzzy fallback (layer 7, only if < 5 results)
-//    Layer 7  Levenshtein on individual name words +   →  30
-//             alias/alias1. Adaptive distance:
-//             ≤2 for 5+ char pairs, ≤1 for shorter.
+//    Layer 7  Levenshtein on name words + alias            →  30  field: name/alias
 // ---------------------------------------------------------------------------
 
 export function searchItems(query: string, items: Item[]): SearchResult[] {
@@ -277,6 +280,7 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
     key: string,
     score: number,
     layer: MatchLayer,
+    field: MatchedField,
   ) => {
     const hits = map.get(key);
     if (!hits) return;
@@ -284,28 +288,30 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
       const p = all[hits[k]];
       if (seen.has(p.item.id)) continue;
       seen.add(p.item.id);
-      results.push({ item: p.item, score, matchType: layer });
+      results.push({ item: p.item, score, matchType: layer, matchedField: field });
     }
   };
 
-  collect(idx.byName, q, 100, 'exact-name');
-  collect(idx.byAlias, q, 100, 'exact-alias');
-  collect(idx.byAlias1, q, 100, 'exact-alias');
+  collect(idx.byName, q, 100, 'exact-name', 'name');
+  collect(idx.byAlias, q, 100, 'exact-alias', 'alias');
+  collect(idx.byAlias1, q, 100, 'exact-alias', 'alias1');
 
   const qNorm = strip(q);
-  collect(idx.byNormAlias, qNorm, 95, 'normalized');
-  collect(idx.byNormAlias1, qNorm, 95, 'normalized');
+  collect(idx.byNormAlias, qNorm, 95, 'normalized', 'alias');
+  collect(idx.byNormAlias1, qNorm, 95, 'normalized', 'alias1');
 
   if (results.length >= MAX_RESULTS) {
     return results.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS);
   }
 
-  // ------ Phase 2: linear scan (layers 3, 4, 5, 6) ------
+  // ------ Phase 2: linear scan (layers 3a, 3b, 4, 5, 6) ------
 
   const qWords = q.split(/\s+/).filter(Boolean);
   const multiWord = qWords.length > 1;
   const wordCount = qWords.length;
   const partialMin = Math.ceil(wordCount * PARTIAL_KEYWORD_RATIO);
+  // For word-boundary prefix: first query token is the strongest signal
+  const qFirst = qWords[0];
 
   for (let i = 0; i < all.length; i++) {
     const p = all[i];
@@ -313,25 +319,31 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
 
     let score = 0;
     let layer: MatchLayer = 'prefix';
+    let field: MatchedField = 'name';
 
-    // Layer 3: Prefix — raw then normalized
-    if (
-      p.aliasLower.startsWith(q) ||
-      p.alias1Lower.startsWith(q) ||
-      p.nameLower.startsWith(q)
-    ) {
+    // Layer 3a: Prefix — alias/alias1 prefix is higher-confidence (code prefix = 88)
+    if (p.aliasLower.startsWith(q) || p.alias1Lower.startsWith(q)) {
+      score = 88;
+      layer = 'prefix';
+      field = p.aliasLower.startsWith(q) ? 'alias' : 'alias1';
+    } else if (p.aliasNorm.startsWith(qNorm) || p.alias1Norm.startsWith(qNorm)) {
+      score = 88;
+      layer = 'prefix';
+      field = p.aliasNorm.startsWith(qNorm) ? 'alias' : 'alias1';
+    } else if (p.nameLower.startsWith(q) || p.nameNorm.startsWith(qNorm)) {
       score = 85;
       layer = 'prefix';
-    } else if (
-      p.aliasNorm.startsWith(qNorm) ||
-      p.alias1Norm.startsWith(qNorm) ||
-      p.nameNorm.startsWith(qNorm)
-    ) {
-      score = 85;
-      layer = 'prefix';
+      field = 'name';
     }
 
-    // Layer 4: Substring — raw then normalized
+    // Layer 3b: Word-boundary prefix — query matches start of any name word
+    else if (p.nameWords.some(w => w.startsWith(qFirst))) {
+      score = 80;
+      layer = 'word-prefix';
+      field = 'name';
+    }
+
+    // Layer 4: Substring — raw then normalized; check alias fields too
     else if (
       p.nameLower.includes(q) ||
       p.aliasLower.includes(q) ||
@@ -339,6 +351,11 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
     ) {
       score = 75;
       layer = 'substring';
+      field = p.nameLower.includes(q)
+        ? 'name'
+        : p.aliasLower.includes(q)
+          ? 'alias'
+          : 'alias1';
     } else if (
       p.nameNorm.includes(qNorm) ||
       p.aliasNorm.includes(qNorm) ||
@@ -346,25 +363,44 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
     ) {
       score = 75;
       layer = 'substring';
+      field = p.nameNorm.includes(qNorm)
+        ? 'name'
+        : p.aliasNorm.includes(qNorm)
+          ? 'alias'
+          : 'alias1';
     }
 
-    // Layer 5 & 6: Keyword matching against name
+    // Layer 5 & 6: Keyword matching — now includes alias fields
     else if (multiWord) {
       let hits = 0;
       for (let k = 0; k < wordCount; k++) {
-        if (p.nameLower.includes(qWords[k])) hits++;
+        const w = qWords[k];
+        if (
+          p.nameLower.includes(w) ||
+          p.aliasLower.includes(w) ||
+          p.alias1Lower.includes(w)
+        ) {
+          hits++;
+        }
       }
+      const nameHits = qWords.filter(w => p.nameLower.includes(w)).length;
+      const aliasHits = qWords.filter(
+        w => p.aliasLower.includes(w) || p.alias1Lower.includes(w),
+      ).length;
+
       if (hits === wordCount) {
         score = 60;
         layer = 'keywords';
+        field = nameHits >= aliasHits ? 'name' : 'alias1';
       } else if (hits >= partialMin) {
         score = 40;
         layer = 'partial';
+        field = nameHits >= aliasHits ? 'name' : 'alias1';
       }
     }
 
     if (score > 0) {
-      results.push({ item: p.item, score, matchType: layer });
+      results.push({ item: p.item, score, matchType: layer, matchedField: field });
       seen.add(p.item.id);
     }
   }
@@ -376,7 +412,7 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
       const p = all[i];
       if (seen.has(p.item.id)) continue;
       if (fuzzyMatchItem(qNorm, qWords, p)) {
-        results.push({ item: p.item, score: 30, matchType: 'fuzzy' });
+        results.push({ item: p.item, score: 30, matchType: 'fuzzy', matchedField: 'name' });
       }
     }
   }

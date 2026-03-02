@@ -11,6 +11,7 @@ export function LiveOcrScanner({
   expectedItem,
   itemMrp,
   itemMainGroup,
+  itemAlias1,
   onClose,
   onFinal,
 }: {
@@ -18,6 +19,7 @@ export function LiveOcrScanner({
   expectedItem: OrderItem;
   itemMrp?: number;
   itemMainGroup?: string | null;
+  itemAlias1?: string | null;
   onClose: () => void;
   onFinal: (payload: { scanResult: ScanResult; thumbnailUrl: string | null }) => void;
 }) {
@@ -63,6 +65,7 @@ export function LiveOcrScanner({
     expectedItem,
     itemMrp,
     itemMainGroup,
+    itemAlias1,
     onStableResult: handleStable,
   });
 
@@ -89,6 +92,7 @@ export function LiveOcrScanner({
           expectedItem,
           itemMrp,
           itemMainGroup ?? null,
+          itemAlias1 ?? null,
         );
         const scanResult = buildScanResultFromMatch({
           rawText,
@@ -113,6 +117,7 @@ export function LiveOcrScanner({
         expectedItem,
         itemMrp,
         itemMainGroup ?? null,
+        itemAlias1 ?? null,
       );
       const scanResult = buildScanResultFromMatch({
         rawText,
@@ -122,17 +127,19 @@ export function LiveOcrScanner({
       onFinal({ scanResult, thumbnailUrl: null });
       onClose();
     },
-    [expectedItem, itemMainGroup, itemMrp, onClose, onFinal],
+    [expectedItem, itemAlias1, itemMainGroup, itemMrp, onClose, onFinal],
   );
 
   return (
     <LiveOcrScannerSheet
       isOpen={isOpen}
       expectedItem={expectedItem}
+      itemAlias1={itemAlias1 ?? null}
       videoRef={videoRef}
       uiState={uiState}
       statusText={statusText}
       candidateText={continuous.candidateText}
+      lastScanResult={continuous.lastScanResult}
       onClose={onClose}
       onStartCamera={startCamera}
       onUsePhoto={onUsePhoto}

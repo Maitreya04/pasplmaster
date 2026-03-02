@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, Keyboard, UploadSimple } from '@phosphor-icons/react';
 import { BottomSheet } from '../../components/shared';
-import type { OrderItem } from '../../types';
+import type { OrderItem, ScanResult } from '../../types';
 
 export type LiveScanUiState =
   | 'requesting_camera'
@@ -14,10 +14,12 @@ export type LiveScanUiState =
 export function LiveOcrScannerSheet({
   isOpen,
   expectedItem,
+  itemAlias1,
   videoRef,
   uiState,
   statusText,
   candidateText,
+  lastScanResult,
   onClose,
   onUsePhoto,
   onManualSubmit,
@@ -25,10 +27,12 @@ export function LiveOcrScannerSheet({
 }: {
   isOpen: boolean;
   expectedItem: OrderItem;
+  itemAlias1?: string | null;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   uiState: LiveScanUiState;
   statusText: string;
   candidateText: string | null;
+  lastScanResult: ScanResult | null;
   onClose: () => void;
   onUsePhoto: (file: File) => void;
   onManualSubmit: (value: string) => void;
@@ -72,6 +76,50 @@ export function LiveOcrScannerSheet({
       streamRef.current = null;
     }
   }, []);
+
+  const expectedPrimaryCode = useMemo(
+    () => expectedItem.item_alias ?? itemAlias1 ?? null,
+    [expectedItem.item_alias, itemAlias1],
+  );
+
+  const displayStatusText = useMemo(() => {
+    if (lastScanResult) {
+      if (lastScanResult.isMatch) {
+        const pn = lastScanResult.ocrExtracted?.partNumber ?? expectedPrimaryCode;
+        return pn ? `Part code matched: ${pn}` : 'Part matched';
+      }
+      if (expectedPrimaryCode) {
+        return `Wrong part — expected ${expectedPrimaryCode}`;
+      }
+      return 'Doesn’t match expected';
+    }
+    return statusText;
+  }, [expectedPrimaryCode, lastScanResult, statusText]);
+
+  const signalPills = useMemo(() => {
+    const signals = lastScanResult?.signals;
+    if (!signals || signals.length === 0) return [];
+    const labelMap: Record<string, string> = {
+      partNumber: 'Part code',
+      brand: 'Brand',
+      vehicle: 'Vehicle',
+      mrp: 'MRP',
+      productType: 'Type',
+    };
+    return signals.map((s) => {
+      const ratio = s.maxScore > 0 ? s.score / s.maxScore : 0;
+      let tone: 'off' | 'weak' | 'strong' = 'off';
+      if (ratio >= 0.6) tone = 'strong';
+      else if (ratio > 0) tone = 'weak';
+      return {
+        key: s.signal,
+        label: labelMap[s.signal] ?? s.signal,
+        ratio,
+        tone,
+        scoreText: `${s.score}/${s.maxScore}`,
+      };
+    });
+  }, [lastScanResult]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -151,23 +199,87 @@ export function LiveOcrScannerSheet({
                   shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]
                 `}
               />
-              <div className="absolute left-0 right-0 bottom-3 flex justify-center">
+              <div className="absolute left-0 right-0 bottom-3 flex flex-col items-center gap-2 px-4">
+                {/* Confidence bar */}
+                <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-emerald-400 transition-all duration-150"
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.max(0, lastScanResult?.confidence ?? 0),
+                      )}%`,
+                    }}
+                  />
+                </div>
                 <span className={`px-3 py-1.5 rounded-full text-xs font-semibold ${badgeClass}`}>
-                  {statusText}
+                  {displayStatusText}
                 </span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Live candidate */}
+        {/* Expected codes */}
         <div className="space-y-1">
+          <p className="text-xs font-semibold text-[var(--content-tertiary)] uppercase tracking-wider">
+            Expected
+          </p>
+          <p className="text-sm text-[var(--content-primary)] leading-snug">
+            {expectedItem.item_name}
+          </p>
+          {(expectedItem.item_alias || itemAlias1) && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {expectedItem.item_alias && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-mono text-[var(--content-tertiary)]">
+                  <span className="uppercase tracking-wider text-[var(--content-secondary)]">
+                    Code
+                  </span>
+                  <span>{expectedItem.item_alias}</span>
+                </span>
+              )}
+              {itemAlias1 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-mono text-[var(--content-tertiary)]">
+                  <span className="uppercase tracking-wider text-[var(--content-secondary)]">
+                    Alias 1
+                  </span>
+                  <span>{itemAlias1}</span>
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Live candidate + signals */}
+        <div className="space-y-2">
           <p className="text-xs font-semibold text-[var(--content-tertiary)] uppercase tracking-wider">
             Detected
           </p>
-          <p className="text-sm font-mono text-[var(--content-primary)] break-words min-h-[20px]">
-            {candidateText ?? '—'}
-          </p>
+          <div className="inline-flex items-center gap-2 rounded-full bg-[var(--bg-tertiary)] px-3 py-1 min-h-[28px]">
+            <span className="text-sm font-mono text-[var(--content-primary)] break-words">
+              {candidateText ?? '—'}
+            </span>
+          </div>
+          {signalPills.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {signalPills.map((p) => {
+                let cls =
+                  'px-2 py-0.5 rounded-full text-[10px] font-semibold border border-[var(--border-subtle)] text-[var(--content-secondary)] bg-[var(--bg-tertiary)]';
+                if (p.tone === 'strong') {
+                  cls =
+                    'px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/40';
+                } else if (p.tone === 'weak') {
+                  cls =
+                    'px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30';
+                }
+                return (
+                  <span key={p.key} className={cls}>
+                    {p.label} {p.scoreText}
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Actions */}

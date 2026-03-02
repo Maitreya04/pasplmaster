@@ -4,7 +4,7 @@ import { Plus, Minus, ShoppingCart, CaretRight, CurrencyInr } from '@phosphor-ic
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
 import { searchItems, normalizeQuery, detectCodeLike } from '../../lib/search/itemSearch';
-import type { SearchResult } from '../../lib/search/itemSearch';
+import type { SearchResult, MatchedField } from '../../lib/search/itemSearch';
 import {
   PageHeader,
   SearchInput,
@@ -60,6 +60,23 @@ interface ItemRowProps {
   onUpdateQty: (itemId: number, qty: number) => void;
 }
 
+function AliasCode({
+  value,
+  query,
+  matchedField,
+}: {
+  value: string;
+  query: string;
+  matchedField: MatchedField;
+}) {
+  const isMatched = matchedField === 'alias1' || matchedField === 'alias' || matchedField === 'name+alias';
+  return (
+    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--content-secondary)] shrink-0 max-w-[120px] truncate">
+      {isMatched ? highlightText(value, query) : value}
+    </span>
+  );
+}
+
 function ItemRow({
   result,
   query,
@@ -73,8 +90,7 @@ function ItemRow({
   price,
   onUpdateQty,
 }: ItemRowProps) {
-  const { item } = result;
-  const secondary = [item.main_group, item.parent_group].filter(Boolean).join(' · ');
+  const { item, matchedField } = result;
   const isEditingQty = editingItemId === item.id;
 
   return (
@@ -83,11 +99,16 @@ function ItemRow({
         <p className="font-semibold text-[var(--content-primary)] leading-snug">
           {highlightText(item.name, query)}
         </p>
-        {secondary && (
-          <p className="text-xs text-[var(--content-tertiary)] mt-0.5 truncate">
-            {secondary}
-          </p>
-        )}
+        <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+          {item.parent_group && (
+            <p className="text-xs text-[var(--content-tertiary)] truncate shrink">
+              {item.parent_group}
+            </p>
+          )}
+          {item.alias1 && (
+            <AliasCode value={item.alias1} query={query} matchedField={matchedField} />
+          )}
+        </div>
         <span className="font-mono text-sm font-semibold text-[var(--content-secondary)] mt-0.5 inline-block">
           {formatCurrency(price)}
         </span>

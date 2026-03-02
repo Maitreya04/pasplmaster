@@ -25,6 +25,12 @@ export interface SignalDetail {
   score: number;
   maxScore: number;
   detail: string;
+  /**
+   * True when this signal result came from a direct comparison against a
+   * part-code style candidate (alias/alias1), rather than the item name.
+   * Used to allow a fast-path "code match = verified" rule.
+   */
+  directCodeMatch?: boolean;
 }
 
 export interface OcrMatchResult {
@@ -260,8 +266,17 @@ function maxAllowedDistance(length: number): number {
  *  Layer 3 — Multi-signal matching
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-function getCandidates(item: OrderItem): string[] {
-  return [item.item_alias, item.item_name].filter(
+function getCodeCandidates(
+  item: OrderItem,
+  itemAlias1?: string | null,
+): string[] {
+  return [item.item_alias, itemAlias1].filter(
+    (s): s is string => !!s && s.length > 0,
+  );
+}
+
+function getNameCandidates(item: OrderItem): string[] {
+  return [item.item_name].filter(
     (s): s is string => !!s && s.length > 0,
   );
 }
@@ -270,19 +285,22 @@ function getCandidates(item: OrderItem): string[] {
 
 function scorePartNumber(
   extracted: ExtractedFields,
-  candidates: string[],
+  codeCandidates: string[],
+  nameCandidates: string[],
 ): SignalDetail {
   const MAX = 40;
 
+  // 1) Strong matches against known part codes (alias / alias1)
   for (const partNum of extracted.partNumbers) {
     const normPart = normalize(partNum);
-    for (const cand of candidates) {
+    for (const cand of codeCandidates) {
       if (normalize(cand) === normPart) {
         return {
           signal: 'partNumber',
           score: MAX,
           maxScore: MAX,
-          detail: `exact: "${partNum}" = "${cand}"`,
+          detail: `exact(code): "${partNum}" = "${cand}"`,
+          directCodeMatch: true,
         };
       }
     }
@@ -290,7 +308,7 @@ function scorePartNumber(
 
   for (const partNum of extracted.partNumbers) {
     const normPart = normalize(partNum);
-    for (const cand of candidates) {
+    for (const cand of codeCandidates) {
       const normCand = normalize(cand);
       if (
         (normCand.length >= 3 && normPart.includes(normCand)) ||
@@ -300,28 +318,30 @@ function scorePartNumber(
           signal: 'partNumber',
           score: 35,
           maxScore: MAX,
-          detail: `contained: "${partNum}" ~ "${cand}"`,
+          detail: `contained(code): "${partNum}" ~ "${cand}"`,
+          directCodeMatch: true,
         };
       }
     }
   }
 
   const normOcr = normalize(extracted.cleanedText);
-  for (const cand of candidates) {
+  for (const cand of codeCandidates) {
     const normCand = normalize(cand);
     if (normCand.length >= 4 && normOcr.includes(normCand)) {
       return {
         signal: 'partNumber',
         score: 30,
         maxScore: MAX,
-        detail: `text-contains: "${cand}" in cleaned OCR`,
+        detail: `text-contains(code): "${cand}" in cleaned OCR`,
+        directCodeMatch: true,
       };
     }
   }
 
   for (const partNum of extracted.partNumbers) {
     const normPart = normalize(partNum);
-    for (const cand of candidates) {
+    for (const cand of codeCandidates) {
       const normCand = normalize(cand);
       const dist = levenshtein(normPart, normCand);
       const maxDist = maxAllowedDistance(
@@ -332,13 +352,90 @@ function scorePartNumber(
           signal: 'partNumber',
           score: 25,
           maxScore: MAX,
-          detail: `fuzzy(d=${dist}): "${partNum}" ~ "${cand}"`,
+          detail: `fuzzy(code,d=${dist}): "${partNum}" ~ "${cand}"`,
+          directCodeMatch: true,
         };
       }
     }
   }
 
-  return { signal: 'partNumber', score: 0, maxScore: MAX, detail: 'no match' };
+  // 2) Softer matches against the item name only. These never count as a
+  // direct code match and use lower scores so other signals must agree.
+
+  for (const partNum of extracted.partNumbers) {
+    const normPart = normalize(partNum);
+    for (const cand of nameCandidates) {
+      if (normalize(cand) === normPart) {
+        return {
+          signal: 'partNumber',
+          score: 25,
+          maxScore: MAX,
+          detail: `exact(name): "${partNum}" = "${cand}"`,
+          directCodeMatch: false,
+        };
+      }
+    }
+  }
+
+  for (const partNum of extracted.partNumbers) {
+    const normPart = normalize(partNum);
+    for (const cand of nameCandidates) {
+      const normCand = normalize(cand);
+      if (
+        (normCand.length >= 3 && normPart.includes(normCand)) ||
+        (normPart.length >= 3 && normCand.includes(normPart))
+      ) {
+        return {
+          signal: 'partNumber',
+          score: 20,
+          maxScore: MAX,
+          detail: `contained(name): "${partNum}" ~ "${cand}"`,
+          directCodeMatch: false,
+        };
+      }
+    }
+  }
+
+  for (const cand of nameCandidates) {
+    const normCand = normalize(cand);
+    if (normCand.length >= 4 && normOcr.includes(normCand)) {
+      return {
+        signal: 'partNumber',
+        score: 15,
+        maxScore: MAX,
+        detail: `text-contains(name): "${cand}" in cleaned OCR`,
+        directCodeMatch: false,
+      };
+    }
+  }
+
+  for (const partNum of extracted.partNumbers) {
+    const normPart = normalize(partNum);
+    for (const cand of nameCandidates) {
+      const normCand = normalize(cand);
+      const dist = levenshtein(normPart, normCand);
+      const maxDist = maxAllowedDistance(
+        Math.min(normPart.length, normCand.length),
+      );
+      if (dist > 0 && dist <= maxDist) {
+        return {
+          signal: 'partNumber',
+          score: 10,
+          maxScore: MAX,
+          detail: `fuzzy(name,d=${dist}): "${partNum}" ~ "${cand}"`,
+          directCodeMatch: false,
+        };
+      }
+    }
+  }
+
+  return {
+    signal: 'partNumber',
+    score: 0,
+    maxScore: MAX,
+    detail: 'no match',
+    directCodeMatch: false,
+  };
 }
 
 /* Signal 2: Brand (max 15) ───────────────────────────────────────────── */
@@ -508,12 +605,16 @@ export function matchOcrToItem(
   expectedItem: OrderItem,
   itemMrp?: number,
   itemMainGroup?: string | null,
+  itemAlias1?: string | null,
 ): OcrMatchResult {
   const extracted = extractFields(ocrText);
-  const candidates = getCandidates(expectedItem);
+  const codeCandidates = getCodeCandidates(expectedItem, itemAlias1);
+  const nameCandidates = getNameCandidates(expectedItem);
+
+  const partSignal = scorePartNumber(extracted, codeCandidates, nameCandidates);
 
   const signals: SignalDetail[] = [
-    scorePartNumber(extracted, candidates),
+    partSignal,
     scoreBrand(extracted, expectedItem.item_name, itemMainGroup ?? null),
     scoreVehicleModel(extracted, expectedItem.item_name),
     scoreMrp(extracted, itemMrp),
@@ -524,9 +625,13 @@ export function matchOcrToItem(
   const firingSignals = signals.filter((s) => s.score > 0);
   const confidence = Math.min(100, totalScore);
 
-  const isMatch =
-    firingSignals.length >= MIN_SIGNALS_FOR_MATCH &&
-    confidence >= MATCH_THRESHOLD;
+  const hasDirectCodeMatch =
+    partSignal.directCodeMatch === true && partSignal.score >= 30;
+
+  const isMatch = hasDirectCodeMatch
+    ? true
+    : firingSignals.length >= MIN_SIGNALS_FOR_MATCH &&
+      confidence >= MATCH_THRESHOLD;
 
   const bestSignal = signals.reduce((best, s) =>
     s.score > best.score ? s : best,

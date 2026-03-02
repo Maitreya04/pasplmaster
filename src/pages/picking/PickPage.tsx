@@ -25,6 +25,7 @@ import { LiveOcrScanner } from './LiveOcrScanner';
 interface ItemMeta {
   mrp: number | null;
   main_group: string | null;
+  alias1: string | null;
 }
 type ItemMetaMap = Map<number, ItemMeta>;
 
@@ -51,6 +52,7 @@ interface PickItemLocal {
   uiState: PickItemUiState;
   scanResult: ScanResult | null;
   thumbnailUrl: string | null;
+  alias1: string | null;
 }
 
 function sortByRack(items: OrderItem[]): OrderItem[] {
@@ -106,13 +108,17 @@ export default function PickPage() {
     const ids = order.items.map((oi) => oi.item_id);
     supabase
       .from('items')
-      .select('id,mrp,main_group')
+      .select('id,mrp,main_group,alias1')
       .in('id', ids)
       .then(({ data }) => {
         if (!data) return;
         const m: ItemMetaMap = new Map();
         for (const row of data) {
-          m.set(row.id, { mrp: row.mrp ?? null, main_group: row.main_group ?? null });
+          m.set(row.id, {
+            mrp: row.mrp ?? null,
+            main_group: row.main_group ?? null,
+            alias1: row.alias1 ?? null,
+          });
         }
         setItemMeta(m);
       });
@@ -131,12 +137,14 @@ export default function PickPage() {
     const sorted = sortByRack(order.items);
     return sorted.map((oi): PickItemLocal => {
       const local = localItems.get(oi.id);
+      const meta = itemMeta.get(oi.item_id);
       if (local) {
         return {
           orderItem: oi,
           uiState: local.uiState ?? uiStateFromDb(oi),
           scanResult: local.scanResult ?? oi.scan_result,
           thumbnailUrl: local.thumbnailUrl ?? null,
+          alias1: meta?.alias1 ?? null,
         };
       }
       return {
@@ -144,9 +152,10 @@ export default function PickPage() {
         uiState: uiStateFromDb(oi),
         scanResult: oi.scan_result,
         thumbnailUrl: null,
+        alias1: meta?.alias1 ?? null,
       };
     });
-  }, [order?.items, localItems]);
+  }, [itemMeta, localItems, order?.items]);
 
   const { active, done } = useMemo(() => partitionItems(pickItems), [pickItems]);
 
@@ -508,6 +517,7 @@ export default function PickPage() {
           expectedItem={liveScanTarget}
           itemMrp={itemMeta.get(liveScanTarget.item_id)?.mrp ?? undefined}
           itemMainGroup={itemMeta.get(liveScanTarget.item_id)?.main_group ?? null}
+          itemAlias1={itemMeta.get(liveScanTarget.item_id)?.alias1 ?? null}
           onClose={closeLiveScan}
           onFinal={({ scanResult, thumbnailUrl }) => {
             updateLocalItem(liveScanTarget.id, {
@@ -591,10 +601,19 @@ function PickItemCard({
           <p className="text-sm font-medium text-[var(--content-primary)] leading-snug">
             {oi.item_name}
           </p>
-          {oi.item_alias && (
-            <p className="text-xs text-[var(--content-tertiary)] mt-0.5 font-mono">
-              {oi.item_alias}
-            </p>
+          {(oi.item_alias || item.alias1) && (
+            <div className="flex flex-wrap gap-1 mt-0.5">
+              {oi.item_alias && (
+                <span className="text-xs text-[var(--content-tertiary)] font-mono bg-[var(--bg-tertiary)] px-2 py-0.5 rounded-md">
+                  Code: {oi.item_alias}
+                </span>
+              )}
+              {item.alias1 && (
+                <span className="text-xs text-[var(--content-tertiary)] font-mono bg-[var(--bg-tertiary)] px-2 py-0.5 rounded-md">
+                  Alias 1: {item.alias1}
+                </span>
+              )}
+            </div>
           )}
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <span className="text-xs font-semibold text-[var(--content-secondary)] bg-[var(--bg-tertiary)] px-2 py-0.5 rounded-md">
