@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, CheckCircle, XCircle } from '@phosphor-icons/react';
+import { X, CheckCircle, XCircle, Hourglass } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useAuth } from '../../context/AuthContext';
@@ -49,6 +49,7 @@ export default function ReviewPage() {
 
   const [items, setItems] = useState<EditableItem[]>([]);
   const [removedIds, setRemovedIds] = useState<Set<number>>(new Set());
+  const [pendingIds, setPendingIds] = useState<Set<number>>(new Set());
   const [rejectSheetOpen, setRejectSheetOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const rejectNavigateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -63,6 +64,18 @@ export default function ReviewPage() {
         }))
       );
       setRemovedIds(new Set());
+      setPendingIds(
+        new Set(
+          order.items
+            .filter(
+              (i) =>
+                i.state === 'flagged' &&
+                (i.flag_reason === 'Out of Stock' ||
+                  i.flag_reason === 'Out of Stock (Billing)'),
+            )
+            .map((i) => i.id),
+        ),
+      );
     }
   }, [order?.id, order?.items]);
 
@@ -88,6 +101,28 @@ export default function ReviewPage() {
     return { totalItems: count, grandTotal: total };
   }, [visibleItems]);
 
+  const pickingSummary = useMemo(() => {
+    if (!order?.items) {
+      return null;
+    }
+    const totalLines = order.items.length;
+    let picked = 0;
+    let flagged = 0;
+    for (const i of order.items) {
+      if (i.state === 'picked') picked += 1;
+      else if (i.state === 'flagged') flagged += 1;
+    }
+    const done = picked + flagged;
+    const remaining = Math.max(0, totalLines - done);
+    return {
+      totalLines,
+      picked,
+      flagged,
+      remaining,
+      done,
+    };
+  }, [order?.items]);
+
   const updateQty = useCallback((itemId: number, qty: number) => {
     setItems((prev) =>
       prev.map((i) =>
@@ -97,7 +132,29 @@ export default function ReviewPage() {
   }, []);
 
   const removeItem = useCallback((itemId: number) => {
-    setRemovedIds((prev) => new Set(prev).add(itemId));
+    setRemovedIds((prev) => {
+      const next = new Set(prev);
+      next.add(itemId);
+      return next;
+    });
+    setPendingIds((prev) => {
+      if (!prev.has(itemId)) return prev;
+      const next = new Set(prev);
+      next.delete(itemId);
+      return next;
+    });
+  }, []);
+
+  const togglePending = useCallback((itemId: number) => {
+    setPendingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
   }, []);
 
   const approveMutation = useMutation({
@@ -116,6 +173,41 @@ export default function ReviewPage() {
       // Delete removed items
       for (const rid of removedIds) {
         await supabase.from('order_items').delete().eq('id', rid);
+      }
+
+      // Create pending entries for items that billing marked as "no stock"
+      const pendingItemIds = Array.from(pendingIds).filter(
+        (id) => !removedIds.has(id),
+      );
+
+      if (pendingItemIds.length > 0) {
+        const pendingRows = visibleItems
+          .filter((item) => pendingItemIds.includes(item.id))
+          .map((item) => ({
+            order_id: order.id,
+            order_number: order.order_number,
+            customer_id: order.customer_id,
+            customer_name: order.customer_name,
+            item_id: item.item_id,
+            item_name: item.item_name,
+            qty_pending: item.qty_approved,
+            source: 'billing' as const,
+            created_by: reviewer,
+            note: 'Marked pending by billing (no stock in Busy)',
+          }));
+
+        if (pendingRows.length > 0) {
+          await supabase.from('pending_items').insert(pendingRows);
+
+          // Also mark these items as flagged (Out of Stock) so pickers see them as done + problem
+          await supabase
+            .from('order_items')
+            .update({
+              state: 'flagged',
+              flag_reason: 'Out of Stock (Billing)',
+            })
+            .in('id', pendingItemIds);
+        }
       }
 
       // Update order
@@ -250,6 +342,51 @@ export default function ReviewPage() {
               </div>
             </Card>
 
+            {/* Picking progress (for approved / picking / completed orders) */}
+            {pickingSummary &&
+              (order.status === 'approved' ||
+                order.status === 'picking' ||
+                order.status === 'completed') && (
+                <Card className="mb-6 lg:mb-8">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-800">
+                        Picking progress
+                      </p>
+                      <p className="text-sm font-mono text-slate-700">
+                        {pickingSummary.done}/{pickingSummary.totalLines} lines
+                        done
+                      </p>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-500"
+                        style={{
+                          width: `${
+                            (pickingSummary.done /
+                              Math.max(1, pickingSummary.totalLines)) *
+                            100
+                          }%`,
+                        }}
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-3 text-xs text-slate-600">
+                      <span className="font-mono">
+                        Picked: {pickingSummary.picked}
+                      </span>
+                      <span className="font-mono">
+                        Flagged: {pickingSummary.flagged}
+                      </span>
+                      {pickingSummary.remaining > 0 && (
+                        <span className="font-mono">
+                          Remaining: {pickingSummary.remaining}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              )}
+
             {/* Item list */}
             <div className="space-y-4">
               <h2 className="text-lg font-semibold text-slate-800">Items</h2>
@@ -257,8 +394,14 @@ export default function ReviewPage() {
                 {visibleItems.map((item) => {
                   const price = item.price_quoted ?? item.price_system ?? 0;
                   const lineTotal = item.qty_approved * price;
+                const isPending = pendingIds.has(item.id);
                   return (
-                    <Card key={item.id} className="flex flex-col lg:flex-row lg:items-center gap-4">
+                  <Card
+                    key={item.id}
+                    className={`flex flex-col lg:flex-row lg:items-center gap-4 ${
+                      isPending ? 'border-amber-300 bg-amber-50' : ''
+                    }`}
+                  >
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-slate-900 text-base lg:text-lg">
                           {item.item_name}
@@ -267,6 +410,27 @@ export default function ReviewPage() {
                           Requested: {item.qty_requested} · Unit: ₹
                           {price.toLocaleString('en-IN')}
                         </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {isPending ? (
+                          <button
+                            type="button"
+                            onClick={() => togglePending(item.id)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200"
+                          >
+                            <Hourglass size={14} weight="bold" />
+                            Pending (no stock)
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => togglePending(item.id)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium text-amber-700 bg-amber-50 border border-amber-100 hover:bg-amber-100 transition-colors"
+                          >
+                            <Hourglass size={14} weight="bold" />
+                            Mark as pending (no stock)
+                          </button>
+                        )}
+                      </div>
                       </div>
                       <div className="flex items-center gap-3 lg:gap-4 shrink-0">
                         <NumberStepper

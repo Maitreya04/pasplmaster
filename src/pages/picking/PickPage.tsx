@@ -12,6 +12,7 @@ import {
 import { supabase } from '../../lib/supabase/client';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
 import {
   BigButton,
   BottomSheet,
@@ -97,6 +98,7 @@ export default function PickPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const { userName } = useAuth();
 
   const orderId = id ? parseInt(id, 10) : null;
   const { data: order, isLoading, error } = useOrderDetail(orderId);
@@ -221,6 +223,7 @@ export default function PickPage() {
       reason: string;
       notes: string;
     }) => {
+      if (!order) throw new Error('No order');
       const { error } = await supabase
         .from('order_items')
         .update({
@@ -230,6 +233,39 @@ export default function PickPage() {
         })
         .eq('id', itemId);
       if (error) throw error;
+
+      // If picker flags "Out of Stock", also create a pending_items entry
+      if (reason === 'Out of Stock') {
+        const target = order.items.find((oi) => oi.id === itemId);
+        if (target) {
+          const qtyPending = target.qty_approved ?? target.qty_requested;
+          if (qtyPending > 0) {
+            // Avoid duplicate pending rows for same order+item while status is pending
+            const { data: existing, error: existingError } = await supabase
+              .from('pending_items')
+              .select('id')
+              .eq('order_id', order.id)
+              .eq('item_id', target.item_id)
+              .eq('status', 'pending')
+              .limit(1)
+              .maybeSingle();
+            if (!existingError && !existing) {
+              await supabase.from('pending_items').insert({
+                order_id: order.id,
+                order_number: order.order_number,
+                customer_id: order.customer_id,
+                customer_name: order.customer_name,
+                item_id: target.item_id,
+                item_name: target.item_name,
+                qty_pending: qtyPending,
+                source: 'picking',
+                created_by: userName || 'Picker',
+                note: notes || null,
+              });
+            }
+          }
+        }
+      }
     },
     onMutate: ({ itemId }) => {
       updateLocalItem(itemId, { uiState: 'flagged' });

@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Package } from '@phosphor-icons/react';
+import { Package, HourglassHigh } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { useOrders } from '../../hooks/useOrders';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
+import { usePendingItems } from '../../hooks/usePendingItems';
 import { Card, BottomSheet, StatusBadge, EmptyState, Skeleton } from '../../components/shared';
 import type { Order, OrderItem } from '../../types';
 
@@ -61,6 +62,14 @@ function OrderDetailSheet({
   onClose: () => void;
 }) {
   const { data: order, isLoading } = useOrderDetail(orderId);
+  const {
+    data: pending,
+    isLoading: pendingLoading,
+  } = usePendingItems({
+    orderId,
+    status: 'pending',
+    enabled: orderId !== null,
+  });
 
   if (!isOpen) return null;
 
@@ -94,8 +103,38 @@ function OrderDetailSheet({
               );
             })}
           </ul>
-          <div className="pt-3 border-t border-[var(--border-subtle)] font-mono font-semibold text-[var(--content-primary)]">
-            Total: {formatCurrency(order.total_value)}
+          <div className="pt-3 border-t border-[var(--border-subtle)] space-y-2">
+            <div className="font-mono font-semibold text-[var(--content-primary)]">
+              Total: {formatCurrency(order.total_value)}
+            </div>
+
+            {pending && pending.length > 0 && (
+              <div className="mt-1 rounded-lg bg-[var(--bg-secondary)] px-3 py-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <HourglassHigh size={14} className="text-[var(--content-warning)]" />
+                  <span className="text-xs font-semibold text-[var(--content-warning)] uppercase tracking-wide">
+                    Pending (no stock)
+                  </span>
+                  {pendingLoading && (
+                    <span className="text-[10px] text-[var(--content-tertiary)]">
+                      updating…
+                    </span>
+                  )}
+                </div>
+                <ul className="space-y-1.5">
+                  {pending.map((pi) => (
+                    <li key={pi.id} className="flex items-baseline justify-between gap-3">
+                      <span className="text-xs text-[var(--content-secondary)] truncate">
+                        {pi.item_name}
+                      </span>
+                      <span className="text-xs font-mono font-semibold text-[var(--content-primary)]">
+                        × {pi.qty_pending}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </div>
       ) : null}

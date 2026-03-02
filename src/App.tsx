@@ -15,6 +15,7 @@ import DashboardPage from './pages/billing/DashboardPage';
 import NeedsReviewPage from './pages/billing/NeedsReviewPage';
 import ReviewPage from './pages/billing/ReviewPage';
 import HistoryPage from './pages/billing/HistoryPage';
+import PendingPage from './pages/billing/PendingPage';
 
 import PickingLayout from './pages/picking/PickingLayout';
 import QueuePage from './pages/picking/QueuePage';
@@ -97,6 +98,7 @@ export default function App() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="needs-review" element={<NeedsReviewPage />} />
+        <Route path="pending" element={<PendingPage />} />
         <Route path="review/:id" element={<ReviewPage />} />
         <Route path="history" element={<HistoryPage />} />
       </Route>

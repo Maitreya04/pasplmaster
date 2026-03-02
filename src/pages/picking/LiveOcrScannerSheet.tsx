@@ -1,8 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, Keyboard, ArrowsIn } from '@phosphor-icons/react';
+import { useRef, useState, useMemo } from 'react';
+import {
+  Camera,
+  CheckCircle,
+  XCircle,
+  ArrowCounterClockwise,
+  Keyboard,
+  SpinnerGap,
+} from '@phosphor-icons/react';
 import { BottomSheet } from '../../components/shared';
 import type { OrderItem, ScanResult } from '../../types';
 
+// Keep the old export name so other files that import the type don't break
 export type LiveScanUiState =
   | 'requesting_camera'
   | 'camera_ready'
@@ -11,118 +19,67 @@ export type LiveScanUiState =
   | 'mismatch'
   | 'error';
 
-export function LiveOcrScannerSheet({
+export function OcrScannerSheet({
   isOpen,
   expectedItem,
   itemAlias1,
-  videoRef,
-  uiState,
-  statusText,
-  candidateText,
-  lastScanResult,
+  photoState,
+  thumbnailUrl,
+  scanResult,
   onClose,
-  onUsePhoto,
+  onPhoto,
+  onConfirm,
+  onRetake,
   onManualSubmit,
-  onStartCamera,
 }: {
   isOpen: boolean;
   expectedItem: OrderItem;
   itemAlias1?: string | null;
-  videoRef: React.RefObject<HTMLVideoElement | null>;
-  uiState: LiveScanUiState;
-  statusText: string;
-  candidateText: string | null;
-  lastScanResult: ScanResult | null;
+  photoState: 'idle' | 'processing' | 'done';
+  thumbnailUrl: string | null;
+  scanResult: ScanResult | null;
   onClose: () => void;
-  onUsePhoto: (file: File) => void;
+  onPhoto: (file: File) => void;
+  onConfirm: () => void;
+  onRetake: () => void;
   onManualSubmit: (value: string) => void;
-  onStartCamera: (videoEl: HTMLVideoElement) => Promise<MediaStream | null>;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const [manualValue, setManualValue] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
+  const [manualValue, setManualValue] = useState('');
 
-  const expectedPrimaryCode = useMemo(
+  const expectedCode = useMemo(
     () => expectedItem.item_alias ?? itemAlias1 ?? null,
     [expectedItem.item_alias, itemAlias1],
   );
 
-  /* ── ROI border colour driven by live-mode state ── */
-  const roiBorderClass = useMemo(() => {
-    switch (uiState) {
-      case 'matched':   return 'border-emerald-400';
-      case 'mismatch':  return 'border-red-400';
-      case 'reading':   return 'border-amber-400';
-      default:          return 'border-white/50';
-    }
-  }, [uiState]);
+  const detectedCode = useMemo(
+    () => scanResult?.ocrExtracted?.partNumber ?? null,
+    [scanResult],
+  );
 
-  /* ── Live-mode status chip shown inside the viewfinder ── */
-  const liveChip = useMemo(() => {
-    if (uiState === 'requesting_camera') {
-      return { text: 'Starting camera…', cls: 'bg-white/10 text-white/60' };
-    }
-    if (uiState === 'reading') {
-      return { text: 'Reading…', cls: 'bg-amber-500/20 text-amber-300' };
-    }
-    if (uiState === 'matched' && lastScanResult) {
-      const pn = lastScanResult.ocrExtracted?.partNumber ?? expectedPrimaryCode;
-      return {
-        text: pn ? `Matched: ${pn}` : 'Matched',
-        cls: 'bg-emerald-500/20 text-emerald-300',
-      };
-    }
-    if (uiState === 'mismatch' && candidateText) {
-      return {
-        text: `Read: ${candidateText} — wrong part`,
-        cls: 'bg-red-500/20 text-red-300',
-      };
-    }
-    if (uiState === 'error') {
-      return { text: 'Camera unavailable', cls: 'bg-red-500/20 text-red-300' };
-    }
-    // camera_ready — show hint
-    return { text: 'Fit label inside the box', cls: 'bg-white/10 text-white/70' };
-  }, [candidateText, expectedPrimaryCode, lastScanResult, uiState]);
-
-  const stopStream = useCallback(() => {
-    if (streamRef.current) {
-      for (const t of streamRef.current.getTracks()) t.stop();
-      streamRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!isOpen) {
-      stopStream();
-      setManualValue('');
-      setManualOpen(false);
-      return;
-    }
-
-    const video = videoRef.current;
-    if (!video) return;
-
-    let cancelled = false;
-    (async () => {
-      const stream = await onStartCamera(video);
-      if (cancelled) {
-        if (stream) for (const t of stream.getTracks()) t.stop();
-        return;
-      }
-      streamRef.current = stream;
-    })();
-
-    return () => {
-      cancelled = true;
-      stopStream();
+  const signalPills = useMemo(() => {
+    const signals = scanResult?.signals;
+    if (!signals || signals.length === 0) return [];
+    const labelMap: Record<string, string> = {
+      partNumber: 'Part code',
+      brand: 'Brand',
+      vehicle: 'Vehicle',
+      mrp: 'MRP',
+      productType: 'Type',
     };
-  }, [isOpen, onStartCamera, stopStream]);
+    return signals
+      .filter((s) => s.score > 0)
+      .map((s) => ({
+        key: s.signal,
+        label: labelMap[s.signal] ?? s.signal,
+        strong: s.score / s.maxScore >= 0.6,
+      }));
+  }, [scanResult]);
 
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose} title="Scan part number">
-      {/* Hidden file input — triggers native camera capture */}
+      {/* Hidden file input — triggers native camera */}
       <input
         ref={fileInputRef}
         type="file"
@@ -131,146 +88,251 @@ export function LiveOcrScannerSheet({
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) onUsePhoto(file);
+          if (file) onPhoto(file);
           e.target.value = '';
         }}
       />
 
       <div className="space-y-4">
-        {/* Expected part info */}
+        {/* ── Expected part ── */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mb-0.5">
               Expected
             </p>
-            <p className="text-sm font-medium text-[var(--content-primary)] leading-snug truncate">
+            <p className="text-sm font-medium text-[var(--content-primary)] leading-snug">
               {expectedItem.item_name}
             </p>
           </div>
-          {expectedPrimaryCode && (
-            <span className="shrink-0 self-start mt-4 inline-flex items-center gap-1 rounded-full bg-[var(--bg-tertiary)] px-2.5 py-1 text-xs font-mono text-[var(--content-secondary)] ring-1 ring-[var(--border-subtle)]">
-              <ArrowsIn size={11} className="opacity-60" />
-              {expectedPrimaryCode}
+          {expectedCode && (
+            <span className="shrink-0 self-start mt-4 inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2.5 py-1 text-xs font-mono font-semibold text-[var(--content-secondary)] ring-1 ring-[var(--border-subtle)]">
+              {expectedCode}
             </span>
           )}
         </div>
 
-        {/* ── Viewfinder ── */}
-        <div className="relative w-full overflow-hidden rounded-2xl bg-black">
-          <div className="relative w-full aspect-[3/4]">
-            <video
-              ref={videoRef}
-              className="absolute inset-0 w-full h-full object-cover"
-              playsInline
-              muted
-              autoPlay
-            />
+        {/* ── Viewfinder area — changes per state ── */}
+        <div className="relative w-full rounded-2xl overflow-hidden bg-[var(--bg-tertiary)]" style={{ aspectRatio: '4/3' }}>
 
-            {/* Dark vignette + scan-box cutout */}
-            <div className="absolute inset-0 pointer-events-none">
-              <div className="absolute inset-0 bg-black/25" />
-
-              {/* ROI box */}
-              <div
-                className={`
-                  absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2
-                  w-[86%] h-[35%] rounded-2xl border-2 transition-colors duration-300
-                  ${roiBorderClass}
-                  shadow-[0_0_0_9999px_rgba(0,0,0,0.38)]
-                `}
-              >
+          {/* ── IDLE: camera placeholder with affordance ── */}
+          {photoState === 'idle' && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6">
+              {/* Dashed scan-box affordance */}
+              <div className="relative w-full max-w-[260px] aspect-[2/1] rounded-xl border-2 border-dashed border-[var(--border-subtle)] flex flex-col items-center justify-center gap-2">
                 {/* Corner marks */}
-                {(['tl','tr','bl','br'] as const).map((corner) => (
+                {(['tl','tr','bl','br'] as const).map((c) => (
                   <span
-                    key={corner}
+                    key={c}
                     className={`
-                      absolute w-4 h-4 border-white/80
-                      ${corner === 'tl' ? '-top-px -left-px border-t-2 border-l-2 rounded-tl-xl'  : ''}
-                      ${corner === 'tr' ? '-top-px -right-px border-t-2 border-r-2 rounded-tr-xl' : ''}
-                      ${corner === 'bl' ? '-bottom-px -left-px border-b-2 border-l-2 rounded-bl-xl' : ''}
-                      ${corner === 'br' ? '-bottom-px -right-px border-b-2 border-r-2 rounded-br-xl' : ''}
+                      absolute w-4 h-4
+                      ${c === 'tl' ? 'top-[-2px] left-[-2px] border-t-2 border-l-2 rounded-tl-lg border-[var(--content-secondary)]' : ''}
+                      ${c === 'tr' ? 'top-[-2px] right-[-2px] border-t-2 border-r-2 rounded-tr-lg border-[var(--content-secondary)]' : ''}
+                      ${c === 'bl' ? 'bottom-[-2px] left-[-2px] border-b-2 border-l-2 rounded-bl-lg border-[var(--content-secondary)]' : ''}
+                      ${c === 'br' ? 'bottom-[-2px] right-[-2px] border-b-2 border-r-2 rounded-br-lg border-[var(--content-secondary)]' : ''}
                     `}
                   />
                 ))}
-              </div>
-
-              {/* Live-mode status chip — sits at bottom of viewfinder */}
-              <div className="absolute bottom-3 left-0 right-0 flex justify-center px-4">
-                <span
-                  className={`
-                    px-3 py-1.5 rounded-full text-[11px] font-semibold backdrop-blur-sm
-                    ${liveChip.cls}
-                  `}
-                >
-                  {liveChip.text}
-                </span>
+                <Camera size={28} weight="light" className="text-[var(--content-secondary)]" />
+                <p className="text-[11px] text-[var(--content-tertiary)] text-center leading-tight px-3">
+                  Fit the part label inside the box
+                </p>
               </div>
             </div>
-          </div>
-        </div>
+          )}
 
-        {/* ── Primary CTA: Take Photo ── */}
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="
-            w-full min-h-[56px] rounded-2xl
-            bg-white text-gray-950 font-semibold text-[15px]
-            flex items-center justify-center gap-2.5
-            active:scale-[0.97] transition-transform duration-100
-            shadow-sm
-          "
-        >
-          <Camera size={20} weight="bold" />
-          Take photo
-        </button>
+          {/* ── PROCESSING & DONE: photo thumbnail ── */}
+          {(photoState === 'processing' || photoState === 'done') && thumbnailUrl && (
+            <img
+              src={thumbnailUrl}
+              alt="Captured label"
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+          )}
 
-        <p className="text-center text-[11px] text-[var(--content-tertiary)]">
-          {statusText}
-        </p>
+          {/* Processing overlay */}
+          {photoState === 'processing' && (
+            <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2">
+              <SpinnerGap size={28} weight="bold" className="text-white animate-spin" />
+              <p className="text-sm font-semibold text-white">Checking part…</p>
+            </div>
+          )}
 
-        {/* ── Manual entry (collapsed by default) ── */}
-        <div className="border-t border-[var(--border-subtle)] pt-3">
-          <button
-            onClick={() => setManualOpen((v) => !v)}
-            className="flex items-center gap-2 text-xs text-[var(--content-tertiary)] w-full"
-          >
-            <Keyboard size={14} />
-            <span>Enter part number manually</span>
-            <span className="ml-auto text-[var(--content-disabled)]">
-              {manualOpen ? '▲' : '▼'}
-            </span>
-          </button>
+          {/* Done — Match overlay */}
+          {photoState === 'done' && scanResult?.isMatch && (
+            <div className="absolute inset-0 bg-emerald-950/70 flex flex-col items-center justify-center gap-2">
+              <CheckCircle size={44} weight="fill" className="text-emerald-400" />
+              <p className="text-base font-bold text-emerald-300">Part confirmed</p>
+              {detectedCode && (
+                <p className="text-xs font-mono text-emerald-400/80">{detectedCode}</p>
+              )}
+            </div>
+          )}
 
-          {manualOpen && (
-            <div className="flex gap-2 mt-3">
-              <input
-                value={manualValue}
-                onChange={(e) => setManualValue(e.target.value)}
-                placeholder="e.g. P-L30"
-                autoFocus
-                className="
-                  flex-1 h-11 px-3 rounded-xl
-                  bg-[var(--bg-tertiary)] text-[var(--content-primary)]
-                  placeholder-[var(--content-disabled)]
-                  border border-[var(--border-subtle)]
-                  focus:outline-none focus:ring-2 focus:ring-amber-500/50
-                "
-              />
-              <button
-                onClick={() => onManualSubmit(manualValue)}
-                disabled={!manualValue.trim()}
-                className="
-                  h-11 px-4 rounded-xl
-                  bg-amber-500 text-gray-950 font-semibold
-                  disabled:opacity-40 disabled:cursor-not-allowed
-                  active:scale-95 transition-transform duration-100
-                "
-              >
-                Submit
-              </button>
+          {/* Done — Mismatch overlay */}
+          {photoState === 'done' && scanResult && !scanResult.isMatch && (
+            <div className="absolute inset-0 bg-gray-950/75 flex flex-col items-center justify-center gap-1.5 px-5">
+              <XCircle size={40} weight="fill" className="text-red-400" />
+              <p className="text-base font-bold text-red-300">Wrong part</p>
+              <div className="mt-1 space-y-0.5 text-center">
+                {detectedCode && (
+                  <p className="text-xs text-white/60">
+                    Read: <span className="font-mono text-white/80">{detectedCode}</span>
+                  </p>
+                )}
+                {expectedCode && (
+                  <p className="text-xs text-white/60">
+                    Expected: <span className="font-mono text-white/80">{expectedCode}</span>
+                  </p>
+                )}
+              </div>
+              {signalPills.length > 0 && (
+                <div className="flex flex-wrap justify-center gap-1 mt-2">
+                  {signalPills.map((p) => (
+                    <span
+                      key={p.key}
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                        p.strong
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          : 'bg-white/10 text-white/50 border border-white/10'
+                      }`}
+                    >
+                      {p.label}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
+
+        {/* ── Actions ── */}
+
+        {/* IDLE: single primary CTA */}
+        {photoState === 'idle' && (
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="
+              w-full min-h-[56px] rounded-2xl
+              bg-white text-gray-950 font-bold text-[15px]
+              flex items-center justify-center gap-2.5
+              active:scale-[0.97] transition-transform duration-100
+              shadow-sm
+            "
+          >
+            <Camera size={22} weight="bold" />
+            Take Photo
+          </button>
+        )}
+
+        {/* PROCESSING: disabled button so user knows to wait */}
+        {photoState === 'processing' && (
+          <button
+            disabled
+            className="
+              w-full min-h-[56px] rounded-2xl
+              bg-[var(--bg-tertiary)] text-[var(--content-disabled)] font-bold text-[15px]
+              flex items-center justify-center gap-2.5
+              cursor-not-allowed
+            "
+          >
+            <SpinnerGap size={20} className="animate-spin" />
+            Checking…
+          </button>
+        )}
+
+        {/* DONE — MATCH: just show that it's confirming (auto-closes) */}
+        {photoState === 'done' && scanResult?.isMatch && (
+          <button
+            onClick={onConfirm}
+            className="
+              w-full min-h-[56px] rounded-2xl
+              bg-emerald-500 text-white font-bold text-[15px]
+              flex items-center justify-center gap-2.5
+              active:scale-[0.97] transition-transform duration-100
+            "
+          >
+            <CheckCircle size={22} weight="fill" />
+            Confirmed — continue
+          </button>
+        )}
+
+        {/* DONE — MISMATCH: retake (primary) + override (ghost) */}
+        {photoState === 'done' && scanResult && !scanResult.isMatch && (
+          <div className="space-y-2">
+            <button
+              onClick={onRetake}
+              className="
+                w-full min-h-[52px] rounded-2xl
+                bg-white text-gray-950 font-bold text-[15px]
+                flex items-center justify-center gap-2.5
+                active:scale-[0.97] transition-transform duration-100
+              "
+            >
+              <ArrowCounterClockwise size={20} weight="bold" />
+              Retake photo
+            </button>
+            <button
+              onClick={onConfirm}
+              className="
+                w-full min-h-[44px] rounded-xl
+                text-[var(--content-tertiary)] text-sm font-medium
+                flex items-center justify-center gap-1.5
+                active:opacity-60 transition-opacity
+              "
+            >
+              Override and continue anyway
+            </button>
+          </div>
+        )}
+
+        {/* ── Manual entry (collapsed, always available) ── */}
+        {photoState !== 'processing' && (
+          <div className="border-t border-[var(--border-subtle)] pt-3">
+            <button
+              onClick={() => setManualOpen((v) => !v)}
+              className="flex items-center gap-2 text-xs text-[var(--content-tertiary)] w-full"
+            >
+              <Keyboard size={14} />
+              <span>Enter part number manually</span>
+              <span className="ml-auto text-[var(--content-disabled)]">
+                {manualOpen ? '▲' : '▼'}
+              </span>
+            </button>
+
+            {manualOpen && (
+              <div className="flex gap-2 mt-3">
+                <input
+                  value={manualValue}
+                  onChange={(e) => setManualValue(e.target.value)}
+                  placeholder={expectedCode ?? 'e.g. P-L30'}
+                  autoFocus
+                  className="
+                    flex-1 h-11 px-3 rounded-xl
+                    bg-[var(--bg-tertiary)] text-[var(--content-primary)]
+                    placeholder-[var(--content-disabled)]
+                    border border-[var(--border-subtle)]
+                    focus:outline-none focus:ring-2 focus:ring-amber-500/50
+                  "
+                />
+                <button
+                  onClick={() => {
+                    onManualSubmit(manualValue);
+                    setManualValue('');
+                  }}
+                  disabled={!manualValue.trim()}
+                  className="
+                    h-11 px-4 rounded-xl
+                    bg-amber-500 text-gray-950 font-semibold
+                    disabled:opacity-40 disabled:cursor-not-allowed
+                    active:scale-95 transition-transform duration-100
+                  "
+                >
+                  Submit
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </BottomSheet>
   );

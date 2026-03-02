@@ -84,6 +84,26 @@ export interface OrderItem {
   scan_result: ScanResult | null;
 }
 
+export type PendingItemStatus = 'pending' | 'resolved' | 'cancelled';
+
+export interface PendingItem {
+  id: number;
+  order_id: number;
+  order_number: string;
+  customer_id: number | null;
+  customer_name: string;
+  item_id: number | null;
+  item_name: string;
+  qty_pending: number;
+  source: 'billing' | 'picking';
+  created_by: string | null;
+  created_at: string;
+  note: string | null;
+  status: PendingItemStatus;
+  resolved_at: string | null;
+  resolved_by: string | null;
+}
+
 export interface ScanSignal {
   signal: string;
   score: number;

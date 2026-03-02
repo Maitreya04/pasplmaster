@@ -1,11 +1,17 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { SquaresFour, ClipboardText, ClockCounterClockwise } from '@phosphor-icons/react';
+import {
+  SquaresFour,
+  ClipboardText,
+  ClockCounterClockwise,
+  HourglassHigh,
+} from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
 
 const NAV_ITEMS = [
   { icon: SquaresFour, label: 'Dashboard', path: '/billing' },
   { icon: ClipboardText, label: 'Needs Review', path: '/billing/needs-review' },
+  { icon: HourglassHigh, label: 'Pending', path: '/billing/pending' },
   { icon: ClockCounterClockwise, label: 'History', path: '/billing/history' },
 ];
 

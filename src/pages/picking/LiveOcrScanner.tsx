@@ -1,10 +1,9 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OrderItem, ScanResult } from '../../types';
 import { scanImage } from '../../lib/ocr/ocrEngine';
 import { matchOcrToItem } from '../../lib/ocr/ocrMatcher';
 import { buildScanResultFromMatch } from '../../lib/ocr/scanResult';
-import { useContinuousOcr } from '../../hooks/useContinuousOcr';
-import { LiveOcrScannerSheet, type LiveScanUiState } from './LiveOcrScannerSheet';
+import { OcrScannerSheet } from './LiveOcrScannerSheet';
 
 export function LiveOcrScanner({
   isOpen,
@@ -23,68 +22,28 @@ export function LiveOcrScanner({
   onClose: () => void;
   onFinal: (payload: { scanResult: ScanResult; thumbnailUrl: string | null }) => void;
 }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [cameraState, setCameraState] = useState<
-    'requesting_camera' | 'camera_ready' | 'error'
-  >('requesting_camera');
+  const [photoState, setPhotoState] = useState<'idle' | 'processing' | 'done'>('idle');
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [result, setResult] = useState<ScanResult | null>(null);
+  const autoConfirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const startCamera = useCallback(async (videoEl: HTMLVideoElement) => {
-    try {
-      setCameraState('requesting_camera');
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-        audio: false,
-      });
-      videoEl.srcObject = stream;
-      await videoEl.play();
-      setCameraState('camera_ready');
-      return stream;
-    } catch {
-      setCameraState('error');
-      return null;
+  // Reset when sheet closes
+  useEffect(() => {
+    if (!isOpen) {
+      if (autoConfirmTimer.current) clearTimeout(autoConfirmTimer.current);
+      if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+      setPhotoState('idle');
+      setThumbUrl(null);
+      setResult(null);
     }
-  }, []);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const ocrEnabled = isOpen && cameraState === 'camera_ready';
-
-  const handleStable = useCallback(
-    (scanResult: ScanResult) => {
-      onFinal({ scanResult, thumbnailUrl: null });
-      onClose();
-    },
-    [onClose, onFinal],
-  );
-
-  const continuous = useContinuousOcr({
-    enabled: ocrEnabled,
-    videoRef,
-    expectedItem,
-    itemMrp,
-    itemMainGroup,
-    itemAlias1,
-    onStableResult: handleStable,
-  });
-
-  const uiState: LiveScanUiState = useMemo(() => {
-    if (!isOpen) return 'camera_ready';
-    if (cameraState === 'requesting_camera') return 'requesting_camera';
-    if (cameraState === 'error') return 'error';
-    return continuous.uiState;
-  }, [cameraState, continuous.uiState, isOpen]);
-
-  const statusText = useMemo(() => {
-    if (cameraState === 'requesting_camera') return 'Requesting camera…';
-    if (cameraState === 'error') return 'Camera permission denied or unavailable';
-    return continuous.statusText;
-  }, [cameraState, continuous.statusText]);
-
-  const onUsePhoto = useCallback(
+  const handlePhoto = useCallback(
     async (file: File) => {
-      const thumbUrl = URL.createObjectURL(file);
+      const url = URL.createObjectURL(file);
+      setThumbUrl(url);
+      setPhotoState('processing');
+
       try {
         const { rawText } = await scanImage(file);
         const matchResult = matchOcrToItem(
@@ -94,21 +53,42 @@ export function LiveOcrScanner({
           itemMainGroup ?? null,
           itemAlias1 ?? null,
         );
-        const scanResult = buildScanResultFromMatch({
-          rawText,
-          matchResult,
-          expectedItem,
-        });
-        onFinal({ scanResult, thumbnailUrl: thumbUrl });
-        onClose();
+        const scanResult = buildScanResultFromMatch({ rawText, matchResult, expectedItem });
+        setResult(scanResult);
+        setPhotoState('done');
+
+        if (scanResult.isMatch) {
+          // Auto-confirm a successful scan after a brief success flash
+          autoConfirmTimer.current = setTimeout(() => {
+            onFinal({ scanResult, thumbnailUrl: url });
+            onClose();
+          }, 900);
+        }
       } catch {
-        URL.revokeObjectURL(thumbUrl);
+        URL.revokeObjectURL(url);
+        setThumbUrl(null);
+        setPhotoState('idle');
       }
     },
-    [expectedItem, itemMainGroup, itemMrp, onClose, onFinal],
+    [expectedItem, itemAlias1, itemMainGroup, itemMrp, onClose, onFinal],
   );
 
-  const onManualSubmit = useCallback(
+  const handleConfirm = useCallback(() => {
+    if (!result) return;
+    if (autoConfirmTimer.current) clearTimeout(autoConfirmTimer.current);
+    onFinal({ scanResult: result, thumbnailUrl: thumbUrl });
+    onClose();
+  }, [onClose, onFinal, result, thumbUrl]);
+
+  const handleRetake = useCallback(() => {
+    if (autoConfirmTimer.current) clearTimeout(autoConfirmTimer.current);
+    if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+    setThumbUrl(null);
+    setResult(null);
+    setPhotoState('idle');
+  }, [thumbUrl]);
+
+  const handleManualSubmit = useCallback(
     (value: string) => {
       const rawText = value.trim();
       if (!rawText) return;
@@ -119,11 +99,7 @@ export function LiveOcrScanner({
         itemMainGroup ?? null,
         itemAlias1 ?? null,
       );
-      const scanResult = buildScanResultFromMatch({
-        rawText,
-        matchResult,
-        expectedItem,
-      });
+      const scanResult = buildScanResultFromMatch({ rawText, matchResult, expectedItem });
       onFinal({ scanResult, thumbnailUrl: null });
       onClose();
     },
@@ -131,20 +107,18 @@ export function LiveOcrScanner({
   );
 
   return (
-    <LiveOcrScannerSheet
+    <OcrScannerSheet
       isOpen={isOpen}
       expectedItem={expectedItem}
       itemAlias1={itemAlias1 ?? null}
-      videoRef={videoRef}
-      uiState={uiState}
-      statusText={statusText}
-      candidateText={continuous.candidateText}
-      lastScanResult={continuous.lastScanResult}
+      photoState={photoState}
+      thumbnailUrl={thumbUrl}
+      scanResult={result}
       onClose={onClose}
-      onStartCamera={startCamera}
-      onUsePhoto={onUsePhoto}
-      onManualSubmit={onManualSubmit}
+      onPhoto={handlePhoto}
+      onConfirm={handleConfirm}
+      onRetake={handleRetake}
+      onManualSubmit={handleManualSubmit}
     />
   );
 }
-
