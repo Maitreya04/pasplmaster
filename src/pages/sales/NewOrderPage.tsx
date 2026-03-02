@@ -266,7 +266,7 @@ export default function NewOrderPage() {
     if (selectedBrand) {
       return searchableItems
         .slice(0, 20)
-        .map(item => ({ item, score: 100, matchType: 'exact-name' as const }));
+        .map(item => ({ item, score: 100, matchType: 'exact-name' as const, matchedField: 'name' as const }));
     }
     return [];
   }, [deferredQuery, searchableItems, selectedBrand]);
