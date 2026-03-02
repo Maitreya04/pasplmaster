@@ -39,7 +39,7 @@ function sortOrders(orders: Order[]): Order[] {
     if (a.priority !== 'urgent' && b.priority === 'urgent') return 1;
     const aTime = a.approved_at ? new Date(a.approved_at).getTime() : 0;
     const bTime = b.approved_at ? new Date(b.approved_at).getTime() : 0;
-    return aTime - bTime;
+    return bTime - aTime;
   });
 }
 

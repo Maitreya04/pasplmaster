@@ -77,6 +77,32 @@ async function preprocessImage(
     data[i + 2] = gray;
   }
 
+  // Unsharp mask — improves small-text legibility on live video frames.
+  // Kernel: centre weight 5, cardinal neighbours -1 each (discrete Laplacian).
+  const sharpened = new Uint8ClampedArray(data.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      const above = ((y - 1) * w + x) * 4;
+      const below = ((y + 1) * w + x) * 4;
+      const left  = (y * w + (x - 1)) * 4;
+      const right = (y * w + (x + 1)) * 4;
+
+      let v: number;
+      if (x === 0 || y === 0 || x === w - 1 || y === h - 1) {
+        v = data[idx];
+      } else {
+        v = 5 * data[idx] - data[above] - data[below] - data[left] - data[right];
+        v = Math.max(0, Math.min(255, v));
+      }
+      sharpened[idx]     = v;
+      sharpened[idx + 1] = v;
+      sharpened[idx + 2] = v;
+      sharpened[idx + 3] = 255;
+    }
+  }
+  for (let i = 0; i < data.length; i++) data[i] = sharpened[i];
+
   ctx.putImageData(imageData, 0, 0);
 
   if ('convertToBlob' in canvas) {

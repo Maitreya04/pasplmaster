@@ -90,8 +90,11 @@ export function extractPartNumberCandidates(ocrTextRaw: string): PartNumberCandi
     /\b[A-Z0-9]{2,8}(?:-[A-Z0-9]{2,10}){1,4}\b/gi,
     // Numeric 4-8 digit codes (avoid years)
     /\b(\d{4,8})\b/g,
-    // Short alphanumeric: S75NC, S75 NC
+    // Short alphanumeric with trailing letters: S75NC, S75 NC
     /\b([A-Z]\d{2,3}\s?[A-Z]{1,4})\b/gi,
+    // Bare piston-size / oversize codes: L30, STD, B40 — letter(s) + 2-3 digits
+    // (no trailing letters required, min 3 chars after normalisation)
+    /\b([A-Z]{1,3}\d{2,3})\b/gi,
   ];
 
   for (const re of genericRes) {

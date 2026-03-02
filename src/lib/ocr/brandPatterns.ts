@@ -52,8 +52,10 @@ export const BRANDS: BrandConfig[] = [
   },
   {
     id: 'usha',
-    detect: [/\bUSHA\b/i, /\bShriram\b/i],
+    detect: [/\bUSHA\b/i, /\bShriram\b/i, /\bPISTON\s+SET\b/i],
     partNumberPatterns: [
+      // Piston size codes on USHA/Shriram labels: L30, STD, O/S 0.25 etc.
+      /\b(?:STD|O\/S\s*\d+\.\d+|[A-Z]\d{2,3})\b/gi,
       /\b\d{4,5}\b/g,
     ],
     nameTokens: ['usha', 'shriram'],
@@ -93,6 +95,9 @@ export const VEHICLE_TOKENS: [RegExp, string[]][] = [
   [/\bYAMAHA\b/gi, ['yamaha']],
   [/\bSUZUKI\b/gi, ['suzuki']],
   [/\bROYAL\s*ENFIELD\b/gi, ['royal', 'enfield']],
+  [/\bEICHER\b/gi, ['eicher']],
+  [/\bMARUTI\b/gi, ['maruti']],
+  [/\bTATAR?\b/gi, ['tata']],
 ];
 
 /* ─── Product Type Tokens ─────────────────────────────────────────────── *

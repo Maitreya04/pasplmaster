@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useId } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { queryClient } from '../lib/queryClient';
@@ -34,6 +34,7 @@ function getTodayStartIso(): string {
 export function useOrders(options?: UseOrdersOptions | OrderStatus) {
   const opts: UseOrdersOptions =
     typeof options === 'string' ? { status: options } : options ?? {};
+  const uid = useId();
 
   const result = useQuery<Order[]>({
     queryKey: [
@@ -86,10 +87,12 @@ export function useOrders(options?: UseOrdersOptions | OrderStatus) {
     staleTime: 0,
   });
 
-  // Realtime subscription: invalidate orders when table changes
+  // Realtime subscription: invalidate orders when table changes.
+  // Each hook instance gets a unique channel name to avoid collisions when
+  // multiple useOrders calls are active on the same page.
   useEffect(() => {
     const channel = supabase
-      .channel('orders-changes')
+      .channel(`orders-changes-${uid}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'orders' },
@@ -102,7 +105,7 @@ export function useOrders(options?: UseOrdersOptions | OrderStatus) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [uid]);
 
   return result;
 }

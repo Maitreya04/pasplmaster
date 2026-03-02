@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { House, PlusCircle, ListBullets } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
+import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
 import { CartProvider } from '../../context/CartContext';
 import { prefetchItems } from '../../hooks/useItems';
 
@@ -16,11 +17,12 @@ export default function SalesLayout() {
 
   return (
     <CartProvider>
-      <div className="theme-dark role-sales min-h-screen bg-[var(--bg-primary)]">
+      <div className="theme-dark role-sales min-h-screen bg-[var(--bg-primary)] relative">
         <div className="pb-20">
           <Outlet />
         </div>
         <BottomNav items={NAV_ITEMS} />
+        <DevRoleSwitcher />
       </div>
     </CartProvider>
   );

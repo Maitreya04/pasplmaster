@@ -225,6 +225,56 @@ function normalize(s: string): string {
   return s.replace(/[\s.\-/\\(),:;'"]+/g, '').toLowerCase();
 }
 
+/**
+ * Generates alternate normalised forms of a string by substituting characters
+ * that Tesseract commonly confuses on auto-part labels:
+ *   L ↔ 1,  O ↔ 0,  I ↔ 1,  S ↔ 5,  B ↔ 8,  Z ↔ 2
+ * This lets "130" match "L30" and "P0L30" match "POL30", etc.
+ */
+function ocrVariants(norm: string): string[] {
+  const base = norm.toLowerCase();
+  const variants = new Set<string>([base]);
+
+  const swaps: [RegExp, string][] = [
+    [/l/g, '1'], [/1/g, 'l'],
+    [/o/g, '0'], [/0/g, 'o'],
+    [/i/g, '1'], [/s/g, '5'], [/5/g, 's'],
+    [/b/g, '8'], [/8/g, 'b'],
+    [/z/g, '2'], [/2/g, 'z'],
+  ];
+
+  for (const [re, replacement] of swaps) {
+    const v = base.replace(re, replacement);
+    if (v !== base) variants.add(v);
+  }
+
+  // Two-pass: apply swaps to each already-generated variant once
+  const firstPass = [...variants];
+  for (const v of firstPass) {
+    for (const [re, replacement] of swaps) {
+      const v2 = v.replace(re, replacement);
+      if (v2 !== v) variants.add(v2);
+    }
+  }
+
+  return [...variants];
+}
+
+/** True if any variant of `a` equals, contains, or is contained by any variant of `b`. */
+function fuzzyOcrContains(a: string, b: string): boolean {
+  for (const va of ocrVariants(a)) {
+    for (const vb of ocrVariants(b)) {
+      if (
+        (vb.length >= 3 && va.includes(vb)) ||
+        (va.length >= 3 && vb.includes(va))
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function tokenize(s: string): string[] {
   return s
     .toLowerCase()
@@ -322,6 +372,16 @@ function scorePartNumber(
           directCodeMatch: true,
         };
       }
+      // Retry with OCR character-confusion variants (L↔1, O↔0, etc.)
+      if (normPart !== normCand && fuzzyOcrContains(normPart, normCand)) {
+        return {
+          signal: 'partNumber',
+          score: 30,
+          maxScore: MAX,
+          detail: `contained-ocr-variant(code): "${partNum}" ~ "${cand}"`,
+          directCodeMatch: true,
+        };
+      }
     }
   }
 
@@ -336,6 +396,22 @@ function scorePartNumber(
         detail: `text-contains(code): "${cand}" in cleaned OCR`,
         directCodeMatch: true,
       };
+    }
+    // Try OCR confusion variants on the full cleaned text too
+    if (normCand.length >= 3) {
+      for (const variantOcr of ocrVariants(normOcr)) {
+        for (const variantCand of ocrVariants(normCand)) {
+          if (variantCand.length >= 3 && variantOcr.includes(variantCand)) {
+            return {
+              signal: 'partNumber',
+              score: 28,
+              maxScore: MAX,
+              detail: `text-contains-ocr-variant(code): "${cand}" in cleaned OCR`,
+              directCodeMatch: true,
+            };
+          }
+        }
+      }
     }
   }
 

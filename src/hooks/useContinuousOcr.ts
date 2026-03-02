@@ -43,13 +43,14 @@ async function captureCenterRoiBlob(
   const vh = video.videoHeight;
   if (!vw || !vh) throw new Error('Video not ready');
 
-  // Must match the overlay in LiveOcrScannerSheet: w=86%, h=28%, centered.
+  // Must match the overlay in LiveOcrScannerSheet: w=86%, h=35%, centered.
   const roiW = vw * 0.86;
-  const roiH = vh * 0.28;
+  const roiH = vh * 0.35;
   const sx = Math.max(0, (vw - roiW) / 2);
   const sy = Math.max(0, (vh - roiH) / 2);
 
-  const outW = Math.min(1200, Math.round(roiW));
+  // Increased to 1600px to take advantage of 1080p camera input.
+  const outW = Math.min(1600, Math.round(roiW));
   const outH = Math.max(1, Math.round(outW * (roiH / roiW)));
 
   canvas.width = outW;

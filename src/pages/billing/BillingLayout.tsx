@@ -1,6 +1,7 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { SquaresFour, ClipboardText, ClockCounterClockwise } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
+import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
 
 const NAV_ITEMS = [
   { icon: SquaresFour, label: 'Dashboard', path: '/billing' },
@@ -13,7 +14,7 @@ export default function BillingLayout() {
   const navigate = useNavigate();
 
   return (
-    <div className="theme-light role-billing min-h-screen bg-[var(--bg-primary)]">
+    <div className="theme-light role-billing min-h-screen bg-[var(--bg-primary)] relative">
       <div className="flex">
         {/* Sidebar — visible on lg+ */}
         <aside className="hidden lg:flex flex-col w-56 min-h-screen border-r border-[var(--border-opaque)] bg-[var(--bg-secondary)] py-6 px-3 shrink-0">
@@ -49,6 +50,7 @@ export default function BillingLayout() {
       <div className="lg:hidden">
         <BottomNav items={NAV_ITEMS} />
       </div>
+      <DevRoleSwitcher />
     </div>
   );
 }
