@@ -58,7 +58,7 @@ function OrderCard({
                 Since {formatOverdueDate(order.created_at)}
               </span>
             )}
-            {order.priority === 'urgent' && (
+            {order.priority === 'urgent' && order.status !== 'completed' && (
               <StatusBadge status="urgent" className="text-xs" />
             )}
             <StatusBadge status={order.status} />

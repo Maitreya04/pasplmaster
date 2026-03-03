@@ -308,11 +308,19 @@ export default function PickPage() {
   const completeMutation = useMutation({
     mutationFn: async () => {
       if (!order) throw new Error('No order');
-      const updates: { status: 'completed' | 'flagged'; completed_at?: string } = {
-        status: hasFlagged ? 'flagged' : 'completed',
+      const isCompleted = !hasFlagged;
+      const updates: {
+        status: 'completed' | 'flagged';
+        completed_at?: string;
+        priority?: 'normal';
+      } = {
+        status: isCompleted ? 'completed' : 'flagged',
       };
-      if (!order.completed_at) {
+      if (!order.completed_at && isCompleted) {
         updates.completed_at = new Date().toISOString();
+      }
+      if (isCompleted) {
+        updates.priority = 'normal';
       }
       const { error } = await supabase
         .from('orders')

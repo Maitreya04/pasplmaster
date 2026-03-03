@@ -120,7 +120,7 @@ function OrderCard({
             {order.order_number}
           </span>
           <div className="flex items-center gap-2 shrink-0">
-            {order.priority === 'urgent' && (
+            {order.priority === 'urgent' && order.status !== 'completed' && (
               <StatusBadge status="urgent" className="text-xs" />
             )}
             <StatusBadge status={order.status} />

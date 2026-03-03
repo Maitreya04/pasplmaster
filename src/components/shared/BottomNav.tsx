@@ -54,3 +54,4 @@ export function BottomNav({ items }: BottomNavProps) {
     </nav>
   );
 }
+

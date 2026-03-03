@@ -1,11 +1,12 @@
 import { useState, useMemo, useDeferredValue, useRef, useEffect, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Minus, ShoppingCart, CaretRight, CaretDown, CurrencyInr } from '@phosphor-icons/react';
+import { Plus, Minus, ShoppingCart, CaretRight, CaretDown, CurrencyInr, Check } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
 import { useCustomers } from '../../hooks/useCustomers';
+import { usePendingItems } from '../../hooks/usePendingItems';
 import { searchItems, normalizeQuery, detectCodeLike } from '../../lib/search/itemSearch';
 import type { SearchResult, MatchedField } from '../../lib/search/itemSearch';
 import { supabase } from '../../lib/supabase/client';
@@ -278,6 +279,14 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
     return map;
   }, [customers]);
 
+  const idToItem = useMemo(() => {
+    const map = new Map<number, Item>();
+    for (const it of items) {
+      map.set(it.id, it);
+    }
+    return map;
+  }, [items]);
+
   const {
     data: customerTopItems = EMPTY_CUSTOMER_TOP_ITEMS,
     isLoading: customerTopItemsLoading,
@@ -341,6 +350,38 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
   }, [trendingRaw, nameToItem]);
 
   const activeCustomer = activeCustomerName ? nameToCustomer.get(activeCustomerName) ?? null : null;
+
+  const { data: pendingItemsForCustomer = [], isLoading: pendingLoading } = usePendingItems({
+    status: 'pending',
+    customerId: activeCustomer?.id,
+    enabled: !!activeCustomer,
+  });
+
+  const pendingSuggestions = useMemo(() => {
+    if (!activeCustomer) return [];
+    if (!pendingItemsForCustomer.length) return [];
+    const out: { pendingId: number; item: Item; qty: number; createdAt: string }[] = [];
+    for (const pi of pendingItemsForCustomer) {
+      if (!pi.item_id) continue;
+      const item = idToItem.get(pi.item_id);
+      if (!item) continue;
+      out.push({
+        pendingId: pi.id,
+        item,
+        qty: pi.qty_pending,
+        createdAt: pi.created_at,
+      });
+    }
+    return out;
+  }, [activeCustomer, pendingItemsForCustomer, idToItem]);
+
+  const toggleQuickReorderItem = (itemId: number) => {
+    setQuickReorderItems(prev =>
+      prev.map(row =>
+        row.item.id === itemId ? { ...row, checked: !row.checked } : row,
+      ),
+    );
+  };
 
   if (!hasSmartData) {
     // New salesperson with no data — just show Trending section below search
@@ -419,7 +460,46 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
         </div>
       </section>
 
-      {/* Section 2 — Quick Reorder */}
+      {/* Section 2 — Pending from last orders */}
+      {activeCustomer && pendingSuggestions.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-baseline justify-between gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+              Pending from last orders
+            </h3>
+            <p className="text-[10px] text-[var(--content-tertiary)]">
+              Items that were out of stock earlier
+            </p>
+          </div>
+          <div className="space-y-2">
+            {pendingSuggestions.slice(0, 5).map((row) => (
+              <button
+                key={row.pendingId}
+                type="button"
+                onClick={() =>
+                  onQuickReorderApply(activeCustomer, [{ item: row.item, qty: row.qty }])
+                }
+                className="w-full px-3 py-2.5 rounded-xl bg-card bg-[var(--bg-secondary)] flex items-center justify-between gap-3 text-left active:scale-95"
+              >
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm text-[var(--content-primary)] truncate">
+                    {row.item.name}
+                  </p>
+                  <p className="text-[11px] text-[var(--content-tertiary)]">
+                    Pending last time:{' '}
+                    <span className="font-mono font-semibold">{row.qty}</span> pcs
+                  </p>
+                </div>
+                <span className="text-xs font-semibold text-[var(--bg-accent)]">
+                  Add now
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Section 3 — Quick Reorder */}
       {activeCustomerName && (
         <section className="space-y-3">
           <div className="flex items-baseline justify-between gap-2">
@@ -446,24 +526,24 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
           {quickReorderItems.length > 0 && (
             <div className="space-y-2">
               {quickReorderItems.map((row) => (
-                <div
+                <button
                   key={row.item.id}
-                  className="px-3 py-3 min-h-[80px] rounded-xl bg-card bg-[var(--bg-secondary)] flex items-start gap-3"
+                  type="button"
+                  onClick={() => toggleQuickReorderItem(row.item.id)}
+                  className="w-full px-3 py-3 min-h-[80px] rounded-xl bg-card bg-[var(--bg-secondary)] flex items-start gap-3 text-left cursor-pointer"
+                  role="checkbox"
+                  aria-checked={row.checked}
                 >
                   <div className="pt-1">
-                    <input
-                      type="checkbox"
-                      className="w-4 h-4 rounded-md border-[var(--border-subtle)] bg-[var(--bg-primary)] appearance-none checked:bg-[var(--bg-accent)] checked:border-[var(--bg-accent)] transition-colors cursor-pointer"
-                      checked={row.checked}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setQuickReorderItems((prev) =>
-                          prev.map((it) =>
-                            it.item.id === row.item.id ? { ...it, checked } : it,
-                          ),
-                        );
-                      }}
-                    />
+                    <div
+                      className={`w-4 h-4 rounded-md border flex items-center justify-center transition-colors ${
+                        row.checked
+                          ? 'bg-[var(--bg-accent)] border-[var(--bg-accent)] text-[var(--content-on-color)]'
+                          : 'bg-[var(--bg-primary)] border-[var(--border-subtle)] text-transparent'
+                      }`}
+                    >
+                      <Check size={12} weight="bold" />
+                    </div>
                   </div>
                   <div className="flex-1 min-w-0 space-y-1">
                     <p className="font-semibold text-sm text-[var(--content-primary)] whitespace-normal break-words line-clamp-2 leading-snug">
@@ -477,7 +557,15 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                       pcs
                     </p>
                   </div>
-                  <div className="shrink-0">
+                  <div
+                    className={`shrink-0 ${row.checked ? '' : 'opacity-60 pointer-events-none'}`}
+                    onClick={(e) => {
+                      // When selected, allow interacting with the stepper without toggling the row
+                      if (row.checked) {
+                        e.stopPropagation();
+                      }
+                    }}
+                  >
                     <NumberStepper
                       value={row.suggestedQty}
                       min={1}
@@ -492,7 +580,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                       }}
                     />
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -526,7 +614,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
         </section>
       )}
 
-      {/* Section 3 — Trending */}
+      {/* Section 4 — Trending */}
       {trendingItems.length > 0 && (
         <section className="space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">

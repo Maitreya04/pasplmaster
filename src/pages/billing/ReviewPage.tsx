@@ -90,6 +90,27 @@ export default function ReviewPage() {
 
   const visibleItems = items.filter((i) => !removedIds.has(i.id));
 
+  const pendingCount = useMemo(() => {
+    let count = 0;
+    for (const id of pendingIds) {
+      if (!removedIds.has(id)) count += 1;
+    }
+    return count;
+  }, [pendingIds, removedIds]);
+
+  const priceMismatchCount = useMemo(
+    () =>
+      visibleItems.filter(
+        (item) => item.flag_reason && item.flag_reason === 'Price Mismatch',
+      ).length,
+    [visibleItems],
+  );
+
+  const readyToBillCount = useMemo(
+    () => Math.max(0, visibleItems.length - pendingCount - priceMismatchCount),
+    [visibleItems.length, pendingCount, priceMismatchCount],
+  );
+
   const { totalItems, grandTotal } = useMemo(() => {
     let count = 0;
     let total = 0;
@@ -244,6 +265,8 @@ export default function ReviewPage() {
       if (resolvingFlags) {
         // Picker already completed; billing is just resolving flags
         orderUpdate.status = 'completed';
+        // Once the order is fully completed, clear any urgent priority
+        orderUpdate.priority = 'normal';
       } else {
         orderUpdate.status = 'approved';
         orderUpdate.approved_at = new Date().toISOString();
@@ -569,19 +592,56 @@ export default function ReviewPage() {
             )}
 
             {/* Summary */}
-            <Card className="mt-6 lg:mt-8">
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="text-sm text-slate-600">Total items</p>
-                  <p className="text-xl font-bold tabular-nums text-slate-900">
-                    {totalItems}
-                  </p>
+            <Card className="mt-6 lg:mt-8 border-amber-200 bg-amber-50/60">
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Warning size={18} weight="fill" className="text-amber-500" />
+                  <h2 className="text-sm font-semibold tracking-wide text-amber-900 uppercase">
+                    Review summary before billing
+                  </h2>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm text-slate-600">Grand total</p>
-                  <p className="text-2xl lg:text-3xl font-bold font-mono text-slate-900">
-                    {formatCurrency(grandTotal)}
-                  </p>
+                <div className="space-y-2 text-sm text-slate-800">
+                  <div className="flex items-center justify-between">
+                    <div className="inline-flex items-center gap-2">
+                      <CheckCircle size={16} weight="bold" className="text-emerald-600" />
+                      <span>Items ready to bill</span>
+                    </div>
+                    <span className="font-mono font-semibold text-emerald-700">
+                      {readyToBillCount}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="inline-flex items-center gap-2">
+                      <Warning size={16} weight="bold" className="text-amber-600" />
+                      <span>Price mismatches to review</span>
+                    </div>
+                    <span className="font-mono font-semibold text-amber-700">
+                      {priceMismatchCount}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="inline-flex items-center gap-2">
+                      <Hourglass size={16} weight="bold" className="text-slate-700" />
+                      <span>Items marked as pending</span>
+                    </div>
+                    <span className="font-mono font-semibold text-slate-800">
+                      {pendingCount}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center pt-3 border-t border-amber-200">
+                  <div>
+                    <p className="text-xs text-slate-600">Total items (qty)</p>
+                    <p className="text-xl font-bold tabular-nums text-slate-900">
+                      {totalItems}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-slate-600">Grand total</p>
+                    <p className="text-2xl lg:text-3xl font-bold font-mono text-slate-900">
+                      {formatCurrency(grandTotal)}
+                    </p>
+                  </div>
                 </div>
               </div>
             </Card>
@@ -607,9 +667,7 @@ export default function ReviewPage() {
                 }`}
               >
                 <CheckCircle size={20} weight="bold" />
-                {order.status === 'flagged'
-                  ? 'Resolve Flags & Mark Completed'
-                  : 'Approve & Send to Picking'}
+                Confirm & Generate Bill
               </BigButton>
             </div>
           </>
@@ -645,6 +703,7 @@ export default function ReviewPage() {
           </BigButton>
         </div>
       </BottomSheet>
+
     </div>
   );
 }
