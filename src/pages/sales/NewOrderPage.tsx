@@ -64,6 +64,19 @@ function buildNarrowSuggestions(
     }
   }
 
+   // If the query looks like a brand (e.g. "usha"), also surface the top
+   // parent_groups within that brand even when their names don't contain the token.
+  let focusedBrand: string | null = activeBrand;
+  if (!focusedBrand && brandCounts.size) {
+    focusedBrand = [...brandCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  }
+  if (focusedBrand && !activeGroup) {
+    for (const it of items) {
+      if (it.main_group !== focusedBrand || !it.parent_group) continue;
+      groupCounts.set(it.parent_group, (groupCounts.get(it.parent_group) ?? 0) + 1);
+    }
+  }
+
   const brandSuggestions: NarrowSuggestion[] = [...brandCounts.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
