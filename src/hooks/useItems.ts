@@ -5,7 +5,7 @@ import type { Item } from '../types';
 
 const BATCH_SIZE = 1000;
 const ITEMS_SELECT =
-  'id,name,alias,alias1,parent_group,main_group,item_category,sales_price,stock_qty,rack_no';
+  'id,name,alias,alias1,parent_group,main_group,item_category,sales_price,mrp,stock_qty,rack_no';
 
 async function fetchAllItems(): Promise<Item[]> {
   const { count, error: countErr } = await supabase

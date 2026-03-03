@@ -1,6 +1,6 @@
 import { useState, useMemo, useDeferredValue, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Minus, ShoppingCart, CaretRight, CurrencyInr } from '@phosphor-icons/react';
+import { Plus, Minus, ShoppingCart, CaretRight, CaretDown, CurrencyInr } from '@phosphor-icons/react';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
 import { searchItems, normalizeQuery, detectCodeLike } from '../../lib/search/itemSearch';
@@ -16,8 +16,149 @@ import {
 } from '../../components/shared';
 import type { Item } from '../../types';
 
-function formatCurrency(n: number) {
+type NarrowSuggestionType = 'brand' | 'group';
+
+interface NarrowSuggestion {
+  type: NarrowSuggestionType;
+  value: string;
+  label: string;
+  count: number;
+}
+
+interface BrandOption {
+  name: string;
+  count: number;
+}
+
+function hasTokenPrefix(value: string | null | undefined, token: string): boolean {
+  if (!value) return false;
+  const v = value.toLowerCase();
+  const t = token.toLowerCase();
+  return v.split(/\s+/).some(word => word.startsWith(t));
+}
+
+function buildNarrowSuggestions(
+  items: Item[],
+  rawQuery: string,
+  activeBrand: string | null,
+  activeGroup: string | null,
+): NarrowSuggestion[] {
+  const q = normalizeQuery(rawQuery);
+  const tokens = q.split(' ').filter(Boolean);
+  if (!tokens.length) return [];
+  const last = tokens[tokens.length - 1];
+  if (last.length < 2) return [];
+
+  const brandCounts = new Map<string, number>();
+  const groupCounts = new Map<string, number>();
+
+  for (const it of items) {
+    if (activeBrand && it.main_group !== activeBrand) continue;
+    if (activeGroup && it.parent_group !== activeGroup) continue;
+
+    if (hasTokenPrefix(it.main_group, last)) {
+      brandCounts.set(it.main_group!, (brandCounts.get(it.main_group!) ?? 0) + 1);
+    }
+    if (hasTokenPrefix(it.parent_group, last)) {
+      groupCounts.set(it.parent_group!, (groupCounts.get(it.parent_group!) ?? 0) + 1);
+    }
+  }
+
+  const brandSuggestions: NarrowSuggestion[] = [...brandCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([value, count]) => ({
+      type: 'brand' as const,
+      value,
+      label: `Brand: ${value}`,
+      count,
+    }));
+
+  const groupSuggestions: NarrowSuggestion[] = [...groupCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([value, count]) => ({
+      type: 'group' as const,
+      value,
+      label: `Group: ${value}`,
+      count,
+    }));
+
+  // Keep this list intentionally small to avoid clutter
+  return [...brandSuggestions, ...groupSuggestions].slice(0, 4);
+}
+
+function formatCurrency(n: number | null | undefined) {
+  if (!n || n <= 0) return '—';
   return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+}
+
+function BrandFilterSheetContent({
+  brands,
+  selectedBrand,
+  onSelect,
+}: {
+  brands: BrandOption[];
+  selectedBrand: string | null;
+  onSelect: (brand: string | null) => void;
+}) {
+  const [search, setSearch] = useState('');
+
+  const filtered = useMemo(
+    () =>
+      !search
+        ? brands
+        : brands.filter(b => b.name.toLowerCase().includes(search.toLowerCase())),
+    [brands, search],
+  );
+
+  return (
+    <div className="space-y-4">
+      <input
+        type="text"
+        placeholder="Search brands…"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        className="w-full h-10 px-3 rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] text-sm placeholder:text-[var(--content-quaternary)] border-none outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
+      />
+      <div className="max-h-[50vh] overflow-y-auto -mx-2">
+        <button
+          onClick={() => onSelect(null)}
+          className="w-full px-2 py-2 flex items-center justify-between text-sm text-left hover:bg-[var(--bg-tertiary)] rounded-lg text-[var(--content-primary)]"
+        >
+          <span>All brands</span>
+          <span
+            className={`w-2.5 h-2.5 rounded-full border ${
+              selectedBrand === null
+                ? 'bg-[var(--bg-accent)] border-[var(--bg-accent)]'
+                : 'border-[var(--border-subtle)]'
+            }`}
+          />
+        </button>
+        {filtered.map(brand => (
+          <button
+            key={brand.name}
+            onClick={() => onSelect(brand.name)}
+            className="w-full px-2 py-2 flex items-center justify-between text-sm text-left hover:bg-[var(--bg-tertiary)] rounded-lg text-[var(--content-primary)]"
+          >
+            <span>{brand.name}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs text-[var(--content-quaternary)]">
+                {brand.count}
+              </span>
+              <span
+                className={`w-2.5 h-2.5 rounded-full border ${
+                  selectedBrand === brand.name
+                    ? 'bg-[var(--bg-accent)] border-[var(--bg-accent)]'
+                    : 'border-[var(--border-subtle)]'
+                }`}
+              />
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -237,17 +378,20 @@ export default function NewOrderPage() {
 
   const [query, setQuery] = useState('');
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [isBrandSheetOpen, setIsBrandSheetOpen] = useState(false);
   const [rateItem, setRateItem] = useState<Item | null>(null);
   const [rateValue, setRateValue] = useState('');
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
 
-  // Top 8 main_groups by item count — computed once items load
-  const brandChips = useMemo(() => {
+  const brandOptions: BrandOption[] = useMemo(() => {
     const counts = new Map<string, number>();
     for (const item of items) {
       if (item.main_group) counts.set(item.main_group, (counts.get(item.main_group) ?? 0) + 1);
     }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([g]) => g);
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count }));
   }, [items]);
 
   const effectiveQuery = query.trim();
@@ -256,8 +400,13 @@ export default function NewOrderPage() {
   const isStale = deferredQuery !== effectiveQuery;
 
   const searchableItems = useMemo(
-    () => (selectedBrand ? items.filter(i => i.main_group === selectedBrand) : items),
-    [items, selectedBrand],
+    () =>
+      items.filter(it => {
+        if (selectedBrand && it.main_group !== selectedBrand) return false;
+        if (selectedGroup && it.parent_group !== selectedGroup) return false;
+        return true;
+      }),
+    [items, selectedBrand, selectedGroup],
   );
 
   const searchResults = useMemo(() => {
@@ -281,6 +430,12 @@ export default function NewOrderPage() {
     [searchResults, bestMatches.length],
   );
 
+  const narrowSuggestions = useMemo(
+    () =>
+      buildNarrowSuggestions(items, effectiveQuery, selectedBrand, selectedGroup),
+    [items, effectiveQuery, selectedBrand, selectedGroup],
+  );
+
   const getCartQty = (id: number) => getCartItem(id)?.qty ?? 0;
   const getPrice = (item: Item) => getCartItem(item.id)?.specialRate ?? item.sales_price;
 
@@ -300,9 +455,6 @@ export default function NewOrderPage() {
     setRateItem(null);
   };
 
-  const toggleBrand = (chip: string) =>
-    setSelectedBrand(prev => (prev === chip ? null : chip));
-
   return (
     <div className="min-h-screen flex flex-col">
       <PageHeader
@@ -321,7 +473,7 @@ export default function NewOrderPage() {
       />
 
       <div className="px-4 pb-4 flex flex-col flex-1">
-        {/* Search input + code badge */}
+        {/* Search input + code badge + ephemeral narrow-by overlay */}
         <div className="relative">
           <SearchInput
             placeholder="Search parts, name or code…"
@@ -335,24 +487,74 @@ export default function NewOrderPage() {
               CODE
             </span>
           )}
+          {narrowSuggestions.length > 0 && !selectedBrand && !selectedGroup && (
+            <div className="absolute left-0 right-0 mt-2 z-20">
+              <div className="rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-2.5 shadow-lg space-y-1.5">
+                <p className="text-[10px] uppercase tracking-wide text-[var(--content-tertiary)]">
+                  Narrow by
+                </p>
+                <div className="flex gap-2 overflow-x-auto scrollbar-none pb-1">
+                  {narrowSuggestions.map(s => (
+                    <button
+                      key={`${s.type}-${s.value}`}
+                      onClick={() => {
+                        if (s.type === 'brand') setSelectedBrand(s.value);
+                        if (s.type === 'group') setSelectedGroup(s.value);
+                      }}
+                      className="px-3 py-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--content-secondary)] text-xs flex items-center gap-1.5 shrink-0 active:scale-95"
+                    >
+                      <span>{s.label}</span>
+                      <span className="text-[10px] text-[var(--content-quaternary)]">
+                        ({s.count})
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Brand chips */}
-        <div className="flex gap-2 overflow-x-auto py-3 -mx-4 px-4 scrollbar-none">
-          <FilterChip
-            label="All"
-            selected={selectedBrand === null}
-            onClick={() => setSelectedBrand(null)}
-          />
-          {brandChips.map(chip => (
-            <FilterChip
-              key={chip}
-              label={chip}
-              selected={selectedBrand === chip}
-              onClick={() => toggleBrand(chip)}
-            />
-          ))}
+        {/* Filter bar */}
+        <div className="flex gap-2 py-3">
+          <button
+            onClick={() => setIsBrandSheetOpen(true)}
+            className={`
+              inline-flex items-center gap-1.5
+              px-3 py-1.5 rounded-lg text-sm font-medium
+              transition-colors duration-150
+              ${
+                selectedBrand
+                  ? 'bg-[var(--bg-inverse-primary)] text-[var(--content-inverse-primary)]'
+                  : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)] hover:text-[var(--content-primary)]'
+              }
+            `}
+          >
+            <span>{selectedBrand ? `Brand: ${selectedBrand}` : 'Brand'}</span>
+            <CaretDown size={14} weight="bold" />
+          </button>
         </div>
+
+        {(selectedBrand || selectedGroup) && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {selectedBrand && (
+              <FilterChip
+                label={`Brand: ${selectedBrand}`}
+                selected
+                removable
+                onClick={() => setSelectedBrand(null)}
+              />
+            )}
+            {selectedGroup && (
+              <FilterChip
+                label={`Group: ${selectedGroup}`}
+                selected
+                removable
+                onClick={() => setSelectedGroup(null)}
+              />
+            )}
+          </div>
+        )}
 
         {/* Results area */}
         <div
@@ -481,6 +683,22 @@ export default function NewOrderPage() {
             </div>
           </div>
         )}
+      </BottomSheet>
+
+      {/* Brand filter sheet */}
+      <BottomSheet
+        isOpen={isBrandSheetOpen}
+        onClose={() => setIsBrandSheetOpen(false)}
+        title="Filter by brand"
+      >
+        <BrandFilterSheetContent
+          brands={brandOptions}
+          selectedBrand={selectedBrand}
+          onSelect={brand => {
+            setSelectedBrand(brand);
+            setIsBrandSheetOpen(false);
+          }}
+        />
       </BottomSheet>
     </div>
   );

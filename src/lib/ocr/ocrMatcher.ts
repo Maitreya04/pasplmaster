@@ -1,4 +1,3 @@
-import type { OrderItem } from '../../types';
 import {
   BRANDS,
   VEHICLE_TOKENS,
@@ -15,6 +14,11 @@ import {
   extractPartNumberCandidates,
   normalizeForPartMatch,
 } from './partNumberExtractor';
+
+export interface MatchableItem {
+  item_name: string;
+  item_alias: string | null;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
  *  Public types
@@ -317,7 +321,7 @@ function maxAllowedDistance(length: number): number {
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 function getCodeCandidates(
-  item: OrderItem,
+  item: MatchableItem,
   itemAlias1?: string | null,
 ): string[] {
   return [item.item_alias, itemAlias1].filter(
@@ -325,7 +329,7 @@ function getCodeCandidates(
   );
 }
 
-function getNameCandidates(item: OrderItem): string[] {
+function getNameCandidates(item: MatchableItem): string[] {
   return [item.item_name].filter(
     (s): s is string => !!s && s.length > 0,
   );
@@ -678,7 +682,7 @@ const MATCH_THRESHOLD = 55;
 
 export function matchOcrToItem(
   ocrText: string,
-  expectedItem: OrderItem,
+  expectedItem: MatchableItem,
   itemMrp?: number,
   itemMainGroup?: string | null,
   itemAlias1?: string | null,

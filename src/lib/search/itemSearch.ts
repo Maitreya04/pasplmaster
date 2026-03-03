@@ -55,6 +55,13 @@ export function normalizeQuery(q: string): string {
     .join(' ');
 }
 
+function hasTokenPrefix(value: string | null | undefined, token: string): boolean {
+  if (!value) return false;
+  const v = value.toLowerCase();
+  const t = token.toLowerCase();
+  return v.split(/\s+/).some(word => word.startsWith(t));
+}
+
 /**
  * Returns true when the query looks like a part-code lookup
  * (e.g. "51122-04", "6002RSR", "84821020").
@@ -265,8 +272,11 @@ function fuzzyMatchItem(
 // ---------------------------------------------------------------------------
 
 export function searchItems(query: string, items: Item[]): SearchResult[] {
+  const raw = query;
   const q = normalizeQuery(query);
   if (!q) return [];
+
+  const isCodeLike = detectCodeLike(raw);
 
   const idx = buildIndex(items);
   const { all } = idx;
@@ -399,6 +409,19 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
       }
     }
 
+    // Brand / group boost for word-like queries (discovery)
+    if (score === 0 && !isCodeLike && qFirst) {
+      if (hasTokenPrefix(p.item.main_group, qFirst)) {
+        score = 55;
+        layer = 'keywords';
+        field = 'name';
+      } else if (hasTokenPrefix(p.item.parent_group, qFirst)) {
+        score = 50;
+        layer = 'keywords';
+        field = 'name';
+      }
+    }
+
     if (score > 0) {
       results.push({ item: p.item, score, matchType: layer, matchedField: field });
       seen.add(p.item.id);
@@ -406,8 +429,8 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
   }
 
   // ------ Phase 3: fuzzy fallback (layer 7) ------
-
-  if (results.length < FUZZY_FALLBACK_THRESHOLD) {
+  // Only for non code-like (wordy) queries
+  if (!isCodeLike && results.length < FUZZY_FALLBACK_THRESHOLD) {
     for (let i = 0; i < all.length; i++) {
       const p = all[i];
       if (seen.has(p.item.id)) continue;

@@ -3,6 +3,7 @@ interface FilterChipProps {
   selected?: boolean;
   onClick: () => void;
   count?: number;
+  removable?: boolean;
 }
 
 export function FilterChip({
@@ -10,6 +11,7 @@ export function FilterChip({
   selected = false,
   onClick,
   count,
+  removable,
 }: FilterChipProps) {
   return (
     <button
@@ -30,6 +32,9 @@ export function FilterChip({
         <span className="font-mono text-xs text-[var(--content-quaternary)]">
           {count}
         </span>
+      )}
+      {selected && removable && (
+        <span className="text-xs leading-none">✕</span>
       )}
     </button>
   );

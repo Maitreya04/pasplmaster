@@ -1,4 +1,9 @@
-import type { OrderItem, ScanResult } from '../../types';
+import type { ScanResult } from '../../types';
+
+interface MatchableItem {
+  item_name: string;
+  item_alias: string | null;
+}
 
 export function buildScanResultFromMatch({
   rawText,
@@ -19,7 +24,7 @@ export function buildScanResultFromMatch({
     };
     signals?: { signal: string; score: number; maxScore: number; detail: string }[];
   };
-  expectedItem: OrderItem;
+  expectedItem: MatchableItem;
 }): ScanResult {
   return {
     scannedText: rawText,
