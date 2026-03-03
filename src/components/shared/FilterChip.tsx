@@ -3,7 +3,9 @@ interface FilterChipProps {
   selected?: boolean;
   onClick: () => void;
   count?: number;
+  /** Show ✕ when selected; if onRemove is set, ✕ clears and chip tap does onClick (e.g. open sheet) */
   removable?: boolean;
+  onRemove?: () => void;
 }
 
 export function FilterChip({
@@ -12,6 +14,7 @@ export function FilterChip({
   onClick,
   count,
   removable,
+  onRemove,
 }: FilterChipProps) {
   return (
     <button
@@ -34,7 +37,29 @@ export function FilterChip({
         </span>
       )}
       {selected && removable && (
-        <span className="text-xs leading-none">✕</span>
+        onRemove ? (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                onRemove();
+              }
+            }}
+            className="ml-0.5 p-0.5 -m-0.5 rounded hover:bg-black/10 focus:outline-none focus:ring-1 focus:ring-inset"
+            aria-label="Remove filter"
+          >
+            ✕
+          </span>
+        ) : (
+          <span className="text-xs leading-none">✕</span>
+        )
       )}
     </button>
   );

@@ -70,7 +70,7 @@ function buildNarrowSuggestions(
     .map(([value, count]) => ({
       type: 'brand' as const,
       value,
-      label: `Brand: ${value}`,
+      label: value,
       count,
     }));
 
@@ -80,7 +80,7 @@ function buildNarrowSuggestions(
     .map(([value, count]) => ({
       type: 'group' as const,
       value,
-      label: `Group: ${value}`,
+      label: value,
       count,
     }));
 
@@ -473,88 +473,87 @@ export default function NewOrderPage() {
       />
 
       <div className="px-4 pb-4 flex flex-col flex-1">
-        {/* Search input + code badge + ephemeral narrow-by overlay */}
-        <div className="relative">
-          <SearchInput
-            placeholder="Search parts, name or code…"
-            value={query}
-            onChange={setQuery}
-            loading={itemsLoading}
-            autoFocus
-          />
-          {isCodeMode && (
-            <span className="absolute right-12 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide bg-[var(--bg-accent)] text-[var(--content-on-color)] pointer-events-none">
-              CODE
-            </span>
-          )}
-          {narrowSuggestions.length > 0 && !selectedBrand && !selectedGroup && (
-            <div className="absolute left-0 right-0 mt-2 z-20">
-              <div className="rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-2.5 shadow-lg space-y-1.5">
-                <p className="text-[10px] uppercase tracking-wide text-[var(--content-tertiary)]">
-                  Narrow by
-                </p>
-                <div className="flex gap-2 overflow-x-auto scrollbar-none pb-1">
-                  {narrowSuggestions.map(s => (
+        {/* Sticky search + filters */}
+        <div className="sticky top-14 z-30 -mx-4 px-4 pt-2 pb-3 space-y-2 bg-[var(--bg-primary)]/90 backdrop-blur-md">
+          <div className="relative">
+            <SearchInput
+              placeholder="Search parts, name or code…"
+              value={query}
+              onChange={setQuery}
+              loading={itemsLoading}
+              autoFocus
+              leftContent={
+                <div className="flex items-center h-full min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsBrandSheetOpen(true)}
+                    className="flex items-center gap-1 px-3 h-full text-sm font-medium text-[var(--content-secondary)] hover:text-[var(--content-primary)] transition-colors min-w-0"
+                    aria-label={selectedBrand ? `Brand: ${selectedBrand}` : 'All brands'}
+                  >
+                    <span className="truncate">
+                      {selectedBrand ?? 'All brands'}
+                    </span>
+                    <CaretDown size={14} weight="bold" className="shrink-0" />
+                  </button>
+                  {selectedBrand && (
                     <button
-                      key={`${s.type}-${s.value}`}
-                      onClick={() => {
-                        if (s.type === 'brand') setSelectedBrand(s.value);
-                        if (s.type === 'group') setSelectedGroup(s.value);
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedBrand(null);
                       }}
-                      className="px-3 py-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--content-secondary)] text-xs flex items-center gap-1.5 shrink-0 active:scale-95"
+                      className="flex items-center justify-center w-8 h-full shrink-0 text-[var(--content-tertiary)] hover:text-[var(--content-primary)]"
+                      aria-label="Reset to all brands"
                     >
-                      <span>{s.label}</span>
-                      <span className="text-[10px] text-[var(--content-quaternary)]">
-                        ({s.count})
-                      </span>
+                      ✕
                     </button>
-                  ))}
+                  )}
                 </div>
+              }
+            />
+            {isCodeMode && (
+              <span className="absolute right-12 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide bg-[var(--bg-accent)] text-[var(--content-on-color)] pointer-events-none">
+                CODE
+              </span>
+            )}
+          </div>
+
+          {narrowSuggestions.length > 0 && !selectedGroup && (
+            <div className="rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-2.5 shadow-lg space-y-1.5">
+              <p className="text-[10px] uppercase tracking-wide text-[var(--content-tertiary)]">
+                Narrow by
+              </p>
+              <div className="flex gap-2 overflow-x-auto scrollbar-none py-1">
+                {narrowSuggestions.map(s => (
+                  <button
+                    key={`${s.type}-${s.value}`}
+                    onClick={() => {
+                      if (s.type === 'brand') setSelectedBrand(s.value);
+                      if (s.type === 'group') setSelectedGroup(s.value);
+                    }}
+                    className="px-3 py-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--content-secondary)] text-xs flex items-center gap-1.5 shrink-0 active:scale-95"
+                  >
+                    <span>{s.label}</span>
+                    <span className="text-[10px] text-[var(--content-quaternary)]">
+                      ({s.count})
+                    </span>
+                  </button>
+                ))}
               </div>
             </div>
           )}
-        </div>
 
-        {/* Filter bar */}
-        <div className="flex gap-2 py-3">
-          <button
-            onClick={() => setIsBrandSheetOpen(true)}
-            className={`
-              inline-flex items-center gap-1.5
-              px-3 py-1.5 rounded-lg text-sm font-medium
-              transition-colors duration-150
-              ${
-                selectedBrand
-                  ? 'bg-[var(--bg-inverse-primary)] text-[var(--content-inverse-primary)]'
-                  : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)] hover:text-[var(--content-primary)]'
-              }
-            `}
-          >
-            <span>{selectedBrand ? `Brand: ${selectedBrand}` : 'Brand'}</span>
-            <CaretDown size={14} weight="bold" />
-          </button>
-        </div>
-
-        {(selectedBrand || selectedGroup) && (
-          <div className="flex flex-wrap gap-2 mb-2">
-            {selectedBrand && (
-              <FilterChip
-                label={`Brand: ${selectedBrand}`}
-                selected
-                removable
-                onClick={() => setSelectedBrand(null)}
-              />
-            )}
-            {selectedGroup && (
+          {selectedGroup && (
+            <div className="flex flex-wrap gap-2">
               <FilterChip
                 label={`Group: ${selectedGroup}`}
                 selected
                 removable
                 onClick={() => setSelectedGroup(null)}
               />
-            )}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
 
         {/* Results area */}
         <div
