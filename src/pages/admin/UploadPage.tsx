@@ -17,6 +17,7 @@ import { importItems, type ImportProgress } from '../../lib/import/itemImporter'
 import { importCustomers } from '../../lib/import/customerImporter';
 import { importStock } from '../../lib/import/stockImporter';
 import { importSalesTargets } from '../../lib/import/salesTargetsImporter';
+import { importSalesHistory } from '../../lib/import/salesHistoryImporter';
 
 type UploadState = 'idle' | 'detected' | 'uploading' | 'done' | 'error';
 
@@ -90,6 +91,8 @@ export default function UploadPage() {
         result = await importStock(workbook, fileName, detection.headerRowIndex, setProgress);
       } else if (detection.type === 'sales_plan') {
         result = await importSalesTargets(workbook, fileName, setProgress);
+      } else if (detection.type === 'sales_history') {
+        result = await importSalesHistory(workbook, fileName, setProgress);
       } else {
         result = await importCustomers(workbook, fileName, setProgress);
       }
@@ -139,7 +142,7 @@ export default function UploadPage() {
           </button>
           <h1 className="text-2xl font-bold text-[var(--content-primary)]">Upload Data</h1>
           <p className="text-sm text-[var(--content-tertiary)] mt-1">
-            Import Excel files for items, stock, customers &amp; sales targets
+            Import Excel files for items, stock, customers, sales targets &amp; sales history
           </p>
         </div>
 

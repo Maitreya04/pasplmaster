@@ -8,6 +8,7 @@ interface NumberStepperProps {
   min?: number;
   max?: number;
   presets?: number[];
+  variant?: 'default' | 'compact';
 }
 
 export function NumberStepper({
@@ -16,6 +17,7 @@ export function NumberStepper({
   min = 1,
   max,
   presets = [1, 2, 5, 10, 25, 50],
+  variant = 'default',
 }: NumberStepperProps) {
   const clamp = useCallback(
     (v: number) => {
@@ -28,6 +30,51 @@ export function NumberStepper({
 
   const decrement = () => onChange(clamp(value - 1));
   const increment = () => onChange(clamp(value + 1));
+
+  if (variant === 'compact') {
+    return (
+      <div className="inline-flex items-center gap-2">
+        <button
+          onClick={decrement}
+          disabled={value <= min}
+          className="
+            w-10 h-10 flex items-center justify-center
+            rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)]
+            hover:opacity-90 active:opacity-80
+            transition-opacity duration-150
+            disabled:opacity-30 disabled:cursor-not-allowed
+          "
+          aria-label="Decrease quantity"
+        >
+          <Minus size={16} weight="regular" />
+        </button>
+
+        <InlineQtyEditor
+          value={value}
+          onConfirm={(qty) => onChange(clamp(qty))}
+          onCancel={() => {}}
+          min={min}
+          max={max}
+          className="min-w-[56px] h-10 text-sm"
+        />
+
+        <button
+          onClick={increment}
+          disabled={max !== undefined && value >= max}
+          className="
+            w-10 h-10 flex items-center justify-center
+            rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)]
+            hover:opacity-90 active:opacity-80
+            transition-opacity duration-150
+            disabled:opacity-30 disabled:cursor-not-allowed
+          "
+          aria-label="Increase quantity"
+        >
+          <Plus size={16} weight="regular" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center gap-3">

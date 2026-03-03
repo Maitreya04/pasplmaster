@@ -1,6 +1,12 @@
 import * as XLSX from 'xlsx';
 
-export type DetectedFileType = 'items_price' | 'items_stock' | 'customers' | 'sales_plan' | 'unknown';
+export type DetectedFileType =
+  | 'items_price'
+  | 'items_stock'
+  | 'customers'
+  | 'sales_plan'
+  | 'sales_history'
+  | 'unknown';
 
 export interface DetectionResult {
   type: DetectedFileType;
@@ -18,6 +24,11 @@ function countDataRows(data: unknown[][], startRow: number): number {
   return data.slice(startRow).filter(
     r => Array.isArray(r) && r.some(c => c != null && String(c).trim() !== ''),
   ).length;
+}
+
+function hasAll(headers: string[], required: string[]): boolean {
+  const set = new Set(headers.map(h => h.toLowerCase()));
+  return required.every(r => set.has(r.toLowerCase()));
 }
 
 export function detectFileType(workbook: XLSX.WorkBook): DetectionResult {
@@ -46,8 +57,18 @@ export function detectFileType(workbook: XLSX.WorkBook): DetectionResult {
     }
   }
 
-  // Customer file: row 1 (index 0) has 'Name' + 'Parent Group'
   const row1 = getStringRow(data, 0);
+  // Sales history file: row 1 has VchDate, Party, Salesman
+  if (hasAll(row1, ['VchDate', 'Party', 'Salesman'])) {
+    return {
+      type: 'sales_history',
+      label: 'Sales History',
+      rowCount: countDataRows(data, 1),
+      headerRowIndex: 0,
+    };
+  }
+
+  // Customer file: row 1 (index 0) has 'Name' + 'Parent Group'
   if (row1.includes('Name') && row1.includes('Parent Group')) {
     return { type: 'customers', label: 'Customer List', rowCount: countDataRows(data, 1), headerRowIndex: 0 };
   }

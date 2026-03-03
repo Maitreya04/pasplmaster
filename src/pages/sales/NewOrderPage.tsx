@@ -1,20 +1,24 @@
-import { useState, useMemo, useDeferredValue, type ReactNode } from 'react';
+import { useState, useMemo, useDeferredValue, useRef, useEffect, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Minus, ShoppingCart, CaretRight, CaretDown, CurrencyInr } from '@phosphor-icons/react';
+import { useQuery } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
+import { useAuth } from '../../context/AuthContext';
+import { useCustomers } from '../../hooks/useCustomers';
 import { searchItems, normalizeQuery, detectCodeLike } from '../../lib/search/itemSearch';
 import type { SearchResult, MatchedField } from '../../lib/search/itemSearch';
+import { supabase } from '../../lib/supabase/client';
 import {
   PageHeader,
   SearchInput,
   FilterChip,
   BottomSheet,
   Skeleton,
-  EmptyState,
   InlineQtyEditor,
+  NumberStepper,
 } from '../../components/shared';
-import type { Item } from '../../types';
+import type { Item, Customer } from '../../types';
 
 type NarrowSuggestionType = 'brand' | 'group';
 
@@ -28,6 +32,25 @@ interface NarrowSuggestion {
 interface BrandOption {
   name: string;
   count: number;
+}
+
+interface TopCustomer {
+  customer_name: string;
+  order_count: number;
+  last_order_date: string | null;
+}
+
+interface CustomerTopItemRow {
+  customer_name: string;
+  item_name: string;
+  order_count: number;
+  most_common_qty: number | null;
+  last_ordered: string | null;
+}
+
+interface TrendingRow {
+  item_name: string;
+  total_order_count: number | null;
 }
 
 function hasTokenPrefix(value: string | null | undefined, token: string): boolean {
@@ -106,6 +129,16 @@ function formatCurrency(n: number | null | undefined) {
   return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 }
 
+function formatShortDate(value: string | null): string {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+  });
+}
+
 function BrandFilterSheetContent({
   brands,
   selectedBrand,
@@ -170,6 +203,357 @@ function BrandFilterSheetContent({
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Smart landing empty state (Your Customers / Quick Reorder / Trending)
+// ---------------------------------------------------------------------------
+
+interface SmartLandingProps {
+  items: Item[];
+  onCustomerSelect: (customer: Customer | null) => void;
+  onQuickReorderApply: (customer: Customer | null, entries: { item: Item; qty: number }[]) => void;
+  scrollToSearch: () => void;
+}
+
+function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSearch }: SmartLandingProps) {
+  const { userName } = useAuth();
+  const { data: customers = [] } = useCustomers();
+
+  const { data: topCustomers = [], isLoading: topCustomersLoading } = useQuery<TopCustomer[]>({
+    queryKey: ['salesperson_top_customers', userName],
+    enabled: !!userName,
+    staleTime: 10 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('salesperson_top_customers')
+        .select('customer_name, order_count, last_order_date')
+        .eq('salesperson_name', userName)
+        .order('order_count', { ascending: false })
+        .limit(8);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const { data: trendingRaw = [] } = useQuery<TrendingRow[]>({
+    queryKey: ['customer_top_items_trending'],
+    staleTime: 10 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await (supabase
+        .from('customer_top_items') as any)
+        .select('item_name, total_order_count:order_count.sum()')
+        .group('item_name')
+        .order('total_order_count', { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const [activeCustomerName, setActiveCustomerName] = useState<string | null>(null);
+  const [quickReorderItems, setQuickReorderItems] = useState<
+    { item: Item; suggestedQty: number; checked: boolean; orderCount: number; mostCommonQty: number | null }[]
+  >([]);
+
+  const nameToItem = useMemo(() => {
+    const map = new Map<string, Item>();
+    for (const it of items) {
+      map.set(it.name, it);
+    }
+    return map;
+  }, [items]);
+
+  const nameToCustomer = useMemo(() => {
+    const map = new Map<string, Customer>();
+    for (const c of customers) {
+      map.set(c.name, c);
+    }
+    return map;
+  }, [customers]);
+
+  const {
+    data: customerTopItems = [],
+    isLoading: customerTopItemsLoading,
+  } = useQuery<CustomerTopItemRow[]>({
+    queryKey: ['customer_top_items_by_customer', activeCustomerName],
+    enabled: !!activeCustomerName,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('customer_top_items')
+        .select('customer_name, item_name, order_count, most_common_qty, last_ordered')
+        .eq('customer_name', activeCustomerName)
+        .order('order_count', { ascending: false })
+        .limit(15);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  // Build quick reorder items when selection or source data changes
+  useEffect(() => {
+    if (!customerTopItems || !customerTopItems.length) {
+      setQuickReorderItems([]);
+      return;
+    }
+    const rows: {
+      item: Item;
+      suggestedQty: number;
+      checked: boolean;
+      orderCount: number;
+      mostCommonQty: number | null;
+    }[] = [];
+    for (const row of customerTopItems) {
+      const item = nameToItem.get(row.item_name);
+      if (!item) continue; // skip silently if item not found
+      const suggested =
+        row.most_common_qty && row.most_common_qty > 0 ? Math.round(Number(row.most_common_qty)) : 1;
+      rows.push({
+        item,
+        suggestedQty: suggested,
+        // Suggestions start inactive; salesperson opts in explicitly
+        checked: false,
+        orderCount: row.order_count ?? 0,
+        mostCommonQty: row.most_common_qty,
+      });
+    }
+    setQuickReorderItems(rows);
+  }, [customerTopItems, nameToItem]);
+
+  const hasSmartData = !!userName && !topCustomersLoading && topCustomers.length > 0;
+
+  const trendingItems = useMemo(() => {
+    if (!trendingRaw.length) return [];
+    const out: { item: Item; totalOrderCount: number }[] = [];
+    for (const row of trendingRaw) {
+      const item = nameToItem.get(row.item_name);
+      if (!item) continue; // skip silently
+      out.push({ item, totalOrderCount: row.total_order_count ?? 0 });
+    }
+    return out;
+  }, [trendingRaw, nameToItem]);
+
+  const activeCustomer = activeCustomerName ? nameToCustomer.get(activeCustomerName) ?? null : null;
+
+  if (!hasSmartData) {
+    // New salesperson with no data — just show Trending section below search
+    return (
+      <div className="space-y-6 pt-4">
+        {trendingItems.length > 0 && (
+          <section className="space-y-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+              Trending
+            </h3>
+            <div className="space-y-2">
+              {trendingItems.map(({ item, totalOrderCount }) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-card bg-[var(--bg-secondary)]"
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold text-[var(--content-primary)] truncate">
+                      {item.name}
+                    </p>
+                    <p className="text-xs text-[var(--content-tertiary)]">
+                      Ordered {totalOrderCount} times
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="shrink-0 px-3 h-9 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)] text-sm font-semibold active:scale-95"
+                    onClick={() => onQuickReorderApply(null, [{ item, qty: 1 }])}
+                  >
+                    Quick add
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 pt-4">
+      {/* Section 1 — Your Customers */}
+      <section className="space-y-3">
+        <h3 className="mt-1 text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+          Your Customers
+        </h3>
+        <div className="flex gap-3 overflow-x-auto pb-1 pt-1 scrollbar-none">
+          {topCustomers.map((c) => {
+            const isActive = c.customer_name === activeCustomerName;
+            return (
+              <button
+                key={c.customer_name}
+                type="button"
+                onClick={() => {
+                  setActiveCustomerName(c.customer_name);
+                  const customer = nameToCustomer.get(c.customer_name) ?? null;
+                  onCustomerSelect(customer);
+                }}
+                className={`min-w-[180px] max-w-[220px] px-3 py-2.5 rounded-2xl bg-card bg-[var(--bg-secondary)] text-left flex flex-col justify-between gap-1.5 ${
+                  isActive ? 'ring-2 ring-white shadow-lg' : 'ring-0'
+                }`}
+              >
+                <p className="font-semibold text-[var(--content-primary)] truncate">
+                  {c.customer_name}
+                </p>
+                <p className="text-xs text-[var(--content-secondary)]">
+                  {c.order_count} order{c.order_count === 1 ? '' : 's'}
+                </p>
+                <p className="text-[10px] text-[var(--content-tertiary)]">
+                  Last order {formatShortDate(c.last_order_date)}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Section 2 — Quick Reorder */}
+      {activeCustomerName && (
+        <section className="space-y-3">
+          <div className="flex items-baseline justify-between gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+              Quick Reorder: {activeCustomerName}
+            </h3>
+            {quickReorderItems.length > 0 && (
+              <p className="text-[10px] text-[var(--content-tertiary)]">
+                Based on past orders
+              </p>
+            )}
+          </div>
+
+          {customerTopItemsLoading && (
+            <p className="text-xs text-[var(--content-tertiary)]">Loading suggestions…</p>
+          )}
+
+          {!customerTopItemsLoading && quickReorderItems.length === 0 && (
+            <p className="text-xs text-[var(--content-tertiary)]">
+              No history yet. Use search above to add items.
+            </p>
+          )}
+
+          {quickReorderItems.length > 0 && (
+            <div className="space-y-2">
+              {quickReorderItems.map((row) => (
+                <div
+                  key={row.item.id}
+                  className="px-3 py-2.5 rounded-xl bg-card bg-[var(--bg-secondary)] flex items-start gap-3"
+                >
+                  <div className="pt-1">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 rounded-md border-[var(--border-subtle)] bg-[var(--bg-primary)] appearance-none checked:bg-[var(--bg-accent)] checked:border-[var(--bg-accent)] transition-colors cursor-pointer"
+                      checked={row.checked}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setQuickReorderItems((prev) =>
+                          prev.map((it) =>
+                            it.item.id === row.item.id ? { ...it, checked } : it,
+                          ),
+                        );
+                      }}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <p className="font-semibold text-[var(--content-primary)] truncate">
+                      {row.item.name}
+                    </p>
+                    <p className="text-[11px] text-[var(--content-tertiary)]">
+                      Ordered {row.orderCount} time{row.orderCount === 1 ? '' : 's'}, usually{' '}
+                      {row.mostCommonQty && row.mostCommonQty > 0
+                        ? Number(row.mostCommonQty)
+                        : row.suggestedQty}{' '}
+                      pcs
+                    </p>
+                  </div>
+                  <div className="shrink-0">
+                    <NumberStepper
+                      value={row.suggestedQty}
+                      min={1}
+                      presets={[]}
+                      variant="compact"
+                      onChange={(qty) => {
+                        setQuickReorderItems((prev) =>
+                          prev.map((it) =>
+                            it.item.id === row.item.id ? { ...it, suggestedQty: qty } : it,
+                          ),
+                        );
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2 pt-2">
+            <button
+              type="button"
+              disabled={quickReorderItems.filter((r) => r.checked && r.suggestedQty > 0).length === 0}
+              className="h-11 rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] font-semibold text-sm flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+              onClick={() => {
+                const entries = quickReorderItems
+                  .filter((r) => r.checked && r.suggestedQty > 0)
+                  .map((r) => ({ item: r.item, qty: r.suggestedQty }));
+                onQuickReorderApply(activeCustomer, entries);
+              }}
+            >
+              Add{' '}
+              {quickReorderItems.filter((r) => r.checked && r.suggestedQty > 0).length}
+              {' '}items to Cart
+            </button>
+            <button
+              type="button"
+              className={`h-11 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-secondary)] text-sm font-semibold flex items-center justify-center gap-1.5 active:scale-95 ${
+                quickReorderItems.length < 3 ? 'border-[var(--content-accent)]' : ''
+              }`}
+              onClick={scrollToSearch}
+            >
+              Search for more
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* Section 3 — Trending */}
+      {trendingItems.length > 0 && (
+        <section className="space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+            Trending
+          </h3>
+          <div className="space-y-2">
+            {trendingItems.map(({ item, totalOrderCount }) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-card bg-[var(--bg-secondary)]"
+              >
+                <div className="min-w-0">
+                  <p className="font-semibold text-[var(--content-primary)] truncate">
+                    {item.name}
+                  </p>
+                  <p className="text-xs text-[var(--content-tertiary)]">
+                    Ordered {totalOrderCount} times
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="shrink-0 px-3 h-9 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)] text-sm font-semibold active:scale-95"
+                  onClick={() => onQuickReorderApply(null, [{ item, qty: 1 }])}
+                >
+                  Quick add
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -386,8 +770,16 @@ function ResultSection({
 export default function NewOrderPage() {
   const navigate = useNavigate();
   const { data: items = [], isLoading: itemsLoading } = useItems();
-  const { items: cartItems, addItem, updateQty, setSpecialRate, getCartItem, totalCount, totalValue } =
-    useCart();
+  const {
+    items: cartItems,
+    addItem,
+    updateQty,
+    setSpecialRate,
+    getCartItem,
+    totalCount,
+    totalValue,
+    setSelectedCustomer,
+  } = useCart();
 
   const [query, setQuery] = useState('');
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
@@ -396,6 +788,7 @@ export default function NewOrderPage() {
   const [rateItem, setRateItem] = useState<Item | null>(null);
   const [rateValue, setRateValue] = useState('');
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
+  const searchRef = useRef<HTMLDivElement | null>(null);
 
   const brandOptions: BrandOption[] = useMemo(() => {
     const counts = new Map<string, number>();
@@ -487,7 +880,10 @@ export default function NewOrderPage() {
 
       <div className="px-4 pb-4 flex flex-col flex-1">
         {/* Sticky search + filters */}
-        <div className="sticky top-14 z-30 -mx-4 px-4 pt-2 pb-3 space-y-2 bg-[var(--bg-primary)]/90 backdrop-blur-md">
+        <div
+          ref={searchRef}
+          className="sticky top-14 z-30 -mx-4 px-4 pt-2 pb-3 space-y-2 bg-[var(--bg-primary)]/90 backdrop-blur-md"
+        >
           <div className="relative">
             <SearchInput
               placeholder="Search parts, name or code…"
@@ -576,10 +972,25 @@ export default function NewOrderPage() {
           {itemsLoading ? (
             <Skeleton variant="list" count={1} lines={6} />
           ) : !effectiveQuery && !selectedBrand ? (
-            <EmptyState
-              icon={ShoppingCart}
-              title="Search for parts"
-              description="Type a name, code, or pick a group above."
+            <SmartLanding
+              items={items}
+              onCustomerSelect={customer => {
+                setSelectedCustomer(customer);
+              }}
+              onQuickReorderApply={(customer, entries) => {
+                if (customer) {
+                  setSelectedCustomer(customer);
+                }
+                for (const entry of entries) {
+                  addItem(entry.item, entry.qty);
+                }
+                navigate('/sales/cart');
+              }}
+              scrollToSearch={() => {
+                if (searchRef.current) {
+                  searchRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+              }}
             />
           ) : searchResults.length === 0 && !isStale && effectiveQuery ? (
             <div className="pt-6 text-center space-y-4">
