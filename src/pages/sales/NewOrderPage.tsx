@@ -211,6 +211,10 @@ function BrandFilterSheetContent({
 // Smart landing empty state (Your Customers / Quick Reorder / Trending)
 // ---------------------------------------------------------------------------
 
+const EMPTY_CUSTOMER_TOP_ITEMS: CustomerTopItemRow[] = [];
+const EMPTY_TOP_CUSTOMERS: TopCustomer[] = [];
+const EMPTY_TRENDING: TrendingRow[] = [];
+
 interface SmartLandingProps {
   items: Item[];
   onCustomerSelect: (customer: Customer | null) => void;
@@ -222,7 +226,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
   const { userName } = useAuth();
   const { data: customers = [] } = useCustomers();
 
-  const { data: topCustomers = [], isLoading: topCustomersLoading } = useQuery<TopCustomer[]>({
+  const { data: topCustomers = EMPTY_TOP_CUSTOMERS, isLoading: topCustomersLoading } = useQuery<TopCustomer[]>({
     queryKey: ['salesperson_top_customers', userName],
     enabled: !!userName,
     staleTime: 10 * 60 * 1000,
@@ -238,7 +242,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
     },
   });
 
-  const { data: trendingRaw = [] } = useQuery<TrendingRow[]>({
+  const { data: trendingRaw = EMPTY_TRENDING } = useQuery<TrendingRow[]>({
     queryKey: ['customer_top_items_trending'],
     staleTime: 10 * 60 * 1000,
     queryFn: async () => {
@@ -275,7 +279,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
   }, [customers]);
 
   const {
-    data: customerTopItems = [],
+    data: customerTopItems = EMPTY_CUSTOMER_TOP_ITEMS,
     isLoading: customerTopItemsLoading,
   } = useQuery<CustomerTopItemRow[]>({
     queryKey: ['customer_top_items_by_customer', activeCustomerName],
@@ -400,7 +404,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                   isActive ? 'ring-2 ring-white shadow-lg' : 'ring-0'
                 }`}
               >
-                <p className="font-semibold text-[var(--content-primary)] truncate">
+                <p className="font-semibold text-[var(--content-primary)] line-clamp-2 leading-snug">
                   {c.customer_name}
                 </p>
                 <p className="text-xs text-[var(--content-secondary)]">
@@ -444,7 +448,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
               {quickReorderItems.map((row) => (
                 <div
                   key={row.item.id}
-                  className="px-3 py-2.5 rounded-xl bg-card bg-[var(--bg-secondary)] flex items-start gap-3"
+                  className="px-3 py-3 min-h-[80px] rounded-xl bg-card bg-[var(--bg-secondary)] flex items-start gap-3"
                 >
                   <div className="pt-1">
                     <input
@@ -462,7 +466,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                     />
                   </div>
                   <div className="flex-1 min-w-0 space-y-1">
-                    <p className="font-semibold text-[var(--content-primary)] truncate">
+                    <p className="font-semibold text-sm text-[var(--content-primary)] whitespace-normal break-words line-clamp-2 leading-snug">
                       {row.item.name}
                     </p>
                     <p className="text-[11px] text-[var(--content-tertiary)]">
@@ -878,7 +882,7 @@ export default function NewOrderPage() {
         }
       />
 
-      <div className="px-4 pb-4 flex flex-col flex-1">
+      <div className="px-4 pb-4">
         {/* Sticky search + filters */}
         <div
           ref={searchRef}
@@ -966,7 +970,7 @@ export default function NewOrderPage() {
 
         {/* Results area */}
         <div
-          className={`flex-1 overflow-y-auto space-y-4 transition-opacity duration-100 ${totalCount > 0 ? 'pb-24' : ''}`}
+          className={`space-y-4 transition-opacity duration-100 ${totalCount > 0 ? 'pb-24' : ''}`}
           style={{ opacity: isStale ? 0.6 : 1 }}
         >
           {itemsLoading ? (

@@ -1,5 +1,5 @@
 import type { Icon } from '@phosphor-icons/react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 
 export interface BottomNavItem {
   icon: Icon;
@@ -13,12 +13,11 @@ interface BottomNavProps {
 
 export function BottomNav({ items }: BottomNavProps) {
   const location = useLocation();
-  const navigate = useNavigate();
 
   return (
     <nav
       className="
-        fixed bottom-0 left-0 right-0 z-40
+        fixed bottom-0 left-0 right-0 z-50
         h-16 pb-[env(safe-area-inset-bottom)]
         bg-[var(--bg-secondary)]
         border-t border-[var(--border-opaque)]
@@ -33,13 +32,14 @@ export function BottomNav({ items }: BottomNavProps) {
         const IconCmp = item.icon;
 
         return (
-          <button
+          <Link
             key={item.path}
-            onClick={() => navigate(item.path)}
+            to={item.path}
             className={`
               flex flex-col items-center justify-center gap-0.5
               min-h-[48px] min-w-[48px] px-3 py-1
               text-xs font-medium transition-colors duration-150
+              no-underline
               ${isActive ? 'text-[var(--content-primary)]' : 'text-[var(--content-tertiary)]'}
             `}
           >
@@ -48,7 +48,7 @@ export function BottomNav({ items }: BottomNavProps) {
             {isActive && (
               <span className="w-1 h-1 rounded-full bg-[var(--role-primary)] mt-0.5" />
             )}
-          </button>
+          </Link>
         );
       })}
     </nav>

@@ -177,6 +177,14 @@ select {
   font-family: "Geist Mono", monospace;
 }
 
+/* Simple 2-line clamp utility for mobile-friendly wrapping */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 @keyframes slide-up {
   from {
     transform: translateY(100%);

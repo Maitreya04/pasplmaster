@@ -46,9 +46,9 @@ export function DevRoleSwitcher() {
   const currentLabel = role ? ROLE_LABEL[role as RoleKey] : 'No role';
 
   return (
-    <div className="fixed right-3 bottom-24 z-50 flex flex-col items-end gap-2 text-xs">
+    <div className="fixed right-3 bottom-28 z-40 flex flex-col items-end gap-2 text-xs pointer-events-none">
       {open && (
-        <div className="rounded-2xl bg-black/80 text-white shadow-lg backdrop-blur px-3 py-2 space-y-1 min-w-[180px]">
+        <div className="rounded-2xl bg-black/80 text-white shadow-lg backdrop-blur px-3 py-2 space-y-1 min-w-[180px] pointer-events-auto">
           <p className="mb-1 text-[10px] uppercase tracking-wide text-white/60">
             Dev Role Switch
           </p>
@@ -74,7 +74,7 @@ export function DevRoleSwitcher() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 rounded-full bg-black/80 text-white px-3 py-1.5 shadow-lg backdrop-blur-sm"
+        className="flex items-center gap-1.5 rounded-full bg-black/80 text-white px-3 py-1.5 shadow-lg backdrop-blur-sm pointer-events-auto"
       >
         <ArrowsLeftRight size={16} weight="bold" />
         <span className="text-[11px]">
