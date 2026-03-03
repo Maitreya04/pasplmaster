@@ -1,29 +1,30 @@
+import { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 
-import LoginPage from './pages/LoginPage';
-import RoleSelectPage from './pages/RoleSelectPage';
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const RoleSelectPage = lazy(() => import('./pages/RoleSelectPage'));
 
-import SalesLayout from './pages/sales/SalesLayout';
-import SalesHome from './pages/sales/SalesHome';
-import NewOrderPage from './pages/sales/NewOrderPage';
-import CartPage from './pages/sales/CartPage';
-import MyOrdersPage from './pages/sales/MyOrdersPage';
+const SalesLayout = lazy(() => import('./pages/sales/SalesLayout'));
+const SalesHome = lazy(() => import('./pages/sales/SalesHome'));
+const NewOrderPage = lazy(() => import('./pages/sales/NewOrderPage'));
+const CartPage = lazy(() => import('./pages/sales/CartPage'));
+const MyOrdersPage = lazy(() => import('./pages/sales/MyOrdersPage'));
 
-import BillingLayout from './pages/billing/BillingLayout';
-import DashboardPage from './pages/billing/DashboardPage';
-import NeedsReviewPage from './pages/billing/NeedsReviewPage';
-import ReviewPage from './pages/billing/ReviewPage';
-import HistoryPage from './pages/billing/HistoryPage';
-import PendingPage from './pages/billing/PendingPage';
+const BillingLayout = lazy(() => import('./pages/billing/BillingLayout'));
+const DashboardPage = lazy(() => import('./pages/billing/DashboardPage'));
+const NeedsReviewPage = lazy(() => import('./pages/billing/NeedsReviewPage'));
+const ReviewPage = lazy(() => import('./pages/billing/ReviewPage'));
+const HistoryPage = lazy(() => import('./pages/billing/HistoryPage'));
+const PendingPage = lazy(() => import('./pages/billing/PendingPage'));
 
-import PickingLayout from './pages/picking/PickingLayout';
-import QueuePage from './pages/picking/QueuePage';
-import PickPage from './pages/picking/PickPage';
+const PickingLayout = lazy(() => import('./pages/picking/PickingLayout'));
+const QueuePage = lazy(() => import('./pages/picking/QueuePage'));
+const PickPage = lazy(() => import('./pages/picking/PickPage'));
 
-import AdminPage from './pages/admin/AdminPage';
-import AdminPasscodePage from './pages/admin/AdminPasscodePage';
-import UploadPage from './pages/admin/UploadPage';
+const AdminPage = lazy(() => import('./pages/admin/AdminPage'));
+const AdminPasscodePage = lazy(() => import('./pages/admin/AdminPasscodePage'));
+const UploadPage = lazy(() => import('./pages/admin/UploadPage'));
 
 const ROLE_HOME: Record<string, string> = {
   sales: '/sales',
@@ -60,95 +61,103 @@ function RootRedirect() {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<RootRedirect />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route
-        path="/select-role"
-        element={
-          <RequireAuth>
-            <RoleSelectPage />
-          </RequireAuth>
-        }
-      />
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-[var(--bg-primary)] text-[var(--content-secondary)]">
+          Loading…
+        </div>
+      }
+    >
+      <Routes>
+        <Route path="/" element={<RootRedirect />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/select-role"
+          element={
+            <RequireAuth>
+              <RoleSelectPage />
+            </RequireAuth>
+          }
+        />
 
-      {/* Sales */}
-      <Route
-        path="/sales"
-        element={
-          <RequireRole>
-            <SalesLayout />
-          </RequireRole>
-        }
-      >
-        <Route index element={<SalesHome />} />
-        <Route path="new" element={<NewOrderPage />} />
-        <Route path="cart" element={<CartPage />} />
-        <Route path="orders" element={<MyOrdersPage />} />
-      </Route>
+        {/* Sales */}
+        <Route
+          path="/sales"
+          element={
+            <RequireRole>
+              <SalesLayout />
+            </RequireRole>
+          }
+        >
+          <Route index element={<SalesHome />} />
+          <Route path="new" element={<NewOrderPage />} />
+          <Route path="cart" element={<CartPage />} />
+          <Route path="orders" element={<MyOrdersPage />} />
+        </Route>
 
-      {/* Billing */}
-      <Route
-        path="/billing"
-        element={
-          <RequireRole>
-            <BillingLayout />
-          </RequireRole>
-        }
-      >
-        <Route index element={<DashboardPage />} />
-        <Route path="needs-review" element={<NeedsReviewPage />} />
-        <Route path="pending" element={<PendingPage />} />
-        <Route path="review/:id" element={<ReviewPage />} />
-        <Route path="history" element={<HistoryPage />} />
-      </Route>
+        {/* Billing */}
+        <Route
+          path="/billing"
+          element={
+            <RequireRole>
+              <BillingLayout />
+            </RequireRole>
+          }
+        >
+          <Route index element={<DashboardPage />} />
+          <Route path="needs-review" element={<NeedsReviewPage />} />
+          <Route path="pending" element={<PendingPage />} />
+          <Route path="review/:id" element={<ReviewPage />} />
+          <Route path="history" element={<HistoryPage />} />
+        </Route>
 
-      {/* Picking */}
-      <Route
-        path="/picking"
-        element={
-          <RequireRole>
-            <PickingLayout />
-          </RequireRole>
-        }
-      >
-        <Route index element={<QueuePage />} />
-        <Route path="pick/:id" element={<PickPage />} />
-      </Route>
+        {/* Picking */}
+        <Route
+          path="/picking"
+          element={
+            <RequireRole>
+              <PickingLayout />
+            </RequireRole>
+          }
+        >
+          <Route index element={<QueuePage />} />
+          <Route path="pick/:id" element={<PickPage />} />
+        </Route>
 
-      <Route
-        path="/admin-passcode"
-        element={
-          <RequireAuth>
-            <AdminPasscodePage />
-          </RequireAuth>
-        }
-      />
+        <Route
+          path="/admin-passcode"
+          element={
+            <RequireAuth>
+              <AdminPasscodePage />
+            </RequireAuth>
+          }
+        />
 
-      {/* Admin */}
-      <Route
-        path="/admin"
-        element={
-          <RequireRole>
-            <RequireAdminUnlock>
-              <AdminPage />
-            </RequireAdminUnlock>
-          </RequireRole>
-        }
-      />
-      <Route
-        path="/admin/upload"
-        element={
-          <RequireRole>
-            <RequireAdminUnlock>
-              <UploadPage />
-            </RequireAdminUnlock>
-          </RequireRole>
-        }
-      />
+        {/* Admin */}
+        <Route
+          path="/admin"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <AdminPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/upload"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <UploadPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
 
-      {/* Catch-all */}
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        {/* Catch-all */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }

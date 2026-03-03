@@ -81,6 +81,7 @@ export interface OrderItem {
   state: OrderItemState;
   flag_reason: string | null;
   flag_notes: string | null;
+  flag_box_price: number | null;
   scan_result: ScanResult | null;
 }
 

@@ -378,6 +378,7 @@ CREATE TABLE order_items (
   state TEXT NOT NULL DEFAULT 'pending',   -- pending|picked|flagged
   flag_reason TEXT,                         -- If flagged: "Out of Stock", "Wrong Part", etc.
   flag_notes TEXT,                          -- Optional picker notes
+  flag_box_price NUMERIC(10,2),            -- Box price when flagged as "Price Mismatch"
   scan_result JSONB,                       -- OCR verification data: {scannedText, confidence, isMatch, matchedAgainst}
   created_at TIMESTAMPTZ DEFAULT now()
 );

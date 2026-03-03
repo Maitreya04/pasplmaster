@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, CheckCircle, XCircle, Hourglass } from '@phosphor-icons/react';
+import { X, CheckCircle, XCircle, Hourglass, Warning } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useAuth } from '../../context/AuthContext';
@@ -157,16 +157,40 @@ export default function ReviewPage() {
     });
   }, []);
 
+  const updatePrice = useCallback((itemId: number, price: number) => {
+    setItems((prev) =>
+      prev.map((i) =>
+        i.id === itemId ? { ...i, price_quoted: Math.max(0, price) } : i
+      )
+    );
+  }, []);
+
   const approveMutation = useMutation({
     mutationFn: async () => {
       if (!order) throw new Error('No order');
       const reviewer = userName || 'Billing';
+      const resolvingFlags = order.status === 'flagged';
 
-      // Update each remaining item's qty_approved
+      // Update each remaining item's qty_approved (and price / flags)
       for (const item of visibleItems) {
+        const update: Record<string, unknown> = {
+          qty_approved: item.qty_approved,
+        };
+        // Allow billing to override price when resolving flags
+        if (typeof item.price_quoted === 'number') {
+          update.price_quoted = item.price_quoted;
+        }
+        // When resolving picking flags, clear the flag and mark as picked
+        if (resolvingFlags && item.state === 'flagged') {
+          update.state = 'picked';
+          update.flag_reason = null;
+          update.flag_notes = null;
+          update.flag_box_price = null;
+        }
+
         await supabase
           .from('order_items')
-          .update({ qty_approved: item.qty_approved })
+          .update(update)
           .eq('id', item.id);
       }
 
@@ -211,21 +235,30 @@ export default function ReviewPage() {
       }
 
       // Update order
-      await supabase
-        .from('orders')
-        .update({
-          status: 'approved',
-          reviewer_name: reviewer,
-          approved_at: new Date().toISOString(),
-          item_count: visibleItems.length,
-          total_value: grandTotal,
-        })
-        .eq('id', order.id);
+      const orderUpdate: Record<string, unknown> = {
+        reviewer_name: reviewer,
+        item_count: visibleItems.length,
+        total_value: grandTotal,
+      };
+
+      if (resolvingFlags) {
+        // Picker already completed; billing is just resolving flags
+        orderUpdate.status = 'completed';
+      } else {
+        orderUpdate.status = 'approved';
+        orderUpdate.approved_at = new Date().toISOString();
+      }
+
+      await supabase.from('orders').update(orderUpdate).eq('id', order.id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
-      toast.success('Order approved and sent to picking');
+      toast.success(
+        order?.status === 'flagged'
+          ? 'Flags resolved and order marked completed'
+          : 'Order approved and sent to picking'
+      );
       navigate('/billing');
     },
     onError: () => {
@@ -342,6 +375,24 @@ export default function ReviewPage() {
               </div>
             </Card>
 
+            {/* Flag resolution banner */}
+            {order.status === 'flagged' && (
+              <Card className="mb-6 border-amber-300 bg-amber-50">
+                <div className="flex items-start gap-3">
+                  <Warning className="text-amber-500 mt-0.5" size={20} weight="fill" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-amber-900">
+                      This order was flagged during picking
+                    </p>
+                    <p className="text-sm text-amber-800">
+                      Review the flagged lines below, adjust prices/quantities if needed,
+                      then mark the order as completed once Busy is updated.
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            )}
+
             {/* Picking progress (for approved / picking / completed orders) */}
             {pickingSummary &&
               (order.status === 'approved' ||
@@ -394,7 +445,7 @@ export default function ReviewPage() {
                 {visibleItems.map((item) => {
                   const price = item.price_quoted ?? item.price_system ?? 0;
                   const lineTotal = item.qty_approved * price;
-                const isPending = pendingIds.has(item.id);
+                  const isPending = pendingIds.has(item.id);
                   return (
                   <Card
                     key={item.id}
@@ -410,6 +461,52 @@ export default function ReviewPage() {
                           Requested: {item.qty_requested} · Unit: ₹
                           {price.toLocaleString('en-IN')}
                         </p>
+                        {item.state === 'flagged' && (
+                          <div className="mt-2 space-y-1 text-xs">
+                            <div className="flex flex-wrap gap-2">
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                                <Warning size={12} weight="fill" />
+                                {item.flag_reason || 'Flagged in picking'}
+                              </span>
+                              {typeof item.flag_box_price === 'number' &&
+                                !Number.isNaN(item.flag_box_price) && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-100">
+                                    Box price: ₹
+                                    {item.flag_box_price.toLocaleString('en-IN', {
+                                      maximumFractionDigits: 2,
+                                    })}
+                                  </span>
+                                )}
+                              {item.flag_notes && (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 text-amber-900 border border-amber-100">
+                                  {item.flag_notes}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-[11px] text-slate-600">
+                                Invoice price (per unit):
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-[11px] text-slate-500">₹</span>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  step="0.01"
+                                  min="0"
+                                  value={item.price_quoted ?? item.price_system ?? 0}
+                                  onChange={(e) =>
+                                    updatePrice(
+                                      item.id,
+                                      Number.parseFloat(e.target.value || '0'),
+                                    )
+                                  }
+                                  className="w-24 px-2 py-1 rounded-md border border-slate-200 text-[11px] text-slate-900 bg-white"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         {isPending ? (
                           <button
@@ -503,10 +600,16 @@ export default function ReviewPage() {
                 variant="primary"
                 onClick={() => approveMutation.mutate()}
                 loading={approveMutation.isPending}
-                className="sm:flex-[2] bg-emerald-600 hover:opacity-90"
+                className={`sm:flex-[2] hover:opacity-90 ${
+                  order.status === 'flagged'
+                    ? 'bg-amber-600'
+                    : 'bg-emerald-600'
+                }`}
               >
                 <CheckCircle size={20} weight="bold" />
-                Approve & Send to Picking
+                {order.status === 'flagged'
+                  ? 'Resolve Flags & Mark Completed'
+                  : 'Approve & Send to Picking'}
               </BigButton>
             </div>
           </>

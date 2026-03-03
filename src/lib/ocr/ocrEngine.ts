@@ -1,4 +1,4 @@
-import { createWorker, type Worker } from 'tesseract.js';
+import type { Worker } from 'tesseract.js';
 
 let worker: Worker | null = null;
 let workerInitializing: Promise<Worker> | null = null;
@@ -7,11 +7,13 @@ async function getWorker(): Promise<Worker> {
   if (worker) return worker;
   if (workerInitializing) return workerInitializing;
 
-  workerInitializing = createWorker('eng').then((w) => {
+  workerInitializing = (async () => {
+    const { createWorker } = await import('tesseract.js');
+    const w = await createWorker('eng');
     worker = w;
     workerInitializing = null;
     return w;
-  });
+  })();
 
   return workerInitializing;
 }

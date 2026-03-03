@@ -31,13 +31,15 @@ interface ItemMeta {
 type ItemMetaMap = Map<number, ItemMeta>;
 
 const FLAG_REASONS = [
+  'Price Mismatch',
   'Out of Stock',
   'Wrong Part',
   'Damaged',
   "Can't Find",
-  'Quantity Mismatch',
   'Other',
 ] as const;
+
+type FlagReason = (typeof FLAG_REASONS)[number];
 
 type PickItemUiState =
   | 'pending'
@@ -130,8 +132,9 @@ export default function PickPage() {
     new Map(),
   );
   const [flagTarget, setFlagTarget] = useState<number | null>(null);
-  const [flagReason, setFlagReason] = useState('');
+  const [flagReason, setFlagReason] = useState<FlagReason | ''>('');
   const [flagNotes, setFlagNotes] = useState('');
+  const [flagBoxPrice, setFlagBoxPrice] = useState('');
   const [liveScanTarget, setLiveScanTarget] = useState<OrderItem | null>(null);
 
   const pickItems = useMemo(() => {
@@ -218,10 +221,12 @@ export default function PickPage() {
       itemId,
       reason,
       notes,
+      boxPrice,
     }: {
       itemId: number;
-      reason: string;
+      reason: FlagReason;
       notes: string;
+      boxPrice: number | null;
     }) => {
       if (!order) throw new Error('No order');
       const { error } = await supabase
@@ -230,6 +235,7 @@ export default function PickPage() {
           state: 'flagged',
           flag_reason: reason,
           flag_notes: notes || null,
+          flag_box_price: boxPrice,
         })
         .eq('id', itemId);
       if (error) throw error;
@@ -278,6 +284,7 @@ export default function PickPage() {
       setFlagTarget(null);
       setFlagReason('');
       setFlagNotes('');
+      setFlagBoxPrice('');
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
     },
   });
@@ -301,12 +308,15 @@ export default function PickPage() {
   const completeMutation = useMutation({
     mutationFn: async () => {
       if (!order) throw new Error('No order');
+      const updates: { status: 'completed' | 'flagged'; completed_at?: string } = {
+        status: hasFlagged ? 'flagged' : 'completed',
+      };
+      if (!order.completed_at) {
+        updates.completed_at = new Date().toISOString();
+      }
       const { error } = await supabase
         .from('orders')
-        .update({
-          status: 'completed',
-          completed_at: new Date().toISOString(),
-        })
+        .update(updates)
         .eq('id', order.id);
       if (error) throw error;
     },
@@ -346,12 +356,35 @@ export default function PickPage() {
 
   const handleFlag = useCallback(() => {
     if (!flagTarget || !flagReason) return;
+
+    if (flagReason === 'Price Mismatch') {
+      const raw = flagBoxPrice.trim();
+      if (!raw) {
+        toast.error('Please enter the price printed on the box');
+        return;
+      }
+      const normalized = raw.replace(/,/g, '');
+      const parsed = Number(normalized);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        toast.error('Please enter a valid box price');
+        return;
+      }
+      flagItemMutation.mutate({
+        itemId: flagTarget,
+        reason: flagReason,
+        notes: flagNotes,
+        boxPrice: parsed,
+      });
+      return;
+    }
+
     flagItemMutation.mutate({
       itemId: flagTarget,
       reason: flagReason,
       notes: flagNotes,
+      boxPrice: null,
     });
-  }, [flagTarget, flagReason, flagNotes, flagItemMutation]);
+  }, [flagTarget, flagReason, flagNotes, flagBoxPrice, flagItemMutation, toast]);
 
   if (!orderId) {
     navigate('/picking');
@@ -436,6 +469,7 @@ export default function PickPage() {
               setFlagTarget(pi.orderItem.id);
               setFlagReason('');
               setFlagNotes('');
+              setFlagBoxPrice('');
             }}
             onScan={() => openLiveScan(pi.orderItem)}
             onOverride={() => handleOverride(pi.orderItem.id)}
@@ -521,6 +555,34 @@ export default function PickPage() {
               </button>
             ))}
           </div>
+          {flagReason === 'Price Mismatch' && (
+            <div className="space-y-1">
+              <p className="text-xs text-[var(--content-secondary)]">
+                Enter the price printed on the box. Billing will see this and can adjust the invoice.
+              </p>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--content-tertiary)]">
+                  ₹
+                </span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0"
+                  value={flagBoxPrice}
+                  onChange={(e) => setFlagBoxPrice(e.target.value)}
+                  placeholder="Box price"
+                  className="
+                    w-full pl-7 pr-3 py-2.5 rounded-xl
+                    bg-[var(--bg-tertiary)] text-[var(--content-primary)]
+                    placeholder-[var(--content-disabled)]
+                    border border-[var(--border-subtle)]
+                    focus:outline-none focus:ring-2 focus:ring-red-500/50
+                  "
+                />
+              </div>
+            </div>
+          )}
           <textarea
             value={flagNotes}
             onChange={(e) => setFlagNotes(e.target.value)}
@@ -536,7 +598,10 @@ export default function PickPage() {
           <BigButton
             variant="primary"
             onClick={handleFlag}
-            disabled={!flagReason}
+            disabled={
+              !flagReason ||
+              (flagReason === 'Price Mismatch' && !flagBoxPrice.trim())
+            }
             loading={flagItemMutation.isPending}
             className="bg-red-600 text-white"
           >
@@ -655,8 +720,22 @@ function PickItemCard({
             <span className="text-xs font-semibold text-[var(--content-secondary)] bg-[var(--bg-tertiary)] px-2 py-0.5 rounded-md">
               Qty: {oi.qty_approved ?? oi.qty_requested}
             </span>
-            {item.uiState === 'flagged' && oi.flag_reason && (
-              <span className="text-xs text-red-400">{oi.flag_reason}</span>
+            {item.uiState === 'flagged' && (
+              <div className="flex flex-wrap gap-1">
+                {oi.flag_reason && (
+                  <span className="text-xs text-red-400">{oi.flag_reason}</span>
+                )}
+                {typeof oi.flag_box_price === 'number' &&
+                  !Number.isNaN(oi.flag_box_price) && (
+                    <span className="text-xs text-red-300">
+                      Box price:{' '}
+                      ₹
+                      {oi.flag_box_price.toLocaleString('en-IN', {
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  )}
+              </div>
             )}
             {item.uiState === 'scanning' && (
               <span className="text-xs text-amber-400 animate-pulse">
