@@ -351,7 +351,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
 
   const activeCustomer = activeCustomerName ? nameToCustomer.get(activeCustomerName) ?? null : null;
 
-  const { data: pendingItemsForCustomer = [], isLoading: pendingLoading } = usePendingItems({
+  const { data: pendingItemsForCustomer = [] } = usePendingItems({
     status: 'pending',
     customerId: activeCustomer?.id,
     enabled: !!activeCustomer,
