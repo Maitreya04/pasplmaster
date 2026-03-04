@@ -112,6 +112,7 @@ export function NumberStepper({
           <button
             key={preset}
             onClick={() => onChange(clamp(preset))}
+            data-inverse-primary={value === preset ? '' : undefined}
             className={`
               px-3 py-1.5 rounded-lg text-sm font-medium font-mono
               transition-colors duration-150

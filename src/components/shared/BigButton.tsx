@@ -36,6 +36,7 @@ export function BigButton({
   return (
     <button
       disabled={disabled || loading}
+      data-inverse-primary={variant === 'primary' ? '' : undefined}
       className={`${baseStyles} ${getVariantStyles(variant)} ${className}`}
       {...rest}
     >
