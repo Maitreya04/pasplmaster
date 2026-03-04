@@ -18,6 +18,8 @@ import { importCustomers } from '../../lib/import/customerImporter';
 import { importStock } from '../../lib/import/stockImporter';
 import { importSalesTargets } from '../../lib/import/salesTargetsImporter';
 import { importSalesHistory } from '../../lib/import/salesHistoryImporter';
+import { queryClient } from '../../lib/queryClient';
+import { ITEMS_QUERY_KEY } from '../../hooks/useItems';
 
 type UploadState = 'idle' | 'detected' | 'uploading' | 'done' | 'error';
 
@@ -98,6 +100,10 @@ export default function UploadPage() {
       }
       setProgress(result);
       setState('done');
+      // Invalidate items cache so New Order / search see updated list after item or stock import
+      if (detection.type === 'items_price' || detection.type === 'items_stock') {
+        void queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
+      }
       if (result.failedCount > 0) {
         toast.info(
           `Import finished. ${result.processed.toLocaleString()} ${detection.type === 'sales_plan' ? 'targets' : 'rows'} imported successfully, ${result.failedCount.toLocaleString()} failed.`,

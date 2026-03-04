@@ -8,7 +8,86 @@
 
 @custom-variant dark (&:is(.theme-dark, .theme-dark *));
 
-/* ─── Primitive palette (never use directly in components) ─── */
+/* ═══════════════════════════════════════════════════════════════
+   DESIGN SYSTEM: Core / Accent / Greys (reference structure)
+   • Core:    primary brand, white, black — main surfaces and text
+   • Accent:  intents (blue, green, amber, red) + role overrides
+   • Greys:   neutral scale for borders, secondary text, hierarchy
+   Use semantic tokens (--bg-*, --content-*, --role-*) in components.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── Core (brand + base) ─── */
+:root {
+  --core-primary: #2563eb;
+  --core-white: #ffffff;
+  --core-black: #0f172a;
+}
+
+/* ─── Palette (OKLCH 0–9) — regenerate: node scripts/generate-palette.mjs ─── */
+:root {
+  --gray-0: #f8f8f8;
+  --gray-1: #f5f5f5;
+  --gray-2: #eaeaea;
+  --gray-3: #d9d9d9;
+  --gray-4: #c1c1c1;
+  --gray-5: #a3a3a3;
+  --gray-6: #7f7f7f;
+  --gray-7: #585858;
+  --gray-8: #2e2e2e;
+  --gray-9: #060606;
+  --blue-0: #f4f5f6;
+  --blue-1: #d1dbe5;
+  --blue-2: #afc1d4;
+  --blue-3: #8ea8c2;
+  --blue-4: #6e8fb1;
+  --blue-5: #4e769f;
+  --blue-6: #2d5e8d;
+  --blue-7: #00467b;
+  --blue-8: #002d69;
+  --blue-9: #001157;
+  --green-0: #f4f5f4;
+  --green-1: #d3ddd3;
+  --green-2: #b3c4b3;
+  --green-3: #94ac94;
+  --green-4: #759575;
+  --green-5: #577e58;
+  --green-6: #39683b;
+  --green-7: #18521e;
+  --green-8: #003c00;
+  --green-9: #002700;
+  --amber-0: #f6f5f4;
+  --amber-1: #e0d8cf;
+  --amber-2: #cabdab;
+  --amber-3: #b4a188;
+  --amber-4: #9f8766;
+  --amber-5: #8a6d44;
+  --amber-6: #755420;
+  --amber-7: #613b00;
+  --amber-8: #4c2200;
+  --amber-9: #380700;
+  --red-0: #f6f4f4;
+  --red-1: #e5d6d4;
+  --red-2: #d3b7b4;
+  --red-3: #c19a96;
+  --red-4: #af7c78;
+  --red-5: #9b605b;
+  --red-6: #88443f;
+  --red-7: #742624;
+  --red-8: #5e0008;
+  --red-9: #480000;
+  --indigo-0: #f4f5f6;
+  --indigo-1: #d5d9e6;
+  --indigo-2: #b6bed5;
+  --indigo-3: #99a4c4;
+  --indigo-4: #7c8ab2;
+  --indigo-5: #6070a1;
+  --indigo-6: #465790;
+  --indigo-7: #2e3e7e;
+  --indigo-8: #19246c;
+  --indigo-9: #0a025a;
+}
+
+/* ─── Navy (dark theme surfaces; keep existing) ─── */
 :root {
   --navy-950: #0a0e1a;
   --navy-900: #0f1629;
@@ -21,63 +100,71 @@
   --navy-200: #b5beda;
   --navy-100: #dce0ee;
   --navy-50: #eef0f7;
+  --transition-ui: 150ms ease;
 }
 
-/* ─── Semantic tokens: Light theme ─── */
+/* ─── Semantic tokens: Light theme (OKLCH palette: gray/blue/green/amber/red) ─── */
 .theme-light {
-  /* Background */
-  --bg-primary: #ffffff;
-  --bg-secondary: #f9fafb;
-  --bg-tertiary: #f3f4f6;
-  --bg-inverse-primary: #111827;
-  --bg-inverse-secondary: #1f2937;
-  --bg-overlay: rgba(0, 0, 0, 0.5);
-  --bg-elevated: #ffffff;
+  /* Background — gray scale + white */
+  --bg-primary: var(--gray-1);
+  --bg-secondary: var(--core-white);
+  --bg-tertiary: var(--gray-1);
+  --bg-inverse-primary: var(--gray-9);
+  --bg-inverse-secondary: var(--gray-8);
+  --bg-overlay: rgba(6, 6, 6, 0.45);
+  --bg-elevated: var(--core-white);
 
-  /* Content */
-  --content-primary: #000000;
-  --content-secondary: #1f2937;
-  --content-tertiary: #6b7280;
-  --content-quaternary: #9ca3af;
-  --content-inverse-primary: #ffffff;
-  --content-inverse-secondary: #d1d5db;
-  --content-on-color: #ffffff;
-  --content-disabled: #9ca3af;
+  /* Content — gray hierarchy; white on color */
+  --content-primary: var(--gray-9);
+  --content-secondary: var(--gray-8);
+  --content-tertiary: var(--gray-7);
+  --content-quaternary: var(--gray-4);
+  --content-inverse-primary: var(--core-white);
+  --content-inverse-secondary: var(--gray-2);
+  --content-on-color: var(--core-white);
+  --content-disabled: var(--gray-4);
 
-  /* Border */
-  --border-opaque: #e5e7eb;
-  --border-subtle: #f3f4f6;
-  --border-selected: #000000;
-  --border-disabled: #e5e7eb;
+  /* Border — gray scale */
+  --border-opaque: var(--gray-3);
+  --border-subtle: var(--gray-2);
+  --border-faint: var(--gray-1);
+  --border-divider: var(--gray-1);
+  --border-selected: var(--gray-9);
+  --border-disabled: var(--gray-3);
 
-  /* Intent — Accent (blue) */
-  --bg-accent: #2563eb;
-  --bg-accent-subtle: rgba(37, 99, 235, 0.1);
-  --content-accent: #2563eb;
-  --border-accent: #3b82f6;
+  /* Row states — subtle */
+  --bg-row-hover: color-mix(in srgb, var(--gray-9) 2%, transparent);
+  --bg-row-selected: color-mix(in srgb, var(--blue-7) 6%, transparent);
 
-  /* Intent — Positive (green) */
-  --bg-positive: #16a34a;
-  --bg-positive-subtle: rgba(22, 163, 74, 0.1);
-  --content-positive: #16a34a;
-  --border-positive: #16a34a;
+  /* Elevation — layered surfaces */
+  --shadow-card: 0 1px 2px rgba(6, 6, 6, 0.04), 0 1px 3px rgba(6, 6, 6, 0.03);
+  --shadow-card-hover: 0 4px 6px rgba(6, 6, 6, 0.05), 0 2px 4px rgba(6, 6, 6, 0.04);
 
-  /* Intent — Warning (amber) */
-  --bg-warning: #d97706;
-  --bg-warning-subtle: rgba(217, 119, 6, 0.1);
-  --content-warning: #d97706;
-  --border-warning: #d97706;
+  /* Accent — from palette scales (4.5:1 text, 3:1 large/icon) */
+  --bg-accent: var(--blue-7);
+  --bg-accent-subtle: color-mix(in srgb, var(--blue-7) 7%, transparent);
+  --content-accent: var(--blue-9);
+  --border-accent: var(--blue-2);
 
-  /* Intent — Negative (red) */
-  --bg-negative: #dc2626;
-  --bg-negative-subtle: rgba(220, 38, 38, 0.1);
-  --content-negative: #dc2626;
-  --border-negative: #dc2626;
+  --bg-positive: var(--green-7);
+  --bg-positive-subtle: color-mix(in srgb, var(--green-7) 7%, transparent);
+  --content-positive: var(--green-9);
+  --border-positive: var(--green-2);
+
+  --bg-warning: var(--amber-7);
+  --bg-warning-subtle: color-mix(in srgb, var(--amber-7) 7%, transparent);
+  --content-warning: var(--amber-9);
+  --border-warning: var(--amber-2);
+
+  --bg-negative: var(--red-7);
+  --bg-negative-subtle: color-mix(in srgb, var(--red-7) 7%, transparent);
+  --content-negative: var(--red-9);
+  --border-negative: var(--red-2);
 
   /* Role accent (overridden per role) */
-  --role-primary: #2563eb;
-  --role-primary-subtle: rgba(37, 99, 235, 0.1);
-  --role-content: #2563eb;
+  --role-primary: var(--blue-7);
+  --role-primary-subtle: color-mix(in srgb, var(--blue-7) 7%, transparent);
+  --role-content: var(--blue-9);
 }
 
 /* ─── Semantic tokens: Dark theme ─── */
@@ -104,8 +191,18 @@
   /* Border */
   --border-opaque: var(--navy-800);
   --border-subtle: var(--navy-700);
+  --border-faint: rgba(255, 255, 255, 0.05);
+  --border-divider: var(--navy-800);
   --border-selected: #ffffff;
   --border-disabled: var(--navy-700);
+
+  /* Row states */
+  --bg-row-hover: rgba(255, 255, 255, 0.04);
+  --bg-row-selected: rgba(99, 102, 241, 0.15);
+
+  /* Elevation — dark mode uses border-only, no shadow */
+  --shadow-card: 0 0 0 1px var(--border-opaque);
+  --shadow-card-hover: 0 0 0 1px var(--border-subtle);
 
   /* Intent — Accent (blue) */
   --bg-accent: #3b82f6;
@@ -137,33 +234,108 @@
   --role-content: #60a5fa;
 }
 
-/* ─── Role accent overrides ─── */
+/* ─── Role accent overrides (light: palette; dark: unchanged) ─── */
 .role-sales {
-  --role-primary: #4f46e5;
+  --role-primary: var(--indigo-7);
+  --role-primary-subtle: color-mix(in srgb, var(--indigo-7) 8%, transparent);
+  --role-content: var(--indigo-9);
+  --bg-row-selected: color-mix(in srgb, var(--indigo-7) 7%, transparent);
+  --role-hero-bg: var(--indigo-4);
+}
+
+.theme-dark .role-sales,
+.role-sales.theme-dark {
   --role-primary-subtle: rgba(79, 70, 229, 0.15);
   --role-content: #818cf8;
+  --bg-row-selected: rgba(79, 70, 229, 0.15);
+  --role-hero-bg: var(--navy-700);
 }
 
 .role-billing {
-  --role-primary: #2563eb;
+  --role-primary: var(--blue-7);
+  --role-primary-subtle: color-mix(in srgb, var(--blue-7) 8%, transparent);
+  --role-content: var(--blue-9);
+  --bg-row-selected: color-mix(in srgb, var(--blue-7) 7%, transparent);
+}
+
+.theme-dark .role-billing,
+.role-billing.theme-dark {
   --role-primary-subtle: rgba(37, 99, 235, 0.15);
   --role-content: #60a5fa;
+  --bg-row-selected: rgba(37, 99, 235, 0.15);
 }
 
 .role-picking {
+  --role-primary: var(--amber-7);
+  --role-primary-subtle: color-mix(in srgb, var(--amber-7) 8%, transparent);
+  --role-content: var(--amber-9);
+  --bg-row-selected: color-mix(in srgb, var(--amber-7) 7%, transparent);
+}
+
+.theme-dark .role-picking,
+.role-picking.theme-dark {
   --role-primary: #f59e0b;
   --role-primary-subtle: rgba(245, 158, 11, 0.15);
   --role-content: #fbbf24;
+  --bg-row-selected: rgba(245, 158, 11, 0.15);
 }
 
 .role-admin {
-  --role-primary: #6b7280;
+  --role-primary: var(--gray-6);
+  --role-primary-subtle: color-mix(in srgb, var(--gray-6) 8%, transparent);
+  --role-content: var(--gray-8);
+}
+
+.theme-dark .role-admin,
+.role-admin.theme-dark {
   --role-primary-subtle: rgba(107, 114, 128, 0.15);
   --role-content: #9ca3af;
 }
 
 body {
   font-family: "Geist Sans", sans-serif;
+}
+
+/* ─── Polish layer (Stripe-grade light mode) ─── */
+.theme-light input:focus,
+.theme-light textarea:focus,
+.theme-light select:focus {
+  outline: none;
+  border-color: var(--role-primary);
+  box-shadow: 0 0 0 3px var(--role-primary-subtle);
+  transition: border-color var(--transition-ui), box-shadow var(--transition-ui);
+}
+
+.theme-light button:not([disabled]) {
+  transition: box-shadow var(--transition-ui), background-color var(--transition-ui),
+    transform var(--transition-ui);
+}
+
+/* Visible focus for keyboard nav (WCAG 2.4.7) — only when focused via keyboard */
+.theme-light button:focus-visible,
+.theme-light [role="button"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg-secondary), 0 0 0 4px var(--role-primary);
+}
+
+.theme-light button.bg-\[var\(--bg-inverse-primary)\)]:not([disabled]):hover {
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1), 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.theme-light button.bg-\[var\(--bg-inverse-primary)\)]:not([disabled]):active {
+  transform: translateY(0.5px);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+/* Respect prefers-reduced-motion (accessibility) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Prevent mobile browser auto-zoom on input focus (iOS Safari zooms when font-size < 16px) */
@@ -206,4 +378,291 @@ select {
 
 .animate-shake {
   animation: shake 400ms ease-in-out;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DESIGN SYSTEM UTILITIES
+   Usage: add .density-compact to a page or section container to
+   tighten spacing without touching individual components.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── A) Density system ─── */
+:root {
+  /* comfortable (default) */
+  --ds-px: 1rem;           /* 16px — horizontal padding for rows/cells/inputs */
+  --ds-py: 0.75rem;        /* 12px — vertical padding */
+  --ds-gap: 1rem;          /* 16px — space between form fields */
+  --ds-gap-sm: 0.375rem;   /*  6px — tight gaps (label→input, chip→chip) */
+  --ds-radius: 0.5rem;     /*  8px — inputs, rows */
+  --ds-row-h: 3rem;        /* 48px — min row/item height */
+  --ds-font-label: 0.6875rem;  /* 11px — ALL-CAPS labels */
+  --ds-font-body: 0.875rem;    /* 14px — table cell, helper text */
+  --ds-font-caption: 0.75rem;  /* 12px — helper/error text */
+}
+
+.density-compact {
+  --ds-px: 0.625rem;       /* 10px */
+  --ds-py: 0.375rem;       /*  6px */
+  --ds-gap: 0.75rem;       /* 12px */
+  --ds-gap-sm: 0.25rem;    /*  4px */
+  --ds-radius: 0.375rem;   /*  6px */
+  --ds-row-h: 2.25rem;     /* 36px */
+  --ds-font-label: 0.625rem;   /* 10px */
+  --ds-font-body: 0.8125rem;   /* 13px */
+  --ds-font-caption: 0.6875rem; /* 11px */
+}
+
+/* ─── B) DS Card ─── */
+.ds-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-card);
+  border-radius: 1rem;
+  transition: box-shadow 150ms ease, border-color 150ms ease;
+}
+
+.ds-card--pressable:hover {
+  box-shadow: var(--shadow-card-hover);
+  border-color: var(--border-opaque);
+}
+
+/* ─── C) DS Table / List rows ─── */
+/*
+  Works for both <table> markup and div-based list UIs.
+  Add .ds-table to the wrapper, .ds-row to each row, .ds-td/.ds-th to cells.
+  For HTML tables use <table class="ds-table"><thead class="ds-table-head">…
+*/
+.ds-table {
+  width: 100%;
+}
+
+table.ds-table {
+  border-collapse: collapse;
+}
+
+.ds-table-head,
+table.ds-table thead tr {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-opaque);
+}
+
+.ds-th,
+table.ds-table th {
+  padding: calc(var(--ds-py) * 0.8) var(--ds-px);
+  font-size: var(--ds-font-label);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--content-tertiary);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.ds-row,
+table.ds-table tbody tr {
+  border-bottom: 1px solid var(--border-faint);
+  transition: background 120ms ease;
+}
+
+.ds-row:hover,
+table.ds-table tbody tr:hover {
+  background: var(--bg-row-hover);
+}
+
+.ds-row--selected,
+table.ds-table tbody tr.ds-row--selected {
+  background: var(--bg-row-selected) !important;
+}
+
+/* Optional: zebra striping — add .ds-table--zebra to the wrapper */
+.ds-table--zebra .ds-row:nth-child(even),
+table.ds-table--zebra tbody tr:nth-child(even) {
+  background: var(--bg-tertiary);
+}
+
+.ds-td,
+table.ds-table td {
+  padding: var(--ds-py) var(--ds-px);
+  font-size: var(--ds-font-body);
+  color: var(--content-primary);
+  vertical-align: middle;
+}
+
+/* ─── D) DS Form fields ─── */
+/*
+  Pattern:
+    <div class="ds-field">
+      <label class="ds-label">Field name</label>
+      <input class="ds-input" />
+      <span class="ds-helper">Hint text</span>
+      <span class="ds-error-text">Error message</span>
+    </div>
+*/
+.ds-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-gap-sm);
+}
+
+/* Primary label: ALL-CAPS 11px — hierarchy marker like Notion sidebar headers */
+.ds-label {
+  display: block;
+  font-size: var(--ds-font-label);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--content-tertiary);
+}
+
+/* Prose label: normal case for inline forms where caps feel heavy */
+.ds-label--prose {
+  font-size: var(--ds-font-caption);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--content-secondary);
+}
+
+.ds-helper {
+  font-size: var(--ds-font-caption);
+  color: var(--content-quaternary);
+  line-height: 1.45;
+}
+
+.ds-error-text {
+  font-size: var(--ds-font-caption);
+  color: var(--content-negative);
+  line-height: 1.45;
+}
+
+/* Base input — use on <input>, <textarea>, <select> */
+.ds-input {
+  display: block;
+  width: 100%;
+  padding: var(--ds-py) var(--ds-px);
+  border-radius: var(--ds-radius);
+  background: var(--bg-secondary);
+  border: 1.5px solid var(--border-opaque);
+  color: var(--content-primary);
+  font-size: 1rem;     /* always 16px — prevents iOS Safari zoom */
+  line-height: 1.5;
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.ds-input::placeholder {
+  color: var(--content-quaternary);
+}
+
+.ds-input:focus {
+  border-color: var(--role-primary);
+  box-shadow: 0 0 0 3px var(--role-primary-subtle);
+}
+
+.ds-input--error,
+.ds-input.error {
+  border-color: var(--border-negative);
+  background: var(--bg-negative-subtle);
+}
+
+.ds-input--error:focus,
+.ds-input.error:focus {
+  border-color: var(--border-negative);
+  box-shadow: 0 0 0 3px var(--bg-negative-subtle);
+}
+
+.ds-input:disabled,
+.ds-input[disabled],
+.ds-input--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* ─── E) DS Chips ─── */
+/*
+  Variants:
+    .ds-chip                  → default (filter/toggle)
+    .ds-chip.ds-chip--selected → active / on
+    .ds-chip.ds-chip--positive / --warning / --negative → intent
+    .ds-chip.ds-chip--role    → role badge (uppercase, accent-tinted)
+    .ds-chip.ds-chip--sm      → compact size
+*/
+.ds-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3125rem 0.75rem;
+  border-radius: 9999px;
+  font-size: var(--ds-font-body);
+  font-weight: 500;
+  line-height: 1;
+  background: var(--bg-tertiary);
+  color: var(--content-secondary);
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease,
+              box-shadow 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ds-chip:hover {
+  background: var(--border-subtle);
+  color: var(--content-primary);
+}
+
+.ds-chip--selected {
+  background: var(--role-primary-subtle);
+  color: var(--role-content);
+  border-color: color-mix(in srgb, var(--role-primary) 22%, transparent);
+}
+
+.ds-chip--selected:hover {
+  background: var(--role-primary-subtle);
+  color: var(--role-content);
+}
+
+/* Intent chips — non-interactive by default; add cursor-pointer if clickable */
+.ds-chip--positive {
+  background: var(--bg-positive-subtle);
+  color: var(--content-positive);
+  border-color: color-mix(in srgb, var(--bg-positive) 20%, transparent);
+  cursor: default;
+}
+
+.ds-chip--warning {
+  background: var(--bg-warning-subtle);
+  color: var(--content-warning);
+  border-color: color-mix(in srgb, var(--bg-warning) 20%, transparent);
+  cursor: default;
+}
+
+.ds-chip--negative {
+  background: var(--bg-negative-subtle);
+  color: var(--content-negative);
+  border-color: color-mix(in srgb, var(--bg-negative) 20%, transparent);
+  cursor: default;
+}
+
+/* Role chip — uppercase label identifying which role/team */
+.ds-chip--role {
+  background: var(--role-primary-subtle);
+  color: var(--role-content);
+  font-weight: 600;
+  font-size: var(--ds-font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: default;
+}
+
+.ds-chip--sm {
+  padding: 0.1875rem 0.5rem;
+  font-size: var(--ds-font-label);
 }

@@ -25,30 +25,34 @@ const SALES_NAMES = [
   'Direct',
 ];
 
+/* Design system: indigo (sales), blue (billing), amber (picking) — use palette tokens */
 const ROLES = [
   {
     key: 'sales' as const,
     icon: ShoppingCart,
     label: 'Sales',
     desc: 'Create & manage orders',
-    tint: 'rgba(79, 70, 229, 0.12)',
-    iconColor: '#818cf8',
+    bgClass: 'bg-[color-mix(in_srgb,var(--indigo-7)_8%,transparent)]',
+    iconBgClass: 'bg-[color-mix(in_srgb,var(--indigo-7)_22%,transparent)]',
+    iconColorClass: 'text-[var(--indigo-7)]',
   },
   {
     key: 'billing' as const,
     icon: ClipboardText,
     label: 'Billing',
     desc: 'Review & approve',
-    tint: 'rgba(37, 99, 235, 0.12)',
-    iconColor: '#60a5fa',
+    bgClass: 'bg-[color-mix(in_srgb,var(--blue-7)_8%,transparent)]',
+    iconBgClass: 'bg-[color-mix(in_srgb,var(--blue-7)_22%,transparent)]',
+    iconColorClass: 'text-[var(--blue-7)]',
   },
   {
     key: 'picking' as const,
     icon: Package,
     label: 'Picking',
     desc: 'Pick & verify items',
-    tint: 'rgba(245, 158, 11, 0.12)',
-    iconColor: '#fbbf24',
+    bgClass: 'bg-[color-mix(in_srgb,var(--amber-7)_8%,transparent)]',
+    iconBgClass: 'bg-[color-mix(in_srgb,var(--amber-7)_22%,transparent)]',
+    iconColorClass: 'text-[var(--amber-7)]',
   },
 ] as const;
 
@@ -64,16 +68,16 @@ export default function RoleSelectPage() {
   }
 
   return (
-    <div className="theme-dark min-h-screen bg-[var(--navy-950)] flex flex-col px-6 py-8">
+    <div className="theme-light min-h-screen bg-[var(--bg-primary)] flex flex-col px-6 py-8">
       {/* Header */}
       <div className="text-center mb-8">
-        <h1 className="text-2xl font-bold text-white">Welcome</h1>
-        <p className="text-sm text-[var(--navy-300)] mt-1">Select your role</p>
+        <h1 className="text-2xl font-bold text-[var(--content-primary)]">Welcome</h1>
+        <p className="text-sm text-[var(--content-secondary)] mt-1">Select your role</p>
       </div>
 
       {/* Role cards */}
       <div className="flex-1 flex flex-col gap-4 max-w-md mx-auto w-full">
-        {ROLES.map(({ key, icon: Icon, label, desc, tint, iconColor }) => (
+        {ROLES.map(({ key, icon: Icon, label, desc, bgClass, iconBgClass, iconColorClass }) => (
           <button
             key={key}
             onClick={() => {
@@ -87,18 +91,16 @@ export default function RoleSelectPage() {
                 setSheetMode('sales');
               }
             }}
-            className="flex-1 rounded-2xl p-6 flex items-center gap-5 transition-transform duration-100 active:scale-[0.98]"
-            style={{ backgroundColor: tint }}
+            className={`flex-1 rounded-2xl p-6 flex items-center gap-5 border border-[var(--border-subtle)] shadow-[var(--shadow-card)] transition-[transform,box-shadow,border-color] duration-[var(--transition-ui)] active:scale-[0.98] hover:shadow-[var(--shadow-card-hover)] hover:border-[var(--border-opaque)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--content-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] ${bgClass}`}
           >
             <div
-              className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0"
-              style={{ backgroundColor: `${iconColor}22` }}
+              className={`w-14 h-14 rounded-xl flex items-center justify-center shrink-0 ${iconBgClass}`}
             >
-              <Icon size={28} weight="duotone" style={{ color: iconColor }} />
+              <Icon size={28} weight="duotone" className={iconColorClass} />
             </div>
             <div className="text-left">
-              <p className="text-lg font-semibold text-white">{label}</p>
-              <p className="text-sm text-[var(--navy-300)]">{desc}</p>
+              <p className="text-lg font-semibold text-[var(--content-primary)]">{label}</p>
+              <p className="text-sm text-[var(--content-secondary)]">{desc}</p>
             </div>
           </button>
         ))}
@@ -110,7 +112,7 @@ export default function RoleSelectPage() {
           selectRole('admin');
           navigate('/admin-passcode');
         }}
-        className="mx-auto mt-6 text-xs text-[var(--navy-500)] hover:text-[var(--navy-300)] transition-colors"
+        className="mx-auto mt-6 text-xs text-[var(--content-tertiary)] hover:text-[var(--content-primary)] transition-colors duration-[var(--transition-ui)] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--content-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] rounded"
       >
         Admin
       </button>

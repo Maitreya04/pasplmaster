@@ -17,7 +17,7 @@ export default function SalesLayout() {
 
   return (
     <CartProvider>
-      <div className="theme-dark role-sales min-h-screen bg-[var(--bg-primary)] relative">
+      <div className="theme-light role-sales min-h-screen bg-[var(--bg-primary)] relative">
         <div className="pb-20">
           <Outlet />
         </div>

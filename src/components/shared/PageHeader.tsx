@@ -11,9 +11,9 @@ export function PageHeader({ title, onBack, action }: PageHeaderProps) {
   return (
     <header
       className="
-        sticky top-0 z-40 h-14
+        sticky top-0 z-40 h-11
         flex items-center justify-between px-4
-        bg-[var(--bg-primary)]/80 backdrop-blur-md
+        bg-[var(--bg-primary)] border-b border-[var(--border-subtle)]
       "
     >
       <div className="w-12 flex items-center">

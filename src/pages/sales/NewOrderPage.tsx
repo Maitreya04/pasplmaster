@@ -974,7 +974,7 @@ export default function NewOrderPage() {
         {/* Sticky search + filters */}
         <div
           ref={searchRef}
-          className="sticky top-14 z-30 -mx-4 px-4 pt-2 pb-3 space-y-2 bg-[var(--bg-primary)]/90 backdrop-blur-md"
+          className="sticky top-11 z-30 -mx-4 px-4 pt-1.5 pb-2 space-y-1.5 bg-[var(--bg-primary)] border-b border-[var(--border-subtle)]"
         >
           <div className="relative">
             <SearchInput
@@ -1058,7 +1058,7 @@ export default function NewOrderPage() {
 
         {/* Results area */}
         <div
-          className={`space-y-4 transition-opacity duration-100 ${totalCount > 0 ? 'pb-24' : ''}`}
+          className={`space-y-4 transition-opacity duration-100 ${totalCount > 0 ? 'pb-32' : ''}`}
           style={{ opacity: isStale ? 0.6 : 1 }}
         >
           {itemsLoading ? (

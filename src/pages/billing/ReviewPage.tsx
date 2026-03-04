@@ -667,7 +667,9 @@ export default function ReviewPage() {
                 }`}
               >
                 <CheckCircle size={20} weight="bold" />
-                Confirm & Generate Bill
+                {order.status === 'flagged'
+                  ? 'Confirm & Generate Bill'
+                  : 'Approve & Send to Picking'}
               </BigButton>
             </div>
           </>

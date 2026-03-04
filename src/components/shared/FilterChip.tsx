@@ -1,9 +1,11 @@
+import { X } from 'lucide-react';
+
 interface FilterChipProps {
   label: string;
   selected?: boolean;
   onClick: () => void;
   count?: number;
-  /** Show ✕ when selected; if onRemove is set, ✕ clears and chip tap does onClick (e.g. open sheet) */
+  /** Show remove icon when selected; if onRemove is set, icon clears and chip tap does onClick (e.g. open sheet) */
   removable?: boolean;
   onRemove?: () => void;
 }
@@ -21,18 +23,18 @@ export function FilterChip({
       onClick={onClick}
       className={`
         inline-flex items-center gap-1.5
-        px-3 py-1.5 rounded-lg text-sm font-medium
-        transition-colors duration-150 whitespace-nowrap shrink-0
+        px-3 py-1.5 rounded-full text-sm font-medium
+        border transition-[background,color,border-color] duration-150 whitespace-nowrap shrink-0
         ${
           selected
-            ? 'bg-[var(--bg-inverse-primary)] text-[var(--content-inverse-primary)]'
-            : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)] hover:text-[var(--content-primary)]'
+            ? 'bg-[var(--role-primary-subtle)] text-[var(--role-content)] border-[color-mix(in_srgb,var(--role-primary)_22%,transparent)]'
+            : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)] border-transparent hover:text-[var(--content-primary)] hover:bg-[var(--border-subtle)]'
         }
       `}
     >
       {label}
       {count !== undefined && (
-        <span className="font-mono text-xs text-[var(--content-quaternary)]">
+        <span className={`font-mono text-xs ${selected ? 'opacity-70' : 'text-[var(--content-quaternary)]'}`}>
           {count}
         </span>
       )}
@@ -52,13 +54,13 @@ export function FilterChip({
                 onRemove();
               }
             }}
-            className="ml-0.5 p-0.5 -m-0.5 rounded hover:bg-black/10 focus:outline-none focus:ring-1 focus:ring-inset"
+            className="ml-0.5 p-0.5 -m-0.5 rounded hover:bg-[var(--bg-row-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--role-primary)] focus-visible:ring-inset cursor-pointer"
             aria-label="Remove filter"
           >
-            ✕
+            <X className="w-3.5 h-3.5 text-current" aria-hidden />
           </span>
         ) : (
-          <span className="text-xs leading-none">✕</span>
+          <X className="w-3.5 h-3.5 shrink-0 opacity-70" aria-hidden />
         )
       )}
     </button>

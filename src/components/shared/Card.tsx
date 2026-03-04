@@ -30,7 +30,11 @@ export function Card({
       className={`
         rounded-2xl p-5
         bg-[var(--bg-secondary)]
-        ${pressable ? 'cursor-pointer hover:bg-[var(--bg-tertiary)] transition-colors duration-150' : ''}
+        border border-[var(--border-subtle)]
+        shadow-[var(--shadow-card)]
+        ${pressable
+          ? 'cursor-pointer transition-[box-shadow,border-color,background] duration-[150ms] ease-out hover:shadow-[var(--shadow-card-hover)] hover:border-[var(--border-opaque)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--role-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]'
+          : ''}
         ${className}
       `}
       {...rest}

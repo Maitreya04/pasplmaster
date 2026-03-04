@@ -3,5 +3,5 @@ interface DividerProps {
 }
 
 export function Divider({ className = '' }: DividerProps) {
-  return <div className={`h-px bg-[var(--border-opaque)] ${className}`} />;
+  return <div className={`h-px bg-[var(--border-divider)] ${className}`} />;
 }

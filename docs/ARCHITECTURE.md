@@ -723,6 +723,19 @@ Without Supabase Auth, there are no JWT tokens, so RLS won't work. Use anon key 
 
 ## 8. Search / Matching Engine
 
+### 8.0 Items data source (New Order / search)
+
+The **New Order** search and "NARROW BY" filters use the **`items`** table in Supabase. The app loads items via `useItems()` which:
+
+- Queries **`supabase.from('items')`** with **`.eq('is_active', true)`** (only active rows).
+- Caches the result in React Query with a 30-minute `staleTime`.
+
+**If new or updated items don’t appear on New Order:**
+
+1. **After an item/stock import** — The app invalidates the items cache when an **items_price** or **items_stock** import finishes (Upload page), so the next time you open or refresh New Order the list is refetched. If you had the app open on New Order while importing elsewhere, switch away and back or refresh the page.
+2. **Items added/updated directly in Supabase** — Ensure each row has **`is_active = true`**. The UI only shows rows where `is_active` is true. Then refresh the app or wait for the cache to refetch.
+3. **Wrong table** — New Order only reads from the **`items`** table. Any other table (e.g. a separate “new items” list) is not used by search.
+
 ### 8.1 Five-Layer Cascade
 
 All searches run against the cached items array (in-memory, no DB hit).
@@ -1109,6 +1122,8 @@ Check specific cell values to identify file type:
 | Alias 1 | 7 | items.alias1 |
 | Item Cat | 8 | items.item_category |
 | Item Main Grp | 9 | items.main_group |
+
+**Matching when names differ:** If a row’s **Name** (column 0) doesn’t match any existing item, the importer tries to match by **Alias** (1) or **Alias 1** (7), so the same product is updated when the file uses a shorter or different name (e.g. "OX 4S FRONT" in the file vs "ASK B.DRUM BAJAJ BOX 4S FRONT" in the app). Codes are matched exactly and also in normalized form (lowercase, no spaces/slashes) so different code formats still match. **Sales Price** (column 5) is then applied to the correct item.
 
 **Stock file (All_Item_Stock.xlsx):**
 | Column | Maps to |

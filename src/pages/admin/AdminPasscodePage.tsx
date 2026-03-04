@@ -54,11 +54,11 @@ export default function AdminPasscodePage() {
   const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
   return (
-    <div className="min-h-screen bg-[var(--navy-950)] flex flex-col items-center justify-between px-6 py-16 select-none">
+    <div className="theme-light min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-between px-6 py-16 select-none">
       {/* Header */}
       <div className="text-center">
-        <h1 className="text-2xl font-bold text-[var(--navy-400)]">Admin</h1>
-        <p className="text-sm text-[var(--navy-500)] mt-2">Enter admin passcode</p>
+        <h1 className="text-2xl font-bold text-[var(--content-primary)]">Admin</h1>
+        <p className="text-sm text-[var(--content-secondary)] mt-2">Enter admin passcode</p>
       </div>
 
       {/* Code circles + error message */}
@@ -71,8 +71,8 @@ export default function AdminPasscodePage() {
                 i < code.length
                   ? error
                     ? 'bg-[var(--content-negative)] scale-110'
-                    : 'bg-white scale-110'
-                  : 'border-2 border-[var(--navy-600)]'
+                    : 'bg-[var(--content-primary)] scale-110'
+                  : 'border-2 border-[var(--border-opaque)]'
               }`}
             />
           ))}
@@ -89,7 +89,7 @@ export default function AdminPasscodePage() {
             <button
               key={d}
               onClick={() => handleDigit(d)}
-              className="w-16 h-16 mx-auto rounded-full flex items-center justify-center font-mono text-xl text-white active:bg-[var(--navy-800)] transition-colors duration-100"
+              className="w-16 h-16 mx-auto rounded-full flex items-center justify-center font-mono text-xl text-[var(--content-primary)] bg-[var(--bg-secondary)] border border-[var(--border-opaque)] shadow-[var(--shadow-card)] active:bg-[var(--bg-tertiary)] hover:border-[var(--border-subtle)] transition-[border-color,background-color] duration-[var(--transition-ui)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--content-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]"
             >
               {d}
             </button>
@@ -97,13 +97,13 @@ export default function AdminPasscodePage() {
           <div />
           <button
             onClick={() => handleDigit('0')}
-            className="w-16 h-16 mx-auto rounded-full flex items-center justify-center font-mono text-xl text-white active:bg-[var(--navy-800)] transition-colors duration-100"
+            className="w-16 h-16 mx-auto rounded-full flex items-center justify-center font-mono text-xl text-[var(--content-primary)] bg-[var(--bg-secondary)] border border-[var(--border-opaque)] shadow-[var(--shadow-card)] active:bg-[var(--bg-tertiary)] hover:border-[var(--border-subtle)] transition-[border-color,background-color] duration-[var(--transition-ui)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--content-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]"
           >
             0
           </button>
           <button
             onClick={handleBackspace}
-            className="w-16 h-16 mx-auto rounded-full flex items-center justify-center text-[var(--navy-400)] active:bg-[var(--navy-800)] transition-colors duration-100"
+            className="w-16 h-16 mx-auto rounded-full flex items-center justify-center text-[var(--content-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-opaque)] shadow-[var(--shadow-card)] active:bg-[var(--bg-tertiary)] hover:border-[var(--border-subtle)] transition-[border-color,background-color] duration-[var(--transition-ui)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--content-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]"
             aria-label="Backspace"
           >
             <Backspace size={24} weight="regular" />

@@ -45,12 +45,13 @@ function CircularProgress({ pct }: { pct: number }) {
 
   return (
     <svg viewBox="0 0 100 100" className="w-32 h-32 -rotate-90">
+      {/* Track: soft so it doesn’t feel stark */}
       <circle
         cx="50"
         cy="50"
         r={r}
         fill="none"
-        stroke="var(--navy-800)"
+        stroke="rgba(255,255,255,0.25)"
         strokeWidth="8"
       />
       <circle
@@ -85,12 +86,12 @@ function HeroCard({
 
   if (isLoading) {
     return (
-      <Card className="bg-[var(--navy-900)] border border-[var(--navy-700)]">
+      <Card className="bg-[var(--role-hero-bg,var(--role-primary))] border border-[var(--role-hero-bg,var(--role-primary))]">
         <div className="flex flex-col items-center gap-4 py-4">
-          <div className="w-32 h-32 rounded-full bg-[var(--navy-800)] animate-pulse" />
+          <div className="w-32 h-32 rounded-full bg-white/20 animate-pulse" />
           <div className="space-y-2 w-40">
-            <div className="h-4 rounded-xl bg-[var(--navy-800)] animate-pulse" />
-            <div className="h-3 rounded-xl bg-[var(--navy-800)] animate-pulse w-3/4 mx-auto" />
+            <div className="h-4 rounded-xl bg-white/20 animate-pulse" />
+            <div className="h-3 rounded-xl bg-white/20 animate-pulse w-3/4 mx-auto" />
           </div>
         </div>
       </Card>
@@ -98,7 +99,7 @@ function HeroCard({
   }
 
   return (
-    <Card className="bg-[var(--navy-900)] border border-[var(--navy-700)]">
+    <Card className="bg-[var(--role-hero-bg,var(--role-primary))] border border-[var(--role-hero-bg,var(--role-primary))]">
       <div className="flex flex-col items-center gap-4 py-2">
         <div className="relative">
           <CircularProgress pct={pct} />
@@ -110,7 +111,7 @@ function HeroCard({
           <p className="font-mono text-white text-sm">
             ₹{formatLakhs(achievedLakhs)} of ₹{formatLakhs(annualTargetLakhs)}
           </p>
-          <p className="text-[var(--navy-400)] text-xs mt-0.5">
+          <p className="text-white/80 text-xs mt-0.5">
             Monthly target: ₹{formatLakhs(monthlyTargetLakhs)}
           </p>
         </div>
@@ -146,21 +147,21 @@ function ThisMonthCard({
       <h3 className="text-sm font-semibold text-[var(--content-secondary)] mb-3">This Month</h3>
       <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="font-mono text-xl font-bold text-white">{orders}</p>
-          <p className="text-xs text-[var(--navy-400)]">orders</p>
+          <p className="font-mono text-xl font-bold text-[var(--content-primary)]">{orders}</p>
+          <p className="text-xs text-[var(--content-tertiary)]">orders</p>
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex justify-between text-xs mb-1">
             <span className="font-mono text-[var(--content-secondary)]">
               {formatCurrency(value)}
             </span>
-            <span className="font-mono text-[var(--navy-400)]">
+            <span className="font-mono text-[var(--content-tertiary)]">
               of ₹{formatLakhs(monthlyTargetLakhs)}
             </span>
           </div>
-          <div className="h-2 rounded-full bg-[var(--navy-800)] overflow-hidden">
+          <div className="h-2 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
             <div
-              className="h-full bg-white rounded-full transition-all duration-500"
+              className="h-full bg-[var(--role-primary)] rounded-full transition-all duration-500"
               style={{ width: `${Math.min(100, pct)}%` }}
             />
           </div>
@@ -186,13 +187,13 @@ function ProductGroupBar({
     <div className="space-y-1">
       <div className="flex justify-between items-baseline gap-2">
         <span className="text-sm text-[var(--content-primary)] truncate">{group}</span>
-        <span className="font-mono text-xs text-[var(--navy-400)] shrink-0">
+        <span className="font-mono text-xs text-[var(--content-tertiary)] shrink-0">
           ₹{formatLakhs(target)}
         </span>
       </div>
-      <div className="h-1.5 rounded-full bg-[var(--navy-800)] overflow-hidden">
+      <div className="h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
         <div
-          className="h-full bg-white rounded-full transition-all duration-300"
+          className="h-full bg-[var(--role-primary)] rounded-full transition-all duration-300"
           style={{ width: `${Math.min(100, pct)}%` }}
         />
       </div>
@@ -205,10 +206,10 @@ function RecentOrderCard({ order }: { order: Order }) {
     <Link to={`/sales/orders`}>
       <Card pressable className="py-3">
         <div className="flex items-center justify-between gap-2">
-          <span className="font-mono text-sm text-[var(--navy-300)]">{order.order_number}</span>
-          <span className="text-xs text-[var(--navy-400)]">{formatTimeAgo(order.created_at)}</span>
+          <span className="font-mono text-sm text-[var(--content-secondary)]">{order.order_number}</span>
+          <span className="text-xs text-[var(--content-tertiary)]">{formatTimeAgo(order.created_at)}</span>
         </div>
-        <p className="font-medium text-white truncate mt-0.5">{order.customer_name}</p>
+        <p className="font-medium text-[var(--content-primary)] truncate mt-0.5">{order.customer_name}</p>
         <p className="font-mono text-xs text-[var(--content-secondary)] mt-0.5">
           {order.item_count} items · {formatCurrency(order.total_value)}
         </p>
@@ -224,12 +225,12 @@ export default function SalesHome() {
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--content-primary)]">
       <div className="p-4 pb-6 space-y-6">
-        {/* Top: Greeting + date */}
+        {/* Top: Greeting + date — use content tokens so readable on light bg */}
         <header>
-          <h1 className="text-2xl font-bold text-white">
+          <h1 className="text-2xl font-bold text-[var(--content-primary)]">
             Hey, {userName ?? 'there'}
           </h1>
-          <p className="text-sm text-[var(--navy-400)] mt-0.5">{todayFormatted()}</p>
+          <p className="text-sm text-[var(--content-tertiary)] mt-0.5">{todayFormatted()}</p>
         </header>
 
         {/* Hero: Annual target ring */}
@@ -280,7 +281,7 @@ export default function SalesHome() {
                 <div className="w-10 h-10 rounded-xl bg-[var(--role-primary-subtle)] flex items-center justify-center">
                   <PlusCircle size={24} weight="duotone" className="text-[var(--role-content)]" />
                 </div>
-                <span className="font-semibold text-white">New Order</span>
+                <span className="font-semibold text-[var(--content-primary)]">New Order</span>
               </Card>
             </Link>
             <Link to="/sales/orders">
@@ -288,7 +289,7 @@ export default function SalesHome() {
                 <div className="w-10 h-10 rounded-xl bg-[var(--role-primary-subtle)] flex items-center justify-center">
                   <ListBullets size={24} weight="duotone" className="text-[var(--role-content)]" />
                 </div>
-                <span className="font-semibold text-white">My Orders</span>
+                <span className="font-semibold text-[var(--content-primary)]">My Orders</span>
               </Card>
             </Link>
           </div>
@@ -313,7 +314,7 @@ export default function SalesHome() {
             </div>
           ) : (
             <Card>
-              <p className="text-sm text-[var(--navy-400)]">No orders yet</p>
+              <p className="text-sm text-[var(--content-tertiary)]">No orders yet</p>
             </Card>
           )}
         </div>

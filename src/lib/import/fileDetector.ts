@@ -35,11 +35,15 @@ export function detectFileType(workbook: XLSX.WorkBook): DetectionResult {
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const data: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-  // Items / price file: scan first 10 rows for one that has both 'Name' and 'Sales Price'
+  // Items / price file: scan first 10 rows for a header with a name-like column and Sales Price
   const scanLimit = Math.min(10, data.length);
+  const hasNameLike = (r: string[]) =>
+    r.some(h => /^name$/i.test(String(h).trim()) || /item\s*description/i.test(String(h)) || /^description$/i.test(String(h).trim()));
+  const hasSalesPrice = (r: string[]) =>
+    r.some(h => /sales\s*price/i.test(String(h)) || /^price$/i.test(String(h).trim()));
   for (let i = 0; i < scanLimit; i++) {
     const row = getStringRow(data, i);
-    if (row.includes('Name') && row.includes('Sales Price')) {
+    if ((row.includes('Name') || hasNameLike(row)) && (row.includes('Sales Price') || hasSalesPrice(row))) {
       return {
         type: 'items_price',
         label: 'Items / Price List',
