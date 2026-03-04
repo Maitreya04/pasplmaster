@@ -105,7 +105,7 @@ export default function QueuePage() {
             <Card
               pressable
               onClick={() => navigate(`/picking/pick/${myActivePick.id}`)}
-              className="border-l-4 border-emerald-500"
+              className="border-l-4 border-[var(--bg-positive)]"
             >
               <div className="flex items-center justify-between">
                 <div className="min-w-0 flex-1">
@@ -124,7 +124,7 @@ export default function QueuePage() {
                     {myActivePick.item_count} items
                   </p>
                 </div>
-                <div className="flex items-center gap-2 text-emerald-400">
+                <div className="flex items-center gap-2 text-[var(--content-positive)]">
                   <span className="text-sm font-medium">Continue</span>
                   <ArrowRight size={20} weight="bold" />
                 </div>
@@ -227,10 +227,10 @@ function OrderCard({
           onClick={onClaim}
           disabled={claiming}
           className="
-            flex items-center gap-1.5 px-4 py-2.5
-            bg-amber-500 text-gray-950 rounded-xl
+            flex items-center gap-2 px-4 py-3
+            bg-[var(--bg-warning)] text-[var(--content-primary)] rounded-xl
             text-sm font-semibold
-            hover:bg-amber-400 active:scale-95
+            hover:opacity-90 active:scale-95
             transition-all duration-150
             disabled:opacity-50 disabled:cursor-not-allowed
             min-h-[44px]

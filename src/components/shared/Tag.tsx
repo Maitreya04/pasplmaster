@@ -1,7 +1,8 @@
 import { type ReactNode } from 'react';
 import { X } from '@phosphor-icons/react';
 
-type TagColor = 'gray' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink';
+type TagColor = 'gray' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink'
+  | 'accent' | 'positive' | 'warning' | 'negative';
 type TagVariant = 'filled' | 'light' | 'outlined';
 type TagSize = 'sm' | 'md';
 
@@ -16,62 +17,75 @@ interface TagProps {
 }
 
 const colorStyles: Record<TagColor, Record<TagVariant, string>> = {
+  accent: {
+    filled: 'bg-[var(--bg-accent)] text-[var(--content-on-color)]',
+    light: 'bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]',
+    outlined: 'border border-[var(--border-accent)] text-[var(--content-accent)]',
+  },
+  positive: {
+    filled: 'bg-[var(--bg-positive)] text-[var(--content-on-color)]',
+    light: 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]',
+    outlined: 'border border-[var(--border-positive)] text-[var(--content-positive)]',
+  },
+  warning: {
+    filled: 'bg-[var(--bg-warning)] text-[var(--content-on-color)]',
+    light: 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)]',
+    outlined: 'border border-[var(--border-warning)] text-[var(--content-warning)]',
+  },
+  negative: {
+    filled: 'bg-[var(--bg-negative)] text-[var(--content-on-color)]',
+    light: 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]',
+    outlined: 'border border-[var(--border-negative)] text-[var(--content-negative)]',
+  },
   gray: {
-    filled: 'bg-gray-600 text-white',
-    light: 'bg-gray-500/10 text-gray-600 dark:bg-gray-400/15 dark:text-gray-300',
-    outlined: 'border border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-300',
-  },
-  red: {
-    filled: 'bg-red-600 text-white',
-    light: 'bg-red-500/10 text-red-600 dark:bg-red-400/15 dark:text-red-400',
-    outlined: 'border border-red-300 text-red-600 dark:border-red-500/40 dark:text-red-400',
-  },
-  orange: {
-    filled: 'bg-orange-500 text-white',
-    light: 'bg-orange-500/10 text-orange-600 dark:bg-orange-400/15 dark:text-orange-400',
-    outlined: 'border border-orange-300 text-orange-600 dark:border-orange-500/40 dark:text-orange-400',
-  },
-  yellow: {
-    filled: 'bg-yellow-500 text-black',
-    light: 'bg-yellow-500/10 text-yellow-700 dark:bg-yellow-400/15 dark:text-yellow-400',
-    outlined: 'border border-yellow-400 text-yellow-700 dark:border-yellow-500/40 dark:text-yellow-400',
-  },
-  green: {
-    filled: 'bg-green-600 text-white',
-    light: 'bg-green-500/10 text-green-600 dark:bg-green-400/15 dark:text-green-400',
-    outlined: 'border border-green-300 text-green-600 dark:border-green-500/40 dark:text-green-400',
+    filled: 'bg-[var(--bg-inverse-secondary)] text-[var(--content-inverse-primary)]',
+    light: 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]',
+    outlined: 'border border-[var(--border-opaque)] text-[var(--content-secondary)]',
   },
   blue: {
-    filled: 'bg-blue-600 text-white',
-    light: 'bg-blue-500/10 text-blue-600 dark:bg-blue-400/15 dark:text-blue-400',
-    outlined: 'border border-blue-300 text-blue-600 dark:border-blue-500/40 dark:text-blue-400',
+    filled: 'bg-[var(--bg-accent)] text-[var(--content-on-color)]',
+    light: 'bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]',
+    outlined: 'border border-[var(--border-accent)] text-[var(--content-accent)]',
+  },
+  green: {
+    filled: 'bg-[var(--bg-positive)] text-[var(--content-on-color)]',
+    light: 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]',
+    outlined: 'border border-[var(--border-positive)] text-[var(--content-positive)]',
+  },
+  red: {
+    filled: 'bg-[var(--bg-negative)] text-[var(--content-on-color)]',
+    light: 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]',
+    outlined: 'border border-[var(--border-negative)] text-[var(--content-negative)]',
+  },
+  orange: {
+    filled: 'bg-[var(--bg-warning)] text-[var(--content-on-color)]',
+    light: 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)]',
+    outlined: 'border border-[var(--border-warning)] text-[var(--content-warning)]',
+  },
+  yellow: {
+    filled: 'bg-[var(--bg-warning)] text-[var(--content-on-color)]',
+    light: 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)]',
+    outlined: 'border border-[var(--border-warning)] text-[var(--content-warning)]',
   },
   purple: {
-    filled: 'bg-purple-600 text-white',
-    light: 'bg-purple-500/10 text-purple-600 dark:bg-purple-400/15 dark:text-purple-400',
-    outlined: 'border border-purple-300 text-purple-600 dark:border-purple-500/40 dark:text-purple-400',
+    filled: 'bg-[var(--role-primary)] text-[var(--content-on-color)]',
+    light: 'bg-[var(--role-primary-subtle)] text-[var(--role-content)]',
+    outlined: 'border border-[color-mix(in_srgb,var(--role-primary)_30%,transparent)] text-[var(--role-content)]',
   },
   pink: {
-    filled: 'bg-pink-600 text-white',
-    light: 'bg-pink-500/10 text-pink-600 dark:bg-pink-400/15 dark:text-pink-400',
-    outlined: 'border border-pink-300 text-pink-600 dark:border-pink-500/40 dark:text-pink-400',
+    filled: 'bg-[var(--bg-negative)] text-[var(--content-on-color)]',
+    light: 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]',
+    outlined: 'border border-[var(--border-negative)] text-[var(--content-negative)]',
   },
 };
 
 const sizeStyles: Record<TagSize, string> = {
-  sm: 'text-xs px-2 py-0.5 gap-1',
-  md: 'text-sm px-2.5 py-1 gap-1.5',
+  sm: 'text-xs h-5 px-2 gap-1',
+  md: 'text-sm h-6 px-3 gap-1.5',
 };
 
-const closeSize: Record<TagSize, number> = {
-  sm: 12,
-  md: 14,
-};
-
-const iconSize: Record<TagSize, number> = {
-  sm: 12,
-  md: 14,
-};
+const closeSize: Record<TagSize, number> = { sm: 12, md: 14 };
+const iconSize: Record<TagSize, number> = { sm: 12, md: 14 };
 
 export function Tag({
   children,

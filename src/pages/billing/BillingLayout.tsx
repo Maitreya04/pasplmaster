@@ -33,7 +33,7 @@ export default function BillingLayout() {
               <button
                 key={path}
                 onClick={() => navigate(path)}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors duration-150 mb-1 w-full text-left ${
+                className={`flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-colors duration-150 mb-1 w-full text-left ${
                   active
                     ? 'bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
                     : 'text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'

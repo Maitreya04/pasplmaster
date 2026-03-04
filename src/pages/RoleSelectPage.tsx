@@ -6,24 +6,7 @@ import { BottomSheet } from '../components/shared';
 
 type SheetMode = 'sales' | null;
 
-const SALES_NAMES = [
-  'Satish',
-  'Hemant',
-  'Mankar',
-  'Raju Ji',
-  'Rehan Multani',
-  'Hardeep Singh',
-  'Deepak',
-  'Vinod',
-  'Sachin Rao',
-  'Anand Awasthi',
-  'Gourav Yadav',
-  'Mahendra Rajput',
-  'Manish Sharma',
-  'Shri Ram Sharma',
-  'Asad Khan',
-  'Direct',
-];
+import { SALES_NAMES } from '../utils/constants';
 
 /* Design system: indigo (sales), blue (billing), amber (picking) — use palette tokens */
 const ROLES = [

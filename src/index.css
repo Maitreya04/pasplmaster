@@ -142,28 +142,28 @@
 
   /* Accent — from palette scales (4.5:1 text, 3:1 large/icon) */
   --bg-accent: var(--blue-7);
-  --bg-accent-subtle: color-mix(in srgb, var(--blue-7) 7%, transparent);
+  --bg-accent-subtle: color-mix(in srgb, var(--blue-7) 12%, transparent);
   --content-accent: var(--blue-9);
   --border-accent: var(--blue-2);
 
   --bg-positive: var(--green-7);
-  --bg-positive-subtle: color-mix(in srgb, var(--green-7) 7%, transparent);
+  --bg-positive-subtle: color-mix(in srgb, var(--green-7) 12%, transparent);
   --content-positive: var(--green-9);
   --border-positive: var(--green-2);
 
   --bg-warning: var(--amber-7);
-  --bg-warning-subtle: color-mix(in srgb, var(--amber-7) 7%, transparent);
+  --bg-warning-subtle: color-mix(in srgb, var(--amber-7) 12%, transparent);
   --content-warning: var(--amber-9);
   --border-warning: var(--amber-2);
 
   --bg-negative: var(--red-7);
-  --bg-negative-subtle: color-mix(in srgb, var(--red-7) 7%, transparent);
+  --bg-negative-subtle: color-mix(in srgb, var(--red-7) 12%, transparent);
   --content-negative: var(--red-9);
   --border-negative: var(--red-2);
 
   /* Role accent (overridden per role) */
   --role-primary: var(--blue-7);
-  --role-primary-subtle: color-mix(in srgb, var(--blue-7) 7%, transparent);
+  --role-primary-subtle: color-mix(in srgb, var(--blue-7) 12%, transparent);
   --role-content: var(--blue-9);
 }
 
@@ -237,9 +237,9 @@
 /* ─── Role accent overrides (light: palette; dark: unchanged) ─── */
 .role-sales {
   --role-primary: var(--indigo-7);
-  --role-primary-subtle: color-mix(in srgb, var(--indigo-7) 8%, transparent);
+  --role-primary-subtle: color-mix(in srgb, var(--indigo-7) 12%, transparent);
   --role-content: var(--indigo-9);
-  --bg-row-selected: color-mix(in srgb, var(--indigo-7) 7%, transparent);
+  --bg-row-selected: color-mix(in srgb, var(--indigo-7) 10%, transparent);
   --role-hero-bg: var(--indigo-4);
 }
 
@@ -253,9 +253,9 @@
 
 .role-billing {
   --role-primary: var(--blue-7);
-  --role-primary-subtle: color-mix(in srgb, var(--blue-7) 8%, transparent);
+  --role-primary-subtle: color-mix(in srgb, var(--blue-7) 12%, transparent);
   --role-content: var(--blue-9);
-  --bg-row-selected: color-mix(in srgb, var(--blue-7) 7%, transparent);
+  --bg-row-selected: color-mix(in srgb, var(--blue-7) 10%, transparent);
 }
 
 .theme-dark .role-billing,
@@ -267,9 +267,9 @@
 
 .role-picking {
   --role-primary: var(--amber-7);
-  --role-primary-subtle: color-mix(in srgb, var(--amber-7) 8%, transparent);
+  --role-primary-subtle: color-mix(in srgb, var(--amber-7) 12%, transparent);
   --role-content: var(--amber-9);
-  --bg-row-selected: color-mix(in srgb, var(--amber-7) 7%, transparent);
+  --bg-row-selected: color-mix(in srgb, var(--amber-7) 10%, transparent);
 }
 
 .theme-dark .role-picking,
@@ -382,11 +382,32 @@ select {
 
 /* ═══════════════════════════════════════════════════════════════
    DESIGN SYSTEM UTILITIES
-   Usage: add .density-compact to a page or section container to
-   tighten spacing without touching individual components.
    ═══════════════════════════════════════════════════════════════ */
 
-/* ─── A) Density system ─── */
+/* ─── Spacing Scale (4pt base grid) ───
+   All dimensions must land on this scale. 2px is allowed only for
+   micro-spacing inside compact elements (badge padding, icon gaps).
+
+   Scale:  0  2  4  6  8  12  16  20  24  32  40  48  56  64
+   TW:     0 0.5 1 1.5 2  3   4   5   6   8   10  12  14  16
+
+   Component height scale (on 4pt grid):
+     Badge sm    20px  (h-5)       Tag/Badge compact
+     Badge md    24px  (h-6)       Tag default
+     Chip        32px  (h-8)       FilterChip, interactive pills
+     Button sm   36px  (h-9)       Inline qty, compact actions
+     Button md   44px  (h-11)      Touch-friendly minimum (WCAG 2.5.8)
+     Button lg   48px  (h-12)      Secondary buttons, inputs
+     Button xl   56px  (h-14)      Primary CTAs, search input
+     Nav         64px  (h-16)      Bottom navigation bar
+
+   Touch targets: interactive elements must have >= 44×44px tap area
+   (use min-h-[44px] min-w-[44px] even if the visual element is smaller).
+   ─── */
+
+/* ─── A) Density system ───
+   Add .density-compact to a page or section container to
+   tighten spacing without touching individual components. */
 :root {
   /* comfortable (default) */
   --ds-px: 1rem;           /* 16px — horizontal padding for rows/cells/inputs */
@@ -631,23 +652,23 @@ table.ds-table td {
 
 /* Intent chips — non-interactive by default; add cursor-pointer if clickable */
 .ds-chip--positive {
-  background: var(--bg-positive-subtle);
-  color: var(--content-positive);
-  border-color: color-mix(in srgb, var(--bg-positive) 20%, transparent);
+  background: color-mix(in srgb, var(--bg-positive) 18%, transparent);
+  color: var(--bg-positive);
+  border-color: color-mix(in srgb, var(--bg-positive) 40%, transparent);
   cursor: default;
 }
 
 .ds-chip--warning {
-  background: var(--bg-warning-subtle);
-  color: var(--content-warning);
-  border-color: color-mix(in srgb, var(--bg-warning) 20%, transparent);
+  background: color-mix(in srgb, var(--bg-warning) 18%, transparent);
+  color: var(--bg-warning);
+  border-color: color-mix(in srgb, var(--bg-warning) 40%, transparent);
   cursor: default;
 }
 
 .ds-chip--negative {
-  background: var(--bg-negative-subtle);
-  color: var(--content-negative);
-  border-color: color-mix(in srgb, var(--bg-negative) 20%, transparent);
+  background: color-mix(in srgb, var(--bg-negative) 18%, transparent);
+  color: var(--bg-negative);
+  border-color: color-mix(in srgb, var(--bg-negative) 40%, transparent);
   cursor: default;
 }
 

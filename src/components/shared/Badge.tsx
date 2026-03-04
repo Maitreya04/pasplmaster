@@ -53,7 +53,7 @@ function BadgeContent({
     <span
       className={`
         inline-flex items-center justify-center
-        min-w-[18px] h-[18px] px-1 rounded-full
+        min-w-5 h-5 px-1 rounded-full
         text-[11px] font-bold leading-none
         ${styles.filled}
         ${className}

@@ -1,4 +1,4 @@
-import { X } from 'lucide-react';
+import { X } from '@phosphor-icons/react';
 
 interface FilterChipProps {
   label: string;
@@ -23,7 +23,7 @@ export function FilterChip({
       onClick={onClick}
       className={`
         inline-flex items-center gap-1.5
-        px-3 py-1.5 rounded-full text-sm font-medium
+        h-8 px-3 rounded-full text-sm font-medium
         border transition-[background,color,border-color] duration-150 whitespace-nowrap shrink-0
         ${
           selected
@@ -57,10 +57,10 @@ export function FilterChip({
             className="ml-0.5 p-0.5 -m-0.5 rounded hover:bg-[var(--bg-row-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--role-primary)] focus-visible:ring-inset cursor-pointer"
             aria-label="Remove filter"
           >
-            <X className="w-3.5 h-3.5 text-current" aria-hidden />
+            <X size={14} weight="bold" className="text-current" aria-hidden />
           </span>
         ) : (
-          <X className="w-3.5 h-3.5 shrink-0 opacity-70" aria-hidden />
+          <X size={14} weight="bold" className="shrink-0 opacity-70" aria-hidden />
         )
       )}
     </button>

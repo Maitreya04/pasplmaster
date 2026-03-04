@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, CaretDown, MagnifyingGlass, CheckCircle, Plus } from '@phosphor-icons/react';
+import { X, MagnifyingGlass, CheckCircle, Plus } from '@phosphor-icons/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
@@ -11,12 +11,11 @@ import {
   PageHeader,
   NumberStepper,
   BigButton,
+  SelectTrigger,
 } from '../../components/shared';
 import type { Customer } from '../../types';
 
-function formatCurrency(n: number) {
-  return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
-}
+import { formatCurrencyRaw as formatCurrency } from '../../utils/formatters';
 
 // ---------------------------------------------------------------------------
 // SearchableCustomerDropdown
@@ -48,29 +47,23 @@ function SearchableCustomerDropdown({
 
   return (
     <div className="relative">
-      <button
-        type="button"
+      <SelectTrigger
         onClick={() => setOpen(!open)}
-        className="w-full h-14 px-4 rounded-xl bg-[var(--bg-tertiary)] text-left flex items-center justify-between gap-2 border border-[var(--border-subtle)] hover:border-[var(--content-tertiary)] transition-colors"
+        open={open}
+        placeholder={placeholder}
+        hasValue={!!value}
       >
-        {value ? (
-          <span className="text-[var(--content-primary)] font-medium truncate">
+        {value && (
+          <>
             {value.name}
             {value.city && (
               <span className="text-[var(--content-tertiary)] font-normal ml-1">
                 · {value.city}
               </span>
             )}
-          </span>
-        ) : (
-          <span className="text-[var(--content-tertiary)]">{placeholder}</span>
+          </>
         )}
-        <CaretDown
-          size={20}
-          weight="bold"
-          className={`text-[var(--content-tertiary)] shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
-        />
-      </button>
+      </SelectTrigger>
 
       {open && (
         <>

@@ -15,23 +15,7 @@ import {
   BottomSheet,
 } from '../../components/shared';
 import type { OrderItem } from '../../types';
-
-function formatCurrency(n: number) {
-  return n.toLocaleString('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  });
-}
-
-function formatTimestamp(dateStr: string) {
-  return new Date(dateStr).toLocaleString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+import { formatCurrency, formatTimestamp } from '../../utils/formatters';
 
 interface EditableItem extends OrderItem {
   qty_approved: number;
@@ -353,7 +337,7 @@ export default function ReviewPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--navy-50)]">
+    <div className="min-h-screen bg-[var(--bg-primary)]">
       <PageHeader
         title={order?.order_number ?? 'Review Order'}
         onBack={() => navigate('/billing')}
@@ -362,29 +346,29 @@ export default function ReviewPage() {
       <div className="p-4 lg:px-8 lg:py-6 max-w-4xl mx-auto">
         {isLoading ? (
           <div className="animate-pulse space-y-4">
-            <div className="h-8 bg-slate-200 rounded w-1/3" />
-            <div className="h-24 bg-slate-200 rounded" />
-            <div className="h-48 bg-slate-200 rounded" />
+            <div className="h-8 bg-[var(--bg-tertiary)] rounded w-1/3" />
+            <div className="h-24 bg-[var(--bg-tertiary)] rounded" />
+            <div className="h-48 bg-[var(--bg-tertiary)] rounded" />
           </div>
         ) : error || !order ? (
-          <p className="text-red-600">Failed to load order</p>
+          <p className="text-[var(--content-negative)]">Failed to load order</p>
         ) : (
           <>
             {/* Order info bar */}
             <Card className="mb-6 lg:mb-8">
               <div className="space-y-2 text-base lg:text-lg">
-                <p className="font-bold text-slate-900">{order.customer_name}</p>
+                <p className="font-bold text-[var(--content-primary)]">{order.customer_name}</p>
                 {order.customer_city && (
-                  <p className="text-slate-600">{order.customer_city}</p>
+                  <p className="text-[var(--content-secondary)]">{order.customer_city}</p>
                 )}
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm lg:text-base text-slate-600">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm lg:text-base text-[var(--content-secondary)]">
                   <span>Salesperson: {order.salesperson_name}</span>
                   {order.transport_name && (
                     <span>Transport: {order.transport_name}</span>
                   )}
                 </div>
                 <div className="flex items-center gap-3 pt-2">
-                  <span className="font-mono text-slate-600">
+                  <span className="font-mono text-[var(--content-secondary)]">
                     {order.order_number}
                   </span>
                   <StatusBadge status={order.status} />
@@ -392,7 +376,7 @@ export default function ReviewPage() {
                     <StatusBadge status="urgent" />
                   )}
                 </div>
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-[var(--content-tertiary)]">
                   {formatTimestamp(order.created_at)}
                 </p>
               </div>
@@ -400,14 +384,14 @@ export default function ReviewPage() {
 
             {/* Flag resolution banner */}
             {order.status === 'flagged' && (
-              <Card className="mb-6 border-amber-300 bg-amber-50">
+              <Card className="mb-6 border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]">
                 <div className="flex items-start gap-3">
-                  <Warning className="text-amber-500 mt-0.5" size={20} weight="fill" />
+                  <Warning className="text-[var(--content-warning)] mt-0.5" size={20} weight="fill" />
                   <div className="space-y-1">
-                    <p className="text-sm font-semibold text-amber-900">
+                    <p className="text-sm font-semibold text-[var(--content-warning)]">
                       This order was flagged during picking
                     </p>
-                    <p className="text-sm text-amber-800">
+                    <p className="text-sm text-[var(--content-warning)]">
                       Review the flagged lines below, adjust prices/quantities if needed,
                       then mark the order as completed once Busy is updated.
                     </p>
@@ -424,17 +408,17 @@ export default function ReviewPage() {
                 <Card className="mb-6 lg:mb-8">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-slate-800">
+                      <p className="text-sm font-semibold text-[var(--content-primary)]">
                         Picking progress
                       </p>
-                      <p className="text-sm font-mono text-slate-700">
+                      <p className="text-sm font-mono text-[var(--content-secondary)]">
                         {pickingSummary.done}/{pickingSummary.totalLines} lines
                         done
                       </p>
                     </div>
-                    <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                    <div className="h-2 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
                       <div
-                        className="h-full bg-emerald-500"
+                        className="h-full bg-[var(--bg-positive)]"
                         style={{
                           width: `${
                             (pickingSummary.done /
@@ -444,7 +428,7 @@ export default function ReviewPage() {
                         }}
                       />
                     </div>
-                    <div className="flex flex-wrap gap-3 text-xs text-slate-600">
+                    <div className="flex flex-wrap gap-3 text-xs text-[var(--content-secondary)]">
                       <span className="font-mono">
                         Picked: {pickingSummary.picked}
                       </span>
@@ -463,7 +447,7 @@ export default function ReviewPage() {
 
             {/* Item list */}
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-slate-800">Items</h2>
+              <h2 className="text-lg font-semibold text-[var(--content-primary)]">Items</h2>
               <div className="space-y-3">
                 {visibleItems.map((item) => {
                   const price = item.price_quoted ?? item.price_system ?? 0;
@@ -473,27 +457,27 @@ export default function ReviewPage() {
                   <Card
                     key={item.id}
                     className={`flex flex-col lg:flex-row lg:items-center gap-4 ${
-                      isPending ? 'border-amber-300 bg-amber-50' : ''
+                      isPending ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]' : ''
                     }`}
                   >
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-slate-900 text-base lg:text-lg">
+                        <p className="font-semibold text-[var(--content-primary)] text-base lg:text-lg">
                           {item.item_name}
                         </p>
-                        <p className="text-sm text-slate-600 mt-1">
+                        <p className="text-sm text-[var(--content-secondary)] mt-1">
                           Requested: {item.qty_requested} · Unit: ₹
                           {price.toLocaleString('en-IN')}
                         </p>
                         {item.state === 'flagged' && (
                           <div className="mt-2 space-y-1 text-xs">
                             <div className="flex flex-wrap gap-2">
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border border-[var(--border-warning)]">
                                 <Warning size={12} weight="fill" />
                                 {item.flag_reason || 'Flagged in picking'}
                               </span>
                               {typeof item.flag_box_price === 'number' &&
                                 !Number.isNaN(item.flag_box_price) && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-100">
+                                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border border-[var(--border-warning)]">
                                     Box price: ₹
                                     {item.flag_box_price.toLocaleString('en-IN', {
                                       maximumFractionDigits: 2,
@@ -501,17 +485,17 @@ export default function ReviewPage() {
                                   </span>
                                 )}
                               {item.flag_notes && (
-                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 text-amber-900 border border-amber-100">
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border border-[var(--border-warning)]">
                                   {item.flag_notes}
                                 </span>
                               )}
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-[11px] text-slate-600">
+                              <span className="text-[11px] text-[var(--content-secondary)]">
                                 Invoice price (per unit):
                               </span>
                               <div className="flex items-center gap-1">
-                                <span className="text-[11px] text-slate-500">₹</span>
+                                <span className="text-[11px] text-[var(--content-tertiary)]">₹</span>
                                 <input
                                   type="number"
                                   inputMode="decimal"
@@ -524,7 +508,7 @@ export default function ReviewPage() {
                                       Number.parseFloat(e.target.value || '0'),
                                     )
                                   }
-                                  className="w-24 px-2 py-1 rounded-md border border-slate-200 text-[11px] text-slate-900 bg-white"
+                                  className="w-24 px-2 py-1 rounded-md border border-[var(--border-opaque)] text-[11px] text-[var(--content-primary)] bg-[var(--bg-secondary)]"
                                 />
                               </div>
                             </div>
@@ -535,7 +519,7 @@ export default function ReviewPage() {
                           <button
                             type="button"
                             onClick={() => togglePending(item.id)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200"
+                            className="inline-flex items-center gap-1 h-6 pl-2 pr-3 rounded-full text-xs font-semibold bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border border-[var(--border-warning)]"
                           >
                             <Hourglass size={14} weight="bold" />
                             Pending (no stock)
@@ -544,7 +528,7 @@ export default function ReviewPage() {
                           <button
                             type="button"
                             onClick={() => togglePending(item.id)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium text-amber-700 bg-amber-50 border border-amber-100 hover:bg-amber-100 transition-colors"
+                            className="inline-flex items-center gap-1 h-6 pl-2 pr-3 rounded-full text-xs font-medium text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] border border-[var(--border-warning)] hover:bg-[var(--bg-warning-subtle)] transition-colors"
                           >
                             <Hourglass size={14} weight="bold" />
                             Mark as pending (no stock)
@@ -559,13 +543,13 @@ export default function ReviewPage() {
                           min={1}
                           presets={[]}
                         />
-                        <span className="font-mono font-semibold text-slate-800 min-w-[90px] text-base lg:text-lg">
+                        <span className="font-mono font-semibold text-[var(--content-primary)] min-w-[88px] text-base lg:text-lg">
                           ₹{lineTotal.toLocaleString('en-IN')}
                         </span>
                         <button
                           type="button"
                           onClick={() => removeItem(item.id)}
-                          className="min-h-[48px] min-w-[48px] flex items-center justify-center rounded-lg text-red-600 hover:bg-red-50 transition-colors"
+                          className="min-h-[48px] min-w-[48px] flex items-center justify-center rounded-lg text-[var(--content-negative)] hover:bg-[var(--bg-negative-subtle)] transition-colors"
                           aria-label="Remove item"
                         >
                           <X size={22} weight="bold" />
@@ -580,11 +564,11 @@ export default function ReviewPage() {
             {/* Notes */}
             {order.notes && (
               <div className="mt-6">
-                <h2 className="text-lg font-semibold text-slate-800 mb-2">
+                <h2 className="text-lg font-semibold text-[var(--content-primary)] mb-2">
                   Notes
                 </h2>
                 <Card>
-                  <p className="text-slate-700 whitespace-pre-wrap">
+                  <p className="text-[var(--content-secondary)] whitespace-pre-wrap">
                     {order.notes}
                   </p>
                 </Card>
@@ -592,53 +576,53 @@ export default function ReviewPage() {
             )}
 
             {/* Summary */}
-            <Card className="mt-6 lg:mt-8 border-amber-200 bg-amber-50/60">
+            <Card className="mt-6 lg:mt-8 border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]">
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
-                  <Warning size={18} weight="fill" className="text-amber-500" />
-                  <h2 className="text-sm font-semibold tracking-wide text-amber-900 uppercase">
+                  <Warning size={18} weight="fill" className="text-[var(--content-warning)]" />
+                  <h2 className="text-sm font-semibold tracking-wide text-[var(--content-warning)] uppercase">
                     Review summary before billing
                   </h2>
                 </div>
-                <div className="space-y-2 text-sm text-slate-800">
+                <div className="space-y-2 text-sm text-[var(--content-primary)]">
                   <div className="flex items-center justify-between">
                     <div className="inline-flex items-center gap-2">
-                      <CheckCircle size={16} weight="bold" className="text-emerald-600" />
+                      <CheckCircle size={16} weight="bold" className="text-[var(--content-positive)]" />
                       <span>Items ready to bill</span>
                     </div>
-                    <span className="font-mono font-semibold text-emerald-700">
+                    <span className="font-mono font-semibold text-[var(--content-positive)]">
                       {readyToBillCount}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="inline-flex items-center gap-2">
-                      <Warning size={16} weight="bold" className="text-amber-600" />
+                      <Warning size={16} weight="bold" className="text-[var(--content-warning)]" />
                       <span>Price mismatches to review</span>
                     </div>
-                    <span className="font-mono font-semibold text-amber-700">
+                    <span className="font-mono font-semibold text-[var(--content-warning)]">
                       {priceMismatchCount}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="inline-flex items-center gap-2">
-                      <Hourglass size={16} weight="bold" className="text-slate-700" />
+                      <Hourglass size={16} weight="bold" className="text-[var(--content-secondary)]" />
                       <span>Items marked as pending</span>
                     </div>
-                    <span className="font-mono font-semibold text-slate-800">
+                    <span className="font-mono font-semibold text-[var(--content-primary)]">
                       {pendingCount}
                     </span>
                   </div>
                 </div>
-                <div className="flex justify-between items-center pt-3 border-t border-amber-200">
+                <div className="flex justify-between items-center pt-3 border-t border-[var(--border-warning)]">
                   <div>
-                    <p className="text-xs text-slate-600">Total items (qty)</p>
-                    <p className="text-xl font-bold tabular-nums text-slate-900">
+                    <p className="text-xs text-[var(--content-secondary)]">Total items (qty)</p>
+                    <p className="text-xl font-bold tabular-nums text-[var(--content-primary)]">
                       {totalItems}
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-slate-600">Grand total</p>
-                    <p className="text-2xl lg:text-3xl font-bold font-mono text-slate-900">
+                    <p className="text-xs text-[var(--content-secondary)]">Grand total</p>
+                    <p className="text-2xl lg:text-3xl font-bold font-mono text-[var(--content-primary)]">
                       {formatCurrency(grandTotal)}
                     </p>
                   </div>
@@ -662,8 +646,8 @@ export default function ReviewPage() {
                 loading={approveMutation.isPending}
                 className={`sm:flex-[2] hover:opacity-90 ${
                   order.status === 'flagged'
-                    ? 'bg-amber-600'
-                    : 'bg-emerald-600'
+                    ? 'bg-[var(--bg-warning)]'
+                    : 'bg-[var(--bg-positive)]'
                 }`}
               >
                 <CheckCircle size={20} weight="bold" />
@@ -686,14 +670,14 @@ export default function ReviewPage() {
         title="Reject order"
       >
         <div className="space-y-4">
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-[var(--content-secondary)]">
             Please provide a reason for rejecting this order.
           </p>
           <textarea
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
             placeholder="e.g. Incorrect pricing, customer requested cancellation..."
-            className="w-full h-24 px-4 py-3 rounded-xl border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full h-24 px-4 py-3 rounded-xl border border-[var(--border-opaque)] text-[var(--content-primary)] placeholder-[var(--content-quaternary)] focus:outline-none focus:ring-2 focus:ring-[var(--role-primary)]"
             autoFocus
           />
           <BigButton

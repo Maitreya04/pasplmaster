@@ -33,7 +33,7 @@ export function NumberStepper({
 
   if (variant === 'compact') {
     return (
-      <div className="inline-flex items-center gap-1.5">
+      <div className="inline-flex items-center gap-2">
         <button
           onClick={decrement}
           disabled={value <= min}
@@ -114,7 +114,7 @@ export function NumberStepper({
             onClick={() => onChange(clamp(preset))}
             data-inverse-primary={value === preset ? '' : undefined}
             className={`
-              px-3 py-1.5 rounded-lg text-sm font-medium font-mono
+              px-3 h-8 rounded-lg text-sm font-medium font-mono
               transition-colors duration-150
               ${
                 value === preset

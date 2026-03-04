@@ -21,6 +21,7 @@ import {
   StatusBadge,
 } from '../../components/shared';
 import type { OrderItem, ScanResult } from '../../types';
+import { FLAG_REASONS, type FlagReason } from '../../utils/constants';
 import { LiveOcrScanner } from './LiveOcrScanner';
 
 interface ItemMeta {
@@ -29,17 +30,6 @@ interface ItemMeta {
   alias1: string | null;
 }
 type ItemMetaMap = Map<number, ItemMeta>;
-
-const FLAG_REASONS = [
-  'Price Mismatch',
-  'Out of Stock',
-  'Wrong Part',
-  'Damaged',
-  "Can't Find",
-  'Other',
-] as const;
-
-type FlagReason = (typeof FLAG_REASONS)[number];
 
 type PickItemUiState =
   | 'pending'
@@ -515,8 +505,8 @@ export default function PickPage() {
             loading={completeMutation.isPending}
             className={
               hasFlagged
-                ? 'bg-amber-500 text-gray-950'
-                : 'bg-emerald-500 text-white'
+                ? 'bg-[var(--bg-warning)] text-[var(--content-primary)]'
+                : 'bg-[var(--bg-positive)] text-[var(--content-on-color)]'
             }
           >
             {hasFlagged ? (
@@ -554,7 +544,7 @@ export default function PickPage() {
                   transition-colors duration-150 min-h-[48px]
                   ${
                     flagReason === reason
-                      ? 'bg-red-500/20 text-red-400 ring-1 ring-red-500/50'
+                      ? 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] ring-1 ring-[var(--border-negative)]'
                       : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
                   }
                 `}
@@ -581,11 +571,11 @@ export default function PickPage() {
                   onChange={(e) => setFlagBoxPrice(e.target.value)}
                   placeholder="Box price"
                   className="
-                    w-full pl-7 pr-3 py-2.5 rounded-xl
+                    w-full pl-7 pr-3 py-3 rounded-xl
                     bg-[var(--bg-tertiary)] text-[var(--content-primary)]
                     placeholder-[var(--content-disabled)]
                     border border-[var(--border-subtle)]
-                    focus:outline-none focus:ring-2 focus:ring-red-500/50
+                    focus:outline-none focus:ring-2 focus:ring-[var(--border-negative)]
                   "
                 />
               </div>
@@ -600,7 +590,7 @@ export default function PickPage() {
               bg-[var(--bg-tertiary)] text-[var(--content-primary)]
               placeholder-[var(--content-disabled)]
               border border-[var(--border-subtle)]
-              focus:outline-none focus:ring-2 focus:ring-red-500/50
+              focus:outline-none focus:ring-2 focus:ring-[var(--border-negative)]
             "
           />
           <BigButton
@@ -611,7 +601,7 @@ export default function PickPage() {
               (flagReason === 'Price Mismatch' && !flagBoxPrice.trim())
             }
             loading={flagItemMutation.isPending}
-            className="bg-red-600 text-white"
+            className="bg-[var(--bg-negative)] text-[var(--content-on-color)]"
           >
             <Flag size={18} weight="fill" />
             Flag Item
@@ -668,12 +658,12 @@ function PickItemCard({
 
   const borderColor: Record<PickItemUiState, string> = {
     pending: 'border-transparent',
-    scanning: 'border-amber-500 animate-pulse',
-    matched: 'border-emerald-500',
-    not_matched: 'border-red-500',
-    picked: 'border-emerald-500',
-    flagged: 'border-red-500',
-    overridden: 'border-amber-500',
+    scanning: 'border-[var(--border-warning)] animate-pulse',
+    matched: 'border-[var(--bg-positive)]',
+    not_matched: 'border-[var(--bg-negative)]',
+    picked: 'border-[var(--bg-positive)]',
+    flagged: 'border-[var(--bg-negative)]',
+    overridden: 'border-[var(--border-warning)]',
   };
 
   return (
@@ -692,9 +682,9 @@ function PickItemCard({
               <MapPin
                 size={16}
                 weight="fill"
-                className="text-amber-400 mb-0.5"
+                className="text-[var(--content-warning)] mb-0.5"
               />
-              <span className="text-amber-400 font-mono font-bold text-base leading-tight">
+              <span className="text-[var(--content-warning)] font-mono font-bold text-base leading-tight">
                 {oi.rack_no}
               </span>
             </div>
@@ -731,11 +721,11 @@ function PickItemCard({
             {item.uiState === 'flagged' && (
               <div className="flex flex-wrap gap-1">
                 {oi.flag_reason && (
-                  <span className="text-xs text-red-400">{oi.flag_reason}</span>
+                  <span className="text-xs text-[var(--content-negative)]">{oi.flag_reason}</span>
                 )}
                 {typeof oi.flag_box_price === 'number' &&
                   !Number.isNaN(oi.flag_box_price) && (
-                    <span className="text-xs text-red-300">
+                    <span className="text-xs text-[var(--content-negative)]">
                       Box price:{' '}
                       ₹
                       {oi.flag_box_price.toLocaleString('en-IN', {
@@ -746,17 +736,17 @@ function PickItemCard({
               </div>
             )}
             {item.uiState === 'scanning' && (
-              <span className="text-xs text-amber-400 animate-pulse">
+              <span className="text-xs text-[var(--content-warning)] animate-pulse">
                 Scanning...
               </span>
             )}
             {item.uiState === 'matched' && item.scanResult && (
-              <span className="text-xs text-emerald-400 truncate max-w-[200px]">
+              <span className="text-xs text-[var(--content-positive)] truncate max-w-[200px]">
                 Match: {item.scanResult.ocrExtracted?.partNumber || item.scanResult.matchedAgainst}
               </span>
             )}
             {item.uiState === 'not_matched' && item.scanResult && (
-              <span className="text-xs text-red-400 truncate max-w-[200px]">
+              <span className="text-xs text-[var(--content-negative)] truncate max-w-[200px]">
                 Expected {oi.item_alias || oi.item_name}
               </span>
             )}
@@ -797,15 +787,15 @@ function PickItemCard({
         <div className="flex flex-col items-center gap-2 shrink-0">
           {isDone ? (
             item.uiState === 'flagged' ? (
-              <Flag size={28} weight="fill" className="text-red-500" />
+              <Flag size={28} weight="fill" className="text-[var(--content-negative)]" />
             ) : (
               <CheckCircle
                 size={28}
                 weight="fill"
                 className={
                   item.uiState === 'overridden'
-                    ? 'text-amber-500'
-                    : 'text-emerald-500'
+                    ? 'text-[var(--content-warning)]'
+                    : 'text-[var(--content-positive)]'
                 }
               />
             )
@@ -832,8 +822,8 @@ function PickItemCard({
                 onClick={onPick}
                 className="
                   min-h-[44px] min-w-[44px] flex items-center justify-center
-                  rounded-xl bg-emerald-500/20
-                  text-emerald-400
+                  rounded-xl bg-[var(--bg-positive-subtle)]
+                  text-[var(--content-positive)]
                   active:scale-95 transition-transform duration-100
                 "
                 aria-label="Mark as picked"
@@ -846,8 +836,8 @@ function PickItemCard({
                 onClick={onFlag}
                 className="
                   min-h-[44px] min-w-[44px] flex items-center justify-center
-                  rounded-xl bg-red-500/10
-                  text-red-400
+                  rounded-xl bg-[var(--bg-negative-subtle)]
+                  text-[var(--content-negative)]
                   active:scale-95 transition-transform duration-100
                 "
                 aria-label="Flag item"
@@ -861,8 +851,8 @@ function PickItemCard({
                   onClick={onOverride}
                   className="
                     min-h-[44px] px-3 flex items-center justify-center
-                    rounded-xl bg-amber-500/20
-                    text-amber-400 text-xs font-semibold
+                    rounded-xl bg-[var(--bg-warning-subtle)]
+                    text-[var(--content-warning)] text-xs font-semibold
                     active:scale-95 transition-transform duration-100
                   "
                 >

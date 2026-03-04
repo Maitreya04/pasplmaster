@@ -19,3 +19,4 @@ export { Tag } from './Tag.tsx';
 export type { TagColor, TagVariant, TagSize } from './Tag.tsx';
 export { Badge } from './Badge.tsx';
 export type { BadgeColor, BadgeVariant } from './Badge.tsx';
+export { SelectTrigger } from './SelectTrigger.tsx';

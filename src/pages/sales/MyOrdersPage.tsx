@@ -7,24 +7,7 @@ import { usePendingItems } from '../../hooks/usePendingItems';
 import { Card, BottomSheet, StatusBadge, EmptyState, Skeleton } from '../../components/shared';
 import type { Order, OrderItem } from '../../types';
 
-function formatCurrency(n: number) {
-  return n.toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
-}
-
-function formatTimeAgo(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 1) return 'just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-}
+import { formatCurrency, formatTimeAgo } from '../../utils/formatters';
 
 function OrderCard({
   order,
@@ -37,15 +20,15 @@ function OrderCard({
     <Card pressable onClick={onTap}>
       <div className="space-y-2">
         <div className="flex items-start justify-between gap-3">
-          <span className="font-mono text-[var(--navy-300)] text-sm">{order.order_number}</span>
+          <span className="font-mono text-[var(--content-tertiary)] text-sm">{order.order_number}</span>
           <StatusBadge status={order.status} />
         </div>
-        <p className="font-bold text-white">{order.customer_name}</p>
+        <p className="font-bold text-[var(--content-primary)]">{order.customer_name}</p>
         <div className="flex items-center justify-between text-sm">
           <span className="font-mono text-[var(--content-secondary)]">
             {order.item_count} items · {formatCurrency(order.total_value)}
           </span>
-          <span className="text-[var(--navy-400)]">{formatTimeAgo(order.created_at)}</span>
+          <span className="text-[var(--content-tertiary)]">{formatTimeAgo(order.created_at)}</span>
         </div>
       </div>
     </Card>
@@ -95,7 +78,7 @@ function OrderDetailSheet({
                 >
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-[var(--content-primary)]">{item.item_name}</p>
-                    <p className="font-mono text-sm text-[var(--navy-400)]">
+                    <p className="font-mono text-sm text-[var(--content-secondary)]">
                       {qty} × {formatCurrency(price)} = {formatCurrency(lineTotal)}
                     </p>
                   </div>
@@ -151,8 +134,8 @@ export default function MyOrdersPage() {
 
   return (
     <div className="p-4 min-h-screen bg-[var(--bg-primary)]">
-      <h1 className="text-2xl font-bold text-white">My Orders</h1>
-      <p className="text-sm text-[var(--navy-400)] mt-1">
+      <h1 className="text-2xl font-bold text-[var(--content-primary)]">My Orders</h1>
+      <p className="text-sm text-[var(--content-secondary)] mt-1">
         {userName ? `Orders by ${userName}` : 'Your submitted orders'}
       </p>
 

@@ -46,13 +46,16 @@ Hosting:      Vercel
 
 ### 3.1 Role Themes
 
-| Role | Background | Primary | Accent | Use |
-|------|-----------|---------|--------|-----|
-| Sales | `bg-gray-950` | `indigo-600` | `indigo-400` | Dark theme — mobile, outdoors |
-| Billing | `bg-gray-50` | `blue-600` | `blue-400` | Light theme — desktop, office |
-| Picking | `bg-gray-950` | `amber-500` | `amber-400` | Dark theme — mobile, warehouse |
-| Admin | `bg-gray-50` | `gray-700` | `gray-500` | Neutral — desktop |
-| Login | `bg-gray-950` | `emerald-500` | `emerald-400` | Dark — universal |
+Roles are themed via `.role-sales`, `.role-billing`, `.role-picking`, `.role-admin` classes on the layout root. These override CSS variables (`--role-primary`, `--role-content`, etc.) from `src/index.css`.
+
+| Role | Class | Primary (`--role-primary`) | Use |
+|------|-------|---------------------------|-----|
+| Sales | `.role-sales` | `--indigo-7` | Mobile, outdoors |
+| Billing | `.role-billing` | `--blue-7` | Desktop, office |
+| Picking | `.role-picking` | `--amber-7` | Mobile, warehouse |
+| Admin | `.role-admin` | `--gray-6` | Desktop |
+
+Light mode uses `.theme-light`, dark mode uses `.theme-dark`. Both map semantic tokens to the OKLCH palette in `src/index.css`.
 
 ### 3.2 Typography Scale
 
@@ -145,13 +148,14 @@ Every page uses these shared components. Build them FIRST in `src/components/sha
 
 #### StatusBadge
 ```tsx
-// Pill-shaped badges with role-appropriate colors
-// submitted: bg-blue-500/20 text-blue-400
-// approved: bg-emerald-500/20 text-emerald-400
-// picking: bg-amber-500/20 text-amber-400
-// completed: bg-green-500/20 text-green-400
-// flagged: bg-red-500/20 text-red-400
-// urgent: bg-red-600 text-white animate-pulse
+// Pill-shaped badges using semantic CSS variables (--bg-accent-subtle, --content-accent, etc.)
+// submitted: accent (blue) — dot + text + subtle bg + border
+// approved: positive (green)
+// picking: warning (amber)
+// completed: positive (green)
+// dispatched: accent (blue)
+// flagged: negative (red)
+// urgent: solid negative bg + animate-pulse
 
 <StatusBadge status="submitted" />
 <StatusBadge status="urgent" />
@@ -237,17 +241,17 @@ Urgent badge:        animate-pulse
 
 ### 3.7 Icons
 
-Use Lucide React icons throughout. Install: already available via CDN or `npm install lucide-react`
+Use **Phosphor Icons** (`@phosphor-icons/react`) throughout. The entire codebase standardises on Phosphor — do NOT use Lucide React.
 
 ```bash
-npm install lucide-react
+npm install @phosphor-icons/react
 ```
 
 Key icons:
 ```
-Search, ShoppingCart, Package, Truck, User, Camera, Check, X, AlertTriangle,
-ChevronLeft, ChevronRight, Plus, Minus, Upload, Clock, MapPin, Phone,
-ScanLine, Flag, CircleCheck, CircleX, Loader2, MoreVertical, Filter
+MagnifyingGlass, ShoppingCart, Package, Truck, User, Camera, Check, X,
+Warning, CaretLeft, CaretRight, Plus, Minus, UploadSimple, Clock, MapPin,
+Phone, Flag, CheckCircle, XCircle, SpinnerGap, DotsThreeVertical, Funnel
 ```
 
 ---
@@ -992,8 +996,8 @@ pasplmaster/
 │   │       ├── AdminPage.tsx         ← Dashboard + config
 │   │       └── UploadPage.tsx        ← Excel import
 │   └── utils/
-│       ├── formatters.ts             ← Currency, date, time formatters
-│       └── constants.ts              ← Flag reasons, salesperson list, etc.
+│       ├── formatters.ts             ← Shared formatters (currency, date, time)
+│       └── constants.ts              ← Shared constants (FLAG_REASONS, SALES_NAMES)
 ├── public/
 │   └── manifest.json
 ├── .env                              ← VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY

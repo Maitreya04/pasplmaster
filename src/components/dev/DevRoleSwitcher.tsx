@@ -58,7 +58,7 @@ export function DevRoleSwitcher() {
                 key={key}
                 type="button"
                 onClick={() => handleSwitch(key)}
-                className={`px-2.5 py-1 rounded-full border text-[11px] transition-colors ${
+                className={`h-6 px-3 rounded-full border text-[11px] transition-colors ${
                   role === key
                     ? 'bg-white text-black border-white'
                     : 'border-white/30 text-white/90 hover:bg-white/10'
