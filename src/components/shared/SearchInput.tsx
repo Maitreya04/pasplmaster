@@ -62,9 +62,9 @@ export function SearchInput({
   const inputEl = (
     <>
       <MagnifyingGlass
-        size={20}
+        size={18}
         weight="regular"
-        className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--content-tertiary)] pointer-events-none"
+        className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--content-tertiary)] pointer-events-none"
       />
       <input
         ref={inputRef}
@@ -74,8 +74,8 @@ export function SearchInput({
         placeholder={placeholder}
         className={
           leftContent
-            ? 'w-full h-14 pl-12 pr-12 text-base bg-transparent text-[var(--content-primary)] placeholder:text-[var(--content-tertiary)] rounded-r-xl rounded-l-none border-none outline-none focus:ring-1 focus:ring-[var(--border-subtle)]'
-            : 'w-full h-14 pl-12 pr-12 text-base bg-[var(--bg-tertiary)] text-[var(--content-primary)] placeholder:text-[var(--content-tertiary)] rounded-xl border-none outline-none focus:ring-1 focus:ring-[var(--border-subtle)]'
+            ? 'w-full h-12 pl-12 pr-12 text-sm bg-transparent text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] rounded-r-xl rounded-l-none border-none outline-none focus:ring-1 focus:ring-[var(--border-opaque)]'
+            : 'w-full h-12 pl-12 pr-12 text-sm bg-transparent text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] rounded-xl border-none outline-none focus:ring-1 focus:ring-[var(--border-opaque)]'
         }
       />
       <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
@@ -97,7 +97,7 @@ export function SearchInput({
 
   if (leftContent) {
     return (
-      <div className="flex w-full rounded-xl overflow-hidden h-14 bg-[var(--bg-tertiary)]">
+      <div className="flex w-full rounded-xl overflow-hidden h-12 bg-[var(--bg-secondary)] border border-[var(--border-opaque)]">
         <div className="flex items-center shrink-0 border-r border-[var(--border-subtle)]">
           {leftContent}
         </div>
@@ -106,5 +106,9 @@ export function SearchInput({
     );
   }
 
-  return <div className="relative w-full">{inputEl}</div>;
+  return (
+    <div className="relative w-full rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-opaque)]">
+      {inputEl}
+    </div>
+  );
 }

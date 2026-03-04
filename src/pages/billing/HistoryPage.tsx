@@ -9,44 +9,12 @@ import {
   Skeleton,
   SearchInput,
 } from '../../components/shared';
+import { formatCurrency, formatTimeAgo, formatFullDate } from '../../utils/formatters';
 import type { Order, OrderStatus } from '../../types';
 
 const HISTORY_LIMIT = 100;
 
 type DateRange = '7' | '30' | 'all';
-
-function formatCurrency(n: number) {
-  return n.toLocaleString('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  });
-}
-
-function formatTimeAgo(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 1) return 'just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-}
-
-function formatFullDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
 
 function getDateFromIso(range: DateRange): string | undefined {
   if (range === 'all') return undefined;
@@ -78,7 +46,7 @@ function OrderCard({
     <Card pressable onClick={onTap} className="min-h-[56px]">
       <div className="flex flex-col gap-2">
         <div className="flex items-start justify-between gap-3">
-          <span className="font-mono text-sm text-slate-600">
+          <span className="font-mono text-sm text-[var(--content-secondary)]">
             {order.order_number}
           </span>
           <div className="flex items-center gap-2 shrink-0">
@@ -88,13 +56,13 @@ function OrderCard({
             <StatusBadge status={order.status} />
           </div>
         </div>
-        <p className="font-bold text-slate-900">{order.customer_name}</p>
-        <p className="text-sm text-slate-600">{order.salesperson_name}</p>
+        <p className="font-bold text-[var(--content-primary)]">{order.customer_name}</p>
+        <p className="text-sm text-[var(--content-secondary)]">{order.salesperson_name}</p>
         <div className="flex items-center justify-between text-sm">
-          <span className="font-mono text-slate-700">
+          <span className="font-mono text-[var(--content-secondary)]">
             {order.item_count} items · {formatCurrency(order.total_value)}
           </span>
-          <span className="text-slate-500" title={formatFullDate(order.created_at)}>
+          <span className="text-[var(--content-tertiary)]" title={formatFullDate(order.created_at)}>
             {formatTimeAgo(order.created_at)}
           </span>
         </div>
@@ -130,12 +98,12 @@ export default function HistoryPage() {
   }, [orders, searchQuery]);
 
   return (
-    <div className="min-h-screen bg-[var(--navy-50)]">
+    <div className="min-h-screen bg-[var(--bg-primary)]">
       <div className="p-4 lg:px-8 lg:py-6 max-w-6xl mx-auto">
-        <h1 className="text-2xl lg:text-3xl font-bold text-slate-900">
+        <h1 className="text-2xl lg:text-3xl font-bold text-[var(--content-primary)]">
           Order History
         </h1>
-        <p className="text-sm lg:text-base text-slate-600 mt-1">
+        <p className="text-sm lg:text-base text-[var(--content-secondary)] mt-1">
           Search and filter past orders
         </p>
 
@@ -148,38 +116,48 @@ export default function HistoryPage() {
             autoFocus={false}
           />
 
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-3 items-center">
             <div className="flex items-center gap-2">
-              <label htmlFor="date-range" className="text-sm font-medium text-slate-700">
+              <label htmlFor="date-range" className="text-sm font-medium text-[var(--content-secondary)] whitespace-nowrap">
                 Period:
               </label>
-              <select
-                id="date-range"
-                value={dateRange}
-                onChange={(e) => setDateRange(e.target.value as DateRange)}
-                className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-900 text-sm"
-              >
-                <option value="7">Last 7 days</option>
-                <option value="30">Last 30 days</option>
-                <option value="all">All</option>
-              </select>
+              <div className="relative">
+                <select
+                  id="date-range"
+                  value={dateRange}
+                  onChange={(e) => setDateRange(e.target.value as DateRange)}
+                  className="appearance-none h-9 pl-3 pr-8 rounded-lg border border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)] text-sm font-medium leading-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+                >
+                  <option value="7">Last 7 days</option>
+                  <option value="30">Last 30 days</option>
+                  <option value="all">All</option>
+                </select>
+                <svg className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--content-tertiary)]" width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
             </div>
             <div className="flex items-center gap-2">
-              <label htmlFor="status-filter" className="text-sm font-medium text-slate-700">
+              <label htmlFor="status-filter" className="text-sm font-medium text-[var(--content-secondary)] whitespace-nowrap">
                 Status:
               </label>
-              <select
-                id="status-filter"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as OrderStatus | 'all')}
-                className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-900 text-sm"
-              >
-                {STATUS_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <select
+                  id="status-filter"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as OrderStatus | 'all')}
+                  className="appearance-none h-9 pl-3 pr-8 rounded-lg border border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)] text-sm font-medium leading-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+                >
+                  {STATUS_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <svg className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--content-tertiary)]" width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
             </div>
           </div>
         </div>
@@ -191,7 +169,7 @@ export default function HistoryPage() {
               <Skeleton variant="card" count={4} />
             </div>
           ) : error ? (
-            <p className="text-red-600">Failed to load orders</p>
+            <p className="text-[var(--content-negative)]">Failed to load orders</p>
           ) : !filteredOrders.length ? (
             <EmptyState
               icon={ClockCounterClockwise}
@@ -204,7 +182,7 @@ export default function HistoryPage() {
             />
           ) : (
             <>
-              <p className="text-sm text-slate-600 mb-4">
+              <p className="text-sm text-[var(--content-secondary)] mb-4">
                 Showing {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''}
                 {dateRange !== 'all' && ` (last ${dateRange} days)`}
               </p>
