@@ -1,6 +1,6 @@
 import { useState, useMemo, useDeferredValue, useRef, useEffect, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Minus, ShoppingCart, CaretRight, CaretDown, CurrencyInr, Check } from '@phosphor-icons/react';
+import { Plus, Minus, ShoppingCart, CaretRight, CaretDown, CurrencyInr, Check, X } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
@@ -125,20 +125,7 @@ function buildNarrowSuggestions(
   return [...brandSuggestions, ...groupSuggestions].slice(0, 4);
 }
 
-function formatCurrency(n: number | null | undefined) {
-  if (!n || n <= 0) return '—';
-  return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
-}
-
-function formatShortDate(value: string | null): string {
-  if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-  });
-}
+import { formatCurrency, formatShortDate } from '../../utils/formatters';
 
 function BrandFilterSheetContent({
   brands,
@@ -396,7 +383,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
               {trendingItems.map(({ item, totalOrderCount }) => (
                 <div
                   key={item.id}
-                  className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-card bg-[var(--bg-secondary)]"
+                  className="flex items-center justify-between gap-3 px-3 py-3 rounded-xl bg-card bg-[var(--bg-secondary)]"
                 >
                   <div className="min-w-0">
                     <p className="font-semibold text-[var(--content-primary)] truncate">
@@ -441,8 +428,10 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                   const customer = nameToCustomer.get(c.customer_name) ?? null;
                   onCustomerSelect(customer);
                 }}
-                className={`min-w-[180px] max-w-[220px] px-3 py-2.5 rounded-2xl bg-card bg-[var(--bg-secondary)] text-left flex flex-col justify-between gap-1.5 ${
-                  isActive ? 'ring-2 ring-white shadow-lg' : 'ring-0'
+                className={`min-w-[180px] max-w-[220px] px-3 py-3 rounded-2xl text-left flex flex-col justify-between gap-1.5 ${
+                  isActive
+                    ? 'bg-[var(--role-primary-subtle)] border border-[var(--role-primary)] shadow-sm'
+                    : 'bg-[var(--bg-secondary)] border border-[var(--border-subtle)]'
                 }`}
               >
                 <p className="font-semibold text-[var(--content-primary)] line-clamp-2 leading-snug">
@@ -479,7 +468,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                 onClick={() =>
                   onQuickReorderApply(activeCustomer, [{ item: row.item, qty: row.qty }])
                 }
-                className="w-full px-3 py-2.5 rounded-xl bg-card bg-[var(--bg-secondary)] flex items-center justify-between gap-3 text-left active:scale-95"
+                className="w-full px-3 py-3 rounded-xl bg-card bg-[var(--bg-secondary)] flex items-center justify-between gap-3 text-left active:scale-95"
               >
                 <div className="min-w-0">
                   <p className="font-semibold text-sm text-[var(--content-primary)] truncate">
@@ -624,7 +613,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
             {trendingItems.map(({ item, totalOrderCount }) => (
               <div
                 key={item.id}
-                className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-card bg-[var(--bg-secondary)]"
+                className="flex items-center justify-between gap-3 px-3 py-3 rounded-xl bg-card bg-[var(--bg-secondary)]"
               >
                 <div className="min-w-0">
                   <p className="font-semibold text-[var(--content-primary)] truncate">
@@ -724,7 +713,7 @@ function ItemRow({
   const isEditingQty = editingItemId === item.id;
 
   return (
-    <li className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-[60px]">
+    <li className="flex items-center gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-[60px]">
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-[var(--content-primary)] leading-snug">
           {highlightText(item.name, query)}
@@ -1003,10 +992,10 @@ export default function NewOrderPage() {
                         e.stopPropagation();
                         setSelectedBrand(null);
                       }}
-                      className="flex items-center justify-center w-8 h-full shrink-0 text-[var(--content-tertiary)] hover:text-[var(--content-primary)]"
+                      className="flex items-center justify-center w-8 h-full shrink-0 text-[var(--content-tertiary)] hover:text-[var(--content-primary)] transition-colors"
                       aria-label="Reset to all brands"
                     >
-                      ✕
+                      <X size={14} weight="bold" />
                     </button>
                   )}
                 </div>
@@ -1020,7 +1009,7 @@ export default function NewOrderPage() {
           </div>
 
           {narrowSuggestions.length > 0 && !selectedGroup && (
-            <div className="rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-2.5 shadow-lg space-y-1.5">
+            <div className="rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-3 shadow-lg space-y-1.5">
               <p className="text-[10px] uppercase tracking-wide text-[var(--content-tertiary)]">
                 Narrow by
               </p>
@@ -1032,7 +1021,7 @@ export default function NewOrderPage() {
                       if (s.type === 'brand') setSelectedBrand(s.value);
                       if (s.type === 'group') setSelectedGroup(s.value);
                     }}
-                    className="px-3 py-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--content-secondary)] text-xs flex items-center gap-1.5 shrink-0 active:scale-95"
+                    className="px-3 h-8 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--content-secondary)] text-xs flex items-center gap-1.5 shrink-0 active:scale-95"
                   >
                     <span>{s.label}</span>
                     <span className="text-[10px] text-[var(--content-quaternary)]">
