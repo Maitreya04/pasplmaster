@@ -56,7 +56,7 @@ const DEFAULT_COLS = {
 } as const;
 
 /** Find column index for a field by matching header labels (case-insensitive). Returns -1 if none match. */
-function detectColumnIndices(headerRow: unknown[]): typeof DEFAULT_COLS {
+function detectColumnIndices(headerRow: unknown[]): Record<keyof typeof DEFAULT_COLS, number> {
   const headers = (headerRow as unknown[]).map(c => String(c ?? '').trim().toLowerCase());
   const find = (...labels: string[]): number => {
     const idx = headers.findIndex(h => labels.some(l => h.includes(l) || l.includes(h)));

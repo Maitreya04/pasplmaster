@@ -12,11 +12,11 @@ export type Scale = readonly [string, string, string, string, string, string, st
 export const scales = palette as Record<ScaleName, string[]>;
 
 /** Gray (neutrals), Blue (accent), Green/Amber/Red (status), Indigo (role: sales) */
-export const gray: Scale = scales.gray as Scale;
-export const blue: Scale = scales.blue as Scale;
-export const green: Scale = scales.green as Scale;
-export const amber: Scale = scales.amber as Scale;
-export const red: Scale = scales.red as Scale;
-export const indigo: Scale = scales.indigo as Scale;
+export const gray: Scale = scales.gray as unknown as Scale;
+export const blue: Scale = scales.blue as unknown as Scale;
+export const green: Scale = scales.green as unknown as Scale;
+export const amber: Scale = scales.amber as unknown as Scale;
+export const red: Scale = scales.red as unknown as Scale;
+export const indigo: Scale = scales.indigo as unknown as Scale;
 
 export default scales;
