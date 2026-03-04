@@ -105,7 +105,7 @@ export function OcrScannerSheet({
             </p>
           </div>
           {expectedCode && (
-            <span className="shrink-0 self-start mt-4 inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2.5 py-1 text-xs font-mono font-semibold text-[var(--content-secondary)] ring-1 ring-[var(--border-subtle)]">
+            <span className="shrink-0 self-start mt-4 inline-flex items-center rounded-full bg-[var(--bg-tertiary)] h-6 px-3 text-xs font-mono font-semibold text-[var(--content-secondary)] ring-1 ring-[var(--border-subtle)]">
               {expectedCode}
             </span>
           )}
@@ -159,20 +159,20 @@ export function OcrScannerSheet({
 
           {/* Done — Match overlay */}
           {photoState === 'done' && scanResult?.isMatch && (
-            <div className="absolute inset-0 bg-emerald-950/70 flex flex-col items-center justify-center gap-2">
-              <CheckCircle size={44} weight="fill" className="text-emerald-400" />
-              <p className="text-base font-bold text-emerald-300">Part confirmed</p>
+            <div className="absolute inset-0 bg-[color-mix(in_srgb,var(--bg-positive)_70%,black)] flex flex-col items-center justify-center gap-2">
+              <CheckCircle size={44} weight="fill" className="text-[var(--content-positive)]" />
+              <p className="text-base font-bold text-[var(--content-on-color)]">Part confirmed</p>
               {detectedCode && (
-                <p className="text-xs font-mono text-emerald-400/80">{detectedCode}</p>
+                <p className="text-xs font-mono text-[var(--content-on-color)] opacity-80">{detectedCode}</p>
               )}
             </div>
           )}
 
           {/* Done — Mismatch overlay */}
           {photoState === 'done' && scanResult && !scanResult.isMatch && (
-            <div className="absolute inset-0 bg-gray-950/75 flex flex-col items-center justify-center gap-1.5 px-5">
-              <XCircle size={40} weight="fill" className="text-red-400" />
-              <p className="text-base font-bold text-red-300">Wrong part</p>
+            <div className="absolute inset-0 bg-[var(--bg-overlay)] flex flex-col items-center justify-center gap-1.5 px-5">
+              <XCircle size={40} weight="fill" className="text-[var(--content-negative)]" />
+              <p className="text-base font-bold text-[var(--content-negative)]">Wrong part</p>
               <div className="mt-1 space-y-0.5 text-center">
                 {detectedCode && (
                   <p className="text-xs text-white/60">
@@ -192,7 +192,7 @@ export function OcrScannerSheet({
                       key={p.key}
                       className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                         p.strong
-                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border border-[var(--border-positive)]'
                           : 'bg-white/10 text-white/50 border border-white/10'
                       }`}
                     >
@@ -213,7 +213,7 @@ export function OcrScannerSheet({
             onClick={() => fileInputRef.current?.click()}
             className="
               w-full min-h-[56px] rounded-2xl
-              bg-white text-gray-950 font-bold text-[15px]
+              bg-[var(--bg-secondary)] text-[var(--content-primary)] font-bold text-[15px]
               flex items-center justify-center gap-2.5
               active:scale-[0.97] transition-transform duration-100
               shadow-sm
@@ -246,7 +246,7 @@ export function OcrScannerSheet({
             onClick={onConfirm}
             className="
               w-full min-h-[56px] rounded-2xl
-              bg-emerald-500 text-white font-bold text-[15px]
+              bg-[var(--bg-positive)] text-[var(--content-on-color)] font-bold text-[15px]
               flex items-center justify-center gap-2.5
               active:scale-[0.97] transition-transform duration-100
             "
@@ -263,7 +263,7 @@ export function OcrScannerSheet({
               onClick={onRetake}
               className="
                 w-full min-h-[52px] rounded-2xl
-                bg-white text-gray-950 font-bold text-[15px]
+                bg-[var(--bg-secondary)] text-[var(--content-primary)] font-bold text-[15px]
                 flex items-center justify-center gap-2.5
                 active:scale-[0.97] transition-transform duration-100
               "
@@ -311,7 +311,7 @@ export function OcrScannerSheet({
                     bg-[var(--bg-tertiary)] text-[var(--content-primary)]
                     placeholder-[var(--content-disabled)]
                     border border-[var(--border-subtle)]
-                    focus:outline-none focus:ring-2 focus:ring-amber-500/50
+                    focus:outline-none focus:ring-2 focus:ring-[var(--border-warning)]
                   "
                 />
                 <button
@@ -322,7 +322,7 @@ export function OcrScannerSheet({
                   disabled={!manualValue.trim()}
                   className="
                     h-11 px-4 rounded-xl
-                    bg-amber-500 text-gray-950 font-semibold
+                    bg-[var(--bg-warning)] text-[var(--content-primary)] font-semibold
                     disabled:opacity-40 disabled:cursor-not-allowed
                     active:scale-95 transition-transform duration-100
                   "

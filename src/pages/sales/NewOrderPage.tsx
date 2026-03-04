@@ -383,7 +383,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
               {trendingItems.map(({ item, totalOrderCount }) => (
                 <div
                   key={item.id}
-                  className="flex items-center justify-between gap-3 px-3 py-3 rounded-xl bg-card bg-[var(--bg-secondary)]"
+                  className="flex items-center justify-between gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)]"
                 >
                   <div className="min-w-0">
                     <p className="font-semibold text-[var(--content-primary)] truncate">
@@ -468,7 +468,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                 onClick={() =>
                   onQuickReorderApply(activeCustomer, [{ item: row.item, qty: row.qty }])
                 }
-                className="w-full px-3 py-3 rounded-xl bg-card bg-[var(--bg-secondary)] flex items-center justify-between gap-3 text-left active:scale-95"
+                className="w-full px-3 py-3 rounded-xl bg-[var(--bg-secondary)] flex items-center justify-between gap-3 text-left active:scale-95"
               >
                 <div className="min-w-0">
                   <p className="font-semibold text-sm text-[var(--content-primary)] truncate">
@@ -519,7 +519,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                   key={row.item.id}
                   type="button"
                   onClick={() => toggleQuickReorderItem(row.item.id)}
-                  className="w-full px-3 py-3 min-h-[80px] rounded-xl bg-card bg-[var(--bg-secondary)] flex items-start gap-3 text-left cursor-pointer"
+                  className="w-full px-3 py-3 min-h-[80px] rounded-xl bg-[var(--bg-secondary)] flex items-start gap-3 text-left cursor-pointer"
                   role="checkbox"
                   aria-checked={row.checked}
                 >
@@ -613,7 +613,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
             {trendingItems.map(({ item, totalOrderCount }) => (
               <div
                 key={item.id}
-                className="flex items-center justify-between gap-3 px-3 py-3 rounded-xl bg-card bg-[var(--bg-secondary)]"
+                className="flex items-center justify-between gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)]"
               >
                 <div className="min-w-0">
                   <p className="font-semibold text-[var(--content-primary)] truncate">
