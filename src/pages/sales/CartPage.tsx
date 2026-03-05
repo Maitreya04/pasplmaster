@@ -295,7 +295,6 @@ export default function CartPage() {
                 {items.map((ci) => {
                   const price = ci.specialRate ?? ci.item.sales_price;
                   const partNo = ci.item.alias1 ?? ci.item.alias;
-                  const lineTotal = price * ci.qty;
                   return (
                     <li
                       key={ci.item.id}
