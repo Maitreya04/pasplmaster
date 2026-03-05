@@ -163,23 +163,34 @@ function ProductGroupBar({
   target: number;
   achieved: number;
 }) {
-  const targetRupees = target * 100000;
-  const pct = targetRupees > 0 ? (achieved / targetRupees) * 100 : 0;
+  const targetLakhs = target; // already in lakhs
+  const achievedLakhs = achieved / 100000; // rupees -> lakhs
+  const pct = targetLakhs > 0 ? (achievedLakhs / targetLakhs) * 100 : 0;
+  const gapLakhs = Math.max(targetLakhs - achievedLakhs, 0);
+  const pctRounded = Math.round(Math.min(100, Math.max(0, pct)));
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       <div className="flex justify-between items-baseline gap-2">
-        <span className="text-sm text-[var(--content-primary)] truncate">{group}</span>
-        <span className="font-mono text-xs text-[var(--content-tertiary)] shrink-0">
-          ₹{formatLakhs(target)}
+        <span className="text-sm font-medium text-[var(--content-primary)] truncate">{group}</span>
+        <span className="font-mono text-[11px] text-[var(--content-tertiary)] shrink-0">
+          Target ₹{formatLakhs(targetLakhs)}
         </span>
       </div>
-      <div className="h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
+      <div className="h-1.25 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
         <div
           className="h-full bg-[var(--role-primary)] rounded-full transition-all duration-300"
           style={{ width: `${Math.min(100, pct)}%` }}
         />
       </div>
+      <p className="text-[11px]">
+        <span className="font-semibold text-[var(--content-secondary)]">
+          Gap <span className="font-mono">₹{formatLakhs(gapLakhs)}</span>
+        </span>
+        <span className="ml-2 text-[var(--content-tertiary)] font-mono">
+          Done ₹{formatLakhs(Math.max(achievedLakhs, 0))} ({pctRounded}%)
+        </span>
+      </p>
     </div>
   );
 }

@@ -59,6 +59,14 @@ function getSheet(workbook: XLSX.WorkBook, name: string): XLSX.WorkSheet | null 
   return null;
 }
 
+function normalizeProductGroup(name: string): string {
+  const trimmed = name.trim();
+  const upper = trimmed.toUpperCase();
+  // Roll up all U4* groups into a single "U4 WHEELER" bucket for dashboards
+  if (upper.startsWith('U4 ')) return 'U4 WHEELER';
+  return trimmed;
+}
+
 function parse4WFSheet(sheet: XLSX.WorkSheet): Array<{ salesperson_name: string; product_group: string; annual_target_lakhs: number }> {
   const raw: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
   if (raw.length < 3) return [];
@@ -75,8 +83,13 @@ function parse4WFSheet(sheet: XLSX.WorkSheet): Array<{ salesperson_name: string;
     const header = str(row1[c]);
     if (header) {
       const key = header.toUpperCase().replace(/\s+/g, '');
-      const displayName = NAME_MAP_4WF[key];
-      if (displayName) lastSalesperson = displayName;
+      // Ignore TOTAL columns (these are per-row totals across all salespeople)
+      if (key.startsWith('TOTAL')) {
+        lastSalesperson = null;
+      } else {
+        const displayName = NAME_MAP_4WF[key];
+        if (displayName) lastSalesperson = displayName;
+      }
     }
     const yearVal = str(row2[c]);
     const is2526 = yearVal === '25-26' || yearVal === '2025-26';
@@ -85,16 +98,20 @@ function parse4WFSheet(sheet: XLSX.WorkSheet): Array<{ salesperson_name: string;
 
   for (let r = 2; r < raw.length; r++) {
     const row = (raw[r] ?? []) as unknown[];
-    const productGroup = str(row[0]);
-    if (!productGroup || productGroup.toUpperCase() === 'TOTAL') continue;
+    const productGroupRaw = str(row[0]);
+    if (!productGroupRaw) continue;
+    const pgNorm = productGroupRaw.toUpperCase().replace(/\s+/g, ' ').trim();
+    // Skip any total rows like "TOTAL", "TOTAL 4W", "TOTAL 2W"
+    if (pgNorm === 'TOTAL' || pgNorm.startsWith('TOTAL ')) continue;
 
     for (const [colStr, salespersonName] of Object.entries(colToName)) {
       const col = parseInt(colStr, 10);
       const val = parseNum(row[col]);
       if (val == null || val === 0) continue;
+      // Excel values are already ANNUAL targets in lakhs
       targets.push({
         salesperson_name: salespersonName,
-        product_group: productGroup,
+        product_group: normalizeProductGroup(productGroupRaw),
         annual_target_lakhs: val,
       });
     }
@@ -110,16 +127,20 @@ function parse2WfSheet(sheet: XLSX.WorkSheet): Array<{ salesperson_name: string;
 
   for (let r = 1; r < raw.length; r++) {
     const row = (raw[r] ?? []) as unknown[];
-    const productGroup = str(row[0]);
-    if (!productGroup || productGroup.toUpperCase() === 'TOTAL') continue;
+    const productGroupRaw = str(row[0]);
+    if (!productGroupRaw) continue;
+    const pgNorm = productGroupRaw.toUpperCase().replace(/\s+/g, ' ').trim();
+    // Skip any total rows like "TOTAL", "TOTAL 4W", "TOTAL 2W"
+    if (pgNorm === 'TOTAL' || pgNorm.startsWith('TOTAL ')) continue;
 
     for (const [colStr, salespersonName] of Object.entries(COL_TO_NAME_2WF)) {
       const col = parseInt(colStr, 10);
       const val = parseNum(row[col]);
       if (val == null || val === 0) continue;
+      // Excel values are already ANNUAL targets in lakhs
       targets.push({
         salesperson_name: salespersonName,
-        product_group: productGroup,
+        product_group: normalizeProductGroup(productGroupRaw),
         annual_target_lakhs: val,
       });
     }

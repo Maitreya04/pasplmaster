@@ -90,6 +90,11 @@ export async function importSalesHistory(
 ): Promise<ImportProgress> {
   const customerAgg = new Map<CustomerTopItemKey, CustomerTopItemAgg>();
   const salespersonAgg = new Map<SalespersonTopCustomerKey, SalespersonTopCustomerAgg>();
+  const salespersonFyAgg = new Map<string, { salesperson_name: string; fyear: string; total_value: number }>();
+  const salespersonGroupAgg = new Map<
+    string,
+    { salesperson_name: string; product_group: string; fyear: string; total_value: number }
+  >();
 
   let sourceRowCount = 0;
 
@@ -103,7 +108,9 @@ export async function importSalesHistory(
 
     const header = (raw[0] as unknown[]).map(c => String(c ?? '').trim());
 
-    const colVchDate = findCol(header, ['VchDate', 'Vch Date', 'Voucher Date']);
+    const colVchDate = findCol(header, ['VchDate', 'Vch Date', 'Voucher Date', 'invoice_date', 'Invoice Date']);
+    const colFyear = findCol(header, ['fyear', 'FYear', 'FY', 'Financial Year']);
+    const colProductGroup = findCol(header, ['item_main_group', 'Item Main Group']);
     const colParty = findCol(header, ['Party', 'Party Name', 'Customer', 'Customer Name']);
     const colSalesman = findCol(header, ['Salesman', 'Sales Person', 'Salesperson']);
     const colItem = findCol(header, ['Itemname', 'Item Name', 'Item', 'Product', 'Stock Item']);
@@ -189,6 +196,35 @@ export async function importSalesHistory(
         spAgg.dates.add(vchDate);
         spAgg.last_order_date = maxDate(spAgg.last_order_date, vchDate);
       }
+
+      // --- salesperson_fy_sales aggregation (for coverage vs targets) ---
+      const fyear = colFyear >= 0 ? toStr(row[colFyear]) : null;
+      if (fyear) {
+        const fyKey = `${salesman}|${fyear}`;
+        let fyAgg = salespersonFyAgg.get(fyKey);
+        if (!fyAgg) {
+          fyAgg = { salesperson_name: salesman, fyear, total_value: 0 };
+          salespersonFyAgg.set(fyKey, fyAgg);
+        }
+        fyAgg.total_value += amtVal;
+      }
+
+      // --- salesperson_product_group_sales aggregation (by item_main_group) ---
+      if (colProductGroup >= 0 && fyear) {
+        const rawPg = toStr(row[colProductGroup]);
+        if (rawPg) {
+          const upper = rawPg.toUpperCase();
+          // Roll up all U4* groups into "U4 WHEELER" bucket
+          const pg = upper.startsWith('U4 ') ? 'U4 WHEELER' : rawPg;
+          const pgKey = `${salesman}|${pg}|${fyear}`;
+          let pgAgg = salespersonGroupAgg.get(pgKey);
+          if (!pgAgg) {
+            pgAgg = { salesperson_name: salesman, product_group: pg, fyear, total_value: 0 };
+            salespersonGroupAgg.set(pgKey, pgAgg);
+          }
+          pgAgg.total_value += amtVal;
+        }
+      }
     }
   }
 
@@ -212,8 +248,26 @@ export async function importSalesHistory(
     updated_at: new Date().toISOString(),
   }));
 
+  const fySalesRecords = Array.from(salespersonFyAgg.values()).map(a => ({
+    salesperson_name: a.salesperson_name,
+    fyear: a.fyear,
+    total_value: a.total_value,
+    updated_at: new Date().toISOString(),
+  }));
+
+  const groupSalesRecords = Array.from(salespersonGroupAgg.values()).map(a => ({
+    salesperson_name: a.salesperson_name,
+    product_group: a.product_group,
+    fyear: a.fyear,
+    total_value: a.total_value,
+    updated_at: new Date().toISOString(),
+  }));
+
   const totalBatches =
-    Math.ceil(customerRecords.length / BATCH_SIZE) + Math.ceil(salespersonRecords.length / BATCH_SIZE);
+    Math.ceil(customerRecords.length / BATCH_SIZE) +
+    Math.ceil(salespersonRecords.length / BATCH_SIZE) +
+    Math.ceil(fySalesRecords.length / BATCH_SIZE) +
+    Math.ceil(groupSalesRecords.length / BATCH_SIZE);
 
   let processedBatches = 0;
   let failedCount = 0;
@@ -262,6 +316,32 @@ export async function importSalesHistory(
     const { error } = await supabase
       .from('salesperson_top_customers')
       .upsert(batch, { onConflict: 'salesperson_name,customer_name' });
+    if (error) {
+      failedCount += batch.length;
+    }
+    updateProgress();
+  }
+
+  // Upsert salesperson_fy_sales in batches
+  for (let i = 0; i < fySalesRecords.length; i += BATCH_SIZE) {
+    const batch = fySalesRecords.slice(i, i + BATCH_SIZE);
+    if (batch.length === 0) continue;
+    const { error } = await supabase
+      .from('salesperson_fy_sales')
+      .upsert(batch, { onConflict: 'salesperson_name,fyear' });
+    if (error) {
+      failedCount += batch.length;
+    }
+    updateProgress();
+  }
+
+  // Upsert salesperson_product_group_sales in batches
+  for (let i = 0; i < groupSalesRecords.length; i += BATCH_SIZE) {
+    const batch = groupSalesRecords.slice(i, i + BATCH_SIZE);
+    if (batch.length === 0) continue;
+    const { error } = await supabase
+      .from('salesperson_product_group_sales')
+      .upsert(batch, { onConflict: 'salesperson_name,product_group,fyear' });
     if (error) {
       failedCount += batch.length;
     }

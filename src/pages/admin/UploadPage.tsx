@@ -104,6 +104,19 @@ export default function UploadPage() {
       if (detection.type === 'items_price' || detection.type === 'items_stock') {
         void queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
       }
+
+      // Invalidate dashboard + smart suggestions when targets or sales history change
+      if (detection.type === 'sales_plan') {
+        // Sales targets updated – refresh any salesperson dashboards
+        void queryClient.invalidateQueries({ queryKey: ['sales-dashboard'] });
+      }
+      if (detection.type === 'sales_history') {
+        // Sales history aggregates updated – refresh dashboard & frequently bought data
+        void queryClient.invalidateQueries({ queryKey: ['sales-dashboard'] });
+        void queryClient.invalidateQueries({ queryKey: ['salesperson_top_customers'] });
+        void queryClient.invalidateQueries({ queryKey: ['customer_top_items_trending'] });
+        void queryClient.invalidateQueries({ queryKey: ['customer_top_items_by_customer'] });
+      }
       if (result.failedCount > 0) {
         toast.info(
           `Import finished. ${result.processed.toLocaleString()} ${detection.type === 'sales_plan' ? 'targets' : 'rows'} imported successfully, ${result.failedCount.toLocaleString()} failed.`,

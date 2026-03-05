@@ -62,8 +62,11 @@ export function detectFileType(workbook: XLSX.WorkBook): DetectionResult {
   }
 
   const row1 = getStringRow(data, 0);
-  // Sales history file: row 1 has VchDate, Party, Salesman
-  if (hasAll(row1, ['VchDate', 'Party', 'Salesman'])) {
+  // Sales history file: row 1 has VchDate/Invoice Date, Party/Customer, Salesman/Salesperson
+  if (
+    hasAll(row1, ['VchDate', 'Party', 'Salesman']) ||
+    hasAll(row1, ['invoice_date', 'customer_name', 'salesperson_name'])
+  ) {
     return {
       type: 'sales_history',
       label: 'Sales History',

@@ -41,3 +41,35 @@ CREATE INDEX IF NOT EXISTS idx_salesperson_top_customers_salesperson
 CREATE INDEX IF NOT EXISTS idx_salesperson_top_customers_customer
   ON public.salesperson_top_customers(customer_name);
 
+-- FY-wise sales per salesperson (for target coverage dashboards)
+CREATE TABLE IF NOT EXISTS public.salesperson_fy_sales (
+  id BIGSERIAL PRIMARY KEY,
+  salesperson_name TEXT NOT NULL,
+  fyear TEXT NOT NULL,
+  total_value NUMERIC(16,2) NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (salesperson_name, fyear)
+);
+
+CREATE INDEX IF NOT EXISTS idx_salesperson_fy_sales_salesperson
+  ON public.salesperson_fy_sales(salesperson_name);
+
+-- FY-wise sales per salesperson + product group (for target vs actual by group)
+CREATE TABLE IF NOT EXISTS public.salesperson_product_group_sales (
+  id BIGSERIAL PRIMARY KEY,
+  salesperson_name TEXT NOT NULL,
+  product_group TEXT NOT NULL,
+  fyear TEXT NOT NULL,
+  total_value NUMERIC(16,2) NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (salesperson_name, product_group, fyear)
+);
+
+CREATE INDEX IF NOT EXISTS idx_salesperson_product_group_sales_sp
+  ON public.salesperson_product_group_sales(salesperson_name);
+
+CREATE INDEX IF NOT EXISTS idx_salesperson_product_group_sales_group
+  ON public.salesperson_product_group_sales(product_group);
+
