@@ -21,6 +21,7 @@ export interface SalesDashboardData {
   thisMonthValue: number;
   topProductGroups: ProductGroupTarget[];
   recentOrders: Order[];
+  lastUpdatedAt: string | null;
 }
 
 function getMonthStartEnd(): { start: string; end: string } {
@@ -48,6 +49,7 @@ export function useSalesDashboard(salespersonName: string | null) {
           thisMonthValue: 0,
           topProductGroups: [],
           recentOrders: [],
+          lastUpdatedAt: null,
         };
       }
 
@@ -114,6 +116,41 @@ export function useSalesDashboard(salespersonName: string | null) {
       const fyAchievement =
         (fyRows ?? []).reduce((sum, r) => sum + Number(r.total_value || 0), 0) || 0;
 
+      // 2b. "Last updated" timestamp so salesperson knows data freshness
+      // We take the latest of targets.updated_at and salesperson_fy_sales.updated_at
+      const { data: targetMeta, error: targetMetaErr } = await supabase
+        .from('sales_targets')
+        .select('updated_at')
+        .eq('salesperson_name', salespersonName)
+        .eq('year', TARGET_YEAR)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (targetMetaErr) throw targetMetaErr;
+
+      const { data: historyMeta, error: historyMetaErr } = await supabase
+        .from('salesperson_fy_sales')
+        .select('updated_at')
+        .eq('salesperson_name', salespersonName)
+        .eq('fyear', HISTORY_FYEAR_KEY)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (historyMetaErr) throw historyMetaErr;
+
+      const latestTargetUpdatedAt = targetMeta?.[0]?.updated_at as string | undefined;
+      const latestHistoryUpdatedAt = historyMeta?.[0]?.updated_at as string | undefined;
+
+      let lastUpdatedAt: string | null = null;
+      if (latestTargetUpdatedAt && latestHistoryUpdatedAt) {
+        lastUpdatedAt =
+          latestTargetUpdatedAt > latestHistoryUpdatedAt
+            ? latestTargetUpdatedAt
+            : latestHistoryUpdatedAt;
+      } else {
+        lastUpdatedAt = (latestTargetUpdatedAt ?? latestHistoryUpdatedAt) ?? null;
+      }
+
       // 3. This month's orders
       const { start: monthStart, end: monthEnd } = getMonthStartEnd();
       const { data: monthOrders, error: monthErr } = await supabase
@@ -147,6 +184,7 @@ export function useSalesDashboard(salespersonName: string | null) {
         thisMonthValue,
         topProductGroups,
         recentOrders: (recentOrders ?? []) as Order[],
+        lastUpdatedAt,
       };
     },
     enabled: !!salespersonName,

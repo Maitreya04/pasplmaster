@@ -57,11 +57,13 @@ function HeroCard({
   fyAchievement,
   monthlyTargetLakhs,
   isLoading,
+  lastUpdatedAt,
 }: {
   annualTargetLakhs: number;
   fyAchievement: number;
   monthlyTargetLakhs: number;
   isLoading: boolean;
+  lastUpdatedAt: string | null;
 }) {
   const targetRupees = annualTargetLakhs * 100000;
   const pct = targetRupees > 0 ? (fyAchievement / targetRupees) * 100 : 0;
@@ -83,8 +85,20 @@ function HeroCard({
 
   return (
     <Card className="bg-[var(--role-hero-bg,var(--role-primary))] border border-[var(--role-hero-bg,var(--role-primary))]">
-      <div className="flex flex-col items-center gap-4 py-2">
-        <div className="relative">
+      <div className="relative flex flex-col items-center gap-3 pt-6 pb-3">
+        {lastUpdatedAt && (
+          <div className="absolute left-0 top-0">
+            <span className="inline-flex items-center rounded-full border border-white/30 bg-white/10 px-2.5 py-0.5 text-[10px] font-medium text-white/90 backdrop-blur-sm">
+              As of{' '}
+              {new Date(lastUpdatedAt).toLocaleDateString('en-IN', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+              })}
+            </span>
+          </div>
+        )}
+        <div className="relative mt-1">
           <CircularProgress pct={pct} />
           <span className="absolute inset-0 flex items-center justify-center font-mono text-2xl font-bold text-white">
             {pct.toFixed(0)}%
@@ -233,6 +247,7 @@ export default function SalesHome() {
           fyAchievement={data?.fyAchievement ?? 0}
           monthlyTargetLakhs={data?.monthlyTargetLakhs ?? 0}
           isLoading={isLoading}
+          lastUpdatedAt={data?.lastUpdatedAt ?? null}
         />
 
         {/* This Month */}
