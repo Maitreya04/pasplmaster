@@ -125,7 +125,7 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
   if (!isOpen) return null;
 
   return (
-    <div ref={containerRef} className="fixed inset-0 z-50 flex items-end">
+    <div ref={containerRef} className="fixed inset-0 z-[60] flex items-end">
       <div
         className="absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-sm"
         onClick={onClose}
