@@ -24,6 +24,44 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
     };
   }, [isOpen]);
 
+  // When an input inside the sheet receives focus (especially on mobile),
+  // scroll it into view so it doesn't get covered by the on‑screen keyboard.
+  useEffect(() => {
+    const sheetEl = sheetRef.current;
+    if (!sheetEl) return;
+
+    const handleFocusIn = (event: FocusEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target || !sheetEl.contains(target)) return;
+
+      // Only nudge on small / touch devices to avoid surprising desktop behaviour.
+      const isCoarsePointer =
+        typeof window !== 'undefined' &&
+        window.matchMedia &&
+        window.matchMedia('(pointer: coarse)').matches;
+
+      if (!isCoarsePointer) return;
+
+      // Defer slightly so the browser has applied keyboard/layout changes.
+      window.setTimeout(() => {
+        try {
+          target.scrollIntoView({
+            block: 'center',
+            behavior: 'smooth',
+          });
+        } catch {
+          // Older browsers: use a simpler call.
+          target.scrollIntoView(true);
+        }
+      }, 50);
+    };
+
+    sheetEl.addEventListener('focusin', handleFocusIn);
+    return () => {
+      sheetEl.removeEventListener('focusin', handleFocusIn);
+    };
+  }, []);
+
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     dragStartY.current = e.touches[0].clientY;
   }, []);
@@ -81,7 +119,10 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
           </div>
         )}
 
-        <div className="overflow-y-auto overscroll-contain px-5 pb-5">
+        <div
+          className="overflow-y-auto overscroll-contain px-5 pb-5"
+          style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 20px)' }}
+        >
           {children}
         </div>
       </div>
