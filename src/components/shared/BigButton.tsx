@@ -15,7 +15,7 @@ const baseStyles =
 function getVariantStyles(variant: Variant): string {
   switch (variant) {
     case 'primary':
-      return 'h-14 bg-[var(--bg-inverse-primary)] text-[var(--content-inverse-primary)] rounded-xl hover:opacity-90 active:opacity-80';
+      return 'h-14 bg-[var(--bg-accent)] text-[var(--content-on-color)] rounded-xl hover:opacity-90 active:opacity-80';
     case 'secondary':
       return 'h-12 bg-[var(--bg-tertiary)] text-[var(--content-secondary)] rounded-xl hover:opacity-90 active:opacity-80';
     case 'danger':
