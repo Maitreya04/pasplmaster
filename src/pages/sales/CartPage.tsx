@@ -158,6 +158,7 @@ export default function CartPage() {
   const { data: transports = [] } = useTransports();
 
   const [submittedOrderNumber, setSubmittedOrderNumber] = useState<string | null>(null);
+  const [showItemBreakdown, setShowItemBreakdown] = useState(false);
 
   const submitMutation = useMutation({
     mutationFn: async () => {
@@ -293,6 +294,7 @@ export default function CartPage() {
               <ul className="space-y-2">
                 {items.map((ci) => {
                   const price = ci.specialRate ?? ci.item.sales_price;
+                  const partNo = ci.item.alias1 ?? ci.item.alias;
                   const lineTotal = price * ci.qty;
                   return (
                     <li
@@ -303,11 +305,13 @@ export default function CartPage() {
                         <p className="font-semibold text-[var(--content-primary)] truncate">
                           {ci.item.name}
                         </p>
+                        {partNo && (
+                          <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-[var(--content-tertiary)] font-mono bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">
+                            <span>{partNo}</span>
+                          </p>
+                        )}
                         <p className="text-sm text-[var(--content-tertiary)] mt-0.5">
-                          {formatCurrency(price)} × {ci.qty} ={' '}
-                          <span className="font-mono font-semibold text-[var(--content-primary)]">
-                            {formatCurrency(lineTotal)}
-                          </span>
+                          {formatCurrency(price)} / pc
                         </p>
                       </div>
                       <div className="shrink-0">
@@ -410,15 +414,76 @@ export default function CartPage() {
             </section>
 
             {/* Summary */}
-            <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)]">
-              <div className="flex justify-between text-sm text-[var(--content-secondary)]">
-                <span>Items</span>
-                <span>{totalCount} pcs</span>
+            <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] space-y-2">
+              <div className="flex justify-between items-baseline text-sm text-[var(--content-secondary)]">
+                <div>
+                  <span>Items</span>
+                  <span className="ml-1 text-[var(--content-tertiary)]">
+                    ({totalCount} pcs)
+                  </span>
+                </div>
+                <span className="font-mono text-[var(--content-primary)]">
+                  {formatCurrency(totalValue)}
+                </span>
               </div>
-              <div className="flex justify-between mt-2 text-lg font-bold text-[var(--content-primary)]">
-                <span>Total</span>
-                <span className="font-mono">{formatCurrency(totalValue)}</span>
+              <div className="flex justify-between items-baseline text-sm text-[var(--content-secondary)]">
+                <div>
+                  <span>Transport</span>
+                  <p className="text-[11px] text-[var(--content-tertiary)]">
+                    {transport ? transport.name : 'Not selected'}
+                  </p>
+                </div>
+                <span className="font-mono text-[var(--content-primary)]">
+                  {formatCurrency(0)}
+                </span>
               </div>
+              <div className="border-t border-[var(--border-subtle)] pt-3 mt-2 flex justify-between text-base font-semibold text-[var(--content-primary)]">
+                <span>Grand Total</span>
+                <span className="font-mono">
+                  {formatCurrency(totalValue)}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="mt-2 w-full flex items-center justify-between text-xs text-[var(--content-secondary)] hover:text-[var(--content-primary)]"
+                onClick={() => setShowItemBreakdown((prev) => !prev)}
+              >
+                <span>{showItemBreakdown ? 'Hide item-wise calculation' : 'Show item-wise calculation'}</span>
+                <span className="text-[10px]">
+                  {showItemBreakdown ? '▲' : '▼'}
+                </span>
+              </button>
+              {showItemBreakdown && (
+                <div className="mt-1 pt-2 border-t border-dashed border-[var(--border-subtle)] space-y-1.5">
+                  {items.map((ci) => {
+                    const price = ci.specialRate ?? ci.item.sales_price;
+                    const lineTotal = price * ci.qty;
+                    const partNo = ci.item.alias1 ?? ci.item.alias;
+                    return (
+                      <div key={ci.item.id} className="flex justify-between gap-3 text-[11px] text-[var(--content-secondary)]">
+                        <div className="min-w-0">
+                          <p className="truncate">
+                            {ci.item.name}
+                          </p>
+                          {partNo && (
+                            <p className="font-mono text-[10px] text-[var(--content-tertiary)] truncate">
+                              {partNo}
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-right font-mono">
+                          <p>
+                            {formatCurrency(price)} × {ci.qty}
+                          </p>
+                          <p className="font-semibold text-[var(--content-primary)]">
+                            = {formatCurrency(lineTotal)}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Submit */}
