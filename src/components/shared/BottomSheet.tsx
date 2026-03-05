@@ -9,6 +9,7 @@ interface BottomSheetProps {
 }
 
 export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const dragStartY = useRef<number | null>(null);
   const currentTranslate = useRef(0);
@@ -21,6 +22,42 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
     }
     return () => {
       document.body.style.overflow = '';
+    };
+  }, [isOpen]);
+
+  // On mobile Safari/Chrome, fixed bottom sheets don't automatically move with
+  // the on‑screen keyboard because the layout viewport height doesn't change.
+  // Tie the container to the visual viewport so the whole sheet lifts above
+  // the keyboard instead of being covered by it.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (typeof window === 'undefined' || !window.visualViewport) return;
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    const viewport = window.visualViewport;
+
+    const syncWithViewport = () => {
+      if (!viewport || !containerRef.current) return;
+      const heightDiff = window.innerHeight - viewport.height - viewport.offsetTop;
+      if (heightDiff > 0) {
+        containerRef.current.style.transform = `translateY(-${heightDiff}px)`;
+      } else {
+        containerRef.current.style.transform = '';
+      }
+    };
+
+    syncWithViewport();
+    viewport.addEventListener('resize', syncWithViewport);
+    viewport.addEventListener('scroll', syncWithViewport);
+
+    return () => {
+      viewport.removeEventListener('resize', syncWithViewport);
+      viewport.removeEventListener('scroll', syncWithViewport);
+      if (containerRef.current) {
+        containerRef.current.style.transform = '';
+      }
     };
   }, [isOpen]);
 
@@ -88,7 +125,7 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end">
+    <div ref={containerRef} className="fixed inset-0 z-50 flex items-end">
       <div
         className="absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-sm"
         onClick={onClose}
