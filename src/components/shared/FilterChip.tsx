@@ -24,7 +24,7 @@ export function FilterChip({
       className={`
         inline-flex items-center gap-1.5
         h-8 px-3 rounded-full text-sm font-medium
-        border transition-[background,color,border-color] duration-150 whitespace-nowrap shrink-0
+        border transition-[background,color,border-color] duration-150 whitespace-nowrap shrink-0 active:scale-95
         ${
           selected
             ? 'bg-[var(--role-primary-subtle)] text-[var(--role-content)] border-[color-mix(in_srgb,var(--role-primary)_22%,transparent)]'
@@ -35,7 +35,7 @@ export function FilterChip({
       {label}
       {count !== undefined && (
         <span className={`font-mono text-xs ${selected ? 'opacity-70' : 'text-[var(--content-quaternary)]'}`}>
-          {count}
+          ({count})
         </span>
       )}
       {selected && removable && (

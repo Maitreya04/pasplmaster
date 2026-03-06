@@ -1,4 +1,5 @@
 import type { Item } from '../../types';
+import { EXPAND_MAP } from './abbreviations';
 
 export type MatchLayer =
   | 'exact-name'
@@ -45,13 +46,21 @@ export const SHORTHAND_MAP: Record<string, string> = {
  *  1. lowercase + trim + collapse whitespace
  *  2. expand known shorthand tokens
  */
+/**
+ * Expands a single token using shorthand and abbreviation/misspelling maps (pasplv1-style).
+ */
+function expandToken(t: string): string {
+  const lower = t.toLowerCase();
+  return SHORTHAND_MAP[lower] ?? EXPAND_MAP[lower] ?? lower;
+}
+
 export function normalizeQuery(q: string): string {
   return q
     .toLowerCase()
     .trim()
     .replace(/\s+/g, ' ')
     .split(' ')
-    .map(t => SHORTHAND_MAP[t] ?? t)
+    .map(t => expandToken(t))
     .join(' ');
 }
 
@@ -380,32 +389,24 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
           : 'alias1';
     }
 
-    // Layer 5 & 6: Keyword matching — now includes alias fields
+    // Layer 5 & 6: Keyword matching — require words in item.name
     else if (multiWord) {
-      let hits = 0;
+      let nameHits = 0;
       for (let k = 0; k < wordCount; k++) {
         const w = qWords[k];
-        if (
-          p.nameLower.includes(w) ||
-          p.aliasLower.includes(w) ||
-          p.alias1Lower.includes(w)
-        ) {
-          hits++;
+        if (p.nameLower.includes(w)) {
+          nameHits++;
         }
       }
-      const nameHits = qWords.filter(w => p.nameLower.includes(w)).length;
-      const aliasHits = qWords.filter(
-        w => p.aliasLower.includes(w) || p.alias1Lower.includes(w),
-      ).length;
 
-      if (hits === wordCount) {
+      if (nameHits === wordCount) {
         score = 60;
         layer = 'keywords';
-        field = nameHits >= aliasHits ? 'name' : 'alias1';
-      } else if (hits >= partialMin) {
+        field = 'name';
+      } else if (nameHits >= partialMin) {
         score = 40;
         layer = 'partial';
-        field = nameHits >= aliasHits ? 'name' : 'alias1';
+        field = 'name';
       }
     }
 

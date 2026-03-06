@@ -668,6 +668,8 @@ function highlightText(text: string, query: string): ReactNode {
 interface ItemRowProps {
   result: SearchResult;
   query: string;
+  /** When set, hide parent_group in row if it matches (avoids repeating the active filter) */
+  activeGroupFilter?: string | null;
   onAdd: (item: Item) => void;
   onDecrement: (item: Item, currentQty: number) => void;
   onIncrement: (item: Item, currentQty: number) => void;
@@ -699,6 +701,7 @@ function AliasCode({
 function ItemRow({
   result,
   query,
+  activeGroupFilter,
   onAdd,
   onDecrement,
   onIncrement,
@@ -711,6 +714,7 @@ function ItemRow({
 }: ItemRowProps) {
   const { item, matchedField } = result;
   const isEditingQty = editingItemId === item.id;
+  const hideGroupInRow = activeGroupFilter != null && item.parent_group === activeGroupFilter;
 
   return (
     <li className="flex items-center gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-[60px]">
@@ -719,7 +723,7 @@ function ItemRow({
           {highlightText(item.name, query)}
         </p>
         <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
-          {item.parent_group && (
+          {item.parent_group && !hideGroupInRow && (
             <p className="text-xs text-[var(--content-tertiary)] truncate shrink">
               {item.parent_group}
             </p>
@@ -794,6 +798,7 @@ function ResultSection({
   label,
   results,
   query,
+  activeGroupFilter,
   onAdd,
   onDecrement,
   onIncrement,
@@ -807,6 +812,7 @@ function ResultSection({
   label: string;
   results: SearchResult[];
   query: string;
+  activeGroupFilter?: string | null;
   onAdd: (item: Item) => void;
   onDecrement: (item: Item, qty: number) => void;
   onIncrement: (item: Item, qty: number) => void;
@@ -829,6 +835,7 @@ function ResultSection({
             key={r.item.id}
             result={r}
             query={query}
+            activeGroupFilter={activeGroupFilter}
             inCartQty={getCartQty(r.item.id)}
             price={getPrice(r.item)}
             onAdd={onAdd}
@@ -880,6 +887,19 @@ export default function NewOrderPage() {
       .sort((a, b) => b[1] - a[1])
       .map(([name, count]) => ({ name, count }));
   }, [items]);
+
+  const subGroupsForBrand = useMemo(() => {
+    if (!selectedBrand) return [];
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      if (item.main_group === selectedBrand && item.parent_group) {
+        counts.set(item.parent_group, (counts.get(item.parent_group) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count }));
+  }, [items, selectedBrand]);
 
   const effectiveQuery = query.trim();
   const isCodeMode = detectCodeLike(effectiveQuery);
@@ -991,6 +1011,7 @@ export default function NewOrderPage() {
                       onClick={(e) => {
                         e.stopPropagation();
                         setSelectedBrand(null);
+                        setSelectedGroup(null);
                       }}
                       className="flex items-center justify-center w-8 h-full shrink-0 text-[var(--content-tertiary)] hover:text-[var(--content-primary)] transition-colors"
                       aria-label="Reset to all brands"
@@ -1008,41 +1029,42 @@ export default function NewOrderPage() {
             )}
           </div>
 
-          {narrowSuggestions.length > 0 && !selectedGroup && (
-            <div className="rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-3 shadow-lg space-y-1.5">
+          {((narrowSuggestions.length > 0 && !selectedGroup) || (selectedBrand && subGroupsForBrand.length > 0)) && (
+            <div className="rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-3 shadow-sm space-y-1.5">
               <p className="text-[10px] uppercase tracking-wide text-[var(--content-tertiary)]">
                 Narrow by
               </p>
               <div className="flex gap-2 overflow-x-auto scrollbar-none py-1">
-                {narrowSuggestions.map(s => (
-                  <button
-                    key={`${s.type}-${s.value}`}
-                    onClick={() => {
-                      if (s.type === 'brand') setSelectedBrand(s.value);
-                      if (s.type === 'group') setSelectedGroup(s.value);
-                    }}
-                    className="px-3 h-8 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--content-secondary)] text-xs flex items-center gap-1.5 shrink-0 active:scale-95"
-                  >
-                    <span>{s.label}</span>
-                    <span className="text-[10px] text-[var(--content-quaternary)]">
-                      ({s.count})
-                    </span>
-                  </button>
-                ))}
+                {selectedBrand && subGroupsForBrand.length > 0
+                  ? subGroupsForBrand.map(({ name, count }) => (
+                      <FilterChip
+                        key={name}
+                        label={name}
+                        count={count}
+                        selected={selectedGroup === name}
+                        removable={selectedGroup === name}
+                        onRemove={() => setSelectedGroup(null)}
+                        onClick={() =>
+                          setSelectedGroup(prev => (prev === name ? null : name))
+                        }
+                      />
+                    ))
+                  : narrowSuggestions.map(s => (
+                      <FilterChip
+                        key={`${s.type}-${s.value}`}
+                        label={s.label}
+                        count={s.count}
+                        selected={false}
+                        onClick={() => {
+                          if (s.type === 'brand') setSelectedBrand(s.value);
+                          if (s.type === 'group') setSelectedGroup(s.value);
+                        }}
+                      />
+                    ))}
               </div>
             </div>
           )}
 
-          {selectedGroup && (
-            <div className="flex flex-wrap gap-2">
-              <FilterChip
-                label={`Group: ${selectedGroup}`}
-                selected
-                removable
-                onClick={() => setSelectedGroup(null)}
-              />
-            </div>
-          )}
         </div>
 
         {/* Results area */}
@@ -1098,6 +1120,7 @@ export default function NewOrderPage() {
                 label="Best match"
                 results={bestMatches}
                 query={effectiveQuery}
+                activeGroupFilter={selectedGroup}
                 onAdd={handleAdd}
                 onDecrement={handleDecrement}
                 onIncrement={handleIncrement}
@@ -1112,6 +1135,7 @@ export default function NewOrderPage() {
                 label={bestMatches.length ? 'More results' : 'Results'}
                 results={moreResults}
                 query={effectiveQuery}
+                activeGroupFilter={selectedGroup}
                 onAdd={handleAdd}
                 onDecrement={handleDecrement}
                 onIncrement={handleIncrement}
@@ -1200,6 +1224,7 @@ export default function NewOrderPage() {
           selectedBrand={selectedBrand}
           onSelect={brand => {
             setSelectedBrand(brand);
+            setSelectedGroup(null);
             setIsBrandSheetOpen(false);
           }}
         />

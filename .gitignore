@@ -26,3 +26,6 @@ dist-ssr
 *.sln
 *.sw?
 .vercel
+
+# PASPL v1 reference copy (optional; remove from disk if not needed)
+.pasplv1-ref
