@@ -80,7 +80,7 @@ export function detectCodeLike(q: string): boolean {
   return /\d{4,}[/\-]\d{2,}/.test(t) || /^\d{5,}$/.test(t) || /^[a-z0-9]{4,}-[a-z0-9]{2,}$/i.test(t);
 }
 
-const FUZZY_FALLBACK_THRESHOLD = 5;
+const FUZZY_FALLBACK_THRESHOLD = 15;
 const PARTIAL_KEYWORD_RATIO = 0.6;
 
 // ---------------------------------------------------------------------------
@@ -97,6 +97,8 @@ interface PrepItem {
   aliasNorm: string;
   alias1Norm: string;
   nameWords: string[];
+  /** All tokens from name, alias, alias1, parent_group, main_group (pasplv1-style) */
+  allWords: Set<string>;
 }
 
 interface SearchIndex {
@@ -113,6 +115,14 @@ let _idx: SearchIndex | null = null;
 
 function strip(s: string): string {
   return s.replace(/[\s.\-/\\]/g, '');
+}
+
+/** Tokenize string into lowercase alphanumeric tokens (pasplv1-style). */
+function toTokens(s: string): string[] {
+  return String(s)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
 }
 
 function indexPush(map: Map<string, number[]>, key: string, i: number) {
@@ -143,6 +153,16 @@ function buildIndex(items: Item[]): SearchIndex {
     const aliasNorm = strip(aliasLower);
     const alias1Norm = strip(alias1Lower);
 
+    const nameWords = nameLower.split(/\s+/).filter(Boolean);
+    const allWords = new Set<string>([
+      ...nameWords,
+      ...toTokens(aliasLower),
+      ...toTokens(alias1Lower),
+      ...toTokens(it.parent_group ?? ''),
+      ...toTokens(it.main_group ?? ''),
+      ...toTokens(it.item_category ?? ''),
+    ].filter(Boolean));
+
     all[i] = {
       item: it,
       nameLower,
@@ -151,7 +171,8 @@ function buildIndex(items: Item[]): SearchIndex {
       nameNorm,
       aliasNorm,
       alias1Norm,
-      nameWords: nameLower.split(/\s+/).filter(Boolean),
+      nameWords,
+      allWords,
     };
 
     indexPush(byName, nameLower, i);
@@ -202,17 +223,37 @@ function levenshtein(a: string, b: string, maxDist: number): number {
   return prev[n];
 }
 
-/** Adaptive max distance: 2 edits for 5+ char pairs, 1 for shorter. */
-function maxDist(a: number, b: number): number {
-  return Math.max(a, b) >= 5 ? 2 : 1;
+/**
+ * Levenshtein similarity: 1 - (distance / maxLen). pasplv1 uses ≥ 0.8 for fuzzy match.
+ * E.g. "pistn" vs "piston" → dist=1, sim=0.83; "brek" vs "brake" → dist=2, sim=0.6.
+ */
+function similarity(a: string, b: string): number {
+  if (a === b) return 1;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  const dist = levenshtein(a, b, maxLen);
+  return 1 - Math.min(dist, maxLen) / maxLen;
 }
 
 // ---------------------------------------------------------------------------
-// Fuzzy matching — checks query against each individual name word, then
-// alias and alias1 (stripped). "pistn" matches "PISTON" (distance 1),
-// "brek" matches "BRAKE" (distance 2, both ≥5 via max(4,5)).
-// For multi-word queries, every query word must fuzzy-hit a name word.
+// Fuzzy matching — pasplv1-style: Levenshtein similarity ≥ 0.8 vs product words.
+// Checks name, alias, alias1, parent_group, main_group (allWords).
+// "pistn" matches "PISTON" (sim 0.83), "actva" matches "ACTIVA" (sim 0.8).
+// For multi-word queries, every query word must fuzzy-hit a product word.
 // ---------------------------------------------------------------------------
+
+const FUZZY_SIMILARITY_THRESHOLD = 0.8;
+const MIN_TOKEN_LEN_FOR_FUZZY = 3;
+
+function tokenFuzzyMatches(token: string, words: Set<string>): boolean {
+  if (token.length < MIN_TOKEN_LEN_FOR_FUZZY) return false;
+  for (const w of words) {
+    if (w.length < MIN_TOKEN_LEN_FOR_FUZZY) continue;
+    if (w.includes(token)) return true;
+    if (similarity(token, w) >= FUZZY_SIMILARITY_THRESHOLD) return true;
+  }
+  return false;
+}
 
 function fuzzyMatchItem(
   qNorm: string,
@@ -220,44 +261,13 @@ function fuzzyMatchItem(
   p: PrepItem,
 ): boolean {
   if (qWords.length > 1) {
-    for (let w = 0; w < qWords.length; w++) {
-      const qw = qWords[w];
-      let hit = false;
-      for (let n = 0; n < p.nameWords.length; n++) {
-        const nw = p.nameWords[n];
-        if (nw.includes(qw)) {
-          hit = true;
-          break;
-        }
-        const md = maxDist(qw.length, nw.length);
-        if (Math.abs(qw.length - nw.length) > md) continue;
-        if (levenshtein(qw, nw, md) <= md) {
-          hit = true;
-          break;
-        }
-      }
-      if (!hit) return false;
+    for (const qw of qWords) {
+      if (!tokenFuzzyMatches(qw, p.allWords)) return false;
     }
     return true;
   }
 
-  for (let n = 0; n < p.nameWords.length; n++) {
-    const nw = p.nameWords[n];
-    const md = maxDist(qNorm.length, nw.length);
-    if (Math.abs(qNorm.length - nw.length) > md) continue;
-    if (levenshtein(qNorm, nw, md) <= md) return true;
-  }
-
-  if (p.aliasNorm) {
-    const md = maxDist(qNorm.length, p.aliasNorm.length);
-    if (levenshtein(qNorm, p.aliasNorm, md) <= md) return true;
-  }
-  if (p.alias1Norm) {
-    const md = maxDist(qNorm.length, p.alias1Norm.length);
-    if (levenshtein(qNorm, p.alias1Norm, md) <= md) return true;
-  }
-
-  return false;
+  return tokenFuzzyMatches(qNorm, p.allWords);
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +431,13 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
         layer = 'keywords';
         field = 'name';
       }
+    }
+
+    // Layer: fuzzy-token (pasplv1-style) — Levenshtein similarity ≥ 0.8 vs product words
+    if (score === 0 && !isCodeLike && qWords.every(qw => tokenFuzzyMatches(qw, p.allWords))) {
+      score = 50;
+      layer = 'fuzzy';
+      field = 'name';
     }
 
     if (score > 0) {

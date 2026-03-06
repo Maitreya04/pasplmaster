@@ -668,8 +668,6 @@ function highlightText(text: string, query: string): ReactNode {
 interface ItemRowProps {
   result: SearchResult;
   query: string;
-  /** When set, hide parent_group in row if it matches (avoids repeating the active filter) */
-  activeGroupFilter?: string | null;
   onAdd: (item: Item) => void;
   onDecrement: (item: Item, currentQty: number) => void;
   onIncrement: (item: Item, currentQty: number) => void;
@@ -685,15 +683,24 @@ function AliasCode({
   value,
   query,
   matchedField,
+  placeholder,
 }: {
   value: string;
   query: string;
   matchedField: MatchedField;
+  placeholder?: boolean;
 }) {
   const isMatched = matchedField === 'alias1' || matchedField === 'alias' || matchedField === 'name+alias';
   return (
-    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--content-secondary)] shrink-0 max-w-[120px] truncate">
-      {isMatched ? highlightText(value, query) : value}
+    <span
+      className={`font-mono text-[10px] px-1.5 py-0.5 rounded shrink-0 max-w-[120px] truncate ${
+        placeholder
+          ? 'bg-[var(--bg-tertiary)] text-[var(--content-quaternary)]'
+          : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
+      }`}
+      aria-label={placeholder ? 'Product code (missing)' : 'Product code'}
+    >
+      {isMatched && !placeholder ? highlightText(value, query) : value}
     </span>
   );
 }
@@ -701,7 +708,6 @@ function AliasCode({
 function ItemRow({
   result,
   query,
-  activeGroupFilter,
   onAdd,
   onDecrement,
   onIncrement,
@@ -714,7 +720,8 @@ function ItemRow({
 }: ItemRowProps) {
   const { item, matchedField } = result;
   const isEditingQty = editingItemId === item.id;
-  const hideGroupInRow = activeGroupFilter != null && item.parent_group === activeGroupFilter;
+  const productCode = (item.alias1 ?? item.alias ?? '').toString().trim();
+  const productCodeValue = productCode || '—';
 
   return (
     <li className="flex items-center gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-[60px]">
@@ -722,15 +729,13 @@ function ItemRow({
         <p className="font-semibold text-[var(--content-primary)] leading-snug">
           {highlightText(item.name, query)}
         </p>
-        <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
-          {item.parent_group && !hideGroupInRow && (
-            <p className="text-xs text-[var(--content-tertiary)] truncate shrink">
-              {item.parent_group}
-            </p>
-          )}
-          {item.alias1 && (
-            <AliasCode value={item.alias1} query={query} matchedField={matchedField} />
-          )}
+        <div className="mt-0.5 min-w-0">
+          <AliasCode
+            value={productCodeValue}
+            query={query}
+            matchedField={matchedField}
+            placeholder={!productCode}
+          />
         </div>
         <span className="font-mono text-sm font-semibold text-[var(--content-secondary)] mt-0.5 inline-block">
           {formatCurrency(price)}
@@ -798,7 +803,6 @@ function ResultSection({
   label,
   results,
   query,
-  activeGroupFilter,
   onAdd,
   onDecrement,
   onIncrement,
@@ -812,7 +816,6 @@ function ResultSection({
   label: string;
   results: SearchResult[];
   query: string;
-  activeGroupFilter?: string | null;
   onAdd: (item: Item) => void;
   onDecrement: (item: Item, qty: number) => void;
   onIncrement: (item: Item, qty: number) => void;
@@ -835,7 +838,6 @@ function ResultSection({
             key={r.item.id}
             result={r}
             query={query}
-            activeGroupFilter={activeGroupFilter}
             inCartQty={getCartQty(r.item.id)}
             price={getPrice(r.item)}
             onAdd={onAdd}
@@ -1120,7 +1122,6 @@ export default function NewOrderPage() {
                 label="Best match"
                 results={bestMatches}
                 query={effectiveQuery}
-                activeGroupFilter={selectedGroup}
                 onAdd={handleAdd}
                 onDecrement={handleDecrement}
                 onIncrement={handleIncrement}
@@ -1135,7 +1136,6 @@ export default function NewOrderPage() {
                 label={bestMatches.length ? 'More results' : 'Results'}
                 results={moreResults}
                 query={effectiveQuery}
-                activeGroupFilter={selectedGroup}
                 onAdd={handleAdd}
                 onDecrement={handleDecrement}
                 onIncrement={handleIncrement}
