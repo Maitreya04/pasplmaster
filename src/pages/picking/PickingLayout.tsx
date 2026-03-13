@@ -13,7 +13,7 @@ export default function PickingLayout() {
   const isPickPage = location.pathname.startsWith('/picking/pick/');
 
   return (
-    <div className="theme-light role-picking min-h-screen bg-[var(--bg-primary)] relative">
+    <div className="role-picking min-h-screen bg-[var(--bg-primary)] relative">
       <div className={isPickPage ? '' : 'pb-20'}>
         <Outlet />
       </div>

@@ -22,6 +22,45 @@ function num(val: unknown, fallback: number): number {
   return n;
 }
 
+function detectColumnIndices(headerRow: unknown[]) {
+  const headers = (headerRow as unknown[]).map(c => String(c ?? '').trim().toLowerCase());
+  const find = (...labels: string[]) => {
+    const norm = labels.map(l => l.toLowerCase());
+    // Pass 1: exact match (highest priority)
+    const exact = headers.findIndex(h => norm.some(l => h === l));
+    if (exact >= 0) return exact;
+    // Pass 2: header contains the full label
+    const contains = headers.findIndex(h => norm.some(l => h.includes(l)));
+    if (contains >= 0) return contains;
+    // Pass 3: label contains header (loosest)
+    const reverse = headers.findIndex(h => norm.some(l => l.includes(h)));
+    if (reverse >= 0) return reverse;
+    return -1;
+  };
+  return {
+    itemDetails: find('item details', 'item', 'name', 'description'),
+    alias: find('alias', 'item code', 'code'),
+    alias1: find('alias 1', 'alias1'),
+    parentGroup: find('parent group', 'group', 'category'),
+    cat: find('cat', 'item cat', 'item category'),
+    rackNo: find('rack no', 'rack no.'),
+    qty: find('qty', 'qty.'),
+    gst: find('gst', 'gst%'),
+    hsn: find('hsn'),
+  };
+}
+
+function assignIfPresent(
+  obj: Record<string, unknown>,
+  key: string,
+  value: unknown,
+) {
+  if (value === null || value === undefined) return;
+  // Avoid overwriting existing DB values with empty strings
+  if (typeof value === 'string' && value.trim() === '') return;
+  obj[key] = value;
+}
+
 export async function importStock(
   workbook: XLSX.WorkBook,
   fileName: string,
@@ -31,18 +70,8 @@ export async function importStock(
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const raw: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-  const header = (raw[headerRowIndex] as unknown[]).map(c => String(c ?? '').trim());
-  const col = {
-    itemDetails: header.indexOf('Item Details'),
-    alias: header.indexOf('Alias'),
-    alias1: header.indexOf('Alias 1'),
-    parentGroup: header.indexOf('Parent Group'),
-    cat: header.indexOf('Cat'),
-    rackNo: header.indexOf('Rack No.'),
-    qty: header.indexOf('Qty.'),
-    gst: header.indexOf('GST%'),
-    hsn: header.indexOf('HSN'),
-  };
+  const headerRow = raw[headerRowIndex] ?? [];
+  const col = detectColumnIndices(headerRow);
 
   const dataStartIndex = headerRowIndex + 1;
   const dataRows = raw.slice(dataStartIndex).filter(
@@ -70,23 +99,27 @@ export async function importStock(
         const name = col.itemDetails >= 0 ? str(row[col.itemDetails]) : null;
         if (!name) return null;
 
-        const rackNoVal = col.rackNo >= 0 ? str(row[col.rackNo]) : null;
-
         const record: Record<string, unknown> = {
           name,
-          alias: col.alias >= 0 ? str(row[col.alias]) : null,
-          alias1: col.alias1 >= 0 ? str(row[col.alias1]) : null,
-          parent_group: col.parentGroup >= 0 ? str(row[col.parentGroup]) : null,
-          item_category: col.cat >= 0 ? str(row[col.cat]) : null,
-          stock_qty: col.qty >= 0 ? num(row[col.qty], 0) : 0,
-          gst_percent: col.gst >= 0 ? num(row[col.gst], 18) : 18,
-          hsn_code: col.hsn >= 0 ? str(row[col.hsn]) : null,
           is_active: true,
           updated_at: new Date().toISOString(),
         };
-        if (rackNoVal != null && rackNoVal !== '') {
-          record.rack_no = rackNoVal;
+
+        // Only assign optional fields if the column exists AND value is present.
+        // This prevents wiping existing DB values when the stock sheet omits columns.
+        if (col.alias >= 0) assignIfPresent(record, 'alias', str(row[col.alias]));
+        if (col.alias1 >= 0) assignIfPresent(record, 'alias1', str(row[col.alias1]));
+        if (col.parentGroup >= 0) assignIfPresent(record, 'parent_group', str(row[col.parentGroup]));
+        if (col.cat >= 0) assignIfPresent(record, 'item_category', str(row[col.cat]));
+        if (col.gst >= 0) assignIfPresent(record, 'gst_percent', num(row[col.gst], 18));
+        if (col.hsn >= 0) assignIfPresent(record, 'hsn_code', str(row[col.hsn]));
+        if (col.qty >= 0) assignIfPresent(record, 'stock_qty', num(row[col.qty], 0));
+
+        if (col.rackNo >= 0) {
+          const rackNoVal = str(row[col.rackNo]);
+          if (rackNoVal != null && rackNoVal !== '') assignIfPresent(record, 'rack_no', rackNoVal);
         }
+
         return record;
       })
       .filter((r): r is Record<string, unknown> => r !== null);

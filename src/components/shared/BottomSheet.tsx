@@ -127,14 +127,14 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
   return (
     <div ref={containerRef} className="fixed inset-0 z-[60] flex items-end">
       <div
-        className="absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-sm"
+        className="absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-md transition-opacity duration-300"
         onClick={onClose}
         aria-hidden="true"
       />
 
       <div
         ref={sheetRef}
-        className="relative z-10 w-full max-h-[85vh] bg-[var(--bg-secondary)] rounded-t-3xl flex flex-col animate-slide-up"
+        className="relative z-10 w-full max-h-[85vh] bg-[var(--bg-secondary)]/95 backdrop-blur-xl rounded-t-[2rem] flex flex-col shadow-2xl ring-1 ring-white/10 animate-slide-up"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}

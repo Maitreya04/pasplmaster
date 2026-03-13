@@ -149,7 +149,7 @@ export default function UploadPage() {
   const pct = progress.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0;
 
   return (
-    <div className="theme-light role-admin min-h-screen bg-[var(--bg-primary)]">
+    <div className="role-admin min-h-screen bg-[var(--bg-primary)]">
       <div className="p-4 lg:px-6 max-w-2xl mx-auto space-y-6">
         <div>
           <button

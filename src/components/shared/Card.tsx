@@ -28,12 +28,12 @@ export function Card({
           : undefined
       }
       className={`
-        rounded-2xl p-5
+        rounded-[1.25rem] p-5
         bg-[var(--bg-secondary)]
         border border-[var(--border-subtle)]
         shadow-[var(--shadow-card)]
         ${pressable
-          ? 'cursor-pointer transition-[box-shadow,border-color,background] duration-[150ms] ease-out hover:shadow-[var(--shadow-card-hover)] hover:border-[var(--border-opaque)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--role-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]'
+          ? 'cursor-pointer transition-[transform,box-shadow,border-color,background] duration-[var(--transition-ui)] ease-out hover:shadow-[var(--shadow-card-hover)] hover:-translate-y-[1px] hover:border-[var(--border-opaque)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--role-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] active:scale-[0.98]'
           : ''}
         ${className}
       `}

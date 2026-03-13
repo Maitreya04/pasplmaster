@@ -10,7 +10,8 @@ export type MatchLayer =
   | 'substring'
   | 'keywords'
   | 'partial'
-  | 'fuzzy';
+  | 'fuzzy'
+  | 'phonetic';
 
 export type MatchedField = 'name' | 'alias' | 'alias1' | 'name+alias';
 
@@ -41,6 +42,21 @@ export const SHORTHAND_MAP: Record<string, string> = {
   sup: 'suspension',
 };
 
+// ---------------------------------------------------------------------------
+// Noise filtering — strip qty / packaging words that salespeople mix in
+// "K27 10" → "K27", "cdi cddlx 2+4 socket wali 2pc" → "cdi cddlx socket"
+// ---------------------------------------------------------------------------
+
+/** Matches quantity-like tokens: 3pc, 10pcs, 2peti, 1box, 5litr, 15kit, etc. */
+const NOISE_QTY_RE = /^\d+(pc|pcs|peti|box|kit|set|litr|ltr|nos?|bucket|pkt)s?$/i;
+
+/** Standalone noise words that carry no search meaning */
+const NOISE_WORDS = new Set([
+  'wali', 'wala', 'wale', 'type', 'no', 'single', 'double',
+  'bucket', 'peti', 'litr', 'ltr', 'pcs', 'pc', 'nos',
+  'box', 'packets', 'packet', 'pkt',
+]);
+
 /**
  * Normalises a raw search query:
  *  1. lowercase + trim + collapse whitespace
@@ -54,14 +70,47 @@ function expandToken(t: string): string {
   return SHORTHAND_MAP[lower] ?? EXPAND_MAP[lower] ?? lower;
 }
 
+/** Check if a token is purely noise (quantity/packaging). */
+function isNoise(t: string): boolean {
+  return NOISE_WORDS.has(t) || NOISE_QTY_RE.test(t) || /^\d+$/.test(t);
+}
+
 export function normalizeQuery(q: string): string {
-  return q
+  let tokens = q
     .toLowerCase()
     .trim()
     .replace(/\s+/g, ' ')
     .split(' ')
-    .map(t => expandToken(t))
-    .join(' ');
+    .filter(Boolean);
+
+  // Strip noise tokens only if we'd still have ≥1 meaningful token left
+  if (tokens.length > 1) {
+    const meaningful = tokens.filter(t => !isNoise(t));
+    if (meaningful.length > 0) tokens = meaningful;
+  }
+
+  const expanded: string[] = [];
+  for (const t of tokens) {
+    const et = expandToken(t);
+    // Only expand model-code variants for tokens that have BOTH letters AND digits
+    // e.g. "dis100" → "discover 100" (via abbreviation), "dio05" → variants
+    // But NOT "shine" or "rear" which are pure words
+    if (/[a-z]/i.test(t) && /\d/.test(t)) {
+      const m = et.match(/^([a-z]{2,})[-_/\. ]?0?(\d{1,3})$/i);
+      if (m) {
+        const base = m[1];
+        const num = m[2];
+        expanded.push(base, `${base}${num}`, `${base}0${num}`, et);
+      } else {
+        expanded.push(et);
+      }
+    } else {
+      // Pure word token — just expand abbreviations, no model-code variants
+      expanded.push(et);
+    }
+  }
+
+  return Array.from(new Set(expanded)).join(' ');
 }
 
 function hasTokenPrefix(value: string | null | undefined, token: string): boolean {
@@ -72,12 +121,59 @@ function hasTokenPrefix(value: string | null | undefined, token: string): boolea
 }
 
 /**
- * Returns true when the query looks like a part-code lookup
- * (e.g. "51122-04", "6002RSR", "84821020").
+ * Returns true when the query looks like a part-code lookup.
+ * Matches:
+ *  - Long numeric codes: "52204499", "84821020"
+ *  - Codes with separators: "51122-04", "6002/RSR"
+ *  - Short alphanumeric codes: "K27", "Gk65m", "GK65M" (letter+digit mix, 2-8 chars)
  */
 export function detectCodeLike(q: string): boolean {
   const t = q.trim();
-  return /\d{4,}[/\-]\d{2,}/.test(t) || /^\d{5,}$/.test(t) || /^[a-z0-9]{4,}-[a-z0-9]{2,}$/i.test(t);
+  if (/\d{4,}[/\-]\d{2,}/.test(t)) return true;           // 51122-04
+  if (/^\d{5,}$/.test(t)) return true;                     // 52204499
+  if (/^[a-z0-9]{4,}-[a-z0-9]{2,}$/i.test(t)) return true; // DIS-PR-02
+  // Short alphanumeric code: must have both letter(s) AND digit(s), 2-8 chars total
+  if (/^[a-z0-9]{2,8}$/i.test(t) && /[a-z]/i.test(t) && /\d/.test(t)) return true; // K27, Gk65m
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Phonetics (Soundex)
+// ---------------------------------------------------------------------------
+
+/**
+ * Computes a Soundex-like phonetic code for coarse phonetic typo matching.
+ */
+function soundex(input: string): string {
+  if (!input) return "";
+  const s = input.toUpperCase().replace(/[^A-Z]/g, "");
+  if (!s) return "";
+  const first = s[0];
+  const map: Record<string, string> = {
+    B: "1", F: "1", P: "1", V: "1",
+    C: "2", G: "2", J: "2", K: "2", Q: "2", S: "2", X: "2", Z: "2",
+    D: "3", T: "3",
+    L: "4",
+    M: "5", N: "5",
+    R: "6",
+  };
+  let out = first;
+  let prev = map[first] || "";
+  for (let i = 1; i < s.length; i++) {
+    const ch = s[i];
+    if ("AEIOUYHW".includes(ch)) {
+      prev = "";
+      continue;
+    }
+    const code = map[ch] || "";
+    if (code && code !== prev) {
+      out += code;
+      prev = code;
+    }
+    if (out.length === 4) break;
+  }
+  while (out.length < 4) out += "0";
+  return out;
 }
 
 const FUZZY_FALLBACK_THRESHOLD = 15;
@@ -99,6 +195,7 @@ interface PrepItem {
   nameWords: string[];
   /** All tokens from name, alias, alias1, parent_group, main_group (pasplv1-style) */
   allWords: Set<string>;
+  allPhonetics: Set<string>;
 }
 
 interface SearchIndex {
@@ -163,6 +260,25 @@ function buildIndex(items: Item[]): SearchIndex {
       ...toTokens(it.item_category ?? ''),
     ].filter(Boolean));
 
+    // Expand model concatenations like "dio 05" -> "dio05" in index words too
+    const allWordsArr = Array.from(allWords);
+    for (const w of allWordsArr) {
+      const m = w.match(/^([a-z0-9]{2,})[-_/\. ]?0?([0-9]{1,2})$/);
+      if (m) {
+        allWords.add(`${m[1]}${m[2]}`);
+        allWords.add(`${m[1]}0${m[2]}`);
+        allWords.add(m[1]); // base word
+      }
+    }
+
+    const allPhonetics = new Set<string>();
+    for (const w of allWords) {
+      if (w.length >= 4) {
+        const sx = soundex(w);
+        if (sx) allPhonetics.add(sx);
+      }
+    }
+
     all[i] = {
       item: it,
       nameLower,
@@ -173,6 +289,7 @@ function buildIndex(items: Item[]): SearchIndex {
       alias1Norm,
       nameWords,
       allWords,
+      allPhonetics,
     };
 
     indexPush(byName, nameLower, i);
@@ -270,6 +387,23 @@ function fuzzyMatchItem(
   return tokenFuzzyMatches(qNorm, p.allWords);
 }
 
+function phoneticMatchItem(
+  qWords: string[],
+  p: PrepItem,
+): boolean {
+  // Only consider tokens >= 4 chars for phonetic matching (short tokens too noisy)
+  const validPhoneticWords = qWords.filter(w => w.length >= 4);
+  if (validPhoneticWords.length === 0) return false;
+
+  // ALL long query words must have a phonetic match in the item
+  for (const qw of validPhoneticWords) {
+    const sx = soundex(qw);
+    if (!sx || !p.allPhonetics.has(sx)) return false;
+  }
+
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // 9-layer cascade search
 //
@@ -286,8 +420,9 @@ function fuzzyMatchItem(
 //    Layer 5  All keywords in name+alias                   →  60  field: name+alias
 //    Layer 6  ≥60% keywords in name+alias                  →  40  field: name+alias
 //
-//  Phase 3 — Fuzzy fallback (layer 7, only if < 5 results)
+//  Phase 3 — Fuzzy & Phonetic fallback (layer 7 & 8, only if < 15 results)
 //    Layer 7  Levenshtein on name words + alias            →  30  field: name/alias
+//    Layer 8  Soundex phonetics on long words              →  25  field: name
 // ---------------------------------------------------------------------------
 
 export function searchItems(query: string, items: Item[]): SearchResult[] {
@@ -441,19 +576,34 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
     }
 
     if (score > 0) {
+      // Keyword-overlap bonus: boost items matching more query tokens
+      // e.g. "cdi dis100 varroc" → item with cdi+discover+varroc gets +3 bonus vs one with only cdi
+      if (multiWord && score < 100) {
+        let overlap = 0;
+        for (const qw of qWords) {
+          if (p.allWords.has(qw) || p.nameLower.includes(qw) || p.aliasLower.includes(qw)) {
+            overlap++;
+          }
+        }
+        score += Math.min(overlap, wordCount);
+      }
       results.push({ item: p.item, score, matchType: layer, matchedField: field });
       seen.add(p.item.id);
     }
   }
 
-  // ------ Phase 3: fuzzy fallback (layer 7) ------
+  // ------ Phase 3: fuzzy & phonetic fallback (layer 7 & 8) ------
   // Only for non code-like (wordy) queries
   if (!isCodeLike && results.length < FUZZY_FALLBACK_THRESHOLD) {
     for (let i = 0; i < all.length; i++) {
       const p = all[i];
       if (seen.has(p.item.id)) continue;
       if (fuzzyMatchItem(qNorm, qWords, p)) {
+        seen.add(p.item.id);
         results.push({ item: p.item, score: 30, matchType: 'fuzzy', matchedField: 'name' });
+      } else if (phoneticMatchItem(qWords, p)) {
+        seen.add(p.item.id);
+        results.push({ item: p.item, score: 25, matchType: 'phonetic', matchedField: 'name' });
       }
     }
   }

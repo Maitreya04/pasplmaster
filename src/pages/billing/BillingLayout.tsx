@@ -20,7 +20,7 @@ export default function BillingLayout() {
   const navigate = useNavigate();
 
   return (
-    <div className="theme-light role-billing min-h-screen bg-[var(--bg-primary)] relative">
+    <div className="role-billing min-h-screen bg-[var(--bg-primary)] relative">
       <div className="flex">
         {/* Sidebar — visible on lg+ */}
         <aside className="hidden lg:flex flex-col w-56 min-h-screen border-r border-[var(--border-opaque)] bg-[var(--bg-secondary)] py-6 px-3 shrink-0">

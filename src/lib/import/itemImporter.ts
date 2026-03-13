@@ -55,23 +55,34 @@ const DEFAULT_COLS = {
   main_group: 9,
 } as const;
 
-/** Find column index for a field by matching header labels (case-insensitive). Returns -1 if none match. */
+/** Find column index for a field by matching header labels (case-insensitive).
+ *  Uses priority matching: exact → header-contains-label → label-contains-header.
+ *  This prevents "alias 1" from falsely matching the "alias" column. Returns -1 if none match. */
 function detectColumnIndices(headerRow: unknown[]): Record<keyof typeof DEFAULT_COLS, number> {
   const headers = (headerRow as unknown[]).map(c => String(c ?? '').trim().toLowerCase());
   const find = (...labels: string[]): number => {
-    const idx = headers.findIndex(h => labels.some(l => h.includes(l) || l.includes(h)));
-    return idx >= 0 ? idx : -1;
+    const norm = labels.map(l => l.toLowerCase());
+    // Pass 1: exact match (highest priority)
+    const exact = headers.findIndex(h => norm.some(l => h === l));
+    if (exact >= 0) return exact;
+    // Pass 2: header contains the full label (e.g. header "sales price" contains "price")
+    const contains = headers.findIndex(h => norm.some(l => h.includes(l)));
+    if (contains >= 0) return contains;
+    // Pass 3: label contains header (e.g. label "gst %" contains header "gst") — loosest
+    const reverse = headers.findIndex(h => norm.some(l => l.includes(h)));
+    if (reverse >= 0) return reverse;
+    return -1;
   };
   const orDefault = (found: number, def: number) => (found >= 0 ? found : def);
   return {
     name: orDefault(find('name', 'item description', 'description'), DEFAULT_COLS.name),
-    alias: orDefault(find('alias', 'item code', 'code'), DEFAULT_COLS.alias),
+    alias: find('alias', 'item code', 'code'),
     parent_group: orDefault(find('parent group', 'category', 'group'), DEFAULT_COLS.parent_group),
     gst_percent: orDefault(find('gst', 'gst %'), DEFAULT_COLS.gst_percent),
     hsn_code: orDefault(find('hsn', 'product id'), DEFAULT_COLS.hsn_code),
     sales_price: orDefault(find('sales price', 'price', 'sale price'), DEFAULT_COLS.sales_price),
     mrp: orDefault(find('mrp'), DEFAULT_COLS.mrp),
-    alias1: orDefault(find('alias 1', 'alias1'), DEFAULT_COLS.alias1),
+    alias1: find('alias 1', 'alias1'),
     item_category: orDefault(find('item cat', 'item category'), DEFAULT_COLS.item_category),
     main_group: orDefault(find('main group', 'item main grp', 'main grp'), DEFAULT_COLS.main_group),
   };
@@ -88,6 +99,7 @@ export async function importItems(
 
   const headerRow = raw[headerRowIndex] ?? [];
   const cols = detectColumnIndices(headerRow);
+  console.log('[Import items_price] Detected columns:', cols);
 
   const dataStartIndex = headerRowIndex + 1;
   const dataRows = raw.slice(dataStartIndex).filter(
@@ -131,8 +143,8 @@ export async function importItems(
       .map(row => {
         const name = str(row[cols.name]);
         if (!name) return null;
-        const alias = str(row[cols.alias]);
-        const alias1 = str(row[cols.alias1]);
+        const alias = cols.alias >= 0 ? str(row[cols.alias]) : null;
+        const alias1 = cols.alias1 >= 0 ? str(row[cols.alias1]) : null;
         // Resolve canonical name: if file name matches an existing row, use it; else if file alias/alias1 matches an existing item (exact or normalized), update that row so price applies when the file uses a shorter/different name or different code format (e.g. "ASK/BJ/FBD/0025" vs "ASKBDBAJBOX4SF")
         let canonicalName = name;
         if (!existingNames.has(name)) {
@@ -141,20 +153,22 @@ export async function importItems(
           else if (alias1 && nameByNormalizedCode.has(normalizeCode(alias1))) canonicalName = nameByNormalizedCode.get(normalizeCode(alias1))!;
           else if (alias && nameByNormalizedCode.has(normalizeCode(alias))) canonicalName = nameByNormalizedCode.get(normalizeCode(alias))!;
         }
-        return {
+        const record: Record<string, unknown> = {
           name: canonicalName,
-          alias: alias,
           parent_group: str(row[cols.parent_group]),
           gst_percent: num(row[cols.gst_percent], 18),
           hsn_code: str(row[cols.hsn_code]),
           sales_price: num(row[cols.sales_price], 0),
           mrp: num(row[cols.mrp], 0),
-          alias1: alias1,
           item_category: str(row[cols.item_category]),
           main_group: str(row[cols.main_group]),
           is_active: true,
           updated_at: new Date().toISOString(),
         };
+        // Only set alias/alias1 when the file has a value — avoids overwriting existing codes with null when the column is blank or wrong
+        if (alias != null && alias !== '') record.alias = alias;
+        if (alias1 != null && alias1 !== '') record.alias1 = alias1;
+        return record;
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
 
@@ -165,6 +179,7 @@ export async function importItems(
     if (records.length > 0) {
       const { error } = await supabase.from('items').upsert(records, { onConflict: 'name' });
       if (error) {
+        console.error(`[Import items_price] Batch ${batchIndex} failed:`, error.message, error.details);
         failedCount += records.length;
         records.forEach(r => existingNames.delete(r.name));
         onProgress({

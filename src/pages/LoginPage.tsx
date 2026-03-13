@@ -53,15 +53,19 @@ export default function LoginPage() {
   const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
   return (
-    <div className="theme-light min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-between px-6 py-16 select-none">
+    <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-between px-6 py-16 select-none relative overflow-hidden">
+      {/* Ambient glowing background orbs */}
+      <div className="absolute top-[-20%] left-[-20%] w-[60vw] h-[60vw] rounded-full bg-indigo-500/10 blur-[100px] pointer-events-none mix-blend-multiply" />
+      <div className="absolute bottom-[-20%] right-[-20%] w-[70vw] h-[70vw] rounded-full bg-blue-500/10 blur-[120px] pointer-events-none mix-blend-multiply" />
+      
       {/* Header */}
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-[var(--content-primary)]">PASPL Master</h1>
-        <p className="text-sm text-[var(--content-secondary)] mt-2">Enter access code</p>
+      <div className="text-center relative z-10">
+        <h1 className="text-3xl font-bold tracking-tight text-[var(--content-primary)]">PASPL Master</h1>
+        <p className="text-sm font-medium text-[var(--content-secondary)] mt-2">Enter access code</p>
       </div>
 
       {/* Code circles + error message */}
-      <div className="flex flex-col items-center gap-6">
+      <div className="flex flex-col items-center gap-6 relative z-10">
         <div className={`flex gap-4 ${error ? 'animate-shake' : ''}`}>
           {[0, 1, 2, 3].map((i) => (
             <div

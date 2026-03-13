@@ -54,7 +54,7 @@ export default function AdminPasscodePage() {
   const digits = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
   return (
-    <div className="theme-light min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-between px-6 py-16 select-none">
+    <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-between px-6 py-16 select-none">
       {/* Header */}
       <div className="text-center">
         <h1 className="text-2xl font-bold text-[var(--content-primary)]">Admin</h1>

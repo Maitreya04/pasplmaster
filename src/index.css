@@ -6,7 +6,6 @@
 @import "@fontsource/geist-mono/700.css";
 @import "tailwindcss";
 
-@custom-variant dark (&:is(.theme-dark, .theme-dark *));
 
 /* ═══════════════════════════════════════════════════════════════
    DESIGN SYSTEM: Core / Accent / Greys (reference structure)
@@ -87,24 +86,8 @@
   --indigo-9: #0a025a;
 }
 
-/* ─── Navy (dark theme surfaces; keep existing) ─── */
+/* ─── Semantic tokens (Using Tailwind v4 Native Palette) ─── */
 :root {
-  --navy-950: #0a0e1a;
-  --navy-900: #0f1629;
-  --navy-800: #1a2240;
-  --navy-700: #253054;
-  --navy-600: #2e3d6b;
-  --navy-500: #3b4f8a;
-  --navy-400: #5a6da8;
-  --navy-300: #8896c1;
-  --navy-200: #b5beda;
-  --navy-100: #dce0ee;
-  --navy-50: #eef0f7;
-  --transition-ui: 150ms ease;
-}
-
-/* ─── Semantic tokens: Light theme (OKLCH palette: gray/blue/green/amber/red) ─── */
-.theme-light {
   /* Background — gray scale + white */
   --bg-primary: var(--gray-1);
   --bg-secondary: var(--core-white);
@@ -170,88 +153,13 @@
   --role-content: #1d4ed8;
 }
 
-/* ─── Semantic tokens: Dark theme ─── */
-.theme-dark {
-  /* Background */
-  --bg-primary: var(--navy-950);
-  --bg-secondary: var(--navy-900);
-  --bg-tertiary: var(--navy-800);
-  --bg-inverse-primary: #ffffff;
-  --bg-inverse-secondary: var(--navy-50);
-  --bg-overlay: rgba(0, 0, 0, 0.6);
-  --bg-elevated: var(--navy-800);
-
-  /* Content */
-  --content-primary: #ffffff;
-  --content-secondary: var(--navy-200);
-  --content-tertiary: var(--navy-400);
-  --content-quaternary: var(--navy-500);
-  --content-inverse-primary: #000000;
-  --content-inverse-secondary: var(--navy-800);
-  --content-on-color: #ffffff;
-  --content-disabled: var(--navy-600);
-
-  /* Border */
-  --border-opaque: var(--navy-800);
-  --border-subtle: var(--navy-700);
-  --border-faint: rgba(255, 255, 255, 0.05);
-  --border-divider: var(--navy-800);
-  --border-selected: #ffffff;
-  --border-disabled: var(--navy-700);
-
-  /* Row states */
-  --bg-row-hover: rgba(255, 255, 255, 0.04);
-  --bg-row-selected: rgba(99, 102, 241, 0.15);
-
-  /* Elevation — dark mode uses border-only, no shadow */
-  --shadow-card: 0 0 0 1px var(--border-opaque);
-  --shadow-card-hover: 0 0 0 1px var(--border-subtle);
-
-  /* Intent — Accent (blue) */
-  --bg-accent: #3b82f6;
-  --bg-accent-subtle: rgba(59, 130, 246, 0.15);
-  --content-accent: #60a5fa;
-  --border-accent: #3b82f6;
-
-  /* Intent — Positive (green) */
-  --bg-positive: #22c55e;
-  --bg-positive-subtle: rgba(34, 197, 94, 0.15);
-  --content-positive: #4ade80;
-  --border-positive: #22c55e;
-
-  /* Intent — Warning (amber) */
-  --bg-warning: #f59e0b;
-  --bg-warning-subtle: rgba(245, 158, 11, 0.15);
-  --content-warning: #fbbf24;
-  --border-warning: #f59e0b;
-
-  /* Intent — Negative (red) */
-  --bg-negative: #ef4444;
-  --bg-negative-subtle: rgba(239, 68, 68, 0.15);
-  --content-negative: #f87171;
-  --border-negative: #ef4444;
-
-  /* Role accent (overridden per role) */
-  --role-primary: #3b82f6;
-  --role-primary-subtle: rgba(59, 130, 246, 0.15);
-  --role-content: #60a5fa;
-}
-
-/* ─── Role accent overrides (light: palette; dark: unchanged) ─── */
+/* ─── Role accent overrides ─── */
 .role-sales {
   --role-primary: var(--indigo-7);
   --role-primary-subtle: color-mix(in srgb, var(--indigo-7) 12%, transparent);
   --role-content: var(--indigo-9);
   --bg-row-selected: color-mix(in srgb, var(--indigo-7) 10%, transparent);
   --role-hero-bg: var(--indigo-4);
-}
-
-.theme-dark .role-sales,
-.role-sales.theme-dark {
-  --role-primary-subtle: rgba(79, 70, 229, 0.15);
-  --role-content: #818cf8;
-  --bg-row-selected: rgba(79, 70, 229, 0.15);
-  --role-hero-bg: var(--navy-700);
 }
 
 .role-billing {
@@ -261,26 +169,11 @@
   --bg-row-selected: color-mix(in srgb, var(--core-primary) 8%, transparent);
 }
 
-.theme-dark .role-billing,
-.role-billing.theme-dark {
-  --role-primary-subtle: rgba(37, 99, 235, 0.15);
-  --role-content: #60a5fa;
-  --bg-row-selected: rgba(37, 99, 235, 0.15);
-}
-
 .role-picking {
   --role-primary: var(--amber-7);
   --role-primary-subtle: color-mix(in srgb, var(--amber-7) 12%, transparent);
   --role-content: var(--amber-9);
   --bg-row-selected: color-mix(in srgb, var(--amber-7) 10%, transparent);
-}
-
-.theme-dark .role-picking,
-.role-picking.theme-dark {
-  --role-primary: #f59e0b;
-  --role-primary-subtle: rgba(245, 158, 11, 0.15);
-  --role-content: #fbbf24;
-  --bg-row-selected: rgba(245, 158, 11, 0.15);
 }
 
 .role-admin {
@@ -289,43 +182,37 @@
   --role-content: var(--gray-8);
 }
 
-.theme-dark .role-admin,
-.role-admin.theme-dark {
-  --role-primary-subtle: rgba(107, 114, 128, 0.15);
-  --role-content: #9ca3af;
-}
-
 body {
   font-family: "Geist Sans", sans-serif;
 }
 
 /* ─── Polish layer (Stripe-grade light mode) ─── */
-.theme-light input:focus,
-.theme-light textarea:focus,
-.theme-light select:focus {
+input:focus,
+textarea:focus,
+select:focus {
   outline: none;
   border-color: var(--role-primary);
   box-shadow: 0 0 0 3px var(--role-primary-subtle);
   transition: border-color var(--transition-ui), box-shadow var(--transition-ui);
 }
 
-.theme-light button:not([disabled]) {
+button:not([disabled]) {
   transition: box-shadow var(--transition-ui), background-color var(--transition-ui),
     transform var(--transition-ui);
 }
 
 /* Visible focus for keyboard nav (WCAG 2.4.7) — only when focused via keyboard */
-.theme-light button:focus-visible,
-.theme-light [role="button"]:focus-visible {
+button:focus-visible,
+[role="button"]:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--bg-secondary), 0 0 0 4px var(--role-primary);
 }
 
-.theme-light button[data-inverse-primary]:not([disabled]):hover {
+button[data-inverse-primary]:not([disabled]):hover {
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1), 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
-.theme-light button[data-inverse-primary]:not([disabled]):active {
+button[data-inverse-primary]:not([disabled]):active {
   transform: translateY(0.5px);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
