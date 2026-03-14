@@ -23,6 +23,7 @@ import {
 import type { OrderItem, ScanResult } from '../../types';
 import { FLAG_REASONS, type FlagReason } from '../../utils/constants';
 import { LiveOcrScanner } from './LiveOcrScanner';
+import { PickCompleteScreen } from './PickCompleteScreen';
 
 interface ItemMeta {
   mrp: number | null;
@@ -321,8 +322,8 @@ export default function PickPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
-      toast.success('Order completed');
-      navigate('/picking');
+      navigator.vibrate?.([50, 30, 50, 30, 100]);
+      setShowComplete(true);
     },
     onError: () => {
       toast.error('Failed to complete order');
@@ -339,6 +340,7 @@ export default function PickPage() {
 
   const handlePick = useCallback(
     (itemId: number) => {
+      navigator.vibrate?.(50);
       pickItemMutation.mutate(itemId);
     },
     [pickItemMutation],
@@ -387,6 +389,20 @@ export default function PickPage() {
   if (!orderId) {
     navigate('/picking');
     return null;
+  }
+
+  const [showComplete, setShowComplete] = useState(false);
+
+  if (showComplete && order) {
+    return (
+      <PickCompleteScreen
+        orderNumber={order.order_number}
+        customerName={order.customer_name}
+        pickedCount={counts.picked}
+        flaggedCount={counts.flagged}
+        totalCount={counts.total}
+      />
+    );
   }
 
   if (isLoading) {
@@ -458,10 +474,11 @@ export default function PickPage() {
 
       {/* Active items */}
       <div className="px-4 pt-3 space-y-2">
-        {active.map((pi) => (
+        {active.map((pi, idx) => (
           <PickItemCard
             key={pi.orderItem.id}
             item={pi}
+            isNext={idx === 0}
             onPick={() => handlePick(pi.orderItem.id)}
             onFlag={() => {
               setFlagTarget(pi.orderItem.id);
@@ -475,23 +492,42 @@ export default function PickPage() {
         ))}
       </div>
 
-      {/* Done items */}
+      {/* Done items — compact */}
       {done.length > 0 && (
         <div className="px-4 pt-6">
           <p className="text-xs font-semibold text-[var(--content-tertiary)] uppercase tracking-wider mb-2">
             Done ({done.length})
           </p>
-          <div className="space-y-2 opacity-60">
-            {done.map((pi) => (
-              <PickItemCard
-                key={pi.orderItem.id}
-                item={pi}
-                onPick={() => {}}
-                onFlag={() => {}}
-                onScan={() => {}}
-                onOverride={() => {}}
-              />
-            ))}
+          <div className="space-y-1">
+            {done.map((pi) => {
+              const oi = pi.orderItem;
+              const isFlagged = pi.uiState === 'flagged';
+              return (
+                <div
+                  key={oi.id}
+                  className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-faint)]"
+                >
+                  {isFlagged ? (
+                    <Flag size={16} weight="fill" className="shrink-0 text-[var(--content-negative)]" />
+                  ) : (
+                    <CheckCircle size={16} weight="fill" className={`shrink-0 ${
+                      pi.uiState === 'overridden' ? 'text-[var(--content-warning)]' : 'text-[var(--content-positive)]'
+                    }`} />
+                  )}
+                  <span className="flex-1 text-sm text-[var(--content-secondary)] truncate">
+                    {oi.item_name}
+                  </span>
+                  <span className="text-xs text-[var(--content-tertiary)] tabular-nums shrink-0">
+                    Qty {oi.qty_approved ?? oi.qty_requested}
+                  </span>
+                  {oi.rack_no && (
+                    <span className="text-xs text-[var(--content-quaternary)] font-mono shrink-0">
+                      {oi.rack_no}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -639,12 +675,14 @@ export default function PickPage() {
 
 function PickItemCard({
   item,
+  isNext = false,
   onPick,
   onFlag,
   onScan,
   onOverride,
 }: {
   item: PickItemLocal;
+  isNext?: boolean;
   onPick: () => void;
   onFlag: () => void;
   onScan: () => void;
@@ -670,21 +708,30 @@ function PickItemCard({
     <div
       className={`
         rounded-2xl p-4 border-l-4 ${borderColor[item.uiState]}
-        bg-[var(--bg-secondary)]
+        ${isNext ? 'bg-[var(--bg-accent-subtle)] ring-1 ring-[var(--border-accent)]' : 'bg-[var(--bg-secondary)]'}
         transition-all duration-200
       `}
     >
+      {/* NEXT badge */}
+      {isNext && !isDone && (
+        <div className="flex items-center gap-1.5 mb-2">
+          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)]">
+            Next
+          </span>
+        </div>
+      )}
+
       <div className="flex items-start gap-3">
-        {/* Rack location */}
-        <div className="shrink-0 w-16 text-center">
+        {/* Rack location — bigger for current (isNext) item */}
+        <div className={`shrink-0 text-center ${isNext ? 'w-20' : 'w-16'}`}>
           {oi.rack_no ? (
-            <div className="flex flex-col items-center">
+            <div className={`flex flex-col items-center ${isNext ? 'bg-[var(--bg-warning-subtle)] rounded-xl py-2 px-1' : ''}`}>
               <MapPin
-                size={16}
+                size={isNext ? 20 : 16}
                 weight="fill"
                 className="text-[var(--content-warning)] mb-0.5"
               />
-              <span className="text-[var(--content-warning)] font-mono font-bold text-base leading-tight">
+              <span className={`text-[var(--content-warning)] font-mono font-bold leading-tight ${isNext ? 'text-xl' : 'text-base'}`}>
                 {oi.rack_no}
               </span>
             </div>
@@ -697,7 +744,7 @@ function PickItemCard({
 
         {/* Item info */}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-[var(--content-primary)] leading-snug">
+          <p className={`font-medium text-[var(--content-primary)] leading-snug ${isNext ? 'text-base' : 'text-sm'}`}>
             {oi.item_name}
           </p>
           {(oi.item_alias || item.alias1) && (
@@ -782,87 +829,80 @@ function PickItemCard({
             />
           )}
         </div>
-
-        {/* Action buttons */}
-        <div className="flex flex-col items-center gap-2 shrink-0">
-          {isDone ? (
-            item.uiState === 'flagged' ? (
-              <Flag size={28} weight="fill" className="text-[var(--content-negative)]" />
-            ) : (
-              <CheckCircle
-                size={28}
-                weight="fill"
-                className={
-                  item.uiState === 'overridden'
-                    ? 'text-[var(--content-warning)]'
-                    : 'text-[var(--content-positive)]'
-                }
-              />
-            )
-          ) : (
-            <>
-              {/* Camera scan button */}
-              <button
-                onClick={onScan}
-                disabled={item.uiState === 'scanning'}
-                className="
-                  min-h-[44px] min-w-[44px] flex items-center justify-center
-                  rounded-xl bg-[var(--bg-tertiary)]
-                  text-[var(--content-secondary)]
-                  active:scale-95 transition-transform duration-100
-                  disabled:opacity-50
-                "
-                aria-label="Scan item"
-              >
-                <Camera size={20} weight="bold" />
-              </button>
-
-              {/* Pick (check) button */}
-              <button
-                onClick={onPick}
-                className="
-                  min-h-[44px] min-w-[44px] flex items-center justify-center
-                  rounded-xl bg-[var(--bg-positive-subtle)]
-                  text-[var(--content-positive)]
-                  active:scale-95 transition-transform duration-100
-                "
-                aria-label="Mark as picked"
-              >
-                <CheckCircle size={22} weight="bold" />
-              </button>
-
-              {/* Flag button */}
-              <button
-                onClick={onFlag}
-                className="
-                  min-h-[44px] min-w-[44px] flex items-center justify-center
-                  rounded-xl bg-[var(--bg-negative-subtle)]
-                  text-[var(--content-negative)]
-                  active:scale-95 transition-transform duration-100
-                "
-                aria-label="Flag item"
-              >
-                <Flag size={18} weight="bold" />
-              </button>
-
-              {/* Override button for OCR no-match */}
-              {item.uiState === 'not_matched' && (
-                <button
-                  onClick={onOverride}
-                  className="
-                    min-h-[44px] px-3 flex items-center justify-center
-                    rounded-xl bg-[var(--bg-warning-subtle)]
-                    text-[var(--content-warning)] text-xs font-semibold
-                    active:scale-95 transition-transform duration-100
-                  "
-                >
-                  Override
-                </button>
-              )}
-            </>
-          )}
-        </div>
       </div>
+
+      {/* Action buttons — full-width primary + secondary row */}
+      {!isDone && (
+        <div className="mt-3 space-y-2">
+          {/* Primary: full-width Picked button */}
+          <button
+            onClick={onPick}
+            className={`
+              w-full flex items-center justify-center gap-2
+              rounded-xl font-semibold
+              active:scale-[0.98] transition-all duration-150
+              ${isNext
+                ? 'h-14 text-base bg-[var(--bg-positive)] text-[var(--content-on-color)]'
+                : 'h-12 text-sm bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
+              }
+            `}
+          >
+            <CheckCircle size={20} weight="bold" />
+            Picked
+          </button>
+
+          {/* Secondary: scan + flag + override row */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onScan}
+              disabled={item.uiState === 'scanning'}
+              className="
+                flex-1 h-11 flex items-center justify-center gap-1.5
+                rounded-xl bg-[var(--bg-tertiary)]
+                text-[var(--content-secondary)] text-sm font-medium
+                active:scale-95 transition-transform duration-100
+                disabled:opacity-50
+              "
+              aria-label="Scan item"
+            >
+              <Camera size={18} weight="bold" />
+              Scan
+            </button>
+
+            <button
+              onClick={() => {
+                navigator.vibrate?.([30, 50, 30]);
+                onFlag();
+              }}
+              className="
+                flex-1 h-11 flex items-center justify-center gap-1.5
+                rounded-xl bg-[var(--bg-negative-subtle)]
+                text-[var(--content-negative)] text-sm font-medium
+                active:scale-95 transition-transform duration-100
+              "
+              aria-label="Flag item"
+            >
+              <Flag size={16} weight="bold" />
+              Flag
+            </button>
+
+            {/* Override button for OCR no-match */}
+            {item.uiState === 'not_matched' && (
+              <button
+                onClick={onOverride}
+                className="
+                  flex-1 h-11 flex items-center justify-center gap-1.5
+                  rounded-xl bg-[var(--bg-warning-subtle)]
+                  text-[var(--content-warning)] text-sm font-semibold
+                  active:scale-95 transition-transform duration-100
+                "
+              >
+                Override
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

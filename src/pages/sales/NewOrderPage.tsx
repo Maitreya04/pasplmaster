@@ -1031,14 +1031,14 @@ export default function NewOrderPage() {
             )}
           </div>
 
-          {((narrowSuggestions.length > 0 && !selectedGroup) || (selectedBrand && subGroupsForBrand.length > 0)) && (
+          {((narrowSuggestions.length > 0) || (selectedBrand && subGroupsForBrand.length > 0)) && (
             <div className="rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-3 shadow-sm space-y-1.5">
               <p className="text-[10px] uppercase tracking-wide text-[var(--content-tertiary)]">
                 Narrow by
               </p>
               <div className="flex gap-2 overflow-x-auto scrollbar-none py-1">
                 {selectedBrand && subGroupsForBrand.length > 0
-                  ? subGroupsForBrand.map(({ name, count }) => (
+                  && subGroupsForBrand.map(({ name, count }) => (
                       <FilterChip
                         key={name}
                         label={name}
@@ -1050,8 +1050,9 @@ export default function NewOrderPage() {
                           setSelectedGroup(prev => (prev === name ? null : name))
                         }
                       />
-                    ))
-                  : narrowSuggestions.map(s => (
+                    ))}
+                {!(selectedBrand && subGroupsForBrand.length > 0)
+                  && narrowSuggestions.map(s => (
                       <FilterChip
                         key={`${s.type}-${s.value}`}
                         label={s.label}
