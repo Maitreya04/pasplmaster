@@ -788,8 +788,17 @@ function PickItemCard({
               </span>
             )}
             {item.uiState === 'matched' && item.scanResult && (
-              <span className="text-xs text-[var(--content-positive)] truncate max-w-[200px]">
+              <span className="text-xs text-[var(--content-positive)] truncate max-w-[200px] flex items-center gap-1">
                 Match: {item.scanResult.ocrExtracted?.partNumber || item.scanResult.matchedAgainst}
+                {item.scanResult.method === 'ai_verify' ? (
+                  <span className="inline-flex px-1.5 py-px rounded-full bg-blue-500/15 text-[10px] font-semibold text-blue-400 border border-blue-400/20">
+                    AI
+                  </span>
+                ) : (
+                  <span className="inline-flex px-1.5 py-px rounded-full bg-[var(--bg-positive-subtle)] text-[10px] font-semibold text-[var(--content-positive)] border border-[var(--border-positive)]">
+                    Local
+                  </span>
+                )}
               </span>
             )}
             {item.uiState === 'not_matched' && item.scanResult && (

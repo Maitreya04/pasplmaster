@@ -35,7 +35,7 @@ export function OcrScannerSheet({
   isOpen: boolean;
   expectedItem: OrderItem;
   itemAlias1?: string | null;
-  photoState: 'idle' | 'processing' | 'done';
+  photoState: 'idle' | 'processing' | 'ai_checking' | 'done';
   thumbnailUrl: string | null;
   scanResult: ScanResult | null;
   onClose: () => void;
@@ -140,8 +140,8 @@ export function OcrScannerSheet({
             </div>
           )}
 
-          {/* ── PROCESSING & DONE: photo thumbnail ── */}
-          {(photoState === 'processing' || photoState === 'done') && thumbnailUrl && (
+          {/* ── PROCESSING, AI_CHECKING & DONE: photo thumbnail ── */}
+          {(photoState === 'processing' || photoState === 'ai_checking' || photoState === 'done') && thumbnailUrl && (
             <img
               src={thumbnailUrl}
               alt="Captured label"
@@ -149,11 +149,20 @@ export function OcrScannerSheet({
             />
           )}
 
-          {/* Processing overlay */}
+          {/* Processing overlay — local OCR */}
           {photoState === 'processing' && (
             <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2">
               <SpinnerGap size={28} weight="bold" className="text-white animate-spin" />
               <p className="text-sm font-semibold text-white">Checking part…</p>
+            </div>
+          )}
+
+          {/* AI checking overlay — Gemini fallback */}
+          {photoState === 'ai_checking' && (
+            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
+              <SpinnerGap size={28} weight="bold" className="text-white animate-spin" />
+              <p className="text-sm font-semibold text-white">AI verifying…</p>
+              <p className="text-[11px] text-white/60">Local match failed, asking Gemini</p>
             </div>
           )}
 
@@ -164,6 +173,11 @@ export function OcrScannerSheet({
               <p className="text-base font-bold text-[var(--content-on-color)]">Part confirmed</p>
               {detectedCode && (
                 <p className="text-xs font-mono text-[var(--content-on-color)] opacity-80">{detectedCode}</p>
+              )}
+              {scanResult.method === 'ai_verify' && (
+                <span className="mt-1 px-2 py-0.5 rounded-full bg-blue-500/30 text-[11px] font-semibold text-blue-200 border border-blue-400/30">
+                  AI verified · {scanResult.confidence}%
+                </span>
               )}
             </div>
           )}
@@ -225,7 +239,7 @@ export function OcrScannerSheet({
         )}
 
         {/* PROCESSING: disabled button so user knows to wait */}
-        {photoState === 'processing' && (
+        {(photoState === 'processing' || photoState === 'ai_checking') && (
           <button
             disabled
             className="
@@ -236,7 +250,7 @@ export function OcrScannerSheet({
             "
           >
             <SpinnerGap size={20} className="animate-spin" />
-            Checking…
+            {photoState === 'ai_checking' ? 'AI verifying…' : 'Checking…'}
           </button>
         )}
 

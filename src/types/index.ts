@@ -125,6 +125,7 @@ export interface ScanResult {
     vehicleModel?: string | null;
   };
   signals?: ScanSignal[];
+  method?: 'local_match' | 'ai_verify' | 'manual';
   timestamp: string;
 }
 
