@@ -1,4 +1,8 @@
 import Ocr from '@gutenye/ocr-browser';
+import { env } from 'onnxruntime-web';
+
+// Required for Vite/Webpack to serve the ONNX models directly
+env.wasm.wasmPaths = '/models/';
 
 export interface OcrScanResult {
   rawText: string;
@@ -41,7 +45,7 @@ export async function scanImage(
 
   let targetElement: string | HTMLImageElement | HTMLCanvasElement | Blob;
 
-  if (imageSource instanceof File) {
+  if (imageSource instanceof Blob) {
     // @gutenye detector takes paths (strings) or buffers for easiest interface usually, but lets pass ObjectUrl
     targetElement = URL.createObjectURL(imageSource);
   } else {
@@ -51,7 +55,7 @@ export async function scanImage(
   // OCR prediction
   const results = await client.detect(targetElement as any);
   
-  if (imageSource instanceof File && typeof targetElement === 'string') {
+  if (imageSource instanceof Blob && typeof targetElement === 'string') {
     URL.revokeObjectURL(targetElement);
   }
 
