@@ -24,6 +24,7 @@ import type { OrderItem, ScanResult } from '../../types';
 import { FLAG_REASONS, type FlagReason } from '../../utils/constants';
 import { LiveOcrScanner } from './LiveOcrScanner';
 import { PickCompleteScreen } from './PickCompleteScreen';
+import { initWorker } from '../../lib/ocr/paddleEngine';
 
 interface ItemMeta {
   mrp: number | null;
@@ -95,6 +96,11 @@ export default function PickPage() {
 
   const orderId = id ? parseInt(id, 10) : null;
   const { data: order, isLoading, error } = useOrderDetail(orderId);
+
+  // Pre-initialize OCR worker to speed up first scan
+  useEffect(() => {
+    initWorker().catch(console.error);
+  }, []);
 
   const [itemMeta, setItemMeta] = useState<ItemMetaMap>(new Map());
 
@@ -840,43 +846,98 @@ function PickItemCard({
         </div>
       </div>
 
-      {/* Action buttons — full-width primary + secondary row */}
+      {/* Action buttons — dynamic flow emphasizing scanning */}
       {!isDone && (
         <div className="mt-3 space-y-2">
-          {/* Primary: full-width Picked button */}
+          {/* Primary Action Button */}
           <button
-            onClick={onPick}
+            onClick={() => {
+              if (item.uiState === 'matched') {
+                onPick();
+              } else if (item.uiState === 'not_matched') {
+                onScan();
+              } else {
+                onScan();
+              }
+            }}
+            disabled={item.uiState === 'scanning'}
             className={`
               w-full flex items-center justify-center gap-2
-              rounded-xl font-semibold
+              rounded-xl font-bold
               active:scale-[0.98] transition-all duration-150
               ${isNext
-                ? 'h-14 text-base bg-[var(--bg-positive)] text-[var(--content-on-color)]'
+                ? 'h-14 text-base bg-[var(--bg-positive)] text-[var(--content-on-color)] shadow-sm shadow-[var(--bg-positive)]/20'
                 : 'h-12 text-sm bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
               }
             `}
           >
-            <CheckCircle size={20} weight="bold" />
-            Picked
+            {item.uiState === 'matched' ? (
+              <>
+                <CheckCircle size={20} weight="bold" />
+                Confirm Picked
+              </>
+            ) : item.uiState === 'not_matched' ? (
+              <>
+                <Camera size={20} weight="bold" />
+                Try Scan Again
+              </>
+            ) : (
+              <>
+                <Camera size={20} weight="bold" />
+                {item.uiState === 'scanning' ? 'Scanning...' : 'Scan Item'}
+              </>
+            )}
           </button>
 
-          {/* Secondary: scan + flag + override row */}
+          {/* Secondary Actions */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={onScan}
-              disabled={item.uiState === 'scanning'}
-              className="
-                flex-1 h-11 flex items-center justify-center gap-1.5
-                rounded-xl bg-[var(--bg-tertiary)]
-                text-[var(--content-secondary)] text-sm font-medium
-                active:scale-95 transition-transform duration-100
-                disabled:opacity-50
-              "
-              aria-label="Scan item"
-            >
-              <Camera size={18} weight="bold" />
-              Scan
-            </button>
+            {item.uiState === 'matched' && (
+              <button
+                onClick={onScan}
+                className="
+                  flex-1 h-11 flex items-center justify-center gap-1.5
+                  rounded-xl bg-[var(--bg-tertiary)]
+                  text-[var(--content-secondary)] text-sm font-medium
+                  active:scale-95 transition-transform duration-100
+                "
+              >
+                <Camera size={18} weight="bold" />
+                Rescan
+              </button>
+            )}
+
+            {(item.uiState === 'pending' || item.uiState === 'scanning') && (
+              <button
+                onClick={onPick}
+                disabled={item.uiState === 'scanning'}
+                className="
+                  flex-1 h-11 flex items-center justify-center gap-1.5
+                  rounded-xl bg-[var(--bg-tertiary)]
+                  text-[var(--content-secondary)] text-sm font-medium
+                  active:scale-95 transition-transform duration-100
+                  disabled:opacity-50
+                "
+                aria-label="Manual Pick"
+              >
+                <CheckCircle size={18} weight="bold" />
+                Manual Pick
+              </button>
+            )}
+
+            {item.uiState === 'not_matched' && (
+              <button
+                onClick={onOverride}
+                className="
+                  flex-1 h-11 flex items-center justify-center gap-1.5
+                  rounded-xl bg-[var(--bg-warning-subtle)]
+                  text-[var(--content-warning)] text-sm font-bold
+                  active:scale-95 transition-transform duration-100
+                "
+              >
+                <Warning size={18} weight="bold" />
+                Override
+              </button>
+            )}
 
             <button
               onClick={() => {
@@ -894,21 +955,6 @@ function PickItemCard({
               <Flag size={16} weight="bold" />
               Flag
             </button>
-
-            {/* Override button for OCR no-match */}
-            {item.uiState === 'not_matched' && (
-              <button
-                onClick={onOverride}
-                className="
-                  flex-1 h-11 flex items-center justify-center gap-1.5
-                  rounded-xl bg-[var(--bg-warning-subtle)]
-                  text-[var(--content-warning)] text-sm font-semibold
-                  active:scale-95 transition-transform duration-100
-                "
-              >
-                Override
-              </button>
-            )}
           </div>
         </div>
       )}

@@ -226,7 +226,14 @@ function extractFields(ocrText: string): ExtractedFields {
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 function normalize(s: string): string {
-  return s.replace(/[\s.\-/\\(),:;'"]+/g, '').toLowerCase();
+  let cleaned = s;
+  while (true) {
+    // Strip common prefixes from code strings before comparing
+    const next = cleaned.replace(/^(P-|R-|UK-|UB-|UF-|G-)/i, '');
+    if (next === cleaned) break;
+    cleaned = next;
+  }
+  return cleaned.replace(/[\s.\-/\\(),:;'"]+/g, '').toLowerCase();
 }
 
 /**
@@ -364,6 +371,18 @@ function scorePartNumber(
     const normPart = normalize(partNum);
     for (const cand of codeCandidates) {
       const normCand = normalize(cand);
+      
+      // Exact matching or suffix matching gets max score
+      if (normCand.endsWith(normPart) || normPart.endsWith(normCand)) {
+        return {
+          signal: 'partNumber',
+          score: MAX,
+          maxScore: MAX,
+          detail: `suffix/exact(code): "${partNum}" ~ "${cand}"`,
+          directCodeMatch: true,
+        };
+      }
+
       if (
         (normCand.length >= 3 && normPart.includes(normCand)) ||
         (normPart.length >= 3 && normCand.includes(normPart))
@@ -673,6 +692,52 @@ function scoreProductType(
   };
 }
 
+/* Signal 6: Keyword overlap (max 30) ─────────────────────────────────── */
+
+function scoreKeywordOverlap(
+  extracted: ExtractedFields,
+  itemName: string,
+): SignalDetail {
+  const MAX = 30;
+  
+  // Extract tokens of length > 2 to avoid matching trivial words
+  const itemTokens = new Set(tokenize(itemName).filter(t => t.length > 2));
+  const extTokens = tokenize(extracted.cleanedText).filter(t => t.length > 2);
+  
+  let matches = 0;
+  const matchedTokens: string[] = [];
+  
+  for (const t of extTokens) {
+    if (itemTokens.has(t) && !matchedTokens.includes(t)) {
+      matches++;
+      matchedTokens.push(t);
+    }
+  }
+
+  if (matches >= 2) {
+    return { 
+      signal: 'keywordOverlap', 
+      score: MAX, 
+      maxScore: MAX, 
+      detail: `keywords: [${matchedTokens.join(', ')}] matched item name` 
+    };
+  } else if (matches === 1) {
+    return { 
+      signal: 'keywordOverlap', 
+      score: 15, 
+      maxScore: MAX, 
+      detail: `keyword: "${matchedTokens[0]}" matched item name` 
+    };
+  }
+  
+  return { 
+    signal: 'keywordOverlap', 
+    score: 0, 
+    maxScore: MAX, 
+    detail: 'no shared keywords' 
+  };
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
  *  Layer 4 — Confidence aggregation & public API
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -699,6 +764,7 @@ export function matchOcrToItem(
     scoreVehicleModel(extracted, expectedItem.item_name),
     scoreMrp(extracted, itemMrp),
     scoreProductType(extracted, expectedItem.item_name),
+    scoreKeywordOverlap(extracted, expectedItem.item_name),
   ];
 
   const totalScore = signals.reduce((sum, s) => sum + s.score, 0);

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OrderItem, ScanResult } from '../../types';
-import { scanImage } from '../../lib/ocr/ocrEngine';
+import { scanImage } from '../../lib/ocr/paddleEngine';
 import { matchOcrToItem } from '../../lib/ocr/ocrMatcher';
 import { buildScanResultFromMatch } from '../../lib/ocr/scanResult';
 import { verifyWithAI, buildScanResultFromAI } from '../../lib/ocr/pickVerifier';
 import { OcrScannerSheet } from './LiveOcrScannerSheet';
 
 /** Resize image to JPEG base64 for AI verification */
-function imageFileToBase64(file: File, maxWidth = 1000): Promise<string> {
+function imageFileToBase64(file: File, maxWidth = 800): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -17,7 +17,7 @@ function imageFileToBase64(file: File, maxWidth = 1000): Promise<string> {
       canvas.height = Math.round(img.height * scale);
       const ctx = canvas.getContext('2d')!;
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
       resolve(dataUrl.split(',')[1]);
       URL.revokeObjectURL(img.src);
     };
