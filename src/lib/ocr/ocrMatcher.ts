@@ -64,6 +64,16 @@ function stripPrefixes(normalizedCode: string): string {
   return normalizedCode.replace(PREFIXES_TO_STRIP, '').replace(PREFIXES_TO_STRIP, ''); // Replace twice in case of TIDCINEL
 }
 
+function normalizeFuzzy(str: string): string {
+  return str
+    .replace(/[G]/g, '6')
+    .replace(/[S]/g, '5')
+    .replace(/[Z]/g, '2')
+    .replace(/[OQ]/g, '0')
+    .replace(/[B]/g, '8')
+    .replace(/[I]/g, '1');
+}
+
 // === VARIANT VALIDATION ===
 interface VariantTokens {
   size: string[];
@@ -279,6 +289,45 @@ export function matchOcrToItem(
         console.log(`Layer 1: code '${codeNorm}' vs name -> substring -> match`);
         bestLayer1Match = bestLayer1Match || { code: rawCode, type: `Code found in name`, baseConfidence: 80, ambiguityWarning: true };
       }
+    }
+  }
+
+  // === LAYER 1.5: FUZZY TOKEN SCAN ===
+  // If strict code extraction failed to yield a match, attempt looking at every alphanumeric token.
+  // This catches cases where OCR reads K6N as KGN, or it has weird boundaries.
+  if (!bestLayer1Match) {
+    console.log('Layer 1 strict extraction failed, attempting fuzzy token scan...');
+    const looseTokens = ocrText.replace(/[^A-Za-z0-9]/g, ' ').split(/\s+/).filter(t => t.length >= 3);
+    
+    for (const token of looseTokens) {
+      const tokenNorm = token.toUpperCase();
+      const tokenFuzzy = normalizeFuzzy(tokenNorm);
+
+      const targets = [
+        { type: 'item_alias', val: aliasNorm },
+        { type: 'alias1', val: alias1Norm }
+      ].filter(t => t.val) as { type: string; val: string }[];
+
+      for (const target of targets) {
+        const targetFuzzy = normalizeFuzzy(target.val);
+        
+        if (tokenFuzzy === targetFuzzy) {
+          console.log(`Layer 1.5: fuzzy token '${tokenNorm}' vs ${target.type} '${target.val}' -> match`);
+          bestLayer1Match = { code: token, type: `Fuzzy exact match with ${target.type}`, baseConfidence: 85, ambiguityWarning: false };
+          break;
+        }
+        
+        if (targetFuzzy.includes(tokenFuzzy) && tokenFuzzy.length >= 3) {
+           console.log(`Layer 1.5: fuzzy token '${tokenNorm}' vs ${target.type} '${target.val}' -> substring match`);
+           bestLayer1Match = bestLayer1Match || { code: token, type: `Fuzzy substring with ${target.type}`, baseConfidence: 75, ambiguityWarning: true };
+        }
+        
+        if (tokenFuzzy.includes(targetFuzzy) && targetFuzzy.length >= 3) {
+           console.log(`Layer 1.5: fuzzy target '${target.val}' in token '${tokenNorm}' -> substring match`);
+           bestLayer1Match = bestLayer1Match || { code: token, type: `Fuzzy target in token with ${target.type}`, baseConfidence: 75, ambiguityWarning: true };
+        }
+      }
+      if (bestLayer1Match?.baseConfidence === 85) break;
     }
   }
 
