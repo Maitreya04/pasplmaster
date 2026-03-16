@@ -5,7 +5,7 @@ import { useOrders } from '../../hooks/useOrders';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { usePendingItems } from '../../hooks/usePendingItems';
 import { Card, BottomSheet, StatusBadge, EmptyState, Skeleton } from '../../components/shared';
-import type { Order, OrderItem } from '../../types';
+import type { Order, OrderItem, OrderWithItems } from '../../types';
 
 import { formatCurrency, formatTimeAgo } from '../../utils/formatters';
 
@@ -13,14 +13,21 @@ function OrderCard({
   order,
   onTap,
 }: {
-  order: Order;
+  order: OrderWithItems | Order;
   onTap: () => void;
 }) {
   return (
     <Card pressable onClick={onTap}>
       <div className="space-y-2">
         <div className="flex items-start justify-between gap-3">
-          <span className="font-mono text-[var(--content-tertiary)] text-sm">{order.order_number}</span>
+          <span className="font-mono text-[var(--content-tertiary)] text-sm">
+            {order.order_number}
+            {order.status !== 'flagged' && 'items' in order && order.items && (order.items as OrderItem[]).some((i: OrderItem) => i.state === 'flagged') && (
+              <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] px-1.5 py-0.5 rounded">
+                Has Rejections
+              </span>
+            )}
+          </span>
           <StatusBadge status={order.status} />
         </div>
         <p className="font-bold text-[var(--content-primary)]">{order.customer_name}</p>
@@ -71,14 +78,34 @@ function OrderDetailSheet({
               const price = item.price_quoted ?? item.price_system ?? 0;
               const qty = item.qty_approved ?? item.qty_requested;
               const lineTotal = price * qty;
+              const isFlagged = item.state === 'flagged';
               return (
                 <li
                   key={item.id}
-                  className="flex justify-between items-start gap-4 py-2 border-b border-[var(--border-subtle)] last:border-0"
+                  className={`flex justify-between items-start gap-4 py-2 border-b border-[var(--border-subtle)] last:border-0 ${isFlagged ? 'opacity-70' : ''}`}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium text-[var(--content-primary)]">{item.item_name}</p>
-                    <p className="font-mono text-sm text-[var(--content-secondary)]">
+                    <p className={`font-medium ${isFlagged ? 'text-[var(--content-negative)]' : 'text-[var(--content-primary)]'}`}>
+                      {item.item_name}
+                    </p>
+                    {isFlagged && (
+                      <div className="mt-1 mb-1 space-y-0.5">
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]">
+                          Rejected: {item.flag_reason || 'See notes'}
+                        </span>
+                        {item.flag_notes && (
+                          <p className="text-xs text-[var(--content-secondary)] mt-0.5">
+                            Note: {item.flag_notes}
+                          </p>
+                        )}
+                        {typeof item.flag_box_price === 'number' && (
+                          <p className="text-xs text-[var(--content-secondary)] mt-0.5">
+                            Printed box price: {formatCurrency(item.flag_box_price)}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <p className={`font-mono text-sm text-[var(--content-secondary)] ${isFlagged ? 'line-through decoration-[var(--border-negative)]' : ''}`}>
                       {qty} × {formatCurrency(price)} = {formatCurrency(lineTotal)}
                     </p>
                   </div>
@@ -87,8 +114,33 @@ function OrderDetailSheet({
             })}
           </ul>
           <div className="pt-3 border-t border-[var(--border-subtle)] space-y-2">
-            <div className="font-mono font-semibold text-[var(--content-primary)]">
-              Total: {formatCurrency(order.total_value)}
+            <div className="flex items-center justify-between">
+              <span className="font-mono font-semibold text-[var(--content-primary)]">
+                Total:
+              </span>
+              <div className="text-right">
+                {order.items?.some((i: OrderItem) => i.state === 'flagged') ? (
+                  <>
+                    <span className="font-mono text-sm text-[var(--content-tertiary)] line-through mr-2">
+                      {formatCurrency(order.total_value)}
+                    </span>
+                    <span className="font-mono font-bold text-[var(--content-primary)]">
+                      {formatCurrency(
+                        order.items.reduce((acc: number, item: OrderItem) => {
+                          if (item.state === 'flagged') return acc;
+                          const price = item.price_quoted ?? item.price_system ?? 0;
+                          const qty = item.qty_approved ?? item.qty_requested;
+                          return acc + (price * qty);
+                        }, 0)
+                      )}
+                    </span>
+                  </>
+                ) : (
+                  <span className="font-mono font-bold text-[var(--content-primary)]">
+                    {formatCurrency(order.total_value)}
+                  </span>
+                )}
+              </div>
             </div>
 
             {pending && pending.length > 0 && (
