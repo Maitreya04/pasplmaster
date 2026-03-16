@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { OrderItem, ScanResult } from '../types';
-import { scanImage } from '../lib/ocr/paddleEngine';
+import { scanBlob } from '../lib/ocr/ocrEngine';
 import { matchOcrToItem } from '../lib/ocr/ocrMatcher';
 import { extractPartNumberCandidates, normalizeForPartMatch } from '../lib/ocr/partNumberExtractor';
 import { buildScanResultFromMatch } from '../lib/ocr/scanResult';
@@ -162,7 +162,7 @@ export function useContinuousOcr({
         setUiState((s) => (s === 'matched' || s === 'mismatch' ? s : 'reading'));
         if (!canvasRef.current) canvasRef.current = document.createElement('canvas');
         const frameBlob = await captureCenterRoiBlob(video, canvasRef.current);
-        const { rawText } = await scanImage(frameBlob);
+        const { rawText } = await scanBlob(frameBlob);
 
         const matchResult = matchOcrToItem(
           rawText,

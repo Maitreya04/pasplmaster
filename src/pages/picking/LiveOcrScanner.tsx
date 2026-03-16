@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OrderItem, ScanResult } from '../../types';
-import { scanImage } from '../../lib/ocr/paddleEngine';
+import { scanImage } from '../../lib/ocr/ocrEngine';
 import { matchOcrToItem } from '../../lib/ocr/ocrMatcher';
 import { buildScanResultFromMatch } from '../../lib/ocr/scanResult';
 import { verifyWithAI, buildScanResultFromAI } from '../../lib/ocr/pickVerifier';

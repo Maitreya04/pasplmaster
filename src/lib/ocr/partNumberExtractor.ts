@@ -84,17 +84,17 @@ export function extractPartNumberCandidates(ocrTextRaw: string): PartNumberCandi
   // 3) Generic “code-ish” patterns (kept permissive because aliases sometimes
   // include model/variant separators like PRO/13S/SPLP/DLX).
   const genericRes: RegExp[] = [
-    // Slash-separated codes: ASK/NA/DBP/0538, PRO/13S/SPLP/DLX
-    /\b[A-Z0-9]{2,10}\/[A-Z0-9]{1,10}(?:\/[A-Z0-9]{1,10}){1,6}\b/gi,
-    // Hyphenated codes: ABC-1234, ABCD-EFGH-1234
-    /\b[A-Z0-9]{2,8}(?:-[A-Z0-9]{2,10}){1,4}\b/gi,
+    // Slash-separated codes: ASK / NA / DBP / 0538, PRO/13S/SPLP/DLX
+    /\b[A-Z0-9]{2,10}(?:\s*\/\s*[A-Z0-9]{1,10}){1,6}\b/gi,
+    // Hyphenated codes: ABC - 1234, ABCD-EFGH-1234
+    /\b[A-Z0-9]{2,8}(?:\s*-\s*[A-Z0-9]{2,10}){1,4}\b/gi,
     // Numeric 4-8 digit codes (avoid years)
     /\b(\d{4,8})\b/g,
     // Short alphanumeric with trailing letters: S75NC, S75 NC
     /\b([A-Z]\d{2,3}\s?[A-Z]{1,4})\b/gi,
-    // Bare piston-size / oversize codes: L30, STD, B40 — letter(s) + 2-3 digits
+    // Bare piston-size / oversize codes: L30, STD, B40, D 32 — letter(s) + optional space + 2-3 digits
     // (no trailing letters required, min 3 chars after normalisation)
-    /\b([A-Z]{1,3}\d{2,3})\b/gi,
+    /\b([A-Z]{1,3}\s*\d{2,3})\b/gi,
   ];
 
   for (const re of genericRes) {

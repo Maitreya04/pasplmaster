@@ -24,7 +24,8 @@ import type { OrderItem, ScanResult } from '../../types';
 import { FLAG_REASONS, type FlagReason } from '../../utils/constants';
 import { LiveOcrScanner } from './LiveOcrScanner';
 import { PickCompleteScreen } from './PickCompleteScreen';
-import { initWorker } from '../../lib/ocr/paddleEngine';
+import { initWorker, terminateWorker } from '../../lib/ocr/ocrEngine';
+
 
 interface ItemMeta {
   mrp: number | null;
@@ -97,9 +98,11 @@ export default function PickPage() {
   const orderId = id ? parseInt(id, 10) : null;
   const { data: order, isLoading, error } = useOrderDetail(orderId);
 
-  // Pre-initialize OCR worker to speed up first scan
   useEffect(() => {
     initWorker().catch(console.error);
+    return () => {
+      terminateWorker().catch(console.error);
+    };
   }, []);
 
   const [itemMeta, setItemMeta] = useState<ItemMetaMap>(new Map());
