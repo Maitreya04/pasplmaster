@@ -1,3 +1,5 @@
+import { matchOcrToItem } from './ocrMatcher';
+
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 export async function verifyWithGemini(
@@ -6,6 +8,7 @@ export async function verifyWithGemini(
 ) {
   if (!API_KEY) return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: '', reason: 'API key not configured' };
 
+  // Phase 1: Use Gemini Flash to extract ALL text accurately
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`,
     {
@@ -14,46 +17,40 @@ export async function verifyWithGemini(
       body: JSON.stringify({
         contents: [{ parts: [
           { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } },
-          { text: `Warehouse product verification. Read this product label photo.
-
-Expected item: "${expectedItem.name}"
-Expected code: "${expectedItem.alias1}" or "${expectedItem.alias}"
-Expected MRP: ${expectedItem.mrp}
-
-Extract all part numbers, codes, description, MRP, brand from the photo.
-
-Matching rules:
-- Code "53064" on box matches "INEL53064" in DB (substring)
-- Code "D 32" on box matches "P-D32" in DB (prefix stripped)
-- Code "K6N" matches "TIDCK6N" (substring)
-- Description keywords must overlap (HINO 6ETI on box = HINO 6ETI in DB)
-- Size MUST match exactly: 0.25 vs 0.50 = WRONG ITEM
-- Side MUST match: RH vs LH = WRONG ITEM
-- NC vs non-NC = DIFFERENT ITEM
-
-Reply ONLY as JSON, no markdown:
-{"match":true,"confidence":95,"code":"code from box","description":"label description","reason":"brief explanation"}` }
+          { text: `Extract all legible text from this product label photo.
+Be extremely precise with letters vs numbers (e.g. 0 vs O, 1 vs I, Z vs 2, 8 vs B).
+Capture everything: part numbers, codes, descriptions, sizes, variants, brand names, and MRP.
+Return ONLY the raw extracted text as plain text, preserving newlines. Do not add any conversational text, JSON wrapping, or markdown formatting.` }
         ]}],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 200 }
+        generationConfig: { temperature: 0.1, maxOutputTokens: 300 }
       })
     }
   );
 
   const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-  try {
-    const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    const result = JSON.parse(cleaned);
-    return {
-      isMatch: result.match || false,
-      confidence: result.confidence || 0,
-      extractedCode: result.code || '',
-      extractedDescription: result.description || '',
-      reason: result.reason || ''
-    };
-  } catch {
-    return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: text.substring(0, 100), reason: 'Parse error' };
+  const extractedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  
+  if (!extractedText.trim()) {
+    return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: '', reason: 'Failed to read any text from image' };
   }
+
+  // Phase 2: Leverage our developed deterministic matching engine
+  const matchResult = matchOcrToItem(
+    extractedText,
+    { item_name: expectedItem.name, item_alias: expectedItem.alias },
+    expectedItem.mrp,
+    null,
+    expectedItem.alias1
+  );
+
+  // Map the strictly engine-evaluated results back to the expected UI format
+  return {
+    isMatch: matchResult.isMatch,
+    confidence: matchResult.confidence,
+    extractedCode: matchResult.ocrExtracted.partNumber || extractedText.substring(0, 30).replace(/\n/g, ' '),
+    extractedDescription: extractedText.substring(0, 100).replace(/\n/g, ' '),
+    reason: matchResult.signals[0]?.detail || 'Matched by engine'
+  };
 }
 
 export async function imageToBase64(file: File, maxWidth = 800): Promise<string> {

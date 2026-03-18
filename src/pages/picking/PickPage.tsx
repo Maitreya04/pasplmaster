@@ -853,7 +853,7 @@ function PickItemCard({
           {/* Scan Warning/Error Banner */}
           {item.uiState === 'warning' && item.scanResult && (
             <div className="mt-2 text-xs text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2 rounded-xl flex items-start gap-1.5 border border-[var(--border-warning)]/20">
-              <span className="mt-0.5 text-base leading-none">⚠️</span>
+              <Warning size={16} weight="bold" className="shrink-0 mt-0.5" />
               <span className="leading-tight">
                 <span className="font-semibold block mb-0.5 text-[var(--content-warning)]">Verification Warning</span>
                 {(item.scanResult as any).reason || 'Item mismatch'}
@@ -862,7 +862,7 @@ function PickItemCard({
           )}
           {item.uiState === 'error' && item.scanResult && (
             <div className="mt-2 text-xs text-[var(--content-negative)] bg-[var(--bg-negative-subtle)] px-3 py-2 rounded-xl flex items-start gap-1.5 border border-[var(--border-negative)]/20">
-              <span className="mt-0.5 text-base leading-none">🚨</span>
+              <Warning size={16} weight="bold" className="shrink-0 mt-0.5" />
               <span className="leading-tight">
                 <span className="font-semibold block mb-0.5 text-[var(--content-negative)]">Verification Failed</span>
                 {(item.scanResult as any).reason || 'Item mismatch or barcode not recognized'}
