@@ -8,35 +8,56 @@ export async function verifyWithGemini(
 ) {
   if (!API_KEY) return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: '', reason: 'API key not configured' };
 
-  // Phase 1: Use Gemini Flash to extract ALL text accurately
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [
-          { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } },
-          { text: `Extract all legible text from this product label photo.
+  // Phase 1: Use Gemini Flash to extract ALL text accurately (with 3 retries for high demand spikes)
+  let data;
+  let lastErrorMsg = '';
+  
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [
+            { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } },
+            { text: `Extract ALL legible text from this product label or packaging photo.
+DO NOT SKIP ANY TEXT. Read every single word, number, and code you see, no matter how large, small, or stylized it is. Pay special attention to standalone codes (e.g. K6N, D32).
 Be extremely precise with letters vs numbers (e.g. 0 vs O, 1 vs I, Z vs 2, 8 vs B).
 Capture everything: part numbers, codes, descriptions, sizes, variants, brand names, and MRP.
 Return ONLY the raw extracted text as plain text, preserving newlines. Do not add any conversational text, JSON wrapping, or markdown formatting.` }
-        ]}],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 300 }
-      })
-    }
-  );
+          ]}],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 300 }
+        })
+      }
+    );
 
-  let data;
-  try {
-    data = await res.json();
-  } catch (err) {
-    return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: '', reason: 'Failed to parse API response' };
+    try {
+      data = await res.json();
+    } catch (err) {
+      if (attempt === 3) return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: '', reason: 'Failed to parse API response' };
+      await new Promise(r => setTimeout(r, 1000 * attempt));
+      continue;
+    }
+
+    if (data.error) {
+      lastErrorMsg = data.error.message;
+      // If error is 503 Service Unavailable (high demand) or 429 Too Many Requests, wait and retry
+      if (res.status === 503 || res.status === 429) {
+        console.warn(`Gemini API overload (attempt ${attempt}/3). Retrying in ${attempt}s...`);
+        await new Promise(r => setTimeout(r, 1000 * attempt));
+        continue;
+      }
+      console.error('Gemini API Error:', data.error);
+      return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: '', reason: `API Error: ${data.error.message}` };
+    }
+    
+    // Success, break out of retry loop
+    break;
   }
 
-  if (data.error) {
-    console.error('Gemini API Error:', data.error);
-    return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: '', reason: `API Error: ${data.error.message}` };
+  if (!data || data.error) {
+    return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: '', reason: `API Error: ${lastErrorMsg || 'Exhausted retries'}` };
   }
 
   const extractedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
