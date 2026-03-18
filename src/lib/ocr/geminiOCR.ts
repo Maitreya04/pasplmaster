@@ -1,4 +1,4 @@
-// Removed matchOcrToItem import as matching is now handled entirely via LLM JSON output
+import { matchOcrToItem } from './ocrMatcher';
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
@@ -24,57 +24,13 @@ export async function verifyWithGemini(
           body: JSON.stringify({
             contents: [{ parts: [
               { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } },
-              { text: `You are an expert warehouse inventory verifier for Pathak Auto Sales, an auto parts distributor in Indore. You verify picked items by reading product labels.
-
-TASK: Read this product photo and verify if it matches the expected item.
-
-EXPECTED ITEM FROM ORDER:
-- Name: "${expectedItem.name}"
-- Code (alias): "${expectedItem.alias || ''}"  
-- Code (alias1): "${expectedItem.alias1 || ''}"
-- MRP: ₹${expectedItem.mrp || ''}
-
-YOUR KNOWLEDGE OF THIS INDUSTRY:
-- Alias1 codes are internal DB codes, NOT manufacturer codes. Example: "INEL53064" is our code, box shows "53064"
-- Brand prefixes in alias1: INEL=Lucas/INEL, TIDC=Diamond/TIDC, ASK=ASK, SH/SM=Suprajit, U2/UP/UR=USHA/Shriram, FOIL/FOAM=Varroc, TE/SW=TAFE/Swaraj, KV=Rane, G=Banco, EV=EVA, BB/BM/BW=KSPG
-- USHA products: box has manufacturer part no (S75 NC, NC 332, P-D32) which does NOT appear in our alias1. Match by description keywords instead.
-- Prefix stripping: "P-D32" on our alias means "D32" is the core code. "Control No. D 32" on box = same item.
-- TIDC chains: our code "TIDCK6N" means the box will show "K6N". "TIDCK6ND" = "K6N DURO" variant.
-
-CRITICAL VARIANT RULES (wrong variant = WRONG ITEM):
-- Size: 0.25, 0.50, 0.75, 1.00, STD — must match exactly
-- Side: RH vs LH — must match exactly  
-- Cover: NC (new cover) vs non-NC — different items
-- Emission: BS3/BS4/BS6/BSVI — must match
-- DURO vs non-DURO — different chain variant
-- Front(F) vs Rear(R) — different items
-
-STRICT REJECTION RULES (RETURN match: false IF ANY ARE TRUE):
-1. Brand Mismatch: Expecting one brand type (e.g. Diamond/TIDC) but box clearly says another (e.g. USHA).
-2. Code Mismatch: Box code (e.g. "D 32") shares NOTHING in common with the expected DB code (e.g. "TIDCK6N").
-3. Description Mismatch: Box text (e.g. "PISTON RINGS") has NO overlap with expected name (e.g. "CHAIN SPROCKET").
-WARNING: DO NOT HALLUCINATE A MATCH. If they look like completely different items visually or textually, THEY ARE DIFFERENT ITEMS.
-
-Read the photo. Extract all visible text, codes, and numbers. Then reason:
-1. What brand is this product?
-2. What part number/code is on the label?
-3. What vehicle/description is shown?
-4. What size/variant indicators are present?
-5. Does this match the expected item considering prefix stripping and keyword overlap?
-
-Reply ONLY as a JSON object, starting with your step-by-step reasoning BEFORE deciding the match boolean:
-{
-  "step_by_step_reasoning": "Compare the extracted brand, code, and description to the expected item. State explicitly why they match or fail. Write this as a single continuous paragraph WITHOUT newlines or bullet points.",
-  "match": true/false,
-  "confidence": 0-100,
-  "code": "code from label",
-  "description": "product description from label",
-  "mrp": "price if visible",
-  "variant_check": "size/side/NC status found",
-  "reason": "short explanation of the final decision"
-}` }
+              { text: `Transcribe EVERY piece of legible text from this product label or packaging photo.
+DO NOT SKIP ANY TEXT. Read every single word, number, and code you see, no matter how large, small, stylized, or randomly placed it is.
+CRITICAL: Pay special attention to standalone codes (e.g. K6N, D32, 7157). These are part numbers, NOT decorative logos!
+Be extremely precise with letters vs numbers (e.g. 0 vs O, 1 vs I, Z vs 2, 8 vs B).
+Return ONLY the raw extracted text as plain text, preserving newlines. Do not add any conversational text or markdown formatting.` }
             ]}],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 500, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 200 } }
+            generationConfig: { temperature: 0.1, maxOutputTokens: 300 }
           })
         }
       );
@@ -120,29 +76,25 @@ Reply ONLY as a JSON object, starting with your step-by-step reasoning BEFORE de
     return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: '', reason: 'Image blocked by safety filters or empty response' };
   }
 
-  try {
-    const jsonStr = extractedText.replace(/```(?:json)?\n?/g, '').replace(/```/g, '').trim();
-    const result = JSON.parse(jsonStr);
-    return {
-      isMatch: result.match,
-      confidence: result.confidence,
-      extractedCode: result.code || '',
-      extractedDescription: result.description || '',
-      reason: result.reason || 'AI Verified'
-    };
-  } catch (err) {
-    console.error("Gemini output was not valid JSON:", extractedText);
-    return {
-      isMatch: false,
-      confidence: 0,
-      extractedCode: '',
-      extractedDescription: '',
-      reason: `Failed to parse AI response. Raw: ${extractedText.substring(0, 100)}`
-    };
-  }
+  // Phase 2: Leverage our developed deterministic matching engine
+  const matchResult = matchOcrToItem(
+    extractedText,
+    { item_name: expectedItem.name, item_alias: expectedItem.alias },
+    expectedItem.mrp,
+    null,
+    expectedItem.alias1
+  );
+
+  return {
+    isMatch: matchResult.isMatch,
+    confidence: matchResult.confidence,
+    extractedCode: matchResult.ocrExtracted.partNumber || extractedText.substring(0, 30).replace(/\n/g, ' '),
+    extractedDescription: extractedText.substring(0, 100).replace(/\n/g, ' '),
+    reason: matchResult.signals[0]?.detail || 'Matched by engine'
+  };
 }
 
-export async function imageToBase64(file: File, maxWidth = 800): Promise<string> {
+export async function imageToBase64(file: File, maxWidth = 600): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {

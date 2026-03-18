@@ -102,7 +102,7 @@ function extractVariants(text: string): VariantTokens {
     side: extract(/\b(RH|LH|RIGHT|LEFT)\b/g),
     position: extract(/\b(FRONT|REAR|FR|RR|F|R)\b/g),
     cover: extract(/\b(NC)\b/g),
-    emission: extract(/\b(BS3|BS4|BS6|BSVI|BSIII|BSIV)\b/g),
+    emission: extract(/\b(BS3A|BS3|BS4|BS6|BSVI|BSIII|BSIV)\b/g),
     duro: extract(/\b(DURO)\b/g),
   };
 }
@@ -363,7 +363,7 @@ export function matchOcrToItem(
 
   // === LAYER 2: KEYWORD MATCH ===
   console.log('Falling back to Layer 2: Keyword Match');
-  const NOISE_WORDS = ['USHA', 'USHA2', 'INEL', 'TIDC', 'ASK', 'SJ', 'VE', 'TE', 'SW', 'BG', 'BA', 'EV', 'KV', 'LC', 'THE', 'FOR', 'AND', 'WITH', 'NEW', 'PART', 'NO', 'NUMBER', 'CODE'];
+  const NOISE_WORDS = ['USHA', 'USHA2', 'INEL', 'TIDC', 'ASK', 'SJ', 'VE', 'TE', 'SW', 'BG', 'BA', 'EV', 'KV', 'LC', 'THE', 'FOR', 'AND', 'WITH', 'NEW', 'PART', 'NO', 'NUMBER', 'CODE', 'MOLY', 'GOLD', 'SSM'];
   
   const extractWords = (text: string) => 
     text.toUpperCase().split(/[^A-Z0-9]+/).filter(w => w.length >= 2);
@@ -406,7 +406,7 @@ export function matchOcrToItem(
   } else {
     isMatch = false;
     // VERY IMPORTANT FOR DEBUGGING: Show the user what we actually read!
-    const snippet = ocrText.replace(/\ng/, ' ').substring(0, 70);
+    const snippet = ocrText.replace(/\n/g, ' ').substring(0, 70);
     detail = `${detail}. (Read: "${snippet}...")`;
   }
 
