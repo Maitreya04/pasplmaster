@@ -49,6 +49,12 @@ CRITICAL VARIANT RULES (wrong variant = WRONG ITEM):
 - DURO vs non-DURO — different chain variant
 - Front(F) vs Rear(R) — different items
 
+STRICT REJECTION RULES (RETURN match: false IF ANY ARE TRUE):
+1. Brand Mismatch: Expecting one brand type (e.g. Diamond/TIDC) but box clearly says another (e.g. USHA).
+2. Code Mismatch: Box code (e.g. "D 32") shares NOTHING in common with the expected DB code (e.g. "TIDCK6N").
+3. Description Mismatch: Box text (e.g. "PISTON RINGS") has NO overlap with expected name (e.g. "CHAIN SPROCKET").
+WARNING: DO NOT HALLUCINATE A MATCH. If they look like completely different items visually or textually, THEY ARE DIFFERENT ITEMS.
+
 Read the photo. Extract all visible text, codes, and numbers. Then reason:
 1. What brand is this product?
 2. What part number/code is on the label?
@@ -56,10 +62,19 @@ Read the photo. Extract all visible text, codes, and numbers. Then reason:
 4. What size/variant indicators are present?
 5. Does this match the expected item considering prefix stripping and keyword overlap?
 
-Reply ONLY as JSON:
-{"match":true/false,"confidence":0-100,"code":"code from label","description":"product description from label","mrp":"price if visible","variant_check":"size/side/NC status found","reason":"one line explanation"}` }
+Reply ONLY as a JSON object, starting with your step-by-step reasoning BEFORE deciding the match boolean:
+{
+  "step_by_step_reasoning": "Compare the extracted brand, code, and description to the expected item. State explicitly why they match or fail.",
+  "match": true/false,
+  "confidence": 0-100,
+  "code": "code from label",
+  "description": "product description from label",
+  "mrp": "price if visible",
+  "variant_check": "size/side/NC status found",
+  "reason": "short explanation of the final decision"
+}` }
             ]}],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 400, thinkingConfig: { thinkingBudget: 200 } }
+            generationConfig: { temperature: 0.1, maxOutputTokens: 500, thinkingConfig: { thinkingBudget: 200 } }
           })
         }
       );
