@@ -297,7 +297,12 @@ export function matchOcrToItem(
   // This catches cases where OCR reads K6N as KGN, or it has weird boundaries.
   if (!bestLayer1Match) {
     console.log('Layer 1 strict extraction failed, attempting fuzzy token scan...');
-    const looseTokens = ocrText.replace(/[^A-Za-z0-9]/g, ' ').split(/\s+/).filter(t => t.length >= 3);
+    // D 32 becomes "D", "32". We need to allow length >= 2 so we don't drop 32.
+    const looseTokens = ocrText.replace(/[^A-Za-z0-9]/g, ' ').split(/\s+/).filter(t => t.length >= 2);
+    
+    // Also add a synthetic token that represents the whole string without spaces, just in case "D 32" needs to be "D32"
+    const squished = ocrText.replace(/[^A-Za-z0-9]/g, '');
+    if (squished.length > 0) looseTokens.push(squished);
     
     for (const token of looseTokens) {
       const tokenNorm = token.toUpperCase();
@@ -393,9 +398,6 @@ export function matchOcrToItem(
   let detail = `Matched ${matchCount}/${expectedWords.length} words. Variants: ${variantCheck.details.join(', ') || 'OK'}`;
 
   // Scoring:
-  // >= 70 total confidence: isMatch true
-  // 50-69: "Possible match — verify"
-  // < 50: no match
   if (keywordScore >= 70) {
     isMatch = true;
   } else if (keywordScore >= 50) {
@@ -403,6 +405,9 @@ export function matchOcrToItem(
     detail = `Possible match — verify. ${detail}`;
   } else {
     isMatch = false;
+    // VERY IMPORTANT FOR DEBUGGING: Show the user what we actually read!
+    const snippet = ocrText.replace(/\ng/, ' ').substring(0, 70);
+    detail = `${detail}. (Read: "${snippet}...")`;
   }
 
   console.log(`Final: isMatch=${isMatch}, confidence=${Math.round(keywordScore)}, method=keyword_match`);
