@@ -27,11 +27,25 @@ Return ONLY the raw extracted text as plain text, preserving newlines. Do not ad
     }
   );
 
-  const data = await res.json();
+  let data;
+  try {
+    data = await res.json();
+  } catch (err) {
+    return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: '', reason: 'Failed to parse API response' };
+  }
+
+  if (data.error) {
+    console.error('Gemini API Error:', data.error);
+    return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: '', reason: `API Error: ${data.error.message}` };
+  }
+
   const extractedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   
   if (!extractedText.trim()) {
-    return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: '', reason: 'Failed to read any text from image' };
+    console.error('Gemini returned no text. Full response:', data);
+    const finishReason = data.candidates?.[0]?.finishReason;
+    const blockReason = finishReason ? ` (Finish Reason: ${finishReason})` : '';
+    return { isMatch: false, confidence: 0, extractedCode: '', extractedDescription: '', reason: `No text extracted${blockReason}` };
   }
 
   // Phase 2: Leverage our developed deterministic matching engine
