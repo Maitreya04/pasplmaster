@@ -64,7 +64,7 @@ Read the photo. Extract all visible text, codes, and numbers. Then reason:
 
 Reply ONLY as a JSON object, starting with your step-by-step reasoning BEFORE deciding the match boolean:
 {
-  "step_by_step_reasoning": "Compare the extracted brand, code, and description to the expected item. State explicitly why they match or fail.",
+  "step_by_step_reasoning": "Compare the extracted brand, code, and description to the expected item. State explicitly why they match or fail. Write this as a single continuous paragraph WITHOUT newlines or bullet points.",
   "match": true/false,
   "confidence": 0-100,
   "code": "code from label",
@@ -74,7 +74,7 @@ Reply ONLY as a JSON object, starting with your step-by-step reasoning BEFORE de
   "reason": "short explanation of the final decision"
 }` }
             ]}],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 500, thinkingConfig: { thinkingBudget: 200 } }
+            generationConfig: { temperature: 0.1, maxOutputTokens: 500, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 200 } }
           })
         }
       );
