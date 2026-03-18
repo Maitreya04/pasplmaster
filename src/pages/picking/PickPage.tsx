@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -22,9 +22,8 @@ import {
 } from '../../components/shared';
 import type { OrderItem, ScanResult } from '../../types';
 import { FLAG_REASONS, type FlagReason } from '../../utils/constants';
-import { LiveOcrScanner } from './LiveOcrScanner';
 import { PickCompleteScreen } from './PickCompleteScreen';
-import { initWorker, terminateWorker } from '../../lib/ocr/ocrEngine';
+import { verifyWithGemini, imageToBase64 } from '../../lib/ocr/geminiOCR';
 
 
 interface ItemMeta {
@@ -38,7 +37,8 @@ type PickItemUiState =
   | 'pending'
   | 'scanning'
   | 'matched'
-  | 'not_matched'
+  | 'warning'
+  | 'error'
   | 'picked'
   | 'flagged'
   | 'overridden';
@@ -83,8 +83,13 @@ function partitionItems(items: PickItemLocal[]): {
 function uiStateFromDb(oi: OrderItem): PickItemUiState {
   if (oi.state === 'picked') return 'picked';
   if (oi.state === 'flagged') return 'flagged';
-  if (oi.scan_result?.isMatch) return 'matched';
-  if (oi.scan_result && !oi.scan_result.isMatch) return 'not_matched';
+  if (oi.scan_result) {
+    const res = oi.scan_result as Record<string, any>;
+    const conf = res?.confidence || 0;
+    if (res?.isMatch || conf >= 70) return 'matched';
+    if (conf >= 40) return 'warning';
+    return 'error';
+  }
   return 'pending';
 }
 
@@ -98,12 +103,7 @@ export default function PickPage() {
   const orderId = id ? parseInt(id, 10) : null;
   const { data: order, isLoading, error } = useOrderDetail(orderId);
 
-  useEffect(() => {
-    initWorker().catch(console.error);
-    return () => {
-      terminateWorker().catch(console.error);
-    };
-  }, []);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [itemMeta, setItemMeta] = useState<ItemMetaMap>(new Map());
 
@@ -341,11 +341,61 @@ export default function PickPage() {
 
   const openLiveScan = useCallback((orderItem: OrderItem) => {
     setLiveScanTarget(orderItem);
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
   }, []);
 
   const closeLiveScan = useCallback(() => {
     setLiveScanTarget(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !liveScanTarget) return;
+
+    const itemId = liveScanTarget.id;
+    const thumbnailUrl = URL.createObjectURL(file);
+    updateLocalItem(itemId, { uiState: 'scanning', thumbnailUrl });
+
+    try {
+      const base64 = await imageToBase64(file, 800);
+      const meta = itemMeta.get(liveScanTarget.item_id);
+      
+      const expectedItem = {
+        name: liveScanTarget.item_name || '',
+        alias: liveScanTarget.item_alias || '',
+        alias1: meta?.alias1 || '',
+        mrp: meta?.mrp || 0
+      };
+
+      const result = await verifyWithGemini(base64, expectedItem);
+      console.log('Gemini result:', result);
+
+      const conf = result.confidence;
+      let uiState: PickItemUiState = 'error';
+      if (conf >= 70) uiState = 'matched';
+      else if (conf >= 40) uiState = 'warning';
+
+      updateLocalItem(itemId, {
+        uiState,
+        scanResult: result as any,
+        thumbnailUrl
+      });
+
+      saveScanResultMutation.mutate({
+        itemId,
+        scanResult: result as any
+      });
+    } catch (err) {
+      console.error(err);
+      toast.error('Verification failed');
+      updateLocalItem(itemId, { uiState: 'pending' });
+    } finally {
+      closeLiveScan();
+    }
+  };
 
   const handlePick = useCallback(
     (itemId: number) => {
@@ -654,28 +704,15 @@ export default function PickPage() {
         </div>
       </BottomSheet>
 
-      {/* Live scan bottom sheet */}
-      {liveScanTarget && (
-        <LiveOcrScanner
-          isOpen={liveScanTarget !== null}
-          expectedItem={liveScanTarget}
-          itemMrp={itemMeta.get(liveScanTarget.item_id)?.mrp ?? undefined}
-          itemMainGroup={itemMeta.get(liveScanTarget.item_id)?.main_group ?? null}
-          itemAlias1={itemMeta.get(liveScanTarget.item_id)?.alias1 ?? null}
-          onClose={closeLiveScan}
-          onFinal={({ scanResult, thumbnailUrl }) => {
-            updateLocalItem(liveScanTarget.id, {
-              uiState: scanResult.isMatch ? 'matched' : 'not_matched',
-              scanResult,
-              thumbnailUrl,
-            });
-            saveScanResultMutation.mutate({
-              itemId: liveScanTarget.id,
-              scanResult,
-            });
-          }}
-        />
-      )}
+      {/* Live scan file input */}
+      <input 
+        type="file" 
+        accept="image/*" 
+        capture="environment" 
+        ref={fileInputRef} 
+        className="hidden" 
+        onChange={handleFileChange} 
+      />
     </div>
   );
 }
@@ -707,7 +744,8 @@ function PickItemCard({
     pending: 'border-transparent',
     scanning: 'border-[var(--border-warning)] animate-pulse',
     matched: 'border-[var(--bg-positive)]',
-    not_matched: 'border-[var(--bg-negative)]',
+    warning: 'border-[var(--border-warning)]',
+    error: 'border-[var(--bg-negative)]',
     picked: 'border-[var(--bg-positive)]',
     flagged: 'border-[var(--bg-negative)]',
     overridden: 'border-[var(--border-warning)]',
@@ -793,53 +831,28 @@ function PickItemCard({
             )}
             {item.uiState === 'scanning' && (
               <span className="text-xs text-[var(--content-warning)] animate-pulse">
-                Scanning...
+                Verifying with AI...
               </span>
             )}
             {item.uiState === 'matched' && item.scanResult && (
               <span className="text-xs text-[var(--content-positive)] truncate max-w-[200px] flex items-center gap-1">
-                Match: {item.scanResult.ocrExtracted?.partNumber || item.scanResult.matchedAgainst}
-                {item.scanResult.method === 'ai_verify' ? (
-                  <span className="inline-flex px-1.5 py-px rounded-full bg-blue-500/15 text-[10px] font-semibold text-blue-400 border border-blue-400/20">
-                    AI
-                  </span>
-                ) : (
-                  <span className="inline-flex px-1.5 py-px rounded-full bg-[var(--bg-positive-subtle)] text-[10px] font-semibold text-[var(--content-positive)] border border-[var(--border-positive)]">
-                    Local
-                  </span>
-                )}
+                ✓ Verified {(item.scanResult as any).extractedCode && `- ${(item.scanResult as any).extractedCode}`} {(item.scanResult as any).reason && `- ${(item.scanResult as any).reason}`}
               </span>
             )}
-            {item.uiState === 'not_matched' && item.scanResult && (
+            {item.uiState === 'warning' && item.scanResult && (
+              <span className="text-xs text-[var(--content-warning)] truncate max-w-[200px]">
+                ⚠ Check: {(item.scanResult as any).reason}
+              </span>
+            )}
+            {item.uiState === 'error' && item.scanResult && (
               <span className="text-xs text-[var(--content-negative)] truncate max-w-[200px]">
-                Expected {oi.item_alias || oi.item_name}
+                ✗ {(item.scanResult as any).reason}
               </span>
             )}
           </div>
 
-          {/* Signal breakdown for scanned items */}
-          {(item.uiState === 'matched' || item.uiState === 'not_matched') &&
-            item.scanResult?.signals && (
-              <div className="flex flex-wrap gap-1 mt-1.5">
-                {item.scanResult.signals
-                  .filter((s) => s.score > 0)
-                  .map((s) => (
-                    <span
-                      key={s.signal}
-                      className="text-[10px] px-1.5 py-0.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--content-tertiary)] font-mono"
-                      title={s.detail}
-                    >
-                      {s.signal} {s.score}/{s.maxScore}
-                    </span>
-                  ))}
-                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--content-tertiary)] font-mono font-bold">
-                  = {item.scanResult.confidence}
-                </span>
-              </div>
-            )}
-
           {/* Thumbnail for scanned items */}
-          {item.thumbnailUrl && (item.uiState === 'matched' || item.uiState === 'not_matched') && (
+          {item.thumbnailUrl && ['scanning', 'matched', 'warning', 'error'].includes(item.uiState) && (
             <img
               src={item.thumbnailUrl}
               alt="Scan"
@@ -855,10 +868,10 @@ function PickItemCard({
           {/* Primary Action Button */}
           <button
             onClick={() => {
-              if (item.uiState === 'matched') {
+              if (['matched', 'warning'].includes(item.uiState)) {
                 onPick();
-              } else if (item.uiState === 'not_matched') {
-                onScan();
+              } else if (item.uiState === 'error') {
+                onOverride();
               } else {
                 onScan();
               }
@@ -879,22 +892,27 @@ function PickItemCard({
                 <CheckCircle size={20} weight="bold" />
                 Confirm Picked
               </>
-            ) : item.uiState === 'not_matched' ? (
+            ) : item.uiState === 'warning' ? (
               <>
-                <Camera size={20} weight="bold" />
-                Try Scan Again
+                <CheckCircle size={20} weight="bold" />
+                Confirm
+              </>
+            ) : item.uiState === 'error' ? (
+              <>
+                <Warning size={20} weight="bold" />
+                Confirm anyway
               </>
             ) : (
               <>
                 <Camera size={20} weight="bold" />
-                {item.uiState === 'scanning' ? 'Scanning...' : 'Scan Item'}
+                {item.uiState === 'scanning' ? 'Verifying with AI...' : 'Scan Item'}
               </>
             )}
           </button>
 
           {/* Secondary Actions */}
           <div className="flex items-center gap-2">
-            {item.uiState === 'matched' && (
+            {['matched', 'warning', 'error'].includes(item.uiState) && (
               <button
                 onClick={onScan}
                 className="
@@ -909,38 +927,21 @@ function PickItemCard({
               </button>
             )}
 
-            {(item.uiState === 'pending' || item.uiState === 'scanning') && (
-              <button
-                onClick={onPick}
-                disabled={item.uiState === 'scanning'}
-                className="
-                  flex-1 h-11 flex items-center justify-center gap-1.5
-                  rounded-xl bg-[var(--bg-tertiary)]
-                  text-[var(--content-secondary)] text-sm font-medium
-                  active:scale-95 transition-transform duration-100
-                  disabled:opacity-50
-                "
-                aria-label="Manual Pick"
-              >
-                <CheckCircle size={18} weight="bold" />
-                Manual Pick
-              </button>
-            )}
-
-            {item.uiState === 'not_matched' && (
-              <button
-                onClick={onOverride}
-                className="
-                  flex-1 h-11 flex items-center justify-center gap-1.5
-                  rounded-xl bg-[var(--bg-warning-subtle)]
-                  text-[var(--content-warning)] text-sm font-bold
-                  active:scale-95 transition-transform duration-100
-                "
-              >
-                <Warning size={18} weight="bold" />
-                Override
-              </button>
-            )}
+            <button
+              onClick={onPick}
+              disabled={item.uiState === 'scanning'}
+              className="
+                flex-1 h-11 flex items-center justify-center gap-1.5
+                rounded-xl bg-[var(--bg-tertiary)]
+                text-[var(--content-secondary)] text-sm font-medium
+                active:scale-95 transition-transform duration-100
+                disabled:opacity-50
+              "
+              aria-label="Manual Pick"
+            >
+              <CheckCircle size={18} weight="bold" />
+              Manual Pick
+            </button>
 
             <button
               onClick={() => {
