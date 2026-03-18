@@ -810,7 +810,7 @@ function PickItemCard({
           )}
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <span className="text-xs font-semibold text-[var(--content-secondary)] bg-[var(--bg-tertiary)] px-2 py-0.5 rounded-md">
-              Qty: {oi.qty_approved ?? oi.qty_requested}
+              0 / {oi.qty_approved ?? oi.qty_requested} Picked
             </span>
             {item.uiState === 'flagged' && (
               <div className="flex flex-wrap gap-1">
@@ -839,16 +839,6 @@ function PickItemCard({
                 ✓ Verified {(item.scanResult as any).extractedCode && `- ${(item.scanResult as any).extractedCode}`} {(item.scanResult as any).reason && `- ${(item.scanResult as any).reason}`}
               </span>
             )}
-            {item.uiState === 'warning' && item.scanResult && (
-              <span className="text-xs text-[var(--content-warning)] truncate max-w-[200px]">
-                ⚠ Check: {(item.scanResult as any).reason}
-              </span>
-            )}
-            {item.uiState === 'error' && item.scanResult && (
-              <span className="text-xs text-[var(--content-negative)] truncate max-w-[200px]">
-                ✗ {(item.scanResult as any).reason}
-              </span>
-            )}
           </div>
 
           {/* Thumbnail for scanned items */}
@@ -858,6 +848,26 @@ function PickItemCard({
               alt="Scan"
               className="mt-2 h-12 rounded-lg object-cover"
             />
+          )}
+
+          {/* Scan Warning/Error Banner */}
+          {item.uiState === 'warning' && item.scanResult && (
+            <div className="mt-2 text-xs text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2 rounded-xl flex items-start gap-1.5 border border-[var(--border-warning)]/20">
+              <span className="mt-0.5 text-base leading-none">⚠️</span>
+              <span className="leading-tight">
+                <span className="font-semibold block mb-0.5 text-[var(--content-warning)]">Verification Warning</span>
+                {(item.scanResult as any).reason || 'Item mismatch'}
+              </span>
+            </div>
+          )}
+          {item.uiState === 'error' && item.scanResult && (
+            <div className="mt-2 text-xs text-[var(--content-negative)] bg-[var(--bg-negative-subtle)] px-3 py-2 rounded-xl flex items-start gap-1.5 border border-[var(--border-negative)]/20">
+              <span className="mt-0.5 text-base leading-none">🚨</span>
+              <span className="leading-tight">
+                <span className="font-semibold block mb-0.5 text-[var(--content-negative)]">Verification Failed</span>
+                {(item.scanResult as any).reason || 'Item mismatch or barcode not recognized'}
+              </span>
+            </div>
           )}
         </div>
       </div>
@@ -882,8 +892,12 @@ function PickItemCard({
               rounded-xl font-bold
               active:scale-[0.98] transition-all duration-150
               ${isNext
-                ? 'h-14 text-base bg-[var(--bg-positive)] text-[var(--content-on-color)] shadow-sm shadow-[var(--bg-positive)]/20'
-                : 'h-12 text-sm bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
+                ? ['error', 'warning'].includes(item.uiState)
+                  ? 'h-14 text-base bg-[var(--bg-warning)] text-[var(--content-primary)] shadow-sm shadow-[var(--bg-warning)]/20'
+                  : 'h-14 text-base bg-[var(--bg-positive)] text-[var(--content-on-color)] shadow-sm shadow-[var(--bg-positive)]/20'
+                : ['error', 'warning'].includes(item.uiState)
+                  ? 'h-12 text-sm bg-[var(--bg-warning-subtle)] text-[var(--content-warning)]'
+                  : 'h-12 text-sm bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
               }
             `}
           >
