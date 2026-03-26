@@ -2,7 +2,7 @@ import { matchOcrToItem, type GeminiExtraction } from './ocrMatcher';
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
-const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash-lite';
 
 const PROMPT = `Read this Indian auto-parts product label photo. Extract ALL text you can see.
 Part numbers follow labels like "Part No", "Control No", or are standalone codes.
@@ -176,8 +176,9 @@ export async function imageToBase64(file: File, maxWidth = 640): Promise<string>
       canvas.width = img.width * scale;
       canvas.height = img.height * scale;
       const ctx = canvas.getContext('2d')!;
+      ctx.filter = 'contrast(1.15)';
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.6).split(',')[1]);
+      resolve(canvas.toDataURL('image/jpeg', 0.65).split(',')[1]);
     };
     img.src = URL.createObjectURL(file);
   });

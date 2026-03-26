@@ -23,7 +23,8 @@ import {
 import type { OrderItem, ScanResult } from '../../types';
 import { FLAG_REASONS, type FlagReason } from '../../utils/constants';
 import { PickCompleteScreen } from './PickCompleteScreen';
-import { verifyWithGemini, imageToBase64 } from '../../lib/ocr/geminiOCR';
+import { imageToBase64 } from '../../lib/ocr/geminiOCR';
+import { verifyWithAI } from '../../lib/ocr/pickVerifier';
 
 
 interface ItemMeta {
@@ -364,17 +365,19 @@ export default function PickPage() {
       const base64 = await imageToBase64(file);
       const meta = itemMeta.get(liveScanTarget.item_id);
       
-      const expectedItem = {
+      const aiResult = await verifyWithAI(base64, {
         name: liveScanTarget.item_name || '',
-        alias: liveScanTarget.item_alias || '',
-        alias1: meta?.alias1 || '',
-        mrp: meta?.mrp || 0,
-        mainGroup: meta?.main_group || '',
-        parentGroup: meta?.parent_group || '',
-      };
+        alias1: meta?.alias1 ?? null,
+        mrp: meta?.mrp ?? undefined,
+      });
 
-      const result = await verifyWithGemini(base64, expectedItem);
-      console.log('Gemini result:', result);
+      const result = {
+        isMatch: aiResult.match,
+        confidence: aiResult.confidence,
+        extractedCode: aiResult.extracted_code ?? '',
+        extractedDescription: aiResult.extracted_description ?? '',
+        reason: aiResult.reason,
+      };
 
       let uiState: PickItemUiState = 'error';
       if (result.isMatch) uiState = 'matched';

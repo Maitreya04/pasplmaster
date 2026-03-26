@@ -1,6 +1,67 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
+const GEMINI_FAST_MODEL = 'gemini-2.5-flash'
+const GEMINI_ACCURATE_MODEL = 'gemini-2.5-pro'
+
+const RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    match: { type: 'BOOLEAN' },
+    confidence: { type: 'NUMBER' },
+    extracted_code: { type: 'STRING' },
+    extracted_description: { type: 'STRING' },
+    extracted_mrp: { type: 'STRING' },
+    extracted_brand: { type: 'STRING' },
+    reason: { type: 'STRING' },
+  },
+  required: ['match', 'confidence', 'reason'],
+} as const
+
+async function callGemini(model: string, imageBase64: string, expectedItem: any) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            {
+              inlineData: {
+                mimeType: "image/jpeg",
+                data: imageBase64,
+              },
+            },
+            {
+              text: `You are verifying a warehouse product pick.
+
+Expected item from order: "${expectedItem.name}"
+Expected alias code: "${expectedItem.alias1 || 'N/A'}"
+Expected MRP: "${expectedItem.mrp || 'N/A'}"
+
+Task:
+- Read the product label and extract any visible codes (part no / model / control no), brand, description, and MRP.
+- Disambiguate 0/O, 1/I, S/5, G/6, B/8, Z/2.
+- Decide if the photo matches the expected item.
+
+Return ONLY JSON that matches this schema.`,
+            },
+          ],
+        }],
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: 350,
+          responseMimeType: 'application/json',
+          responseSchema: RESPONSE_SCHEMA,
+        },
+      }),
+    },
+  )
+
+  const data = await res.json()
+  return { res, data }
+}
 
 serve(async (req) => {
   const corsHeaders = {
@@ -29,78 +90,54 @@ serve(async (req) => {
       )
     }
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              {
-                inlineData: {
-                  mimeType: "image/jpeg",
-                  data: imageBase64
-                }
-              },
-              {
-                text: `You are verifying a warehouse product pick.
-
-Expected item from order: "${expectedItem.name}"
-Expected alias code: "${expectedItem.alias1 || 'N/A'}"
-Expected MRP: "${expectedItem.mrp || 'N/A'}"
-
-Look at this product photo and extract:
-1. Any part numbers, model codes, or product codes visible
-2. Product description text
-3. MRP/price if visible
-4. Brand name
-
-Then determine: Does this photo show the expected item?
-
-Reply ONLY in this JSON format, no other text:
-{
-  "match": true/false,
-  "confidence": 0-100,
-  "extracted_code": "code from box",
-  "extracted_description": "description from box",
-  "extracted_mrp": "price from box",
-  "extracted_brand": "brand from box",
-  "reason": "brief explanation"
-}`
-              }
-            ]
-          }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 300
-          }
-        })
-      }
-    )
-
-    if (!response.ok) {
-      const errText = await response.text()
-      console.error('Gemini API error:', response.status, errText)
+    // Fast-first; fallback to more accurate model only when needed.
+    const { res: fastRes, data: fastData } = await callGemini(GEMINI_FAST_MODEL, imageBase64, expectedItem)
+    if (!fastRes.ok) {
+      console.error('Gemini API error:', fastRes.status, JSON.stringify(fastData))
       return new Response(
-        JSON.stringify({ match: false, confidence: 0, reason: `Gemini API error: ${response.status}` }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ match: false, confidence: 0, reason: `Gemini API error: ${fastRes.status}` }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       )
     }
 
-    const data = await response.json()
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
-
-    // Parse JSON from response (handle markdown code blocks)
-    const jsonStr = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    let result
+    const fastText = fastData?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+    let fastResult: any
     try {
-      result = JSON.parse(jsonStr)
+      fastResult = typeof fastText === 'string' ? JSON.parse(fastText) : fastText
     } catch {
-      result = { match: false, confidence: 0, reason: 'Failed to parse AI response' }
+      fastResult = { match: false, confidence: 0, reason: 'Failed to parse AI response' }
     }
 
-    return new Response(JSON.stringify(result), {
+    const confidence = typeof fastResult?.confidence === 'number' ? fastResult.confidence : 0
+    const needsFallback =
+      confidence < 55 ||
+      (!fastResult?.match && confidence < 75) ||
+      (!fastResult?.extracted_code && !fastResult?.extracted_description)
+
+    if (!needsFallback) {
+      return new Response(JSON.stringify(fastResult), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const { res: accRes, data: accData } = await callGemini(GEMINI_ACCURATE_MODEL, imageBase64, expectedItem)
+    if (!accRes.ok) {
+      // If fallback fails, return the fast result (best effort).
+      console.error('Gemini fallback error:', accRes.status, JSON.stringify(accData))
+      return new Response(JSON.stringify(fastResult), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const accText = accData?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+    let accResult: any
+    try {
+      accResult = typeof accText === 'string' ? JSON.parse(accText) : accText
+    } catch {
+      accResult = fastResult
+    }
+
+    return new Response(JSON.stringify(accResult), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
   } catch (err) {
