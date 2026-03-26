@@ -115,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const selectRole = useCallback((newRole: NonNullable<Role>, name?: string) => {
-    const resolvedName = name || (newRole === 'picking' ? 'Picker' : null);
+    const resolvedName = name || null;
     setRole(newRole);
     setUserName(resolvedName);
     safeLocalStorageSet(LS_KEYS.role, newRole);

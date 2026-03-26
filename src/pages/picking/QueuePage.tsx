@@ -8,6 +8,7 @@ import {
   Clock,
   SpinnerGap,
   Warning,
+  User,
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrders } from '../../hooks/useOrders';
@@ -58,8 +59,13 @@ export default function QueuePage() {
     status: 'picking',
   });
 
-  const myActivePick = useMemo(
-    () => pickingOrders?.find((o) => o.picker_name === userName) ?? null,
+  const myActivePicks = useMemo(
+    () => (pickingOrders ?? []).filter((o) => o.picker_name === userName),
+    [pickingOrders, userName],
+  );
+
+  const otherPickingOrders = useMemo(
+    () => (pickingOrders ?? []).filter((o) => o.picker_name !== userName),
     [pickingOrders, userName],
   );
 
@@ -70,6 +76,17 @@ export default function QueuePage() {
 
   const claimMutation = useMutation({
     mutationFn: async (orderId: number) => {
+      const { data: current, error: checkError } = await supabase
+        .from('orders')
+        .select('status, picker_name')
+        .eq('id', orderId)
+        .single();
+      if (checkError) throw checkError;
+
+      if (current.status === 'picking' && current.picker_name) {
+        throw new Error(`ALREADY_CLAIMED:${current.picker_name}`);
+      }
+
       const { error } = await supabase
         .from('orders')
         .update({
@@ -85,8 +102,14 @@ export default function QueuePage() {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       navigate(`/picking/pick/${orderId}`);
     },
-    onError: () => {
-      toast.error('Failed to claim order — it may have been taken by another picker');
+    onError: (err) => {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.startsWith('ALREADY_CLAIMED:')) {
+        const pickerName = msg.replace('ALREADY_CLAIMED:', '');
+        toast.error(`This order is already being picked by ${pickerName}. Please choose another order.`);
+      } else {
+        toast.error('Failed to claim order — it may have been taken by another picker');
+      }
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
   });
@@ -95,64 +118,77 @@ export default function QueuePage() {
 
   return (
     <div className="min-h-screen">
-      <PageHeader title="Pick Queue" />
+      <PageHeader
+        title="Pick Queue"
+        action={
+          userName ? (
+            <span className="flex items-center gap-1 text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] px-2 py-1 rounded-full">
+              <User size={12} weight="bold" />
+              {userName}
+            </span>
+          ) : undefined
+        }
+      />
 
       <div className="p-4 space-y-6">
-        {/* My Active Pick — prominent amber banner */}
-        {myActivePick && (
-          <section>
-            <div
-              onClick={() => navigate(`/picking/pick/${myActivePick.id}`)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  navigate(`/picking/pick/${myActivePick.id}`);
-                }
-              }}
-              className="
-                rounded-2xl p-5
-                bg-[var(--bg-warning-subtle)] border-2 border-[var(--border-warning)]
-                cursor-pointer active:scale-[0.98] transition-transform duration-150
-              "
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <Warning size={18} weight="fill" className="text-[var(--content-warning)]" />
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--content-warning)]">
-                  In Progress
-                </span>
-              </div>
-              <div className="flex items-center justify-between mb-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-mono font-bold text-lg text-[var(--content-primary)]">
-                      {myActivePick.order_number}
-                    </span>
-                    {myActivePick.priority === 'urgent' && (
-                      <StatusBadge status="urgent" />
-                    )}
-                  </div>
-                  <p className="text-sm text-[var(--content-secondary)] truncate">
-                    {myActivePick.customer_name}
-                    <span className="text-[var(--content-tertiary)]">
-                      {' '}· {myActivePick.item_count} items
-                    </span>
-                  </p>
-                </div>
-              </div>
-              <BigButton
-                variant="primary"
-                className="bg-[var(--bg-warning)] text-[var(--content-primary)]"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigate(`/picking/pick/${myActivePick.id}`);
+        {/* My Active Picks — prominent amber banners */}
+        {myActivePicks.length > 0 && (
+          <section className="space-y-3">
+            {myActivePicks.map((pick) => (
+              <div
+                key={pick.id}
+                onClick={() => navigate(`/picking/pick/${pick.id}`)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    navigate(`/picking/pick/${pick.id}`);
+                  }
                 }}
+                className="
+                  rounded-2xl p-5
+                  bg-[var(--bg-warning-subtle)] border-2 border-[var(--border-warning)]
+                  cursor-pointer active:scale-[0.98] transition-transform duration-150
+                "
               >
-                Continue Picking
-                <ArrowRight size={20} weight="bold" />
-              </BigButton>
-            </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Warning size={18} weight="fill" className="text-[var(--content-warning)]" />
+                  <span className="text-xs font-semibold uppercase tracking-wider text-[var(--content-warning)]">
+                    In Progress
+                  </span>
+                </div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="font-mono font-bold text-lg text-[var(--content-primary)]">
+                        {pick.order_number}
+                      </span>
+                      {pick.priority === 'urgent' && (
+                        <StatusBadge status="urgent" />
+                      )}
+                    </div>
+                    <p className="text-sm text-[var(--content-secondary)] truncate">
+                      {pick.customer_name}
+                      <span className="text-[var(--content-tertiary)]">
+                        {' '}· {pick.item_count} items
+                      </span>
+                    </p>
+                  </div>
+                </div>
+                <BigButton
+                  variant="primary"
+                  className="bg-[var(--bg-warning)] text-[var(--content-primary)]"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/picking/pick/${pick.id}`);
+                  }}
+                >
+                  Continue Picking
+                  <ArrowRight size={20} weight="bold" />
+                </BigButton>
+              </div>
+            ))}
           </section>
         )}
 
@@ -193,6 +229,44 @@ export default function QueuePage() {
             </div>
           )}
         </section>
+
+        {/* Other Picking Orders — being picked by other pickers */}
+        {otherPickingOrders.length > 0 && (
+          <section>
+            <h2 className="text-sm font-semibold text-[var(--content-tertiary)] uppercase tracking-wider mb-3">
+              Being Picked by Others
+              <span className="ml-2 text-[var(--content-secondary)]">
+                ({otherPickingOrders.length})
+              </span>
+            </h2>
+            <div className="space-y-2">
+              {otherPickingOrders.map((order) => (
+                <Card key={order.id} className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="font-mono font-semibold text-sm text-[var(--content-primary)]">
+                        {order.order_number}
+                      </span>
+                      {order.priority === 'urgent' && <StatusBadge status="urgent" />}
+                      <StatusBadge status="picking" />
+                    </div>
+                    <p className="text-sm text-[var(--content-secondary)] truncate">
+                      {order.customer_name}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs text-[var(--content-tertiary)]">
+                      {order.picker_name}
+                    </p>
+                    <p className="text-xs text-[var(--content-quaternary)]">
+                      {order.item_count} items
+                    </p>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );

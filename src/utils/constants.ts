@@ -9,6 +9,13 @@ export const FLAG_REASONS = [
 
 export type FlagReason = (typeof FLAG_REASONS)[number];
 
+export const PICKER_NAMES = [
+  'Shankar',
+  'Dharmendra',
+  'Abhishek',
+  'Guddu',
+];
+
 export const SALES_NAMES = [
   'Satish',
   'Hemant',

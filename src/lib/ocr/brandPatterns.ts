@@ -70,6 +70,8 @@ export const BRANDS: BrandConfig[] = [
 export const VEHICLE_TOKENS: [RegExp, string[]][] = [
   [/\bACT[\s-]*(?:N|IVA)\s*\d*/gi, ['activa']],
   [/\bHN\s+ACT/gi, ['honda', 'activa']],
+  [/\bDIO\b/gi, ['dio']],
+  [/\bGRAZIA\b/gi, ['grazia']],
   [/\bSHNE|SHINE\b/gi, ['shine']],
   [/\bHN\s+SHNE/gi, ['honda', 'shine']],
   [/\bSPL(?:ENDOR|DR|ENDER)\s*(?:PLUS|PRO|\+)?\b/gi, ['splendor']],

@@ -4,9 +4,9 @@ import { ShoppingCart, ClipboardText, Package } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { BottomSheet } from '../components/shared';
 
-type SheetMode = 'sales' | null;
+type SheetMode = 'sales' | 'picking' | null;
 
-import { SALES_NAMES } from '../utils/constants';
+import { SALES_NAMES, PICKER_NAMES } from '../utils/constants';
 
 /* Design system: indigo (sales), blue (billing), amber (picking) — use palette tokens */
 const ROLES = [
@@ -50,6 +50,12 @@ export default function RoleSelectPage() {
     navigate('/sales');
   }
 
+  function handlePickerSelect(name: string) {
+    selectRole('picking', name);
+    setSheetMode(null);
+    navigate('/picking');
+  }
+
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col px-6 py-8 relative overflow-hidden">
       {/* Ambient glowing background orbs */}
@@ -72,8 +78,7 @@ export default function RoleSelectPage() {
                 selectRole('billing');
                 navigate('/billing');
               } else if (key === 'picking') {
-                selectRole('picking');
-                navigate('/picking');
+                setSheetMode('picking');
               } else {
                 setSheetMode('sales');
               }
@@ -111,6 +116,21 @@ export default function RoleSelectPage() {
             <button
               key={name}
               onClick={() => handleSalesSelect(name)}
+              className="w-full text-left px-4 py-3 rounded-xl text-[var(--content-primary)] hover:bg-[var(--bg-tertiary)] active:bg-[var(--bg-tertiary)] transition-colors duration-150 text-base"
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
+
+      {/* Picker name picker */}
+      <BottomSheet isOpen={sheetMode === 'picking'} onClose={() => setSheetMode(null)} title="Select your name">
+        <div className="space-y-1">
+          {PICKER_NAMES.map((name) => (
+            <button
+              key={name}
+              onClick={() => handlePickerSelect(name)}
               className="w-full text-left px-4 py-3 rounded-xl text-[var(--content-primary)] hover:bg-[var(--bg-tertiary)] active:bg-[var(--bg-tertiary)] transition-colors duration-150 text-base"
             >
               {name}

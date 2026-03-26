@@ -86,9 +86,8 @@ function uiStateFromDb(oi: OrderItem): PickItemUiState {
   if (oi.state === 'flagged') return 'flagged';
   if (oi.scan_result) {
     const res = oi.scan_result as Record<string, any>;
-    const conf = res?.confidence || 0;
-    if (res?.isMatch || conf >= 70) return 'matched';
-    if (conf >= 40) return 'warning';
+    if (res?.isMatch) return 'matched';
+    if ((res?.confidence || 0) >= 35) return 'warning';
     return 'error';
   }
   return 'pending';
@@ -362,7 +361,7 @@ export default function PickPage() {
     updateLocalItem(itemId, { uiState: 'scanning', thumbnailUrl });
 
     try {
-      const base64 = await imageToBase64(file, 800);
+      const base64 = await imageToBase64(file);
       const meta = itemMeta.get(liveScanTarget.item_id);
       
       const expectedItem = {
@@ -377,10 +376,9 @@ export default function PickPage() {
       const result = await verifyWithGemini(base64, expectedItem);
       console.log('Gemini result:', result);
 
-      const conf = result.confidence;
       let uiState: PickItemUiState = 'error';
-      if (conf >= 70) uiState = 'matched';
-      else if (conf >= 40) uiState = 'warning';
+      if (result.isMatch) uiState = 'matched';
+      else if (result.confidence >= 35) uiState = 'warning';
 
       updateLocalItem(itemId, {
         uiState,
@@ -861,6 +859,11 @@ function PickItemCard({
               <span className="leading-tight">
                 <span className="font-semibold block mb-0.5 text-[var(--content-warning)]">Verification Warning</span>
                 {(item.scanResult as any).reason || 'Item mismatch'}
+                {(item.scanResult as any).extractedDescription && (
+                  <span className="block mt-1 text-[var(--content-tertiary)]">
+                    Read: {(item.scanResult as any).extractedDescription}
+                  </span>
+                )}
               </span>
             </div>
           )}
@@ -870,6 +873,11 @@ function PickItemCard({
               <span className="leading-tight">
                 <span className="font-semibold block mb-0.5 text-[var(--content-negative)]">Verification Failed</span>
                 {(item.scanResult as any).reason || 'Item mismatch or barcode not recognized'}
+                {(item.scanResult as any).extractedDescription && (
+                  <span className="block mt-1 text-[var(--content-tertiary)]">
+                    Read: {(item.scanResult as any).extractedDescription}
+                  </span>
+                )}
               </span>
             </div>
           )}
