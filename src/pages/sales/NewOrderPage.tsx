@@ -62,6 +62,15 @@ function hasTokenPrefix(value: string | null | undefined, token: string): boolea
   return v.split(/\s+/).some(word => word.startsWith(t));
 }
 
+function stripMatchingTokens(rawQuery: string, value: string): string {
+  const valueTokens = normalizeQuery(value).split(' ').filter(Boolean);
+  const queryTokens = normalizeQuery(rawQuery).split(' ').filter(Boolean);
+  const remaining = queryTokens.filter(qt =>
+    !valueTokens.some(vt => vt.startsWith(qt) || qt.startsWith(vt)),
+  );
+  return remaining.join(' ');
+}
+
 function buildNarrowSuggestions(
   items: Item[],
   rawQuery: string,
@@ -89,11 +98,14 @@ function buildNarrowSuggestions(
     }
   }
 
-   // If the query looks like a brand (e.g. "usha"), also surface the top
-   // parent_groups within that brand even when their names don't contain the token.
   let focusedBrand: string | null = activeBrand;
   if (!focusedBrand && brandCounts.size) {
-    focusedBrand = [...brandCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    const sorted = [...brandCounts.entries()].sort((a, b) => b[1] - a[1]);
+    const topCount = sorted[0][1];
+    const secondCount = sorted.length > 1 ? sorted[1][1] : 0;
+    if (sorted.length === 1 || topCount > secondCount * 3) {
+      focusedBrand = sorted[0][0];
+    }
   }
   if (focusedBrand && !activeGroup) {
     for (const it of items) {
@@ -114,7 +126,7 @@ function buildNarrowSuggestions(
 
   const groupSuggestions: NarrowSuggestion[] = [...groupCounts.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
+    .slice(0, 12)
     .map(([value, count]) => ({
       type: 'group' as const,
       value,
@@ -122,8 +134,7 @@ function buildNarrowSuggestions(
       count,
     }));
 
-  // Keep this list intentionally small to avoid clutter
-  return [...brandSuggestions, ...groupSuggestions].slice(0, 4);
+  return [...brandSuggestions, ...groupSuggestions];
 }
 
 import { formatCurrency, formatShortDate } from '../../utils/formatters';
@@ -881,6 +892,13 @@ export default function NewOrderPage() {
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const searchRef = useRef<HTMLDivElement | null>(null);
 
+  const focusSearchInput = () => {
+    requestAnimationFrame(() => {
+      const input = searchRef.current?.querySelector('input:not([type="hidden"])') as HTMLInputElement | null;
+      input?.focus();
+    });
+  };
+
   const brandOptions: BrandOption[] = useMemo(() => {
     const counts = new Map<string, number>();
     for (const item of items) {
@@ -909,29 +927,32 @@ export default function NewOrderPage() {
   const deferredQuery = useDeferredValue(effectiveQuery);
   const isStale = deferredQuery !== effectiveQuery;
 
-  const searchableItems = useMemo(
-    () =>
-      items.filter(it => {
-        if (selectedBrand && it.main_group !== selectedBrand) return false;
-        if (selectedGroup && it.parent_group !== selectedGroup) return false;
-        return true;
-      }),
-    [items, selectedBrand, selectedGroup],
-  );
-
-  // Build the search index from filtered items
-  const searchIndex = useMemo(() => buildSearchIndex(searchableItems), [searchableItems]);
+  // Build the search index ONCE from all items — brand/group filtering is done inside searchItems()
+  const searchIndex = useMemo(() => buildSearchIndex(items), [items]);
 
   const searchResults = useMemo(() => {
-    if (deferredQuery) return searchItems(deferredQuery, searchIndex);
-    // Brand chip selected but no text: show all items in that group
+    if (deferredQuery) return searchItems(deferredQuery, searchIndex, selectedBrand, selectedGroup);
+    // Brand chip selected but no text: show items in that group via index
     if (selectedBrand) {
-      return searchableItems
+      const brandSet = searchIndex.brandGroups.get(selectedBrand);
+      if (!brandSet) return [];
+      let indices = [...brandSet];
+      if (selectedGroup) {
+        const groupSet = searchIndex.parentGroups.get(selectedGroup);
+        if (!groupSet) return [];
+        indices = indices.filter(i => groupSet.has(i));
+      }
+      return indices
         .slice(0, 20)
-        .map(item => ({ item, score: 100, matchType: 'exact-name' as const, matchedField: 'name' as const }));
+        .map(i => ({
+          item: searchIndex.all[i].item,
+          score: 100,
+          matchType: 'exact-name' as const,
+          matchedField: 'name' as const,
+        }));
     }
     return [];
-  }, [deferredQuery, searchIndex, searchableItems, selectedBrand]);
+  }, [deferredQuery, searchIndex, selectedBrand, selectedGroup]);
 
   // When browsing a brand with no query there's no meaningful "best match" split
   const bestMatches = useMemo(
@@ -949,10 +970,36 @@ export default function NewOrderPage() {
     [items, effectiveQuery, selectedBrand, selectedGroup],
   );
 
+  const detectedBrand = useMemo(() => {
+    if (selectedBrand) return null;
+    const brands = narrowSuggestions.filter(s => s.type === 'brand');
+    if (brands.length === 0) return null;
+    if (brands.length === 1) return brands[0].value;
+    if (brands[0].count > brands[1].count * 3) return brands[0].value;
+    return null;
+  }, [narrowSuggestions, selectedBrand]);
+
+  const subGroupsForDetectedBrand = useMemo(() => {
+    if (!detectedBrand) return [];
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      if (item.main_group === detectedBrand && item.parent_group) {
+        counts.set(item.parent_group, (counts.get(item.parent_group) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count }));
+  }, [items, detectedBrand]);
+
   const getCartQty = (id: number) => getCartItem(id)?.qty ?? 0;
   const getPrice = (item: Item) => getCartItem(item.id)?.specialRate ?? item.sales_price;
 
-  const handleAdd = (item: Item) => addItem(item, 1);
+  const handleAdd = (item: Item) => {
+    addItem(item, 1);
+    setQuery('');
+    focusSearchInput();
+  };
   const handleDecrement = (item: Item, qty: number) => updateQty(item.id, Math.max(1, qty - 1));
   const handleIncrement = (item: Item, qty: number) => updateQty(item.id, qty + 1);
 
@@ -1035,12 +1082,13 @@ export default function NewOrderPage() {
             )}
           </div>
 
-          {((narrowSuggestions.length > 0) || (selectedBrand && subGroupsForBrand.length > 0)) && (
+          {(narrowSuggestions.length > 0 || (selectedBrand && subGroupsForBrand.length > 0) || (detectedBrand && subGroupsForDetectedBrand.length > 0)) && (
             <div className="rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-3 shadow-sm space-y-1.5">
               <p className="text-[10px] uppercase tracking-wide text-[var(--content-tertiary)]">
                 Narrow by
               </p>
               <div className="flex gap-2 overflow-x-auto scrollbar-none py-1">
+                {/* Case 1: Brand selected from dropdown/pill → subcategory chips */}
                 {selectedBrand && subGroupsForBrand.length > 0
                   && subGroupsForBrand.map(({ name, count }) => (
                       <FilterChip
@@ -1055,7 +1103,40 @@ export default function NewOrderPage() {
                         }
                       />
                     ))}
-                {!(selectedBrand && subGroupsForBrand.length > 0)
+
+                {/* Case 2: Brand detected from query (e.g. "usha") → brand chip + subcategory chips */}
+                {!selectedBrand && detectedBrand && subGroupsForDetectedBrand.length > 0 && (
+                  <>
+                    <FilterChip
+                      key={`brand-${detectedBrand}`}
+                      label={detectedBrand}
+                      count={narrowSuggestions.find(s => s.type === 'brand' && s.value === detectedBrand)?.count}
+                      selected={false}
+                      onClick={() => {
+                        setSelectedBrand(detectedBrand);
+                        setQuery(stripMatchingTokens(query, detectedBrand));
+                        focusSearchInput();
+                      }}
+                    />
+                    {subGroupsForDetectedBrand.map(({ name, count }) => (
+                      <FilterChip
+                        key={`det-${name}`}
+                        label={name}
+                        count={count}
+                        selected={false}
+                        onClick={() => {
+                          setSelectedBrand(detectedBrand);
+                          setSelectedGroup(name);
+                          setQuery(stripMatchingTokens(query, detectedBrand));
+                          focusSearchInput();
+                        }}
+                      />
+                    ))}
+                  </>
+                )}
+
+                {/* Case 3: No brand intent → show all narrow suggestions */}
+                {!selectedBrand && !(detectedBrand && subGroupsForDetectedBrand.length > 0)
                   && narrowSuggestions.map(s => (
                       <FilterChip
                         key={`${s.type}-${s.value}`}
@@ -1063,8 +1144,15 @@ export default function NewOrderPage() {
                         count={s.count}
                         selected={false}
                         onClick={() => {
-                          if (s.type === 'brand') setSelectedBrand(s.value);
-                          if (s.type === 'group') setSelectedGroup(s.value);
+                          if (s.type === 'brand') {
+                            setSelectedBrand(s.value);
+                            setQuery(stripMatchingTokens(query, s.value));
+                          }
+                          if (s.type === 'group') {
+                            setSelectedGroup(s.value);
+                            setQuery(stripMatchingTokens(query, s.value));
+                          }
+                          focusSearchInput();
                         }}
                       />
                     ))}
