@@ -6,6 +6,7 @@ import type { ScanResult } from '../../types';
 interface ItemMeta {
   mrp?: number;
   mainGroup?: string | null;
+  parentGroup?: string | null;
   alias1?: string | null;
 }
 
@@ -19,10 +20,6 @@ export interface AIVerifyResult {
   reason: string;
 }
 
-/**
- * Layer 3: Gemini Flash AI verification via Supabase edge function.
- * Called only when local OCR matching (Layers 1+2) fails.
- */
 export async function verifyWithAI(
   imageBase64: string,
   expectedItem: { name: string; alias1?: string | null; mrp?: number },
@@ -52,9 +49,6 @@ export async function verifyWithAI(
   }
 }
 
-/**
- * Build a ScanResult from an AI verification response.
- */
 export function buildScanResultFromAI(
   aiResult: AIVerifyResult,
   ocrText: string,
@@ -83,26 +77,19 @@ export function buildScanResultFromAI(
   };
 }
 
-/**
- * Full verification pipeline:
- * 1. Run local OCR matching (reuse existing ocrMatcher)
- * 2. If local match fails, fall back to Gemini AI
- *
- * Returns { scanResult, usedAI }
- */
 export async function verifyPickFull(
   ocrText: string,
   imageBase64: string,
   expectedItem: { item_name: string; item_alias: string | null },
   meta: ItemMeta,
 ): Promise<{ scanResult: ScanResult; usedAI: boolean }> {
-  // Layer 1+2: Local OCR matching (existing multi-signal matcher)
   const matchResult = matchOcrToItem(
     ocrText,
     expectedItem,
     meta.mrp,
     meta.mainGroup ?? null,
     meta.alias1 ?? null,
+    meta.parentGroup ?? null,
   );
 
   if (matchResult.isMatch) {
@@ -115,7 +102,6 @@ export async function verifyPickFull(
     return { scanResult, usedAI: false };
   }
 
-  // Layer 3: AI fallback (only if local matching failed)
   const aiResult = await verifyWithAI(imageBase64, {
     name: expectedItem.item_name,
     alias1: meta.alias1,
@@ -127,7 +113,6 @@ export async function verifyPickFull(
     return { scanResult, usedAI: true };
   }
 
-  // Neither local nor AI matched — return local result with no-match
   const scanResult = buildScanResultFromMatch({
     rawText: ocrText,
     matchResult,

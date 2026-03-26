@@ -1,3 +1,19 @@
+import { PRODUCT_TYPE_TOKENS, VEHICLE_TOKENS } from './brandPatterns';
+
+// ─── Interfaces ───────────────────────────────────────────────────────────
+
+export interface GeminiExtraction {
+  part_numbers: string[];
+  product_type: string;
+  brand: string;
+  vehicle_models: string[];
+  mrp: number | null;
+  size_variant: string;
+  emission_standard: string;
+  other_variants: string[];
+  raw_text: string;
+}
+
 export interface MatchableItem {
   item_name: string;
   item_alias: string | null;
@@ -25,43 +41,19 @@ export interface OcrMatchResult {
   matchStrategy: string;
 }
 
-// === CODE EXTRACTION ===
-const LAYER_1_PATTERNS = [
-  // 1. Slashed codes: ASK/NA/BS/00002
-  /\b([A-Z]{2,5}(?:\/[A-Z0-9]{1,5}){2,4})\b/g,
-  // 2. Labeled codes
-  /(?:Part\s*(?:No|Number|Code)|Control\s*No|Product\/Part\s*No|SAP\s*Code)[:\.\s-]*([A-Z0-9\-\/\s]{2,25})/gi,
-  // 3. Alphanumeric: SHSP1501, INEL53064
-  /\b([A-Z]{2,4}\d{3,8}[A-Z]?)\b/g,
-  // 4. Hyphenated: FOIL-SHIN-1501
-  /\b([A-Z]+-[A-Z]+-\d+)\b/gi,
-  // 5. 3-char codes: K6N, A71, A9
-  /\b([A-Z]\d[A-Z0-9])\b/g,
-  // 6. Pure numbers: 53064, 7157
-  /\b(\d{4,8})\b/g,
-  // 7. Prefix codes: P-D32, R-D32, D32
-  /\b([A-Z]\-?[A-Z]?\d{1,3})\b/g,
-];
-
-function extractCodes(text: string): string[] {
-  const codes: string[] = [];
-  for (const pattern of LAYER_1_PATTERNS) {
-    pattern.lastIndex = 0;
-    let match;
-    while ((match = pattern.exec(text)) !== null) {
-      if (match[1]) codes.push(match[1].trim());
-    }
-  }
-  return codes;
-}
+// ─── Normalization Helpers ────────────────────────────────────────────────
 
 function normalizeCode(code: string): string {
   return code.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
 }
 
-const PREFIXES_TO_STRIP = /^(P|R|UK|UB|UF|G|U2|UP|UR|INEL|TIDC|ASK)/i;
-function stripPrefixes(normalizedCode: string): string {
-  return normalizedCode.replace(PREFIXES_TO_STRIP, '').replace(PREFIXES_TO_STRIP, ''); // Replace twice in case of TIDCINEL
+const PREFIXES_TO_STRIP = /^(P|R|UK|UB|UF|G|U2|UP|UR|INEL|TIDC|ASK|LC|EV|KV|SJ|TP|LV|BG|BA|SW|SC)/i;
+
+function stripPrefix(code: string): string {
+  let result = code;
+  result = result.replace(PREFIXES_TO_STRIP, '');
+  result = result.replace(PREFIXES_TO_STRIP, '');
+  return result;
 }
 
 function normalizeFuzzy(str: string): string {
@@ -74,372 +66,657 @@ function normalizeFuzzy(str: string): string {
     .replace(/[I]/g, '1');
 }
 
-// === VARIANT VALIDATION ===
-interface VariantTokens {
-  size: string[];
-  side: string[];
-  position: string[];
-  cover: string[];
-  emission: string[];
-  duro: string[];
+function tokenize(text: string): string[] {
+  return text.toUpperCase().split(/[^A-Z0-9]+/).filter(w => w.length >= 2);
 }
 
-function extractVariants(text: string): VariantTokens {
-  const normText = ' ' + text.toUpperCase().replace(/[^A-Z0-9.]/g, ' ') + ' ';
-  
-  const extract = (regex: RegExp) => {
-    const matches: string[] = [];
-    regex.lastIndex = 0;
-    let m;
-    while ((m = regex.exec(normText)) !== null) {
-      matches.push(m[1]);
-    }
-    return [...new Set(matches)]; // Deduplicate
+// ─── Product Type Extraction ──────────────────────────────────────────────
+
+interface ProductTypeInfo {
+  canonical: string;
+  tokens: string[];
+}
+
+const PRODUCT_TYPE_CANONICAL: [RegExp, ProductTypeInfo][] = [
+  [/\bBRAKE\s*SHOE/i, { canonical: 'BRAKE_SHOE', tokens: ['brake', 'shoe'] }],
+  [/\bDISC\s*(?:BRAKE\s*)?PAD/i, { canonical: 'DISC_PAD', tokens: ['disc', 'pad'] }],
+  [/\bBRAKE\s*PAD/i, { canonical: 'BRAKE_PAD', tokens: ['brake', 'pad'] }],
+  [/\bCLUTCH\s*SHOE/i, { canonical: 'CLUTCH_SHOE', tokens: ['clutch', 'shoe'] }],
+  [/\bCLUTCH\s*CABLE/i, { canonical: 'CLUTCH_CABLE', tokens: ['clutch', 'cable'] }],
+  [/\bACCEL(?:ERATOR)?\s*CABLE/i, { canonical: 'ACC_CABLE', tokens: ['acc', 'cable'] }],
+  [/\bSPEEDO/i, { canonical: 'SPEEDO', tokens: ['speedo'] }],
+  [/\bSTARTER\s*(?:MOTOR)?/i, { canonical: 'STARTER', tokens: ['starter'] }],
+  [/\bENGINE\s*VALVE/i, { canonical: 'ENGINE_VALVE', tokens: ['engine', 'valve'] }],
+  [/\bPISTON\s*(?:ASSEMBLY|ASSY|SET)/i, { canonical: 'PISTON_ASSY', tokens: ['piston'] }],
+  [/\bPISTON\s*RING/i, { canonical: 'PISTON_RING', tokens: ['ring'] }],
+  [/\bCAM\s*CHAIN/i, { canonical: 'CAM_CHAIN', tokens: ['cam', 'chain'] }],
+  [/\bCHAIN\s*(?:KIT|SET|SPROCKET)/i, { canonical: 'CHAIN_KIT', tokens: ['chain'] }],
+  [/\bCAM\s*BUSH/i, { canonical: 'CAM_BUSH', tokens: ['cam', 'bush'] }],
+  [/\bBEARING/i, { canonical: 'BEARING', tokens: ['bearing'] }],
+  [/\bSTATOR/i, { canonical: 'STATOR', tokens: ['stator'] }],
+  [/\bSHOCK/i, { canonical: 'SHOCK', tokens: ['shock'] }],
+  [/\bB\.?DRUM/i, { canonical: 'BRAKE_DRUM', tokens: ['drum'] }],
+  [/\bRING\b/i, { canonical: 'PISTON_RING', tokens: ['ring'] }],
+  [/\bPISTON\b/i, { canonical: 'PISTON_ASSY', tokens: ['piston'] }],
+  [/\bVALVE\b/i, { canonical: 'VALVE', tokens: ['valve'] }],
+];
+
+const CONFLICTING_PRODUCT_TYPES: [string, string][] = [
+  ['BRAKE_SHOE', 'CLUTCH_SHOE'],
+  ['BRAKE_SHOE', 'DISC_PAD'],
+  ['CLUTCH_SHOE', 'DISC_PAD'],
+  ['CLUTCH_CABLE', 'ACC_CABLE'],
+  ['PISTON_ASSY', 'PISTON_RING'],
+  ['STARTER', 'STATOR'],
+  ['BRAKE_DRUM', 'BRAKE_SHOE'],
+  ['ENGINE_VALVE', 'PISTON_ASSY'],
+];
+
+function detectProductType(text: string): ProductTypeInfo | null {
+  const normalized = text.replace(/_/g, ' ');
+  for (const [re, info] of PRODUCT_TYPE_CANONICAL) {
+    re.lastIndex = 0;
+    if (re.test(normalized)) return info;
+  }
+  return null;
+}
+
+function areProductTypesConflicting(a: string, b: string): boolean {
+  if (a === b) return false;
+  return CONFLICTING_PRODUCT_TYPES.some(
+    ([x, y]) => (a === x && b === y) || (a === y && b === x)
+  );
+}
+
+// ─── Vehicle Model Extraction ─────────────────────────────────────────────
+
+const VEHICLE_FAMILIES: [RegExp, string][] = [
+  [/\bHONDA\b/i, 'HONDA'],
+  [/\bHERO\b/i, 'HERO'],
+  [/\bTVS\b/i, 'TVS'],
+  [/\bBAJAJ\b/i, 'BAJAJ'],
+  [/\bYAMAHA\b/i, 'YAMAHA'],
+  [/\bSUZUKI\b/i, 'SUZUKI'],
+  [/\bROYAL\s*ENFIELD\b/i, 'ROYAL_ENFIELD'],
+  [/\bEICHER\b/i, 'EICHER'],
+  [/\bMARUTI\b/i, 'MARUTI'],
+  [/\bTATA\b/i, 'TATA'],
+  [/\bMAHINDRA\b/i, 'MAHINDRA'],
+  [/\bLEYLAND|LEYL?\b/i, 'LEYLAND'],
+  [/\bHINO\b/i, 'HINO'],
+  [/\bPIAGGIO\b/i, 'PIAGGIO'],
+];
+
+function extractVehicleFamilies(text: string): string[] {
+  const families: string[] = [];
+  for (const [re, family] of VEHICLE_FAMILIES) {
+    re.lastIndex = 0;
+    if (re.test(text)) families.push(family);
+  }
+  // Also infer family from VEHICLE_TOKENS abbreviations (HN ACT → honda → HONDA)
+  const tokens = extractVehicleTokens(text);
+  const tokenToFamily: Record<string, string> = {
+    honda: 'HONDA', hero: 'HERO', tvs: 'TVS', bajaj: 'BAJAJ',
+    yamaha: 'YAMAHA', suzuki: 'SUZUKI', eicher: 'EICHER',
+    tata: 'TATA', mahindra: 'MAHINDRA', maruti: 'MARUTI',
+    royal: 'ROYAL_ENFIELD', enfield: 'ROYAL_ENFIELD',
   };
+  for (const t of tokens) {
+    const family = tokenToFamily[t];
+    if (family) families.push(family);
+  }
+  return [...new Set(families)];
+}
+
+function extractVehicleTokens(text: string): string[] {
+  const tokens: string[] = [];
+  for (const [re, toks] of VEHICLE_TOKENS) {
+    re.lastIndex = 0;
+    if (re.test(text)) tokens.push(...toks);
+  }
+  return [...new Set(tokens)];
+}
+
+// ─── Variant / Size Extraction ────────────────────────────────────────────
+
+interface VariantInfo {
+  sizes: string[];
+  sides: string[];
+  emissions: string[];
+  specials: string[];
+}
+
+function extractVariants(text: string): VariantInfo {
+  const upper = text.toUpperCase();
+
+  const sizes: string[] = [];
+  const sizeRe = /\b(STD|0\.25|0\.50|0\.75|1\.00|O\/S\s*[\d.]+|[\d]+\.[\d]+\s*mm)\b/gi;
+  let m;
+  while ((m = sizeRe.exec(upper)) !== null) {
+    sizes.push(m[1].replace(/\s+/g, '').toUpperCase());
+  }
+
+  const sides: string[] = [];
+  const sideRe = /\b(RH|LH|RIGHT|LEFT|FRONT|REAR|F&R|F\s*&\s*R)\b/gi;
+  while ((m = sideRe.exec(upper)) !== null) {
+    const v = m[1].toUpperCase();
+    if (v === 'RIGHT' || v === 'RH') sides.push('RH');
+    else if (v === 'LEFT' || v === 'LH') sides.push('LH');
+    else if (v === 'FRONT') sides.push('FRONT');
+    else if (v === 'REAR') sides.push('REAR');
+    else if (v.includes('F') && v.includes('R')) sides.push('F&R');
+  }
+
+  const emissions: string[] = [];
+  const emRe = /\b(BS3A?|BS4|BS6|BSVI|BSIV|BSIII|BS\s*III|BS\s*IV|BS\s*VI)\b/gi;
+  while ((m = emRe.exec(upper)) !== null) {
+    const v = m[1].replace(/\s+/g, '').toUpperCase();
+    if (v === 'BSVI' || v === 'BS6') emissions.push('BS6');
+    else if (v === 'BSIV' || v === 'BS4') emissions.push('BS4');
+    else if (v === 'BSIII' || v === 'BS3') emissions.push('BS3');
+    else if (v === 'BS3A') emissions.push('BS3A');
+    else emissions.push(v);
+  }
+
+  const specials: string[] = [];
+  if (/\bNC\b/.test(upper)) specials.push('NC');
+  if (/\bDURO\b/.test(upper)) specials.push('DURO');
+  if (/\bHET\b/.test(upper)) specials.push('HET');
+  if (/\bTUFF?\b/.test(upper)) specials.push('TUFF');
+  if (/\bN\/?M\b/.test(upper)) specials.push('NM');
+  if (/\bO\/?M\b/.test(upper)) specials.push('OM');
 
   return {
-    size: extract(/\b(STD|0\.25|0\.50|0\.75|1\.00|25MM|47MM|50MM|65MM|010|020)\b/g),
-    side: extract(/\b(RH|LH|RIGHT|LEFT)\b/g),
-    position: extract(/\b(FRONT|REAR|FR|RR|F|R)\b/g),
-    cover: extract(/\b(NC)\b/g),
-    emission: extract(/\b(BS3A|BS3|BS4|BS6|BSVI|BSIII|BSIV)\b/g),
-    duro: extract(/\b(DURO)\b/g),
+    sizes: [...new Set(sizes)],
+    sides: [...new Set(sides)],
+    emissions: [...new Set(emissions)],
+    specials: [...new Set(specials)],
   };
 }
 
-function normalizeSide(side: string): string {
-  if (side === 'RH' || side === 'RIGHT') return 'RH';
-  if (side === 'LH' || side === 'LEFT') return 'LH';
-  return side;
+// ─── Brand Matching ───────────────────────────────────────────────────────
+
+const BRAND_ALIASES: Record<string, string[]> = {
+  ASK: ['ASK'],
+  USHA: ['USHA', 'SHRIRAM', 'USHA2', 'SPR'],
+  TIDC: ['TIDC', 'DIAMOND'],
+  LUCAS: ['LUCAS', 'LUCAS TVS'],
+  SUPRAJIT: ['SUPRAJIT', 'SJ'],
+  KSPG: ['KSPG'],
+  SCHEAFFLER: ['FAG', 'SCHEAFFLER'],
+  RANE: ['RANE'],
+  'Tiger Power': ['TIGER POWER', 'TP'],
+  FRIENDS: ['FRIENDS'],
+};
+
+function matchBrand(ocrBrand: string, itemMainGroup: string | null): boolean {
+  if (!ocrBrand || !itemMainGroup) return false;
+  const ocrUpper = ocrBrand.toUpperCase();
+  const groupUpper = itemMainGroup.toUpperCase();
+
+  if (groupUpper.includes(ocrUpper) || ocrUpper.includes(groupUpper)) return true;
+
+  for (const [group, aliases] of Object.entries(BRAND_ALIASES)) {
+    const groupMatch = groupUpper === group.toUpperCase() ||
+      aliases.some(a => groupUpper.includes(a));
+    const ocrMatch = aliases.some(a =>
+      ocrUpper.includes(a) || a.includes(ocrUpper)
+    );
+    if (groupMatch && ocrMatch) return true;
+  }
+
+  return false;
 }
 
-function normalizeEmission(em: string): string {
-  if (em === 'BSVI' || em === 'BS6') return 'BS6';
-  if (em === 'BSIV' || em === 'BS4') return 'BS4';
-  if (em === 'BSIII' || em === 'BS3') return 'BS3';
-  return em;
+// ─── Part Number Scoring ──────────────────────────────────────────────────
+
+interface PartNumberMatch {
+  score: number;
+  matchedCode: string;
+  matchedAgainst: string;
+  detail: string;
 }
 
-interface VariantCheckResult {
-  confidencePenalty: number;
-  isFatal: boolean;
-  bonus: number;
-  details: string[];
+function scorePartNumber(
+  extractedCodes: string[],
+  alias: string | null,
+  alias1: string | null,
+): PartNumberMatch {
+  if (extractedCodes.length === 0) {
+    return { score: 0, matchedCode: '', matchedAgainst: '', detail: 'No part numbers extracted' };
+  }
+
+  const targets: { label: string; raw: string; norm: string; stripped: string }[] = [];
+  if (alias) {
+    const norm = normalizeCode(alias);
+    targets.push({ label: 'alias', raw: alias, norm, stripped: stripPrefix(norm) });
+  }
+  if (alias1) {
+    const norm = normalizeCode(alias1);
+    targets.push({ label: 'alias1', raw: alias1, norm, stripped: stripPrefix(norm) });
+  }
+
+  if (targets.length === 0) {
+    return { score: 0, matchedCode: '', matchedAgainst: '', detail: 'No alias/alias1 to match against' };
+  }
+
+  let best: PartNumberMatch = { score: 0, matchedCode: '', matchedAgainst: '', detail: 'No part number matched' };
+
+  for (const rawCode of extractedCodes) {
+    const codeNorm = normalizeCode(rawCode);
+    if (!codeNorm || codeNorm.length < 2) continue;
+    const codeStripped = stripPrefix(codeNorm);
+    const codeFuzzy = normalizeFuzzy(codeNorm);
+
+    for (const target of targets) {
+      // Exact normalized match: ASK/NA/BS/00002 → ASKNABS00002 === ASKNABS00002
+      if (codeNorm === target.norm) {
+        return { score: 40, matchedCode: rawCode, matchedAgainst: target.raw, detail: `Exact match on ${target.label}` };
+      }
+
+      // Prefix-stripped exact: 26046091 → 26046091 === LC26046091 stripped to 26046091
+      if (codeStripped.length >= 3 && codeStripped === target.stripped) {
+        const s = { score: 35, matchedCode: rawCode, matchedAgainst: target.raw, detail: `Prefix-stripped match on ${target.label}` };
+        if (s.score > best.score) best = s;
+        continue;
+      }
+
+      // Code is the tail of target: K6N matches TIDCK6N
+      if (codeNorm.length >= 3 && target.norm.endsWith(codeNorm)) {
+        const s = { score: 33, matchedCode: rawCode, matchedAgainst: target.raw, detail: `Suffix match on ${target.label} (${codeNorm} in ${target.norm})` };
+        if (s.score > best.score) best = s;
+        continue;
+      }
+
+      // Target ends with code after prefix strip
+      if (codeStripped.length >= 3 && target.stripped.endsWith(codeStripped)) {
+        const s = { score: 30, matchedCode: rawCode, matchedAgainst: target.raw, detail: `Stripped suffix match on ${target.label}` };
+        if (s.score > best.score) best = s;
+        continue;
+      }
+
+      // Fuzzy OCR confusion: K6N scanned as KGN, G→6 normalization
+      const targetFuzzy = normalizeFuzzy(target.norm);
+      if (codeFuzzy.length >= 3 && codeFuzzy === targetFuzzy) {
+        const s = { score: 30, matchedCode: rawCode, matchedAgainst: target.raw, detail: `Fuzzy match on ${target.label} (OCR confusion corrected)` };
+        if (s.score > best.score) best = s;
+        continue;
+      }
+
+      const codeStrippedFuzzy = normalizeFuzzy(codeStripped);
+      const targetStrippedFuzzy = normalizeFuzzy(target.stripped);
+      if (codeStrippedFuzzy.length >= 3 && codeStrippedFuzzy === targetStrippedFuzzy) {
+        const s = { score: 28, matchedCode: rawCode, matchedAgainst: target.raw, detail: `Fuzzy prefix-stripped match on ${target.label}` };
+        if (s.score > best.score) best = s;
+        continue;
+      }
+
+      // Substring containment (weaker)
+      if (codeNorm.length >= 4 && target.norm.includes(codeNorm)) {
+        const s = { score: 20, matchedCode: rawCode, matchedAgainst: target.raw, detail: `Substring of ${target.label}` };
+        if (s.score > best.score) best = s;
+      }
+    }
+  }
+
+  return best;
 }
 
-function validateVariants(expected: VariantTokens, found: VariantTokens): VariantCheckResult {
-  let penalty = 0;
-  let bonus = 0;
-  let isFatal = false;
-  const details: string[] = [];
-
-  // Size Check: If expected contains a size, found MUST contain it
-  if (expected.size.length > 0) {
-    const hasMatch = expected.size.some(es => found.size.includes(es));
-    if (!hasMatch) {
-      penalty += 40;
-      details.push(`Missing expected size (${expected.size.join(', ')})`);
-    } else {
-      bonus += 5;
-    }
-  }
-
-  // Side Check: RH/LH mismatch is FATAL
-  if (expected.side.length > 0) {
-    const exSides = expected.side.map(normalizeSide);
-    const foundSides = found.side.map(normalizeSide);
-    const hasMatch = exSides.some(es => foundSides.includes(es));
-    // If we have an explicit expected side, and a found side, but they don't match -> FATAL
-    // Wait, the rule says "If expected item name contains RH or LH, OCR must match the SAME side. Wrong side = isMatch false."
-    // What if OCR is missing the side entirely but the expected has it? This implies "Wrong side" = failure. 
-    // And if it is missing? If missing, it might just be the camera didn't pick it up. Let's fail if it's explicitly the *wrong* side, or fail if missing.
-    // "Wrong side = isMatch false"
-    if (foundSides.length > 0 && !hasMatch) {
-      isFatal = true;
-      details.push(`Side mismatch: expected ${exSides.join(', ')} but found ${foundSides.join(', ')}`);
-    } else if (foundSides.length === 0) {
-      // Missing side is not explicitly fatal in prompt, but we can penalize or just let it pass
-      penalty += 20;
-      details.push(`Missing expected side (${expected.side.join(', ')})`);
-    } else {
-      bonus += 5;
-    }
-  }
-
-  // Cover Check: NC
-  if (expected.cover.includes('NC')) {
-    if (!found.cover.includes('NC')) {
-      penalty += 20;
-      details.push('Missing NC cover variant');
-    } else {
-      bonus += 5;
-    }
-  }
-
-  // Duro Check
-  if (expected.duro.includes('DURO')) {
-    if (!found.duro.includes('DURO')) {
-      penalty += 30;
-      details.push('Missing DURO variant');
-    } else {
-      bonus += 5;
-    }
-  }
-
-  // Emission Check
-  if (expected.emission.length > 0) {
-    const exEms = expected.emission.map(normalizeEmission);
-    const foundEms = found.emission.map(normalizeEmission);
-    const hasMatch = exEms.some(es => foundEms.includes(es));
-    if (foundEms.length > 0 && !hasMatch) {
-      isFatal = true;
-      details.push(`Emission mismatch: expected ${exEms.join(', ')} but found ${foundEms.join(', ')}`);
-    } else if (!hasMatch) {
-      penalty += 20;
-      details.push('Missing expected emission variant');
-    } else {
-      bonus += 5;
-    }
-  }
-
-  // If there are expected variants and they all matched beautifully:
-  if (penalty === 0 && !isFatal && bonus > 0) {
-    bonus = 20; // Overall bonus if all present variants matched perfectly
-  }
-
-  return { confidencePenalty: penalty, isFatal, bonus, details };
-}
+// ─── Main Multi-Signal Matcher ────────────────────────────────────────────
 
 export function matchOcrToItem(
-  ocrText: string,
+  ocrInput: GeminiExtraction | string,
   expectedItem: MatchableItem,
   _itemMrp?: number,
-  _itemMainGroup?: string | null,
+  itemMainGroup?: string | null,
   itemAlias1?: string | null,
+  itemParentGroup?: string | null,
 ): OcrMatchResult {
-  console.log('--- OCR MATCHING ENGINE ---');
-  console.log('OCR text:', ocrText.replace(/\n/g, ' '));
+  const isStructured = typeof ocrInput !== 'string';
 
-  // Extract Codes
-  const extractedCodes = extractCodes(ocrText);
-  console.log('Extracted codes:', extractedCodes);
+  const extraction: GeminiExtraction = isStructured
+    ? ocrInput
+    : parseRawTextFallback(ocrInput);
 
-  const aliasNorm = expectedItem.item_alias ? normalizeCode(expectedItem.item_alias) : null;
-  const alias1Norm = itemAlias1 ? normalizeCode(itemAlias1) : null;
-  const nameNorm = normalizeCode(expectedItem.item_name);
+  console.log('--- MULTI-SIGNAL OCR MATCHER v2 ---');
+  console.log('Expected:', expectedItem.item_name, '| alias:', expectedItem.item_alias, '| alias1:', itemAlias1);
+  console.log('Extracted:', JSON.stringify(extraction, null, 2));
 
-  // Pre-calculate variants for both
-  const expectedVariants = extractVariants(expectedItem.item_name);
-  const foundVariants = extractVariants(ocrText);
-  console.log('Variant check: expected', expectedVariants, 'vs found', foundVariants);
+  const signals: SignalDetail[] = [];
+  let totalScore = 0;
+  let fatalReason: string | null = null;
 
-  const variantCheck = validateVariants(expectedVariants, foundVariants);
-  console.log('Variant check result:', variantCheck);
+  // ── Signal 1: Part Number (max 40) ──────────────────────────────────
 
-  // === LAYER 1: CODE MATCH ===
-  let bestLayer1Match: { code: string; type: string; baseConfidence: number; ambiguityWarning: boolean } | null = null;
-  
-  if (extractedCodes.length > 0) {
-    for (const rawCode of extractedCodes) {
-      const codeNorm = normalizeCode(rawCode);
-      if (!codeNorm) continue;
+  const partMatch = scorePartNumber(
+    extraction.part_numbers,
+    expectedItem.item_alias,
+    itemAlias1 ?? null,
+  );
+  signals.push({
+    signal: 'part_number',
+    score: partMatch.score,
+    maxScore: 40,
+    detail: partMatch.detail,
+  });
+  totalScore += partMatch.score;
 
-      const targets = [
-        { type: 'item_alias', val: aliasNorm },
-        { type: 'alias1', val: alias1Norm }
-      ].filter(t => t.val) as { type: string; val: string }[];
+  // ── Signal 2: Product Type (max 15, fatal on conflict) ──────────────
 
-      for (const target of targets) {
-        // a) Exact normalized match
-        if (codeNorm === target.val) {
-          console.log(`Layer 1: code '${codeNorm}' vs ${target.type} '${target.val}' -> exact -> match`);
-          bestLayer1Match = { code: rawCode, type: `Exact match with ${target.type}`, baseConfidence: 95, ambiguityWarning: false };
-          break; // Highest priority
-        }
-        
-        // b) Code is substring of target (with Ambiguity rule)
-        // E.g. rawCode "K6N". target "TIDCK6N" or "TIDCK6ND"
-        // Prompt rule: boundaries or variants handle disambiguation.
-        // Actually ambiguity checking would ideally look at the whole DB, but here we can only check if variant validates it.
-        // We set ambiguityWarning if it's a substring match so Variant logic is strictly required to pass a high bar.
-        if (target.val.includes(codeNorm) && codeNorm.length >= 3) {
-          console.log(`Layer 1: code '${codeNorm}' vs ${target.type} '${target.val}' -> substring (code in target) -> match`);
-          bestLayer1Match = bestLayer1Match || { code: rawCode, type: `Substring (code in target ${target.type})`, baseConfidence: 85, ambiguityWarning: true };
-        }
-        
-        // c) Target is substring of code
-        if (codeNorm.includes(target.val) && target.val.length >= 3) {
-          console.log(`Layer 1: code '${codeNorm}' vs ${target.type} '${target.val}' -> substring (target in code) -> match`);
-          bestLayer1Match = bestLayer1Match || { code: rawCode, type: `Substring (target ${target.type} in code)`, baseConfidence: 85, ambiguityWarning: true };
-        }
+  const ocrProductType = detectProductType(extraction.product_type || extraction.raw_text);
+  // Check item name first, then parent_group as fallback (e.g. "U2 PISTON ASSY")
+  const expectedProductType = detectProductType(expectedItem.item_name)
+    || (itemParentGroup ? detectProductType(itemParentGroup) : null);
 
-        // d) Prefix-stripped match
-        const strippedCode = stripPrefixes(codeNorm);
-        const strippedTarget = stripPrefixes(target.val);
-        if (strippedCode === strippedTarget && strippedCode.length >= 3 && strippedCode !== codeNorm) {
-          console.log(`Layer 1: code '${codeNorm}' vs ${target.type} '${target.val}' -> prefix-stripped (${strippedCode}) -> match`);
-          bestLayer1Match = bestLayer1Match || { code: rawCode, type: `Prefix-stripped match with ${target.type}`, baseConfidence: 90, ambiguityWarning: false };
-        }
-      }
+  let productTypeScore = 0;
+  let productTypeDetail = '';
 
-      if (bestLayer1Match?.baseConfidence === 95) break;
-
-      // e) Code found in expectedItem.name text
-      if (nameNorm.includes(codeNorm) && codeNorm.length >= 3) {
-        console.log(`Layer 1: code '${codeNorm}' vs name -> substring -> match`);
-        bestLayer1Match = bestLayer1Match || { code: rawCode, type: `Code found in name`, baseConfidence: 80, ambiguityWarning: true };
-      }
-    }
-  }
-
-  // === LAYER 1.5: FUZZY TOKEN SCAN ===
-  // If strict code extraction failed to yield a match, attempt looking at every alphanumeric token.
-  // This catches cases where OCR reads K6N as KGN, or it has weird boundaries.
-  if (!bestLayer1Match) {
-    console.log('Layer 1 strict extraction failed, attempting fuzzy token scan...');
-    // D 32 becomes "D", "32". We need to allow length >= 2 so we don't drop 32.
-    const looseTokens = ocrText.replace(/[^A-Za-z0-9]/g, ' ').split(/\s+/).filter(t => t.length >= 2);
-    
-    // Also add a synthetic token that represents the whole string without spaces, just in case "D 32" needs to be "D32"
-    const squished = ocrText.replace(/[^A-Za-z0-9]/g, '');
-    if (squished.length > 0) looseTokens.push(squished);
-    
-    for (const token of looseTokens) {
-      const tokenNorm = token.toUpperCase();
-      const tokenFuzzy = normalizeFuzzy(tokenNorm);
-
-      const targets = [
-        { type: 'item_alias', val: aliasNorm },
-        { type: 'alias1', val: alias1Norm }
-      ].filter(t => t.val) as { type: string; val: string }[];
-
-      for (const target of targets) {
-        const targetFuzzy = normalizeFuzzy(target.val);
-        
-        if (tokenFuzzy === targetFuzzy) {
-          console.log(`Layer 1.5: fuzzy token '${tokenNorm}' vs ${target.type} '${target.val}' -> match`);
-          bestLayer1Match = { code: token, type: `Fuzzy exact match with ${target.type}`, baseConfidence: 85, ambiguityWarning: false };
-          break;
-        }
-        
-        if (targetFuzzy.includes(tokenFuzzy) && tokenFuzzy.length >= 3) {
-           console.log(`Layer 1.5: fuzzy token '${tokenNorm}' vs ${target.type} '${target.val}' -> substring match`);
-           bestLayer1Match = bestLayer1Match || { code: token, type: `Fuzzy substring with ${target.type}`, baseConfidence: 75, ambiguityWarning: true };
-        }
-        
-        if (tokenFuzzy.includes(targetFuzzy) && targetFuzzy.length >= 3) {
-           console.log(`Layer 1.5: fuzzy target '${target.val}' in token '${tokenNorm}' -> substring match`);
-           bestLayer1Match = bestLayer1Match || { code: token, type: `Fuzzy target in token with ${target.type}`, baseConfidence: 75, ambiguityWarning: true };
-        }
-      }
-      if (bestLayer1Match?.baseConfidence === 85) break;
-    }
-  }
-
-  // Evaluate Layer 1
-  if (bestLayer1Match) {
-    if (variantCheck.isFatal) {
-      console.log('Final: isMatch=false, variant check fatal (Side/Emission mismatch)');
-      return createMatchResult(false, 0, 'code_match', `Code matched but fatal variant mismatch: ${variantCheck.details.join(', ')}`, bestLayer1Match.code);
-    }
-    
-    let finalConfidence = bestLayer1Match.baseConfidence - variantCheck.confidencePenalty + variantCheck.bonus;
-    
-    // If ambiguous substring, and we had significant penalties (e.g. missing Duro), it drops confidence.
-    if (bestLayer1Match.ambiguityWarning && variantCheck.confidencePenalty > 0) {
-      console.log('Ambiguous code match + variant mismatch -> reducing confidence.');
-      finalConfidence -= 20; // Additional penalty for ambiguous matches without confirming variants
-    }
-
-    finalConfidence = Math.max(0, Math.min(100, finalConfidence));
-    
-    if (finalConfidence >= 70) {
-      console.log(`Final: isMatch=true, confidence=${finalConfidence}, method=code_match+variant_verified: ${bestLayer1Match.type}`);
-      return createMatchResult(true, finalConfidence, 'code_match', `Code match + variants: ${variantCheck.details.join(', ') || 'OK'}`, bestLayer1Match.code);
+  if (ocrProductType && expectedProductType) {
+    if (ocrProductType.canonical === expectedProductType.canonical) {
+      productTypeScore = 15;
+      productTypeDetail = `Match: ${ocrProductType.canonical}`;
+    } else if (areProductTypesConflicting(ocrProductType.canonical, expectedProductType.canonical)) {
+      fatalReason = `Product type conflict: scanned "${ocrProductType.canonical}" but expected "${expectedProductType.canonical}"`;
+      productTypeDetail = fatalReason;
     } else {
-      console.log(`Layer 1 code match confidence dropped to ${finalConfidence} due to variant penalties. Falling to Layer 2...`);
+      productTypeScore = 5;
+      productTypeDetail = `Partial: scanned ${ocrProductType.canonical}, expected ${expectedProductType.canonical} (not conflicting)`;
     }
-  }
-
-  // === LAYER 2: KEYWORD MATCH ===
-  console.log('Falling back to Layer 2: Keyword Match');
-  const NOISE_WORDS = ['USHA', 'USHA2', 'INEL', 'TIDC', 'ASK', 'SJ', 'VE', 'TE', 'SW', 'BG', 'BA', 'EV', 'KV', 'LC', 'THE', 'FOR', 'AND', 'WITH', 'NEW', 'PART', 'NO', 'NUMBER', 'CODE', 'MOLY', 'GOLD', 'SSM'];
-  
-  const extractWords = (text: string) => 
-    text.toUpperCase().split(/[^A-Z0-9]+/).filter(w => w.length >= 2);
-
-  const expectedWords = extractWords(expectedItem.item_name).filter(w => !NOISE_WORDS.includes(w));
-  const ocrWords = extractWords(ocrText).filter(w => !NOISE_WORDS.includes(w));
-
-  if (expectedWords.length === 0) {
-    return createMatchResult(false, 0, 'keyword_match', 'No valid words to match after noise filter', extractedCodes[0] || null);
-  }
-
-  let matchCount = 0;
-  for (const expected of expectedWords) {
-    if (ocrWords.some(ocrWord => ocrWord === expected || ocrWord.includes(expected) || expected.includes(ocrWord))) {
-      matchCount++;
-    }
-  }
-
-  const keywordRatio = matchCount / expectedWords.length;
-  console.log(`Layer 2: ${matchCount}/${expectedWords.length} keywords matched (${Math.round(keywordRatio * 100)}%)`);
-
-  let keywordScore = (keywordRatio * 80) + variantCheck.bonus - variantCheck.confidencePenalty;
-  
-  if (variantCheck.isFatal) {
-    console.log('Layer 2 rejected due to fatal variant mismatch.');
-    keywordScore = 0;
-  }
-
-  keywordScore = Math.max(0, Math.min(100, keywordScore));
-  
-  let isMatch = false;
-  let detail = `Matched ${matchCount}/${expectedWords.length} words. Variants: ${variantCheck.details.join(', ') || 'OK'}`;
-
-  // Scoring:
-  if (keywordScore >= 70) {
-    isMatch = true;
-  } else if (keywordScore >= 50) {
-    isMatch = false;
-    detail = `Possible match — verify. ${detail}`;
+  } else if (ocrProductType && !expectedProductType) {
+    productTypeScore = 3;
+    productTypeDetail = `OCR found ${ocrProductType.canonical}, no type in expected name`;
   } else {
-    isMatch = false;
-    // VERY IMPORTANT FOR DEBUGGING: Show the user what we actually read!
-    const snippet = ocrText.replace(/\n/g, ' ').substring(0, 70);
-    detail = `${detail}. (Read: "${snippet}...")`;
+    productTypeDetail = 'Product type not detected';
   }
 
-  console.log(`Final: isMatch=${isMatch}, confidence=${Math.round(keywordScore)}, method=keyword_match`);
-  return createMatchResult(isMatch, Math.round(keywordScore), 'keyword_match', detail, extractedCodes[0] || null);
+  signals.push({ signal: 'product_type', score: productTypeScore, maxScore: 15, detail: productTypeDetail });
+  totalScore += productTypeScore;
+
+  // ── Signal 3: Vehicle Model (max 15) ────────────────────────────────
+
+  const ocrVehicleText = extraction.vehicle_models.join(' ') + ' ' + extraction.raw_text;
+  const ocrVehicleFamilies = extractVehicleFamilies(ocrVehicleText);
+  const expectedVehicleFamilies = extractVehicleFamilies(expectedItem.item_name);
+  const ocrVehicleTokens = extractVehicleTokens(ocrVehicleText);
+  const expectedVehicleTokens = extractVehicleTokens(expectedItem.item_name);
+
+  let vehicleScore = 0;
+  let vehicleDetail = '';
+
+  if (ocrVehicleFamilies.length > 0 && expectedVehicleFamilies.length > 0) {
+    const familyOverlap = ocrVehicleFamilies.some(f => expectedVehicleFamilies.includes(f));
+    if (familyOverlap) {
+      vehicleScore = 10;
+      vehicleDetail = `Vehicle family match: ${ocrVehicleFamilies.filter(f => expectedVehicleFamilies.includes(f)).join(', ')}`;
+
+      const tokenOverlap = ocrVehicleTokens.filter(t => expectedVehicleTokens.includes(t));
+      if (tokenOverlap.length > 0) {
+        vehicleScore = 15;
+        vehicleDetail += ` + model tokens: ${tokenOverlap.join(', ')}`;
+      }
+    } else {
+      vehicleScore = -5;
+      vehicleDetail = `Vehicle mismatch: scanned [${ocrVehicleFamilies.join(',')}] vs expected [${expectedVehicleFamilies.join(',')}]`;
+    }
+  } else if (expectedVehicleFamilies.length === 0) {
+    vehicleDetail = 'No vehicle info in expected item';
+  } else {
+    vehicleDetail = 'No vehicle info extracted from label';
+  }
+
+  signals.push({ signal: 'vehicle_model', score: Math.max(0, vehicleScore), maxScore: 15, detail: vehicleDetail });
+  totalScore += Math.max(0, vehicleScore);
+
+  // ── Signal 4: Size Variant (max 10, fatal on contradiction) ─────────
+
+  const ocrVariants = extractVariants(
+    extraction.size_variant + ' ' + extraction.other_variants.join(' ') + ' ' + extraction.raw_text
+  );
+  const expectedVariants = extractVariants(expectedItem.item_name);
+
+  let sizeScore = 0;
+  let sizeDetail = '';
+
+  if (expectedVariants.sizes.length > 0 && ocrVariants.sizes.length > 0) {
+    const sizeMatch = expectedVariants.sizes.some(es =>
+      ocrVariants.sizes.some(os => os === es || os.replace(/\s/g, '') === es.replace(/\s/g, ''))
+    );
+    if (sizeMatch) {
+      sizeScore = 10;
+      sizeDetail = `Size match: ${ocrVariants.sizes.join(', ')}`;
+    } else {
+      fatalReason = fatalReason || `Size mismatch: scanned [${ocrVariants.sizes.join(',')}] vs expected [${expectedVariants.sizes.join(',')}]`;
+      sizeDetail = fatalReason;
+    }
+  } else if (expectedVariants.sizes.length > 0) {
+    sizeDetail = `Expected size ${expectedVariants.sizes.join(',')} not found on label`;
+  } else {
+    sizeDetail = 'No size info to compare';
+  }
+
+  signals.push({ signal: 'size_variant', score: sizeScore, maxScore: 10, detail: sizeDetail });
+  totalScore += sizeScore;
+
+  // ── Signal 5: Emission Standard (max 10, fatal on mismatch) ─────────
+
+  const ocrEmissions = ocrVariants.emissions.length > 0
+    ? ocrVariants.emissions
+    : extractVariants(extraction.emission_standard).emissions;
+  const expectedEmissions = expectedVariants.emissions;
+
+  let emissionScore = 0;
+  let emissionDetail = '';
+
+  if (expectedEmissions.length > 0 && ocrEmissions.length > 0) {
+    const emMatch = expectedEmissions.some(ee => ocrEmissions.includes(ee));
+    if (emMatch) {
+      emissionScore = 10;
+      emissionDetail = `Emission match: ${ocrEmissions.join(', ')}`;
+    } else {
+      fatalReason = fatalReason || `Emission mismatch: scanned [${ocrEmissions.join(',')}] vs expected [${expectedEmissions.join(',')}]`;
+      emissionDetail = fatalReason;
+    }
+  } else {
+    emissionDetail = 'No emission standard to compare';
+  }
+
+  signals.push({ signal: 'emission', score: emissionScore, maxScore: 10, detail: emissionDetail });
+  totalScore += emissionScore;
+
+  // ── Signal 6: Other Variants - NC, DURO, HET, side (max 5) ─────────
+
+  let variantScore = 0;
+  let variantDetail = '';
+  const variantDetails: string[] = [];
+
+  // Side check (fatal on mismatch)
+  if (expectedVariants.sides.length > 0 && ocrVariants.sides.length > 0) {
+    const sideMatch = expectedVariants.sides.some(es => ocrVariants.sides.includes(es));
+    if (!sideMatch) {
+      fatalReason = fatalReason || `Side mismatch: scanned [${ocrVariants.sides.join(',')}] vs expected [${expectedVariants.sides.join(',')}]`;
+      variantDetails.push(fatalReason);
+    } else {
+      variantScore += 2;
+      variantDetails.push(`Side: ${ocrVariants.sides.join(',')}`);
+    }
+  }
+
+  // Special variants (NC, DURO, HET, NM, OM)
+  for (const spec of expectedVariants.specials) {
+    if (ocrVariants.specials.includes(spec)) {
+      variantScore += 1;
+      variantDetails.push(`${spec} confirmed`);
+    } else {
+      variantDetails.push(`Expected ${spec} not found`);
+    }
+  }
+
+  variantScore = Math.min(5, variantScore);
+  variantDetail = variantDetails.length > 0 ? variantDetails.join('; ') : 'No special variants to compare';
+  signals.push({ signal: 'other_variants', score: variantScore, maxScore: 5, detail: variantDetail });
+  totalScore += variantScore;
+
+  // ── Signal 7: Brand (max 5) ─────────────────────────────────────────
+
+  let brandScore = 0;
+  let brandDetail = '';
+
+  if (extraction.brand && itemMainGroup) {
+    if (matchBrand(extraction.brand, itemMainGroup)) {
+      brandScore = 5;
+      brandDetail = `Brand match: "${extraction.brand}" → ${itemMainGroup}`;
+    } else {
+      brandDetail = `Brand mismatch: "${extraction.brand}" vs main_group "${itemMainGroup}"`;
+    }
+  } else {
+    brandDetail = extraction.brand ? 'No main_group to compare' : 'No brand extracted';
+  }
+
+  signals.push({ signal: 'brand', score: brandScore, maxScore: 5, detail: brandDetail });
+  totalScore += brandScore;
+
+  // ── Final Decision ──────────────────────────────────────────────────
+
+  if (fatalReason) {
+    console.log(`FATAL: ${fatalReason}`);
+    return buildResult(false, 0, 'multi_signal', signals, extraction, partMatch.matchedCode, fatalReason);
+  }
+
+  totalScore = Math.max(0, Math.min(100, totalScore));
+
+  // Dual-threshold: strong code match needs less additional confirmation.
+  // Code-primary path: exact/prefix code match (>=33) → threshold 40
+  // Signal-primary path: no code match → threshold 55 (needs multiple signals)
+  const hasStrongCode = partMatch.score >= 33;
+  const threshold = hasStrongCode ? 40 : 55;
+  const isMatch = totalScore >= threshold;
+
+  let strategy = 'multi_signal';
+  if (hasStrongCode) strategy = 'code_match+signals';
+  else if (productTypeScore > 0 && vehicleScore >= 10) strategy = 'type+vehicle+signals';
+
+  const positiveSignals = signals.filter(s => s.score > 0 && s.signal !== 'summary').map(s => s.signal);
+  const failedSignals = signals.filter(s => s.score === 0 && s.maxScore > 0 && s.signal !== 'summary').map(s => s.signal);
+
+  const reason = isMatch
+    ? `Verified (${totalScore}/100): ${positiveSignals.join(', ')}`
+    : totalScore >= 35
+      ? `Possible match (${totalScore}/100) — verify manually. Matched: ${positiveSignals.join(', ')}`
+      : `No match (${totalScore}/100): ${failedSignals.join(', ')} failed`;
+
+  console.log(`Result: isMatch=${isMatch}, confidence=${totalScore}, strategy=${strategy}, threshold=${threshold}`);
+  console.log(`Reason: ${reason}`);
+
+  return buildResult(isMatch, totalScore, strategy, signals, extraction, partMatch.matchedCode, reason);
 }
 
-function createMatchResult(
-  isMatch: boolean, 
-  confidence: number, 
-  strategy: string, 
-  detail: string,
-  partNumber: string | null = null
+// ─── Raw Text Fallback Parser ─────────────────────────────────────────────
+// Used when Gemini JSON parsing fails and we only have raw text
+
+function parseRawTextFallback(rawText: string): GeminiExtraction {
+  const partNumbers: string[] = [];
+
+  const patterns: RegExp[] = [
+    // Slashed codes: ASK/NA/BS/00002, ASK/CS/0411
+    /\b([A-Z]{2,5}(?:\/[A-Z0-9]{1,5}){2,4})\b/g,
+    // Labeled codes (stops at newline, not greedy across lines)
+    /(?:Part\s*(?:No|Number|Code)|Control\s*No|Product\/Part\s*No)[:\.\s-]*([A-Z0-9][A-Z0-9\-\/. ]{1,25})/gim,
+    // Long alphanumeric: SHH0120, INEL53064, 26046091
+    /\b([A-Z]{2,4}\d{3,8}[A-Z]?)\b/g,
+    // Hyphenated: FOIL-SHIN-1501
+    /\b([A-Z]+-[A-Z]+-\d+)\b/gi,
+    // 3-char codes: K6N, A71, D32, S75
+    /\b([A-Z]\d[A-Z0-9])\b/g,
+    // Short letter+digits: D32, S75, L30 (1-2 letters + 2-3 digits)
+    /\b([A-Z]{1,2}\s?\d{2,3})\b/g,
+    // Pure numeric codes (5+ digits, avoiding years and prices)
+    /\b(\d{5,8})\b/g,
+    // Dotted codes: PC.217.7.18.003
+    /\b([A-Z]{1,3}[\d.]{5,20})\b/g,
+  ];
+
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0;
+    let m;
+    while ((m = pattern.exec(rawText)) !== null) {
+      const raw = (m[1] || '').trim();
+      if (!raw) continue;
+      // Skip if it looks like a year, price, or very short noise
+      const norm = raw.replace(/\s+/g, '');
+      if (/^\d{4}$/.test(norm) && parseInt(norm) >= 2020 && parseInt(norm) <= 2035) continue;
+      partNumbers.push(raw);
+    }
+  }
+
+  const productType = detectProductType(rawText);
+  const vehicleFamilies = extractVehicleFamilies(rawText);
+  const vehicleTokens = extractVehicleTokens(rawText);
+
+  let mrp: number | null = null;
+  const mrpRe = /(?:M\.?R\.?P\.?|Rs\.?|₹)\s*[:.]?\s*([\d,]+(?:\.\d{1,2})?)/gi;
+  const mrpMatch = mrpRe.exec(rawText);
+  if (mrpMatch) {
+    mrp = parseFloat(mrpMatch[1].replace(/,/g, ''));
+  }
+
+  let brand = '';
+  const brandPatterns: [RegExp, string][] = [
+    [/\bASK\b/i, 'ASK'],
+    [/\bUSHA\b/i, 'USHA'],
+    [/\bShriram\b/i, 'USHA'],
+    [/\bDIAMOND\b/i, 'DIAMOND'],
+    [/\bLucas\s*TVS\b/i, 'Lucas TVS'],
+    [/\bSuprajit\b/i, 'Suprajit'],
+    [/\bKSPG\b/i, 'KSPG'],
+    [/\bVarroc\b/i, 'Varroc'],
+  ];
+  for (const [re, name] of brandPatterns) {
+    if (re.test(rawText)) { brand = name; break; }
+  }
+
+  const variants = extractVariants(rawText);
+
+  return {
+    part_numbers: [...new Set(partNumbers)],
+    product_type: productType?.canonical || '',
+    brand,
+    vehicle_models: vehicleFamilies.length > 0
+      ? vehicleFamilies.map(f => {
+          const tokens = vehicleTokens.filter(t => t !== f.toLowerCase());
+          return tokens.length > 0 ? `${f} ${tokens.join(' ')}` : f;
+        })
+      : [],
+    mrp,
+    size_variant: variants.sizes.join(', '),
+    emission_standard: variants.emissions.join(', '),
+    other_variants: [...variants.specials, ...variants.sides],
+    raw_text: rawText,
+  };
+}
+
+// ─── Result Builder ───────────────────────────────────────────────────────
+
+function buildResult(
+  isMatch: boolean,
+  confidence: number,
+  strategy: string,
+  signals: SignalDetail[],
+  extraction: GeminiExtraction,
+  matchedCode: string,
+  reason: string,
 ): OcrMatchResult {
   return {
     isMatch,
     confidence,
-    matchedFields: [strategy],
-    signals: [
-      {
-        signal: strategy,
-        score: confidence,
-        maxScore: 100,
-        detail,
-      }
-    ],
+    matchedFields: signals.filter(s => s.score > 0).map(s => s.signal),
+    signals: [...signals, { signal: 'summary', score: confidence, maxScore: 100, detail: reason }],
     ocrExtracted: {
-      partNumber,
-      description: null,
-      mrp: null,
-      brand: null,
-      vehicleModel: null
+      partNumber: matchedCode || extraction.part_numbers[0] || null,
+      description: extraction.product_type || null,
+      mrp: extraction.mrp,
+      brand: extraction.brand || null,
+      vehicleModel: extraction.vehicle_models[0] || null,
     },
-    matchStrategy: strategy
+    matchStrategy: strategy,
   };
 }

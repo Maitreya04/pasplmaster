@@ -29,6 +29,7 @@ import { verifyWithGemini, imageToBase64 } from '../../lib/ocr/geminiOCR';
 interface ItemMeta {
   mrp: number | null;
   main_group: string | null;
+  parent_group: string | null;
   alias1: string | null;
 }
 type ItemMetaMap = Map<number, ItemMeta>;
@@ -112,7 +113,7 @@ export default function PickPage() {
     const ids = order.items.map((oi) => oi.item_id);
     supabase
       .from('items')
-      .select('id,mrp,main_group,alias1')
+      .select('id,mrp,main_group,parent_group,alias1')
       .in('id', ids)
       .then(({ data }) => {
         if (!data) return;
@@ -121,6 +122,7 @@ export default function PickPage() {
           m.set(row.id, {
             mrp: row.mrp ?? null,
             main_group: row.main_group ?? null,
+            parent_group: row.parent_group ?? null,
             alias1: row.alias1 ?? null,
           });
         }
@@ -367,7 +369,9 @@ export default function PickPage() {
         name: liveScanTarget.item_name || '',
         alias: liveScanTarget.item_alias || '',
         alias1: meta?.alias1 || '',
-        mrp: meta?.mrp || 0
+        mrp: meta?.mrp || 0,
+        mainGroup: meta?.main_group || '',
+        parentGroup: meta?.parent_group || '',
       };
 
       const result = await verifyWithGemini(base64, expectedItem);
