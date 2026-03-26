@@ -9,6 +9,7 @@ import { useCustomers } from '../../hooks/useCustomers';
 import { usePendingItems } from '../../hooks/usePendingItems';
 import { searchItems, normalizeQuery, detectCodeLike } from '../../lib/search/itemSearch';
 import type { SearchResult, MatchedField } from '../../lib/search/itemSearch';
+import { buildSearchIndex } from '../../lib/search/searchIndex';
 import { supabase } from '../../lib/supabase/client';
 import {
   PageHeader,
@@ -918,8 +919,11 @@ export default function NewOrderPage() {
     [items, selectedBrand, selectedGroup],
   );
 
+  // Build the search index from filtered items
+  const searchIndex = useMemo(() => buildSearchIndex(searchableItems), [searchableItems]);
+
   const searchResults = useMemo(() => {
-    if (deferredQuery) return searchItems(deferredQuery, searchableItems);
+    if (deferredQuery) return searchItems(deferredQuery, searchIndex);
     // Brand chip selected but no text: show all items in that group
     if (selectedBrand) {
       return searchableItems
@@ -927,7 +931,7 @@ export default function NewOrderPage() {
         .map(item => ({ item, score: 100, matchType: 'exact-name' as const, matchedField: 'name' as const }));
     }
     return [];
-  }, [deferredQuery, searchableItems, selectedBrand]);
+  }, [deferredQuery, searchIndex, searchableItems, selectedBrand]);
 
   // When browsing a brand with no query there's no meaningful "best match" split
   const bestMatches = useMemo(

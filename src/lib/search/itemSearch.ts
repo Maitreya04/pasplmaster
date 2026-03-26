@@ -1,5 +1,7 @@
 import type { Item } from '../../types';
 import { EXPAND_MAP } from './abbreviations';
+import type { SearchIndex, PrepItem } from './searchIndex';
+import { strip, soundex } from './searchIndex';
 
 export type MatchLayer =
   | 'exact-name'
@@ -57,11 +59,6 @@ const NOISE_WORDS = new Set([
   'box', 'packets', 'packet', 'pkt',
 ]);
 
-/**
- * Normalises a raw search query:
- *  1. lowercase + trim + collapse whitespace
- *  2. expand known shorthand tokens
- */
 /**
  * Expands a single token using shorthand and abbreviation/misspelling maps (pasplv1-style).
  */
@@ -138,172 +135,6 @@ export function detectCodeLike(q: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Phonetics (Soundex)
-// ---------------------------------------------------------------------------
-
-/**
- * Computes a Soundex-like phonetic code for coarse phonetic typo matching.
- */
-function soundex(input: string): string {
-  if (!input) return "";
-  const s = input.toUpperCase().replace(/[^A-Z]/g, "");
-  if (!s) return "";
-  const first = s[0];
-  const map: Record<string, string> = {
-    B: "1", F: "1", P: "1", V: "1",
-    C: "2", G: "2", J: "2", K: "2", Q: "2", S: "2", X: "2", Z: "2",
-    D: "3", T: "3",
-    L: "4",
-    M: "5", N: "5",
-    R: "6",
-  };
-  let out = first;
-  let prev = map[first] || "";
-  for (let i = 1; i < s.length; i++) {
-    const ch = s[i];
-    if ("AEIOUYHW".includes(ch)) {
-      prev = "";
-      continue;
-    }
-    const code = map[ch] || "";
-    if (code && code !== prev) {
-      out += code;
-      prev = code;
-    }
-    if (out.length === 4) break;
-  }
-  while (out.length < 4) out += "0";
-  return out;
-}
-
-const FUZZY_FALLBACK_THRESHOLD = 15;
-const PARTIAL_KEYWORD_RATIO = 0.6;
-
-// ---------------------------------------------------------------------------
-// Pre-processing — computed once per item-list identity.
-// Builds flat array + hash-map indexes for O(1) exact/normalized lookups.
-// ---------------------------------------------------------------------------
-
-interface PrepItem {
-  item: Item;
-  nameLower: string;
-  aliasLower: string;
-  alias1Lower: string;
-  nameNorm: string;
-  aliasNorm: string;
-  alias1Norm: string;
-  nameWords: string[];
-  /** All tokens from name, alias, alias1, parent_group, main_group (pasplv1-style) */
-  allWords: Set<string>;
-  allPhonetics: Set<string>;
-}
-
-interface SearchIndex {
-  all: PrepItem[];
-  byName: Map<string, number[]>;
-  byAlias: Map<string, number[]>;
-  byAlias1: Map<string, number[]>;
-  byNormAlias: Map<string, number[]>;
-  byNormAlias1: Map<string, number[]>;
-}
-
-let _ref: Item[] | null = null;
-let _idx: SearchIndex | null = null;
-
-function strip(s: string): string {
-  return s.replace(/[\s.\-/\\]/g, '');
-}
-
-/** Tokenize string into lowercase alphanumeric tokens (pasplv1-style). */
-function toTokens(s: string): string[] {
-  return String(s)
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-}
-
-function indexPush(map: Map<string, number[]>, key: string, i: number) {
-  if (!key) return;
-  const arr = map.get(key);
-  if (arr) arr.push(i);
-  else map.set(key, [i]);
-}
-
-function buildIndex(items: Item[]): SearchIndex {
-  if (_ref === items && _idx) return _idx;
-  _ref = items;
-
-  const len = items.length;
-  const all: PrepItem[] = new Array(len);
-  const byName = new Map<string, number[]>();
-  const byAlias = new Map<string, number[]>();
-  const byAlias1 = new Map<string, number[]>();
-  const byNormAlias = new Map<string, number[]>();
-  const byNormAlias1 = new Map<string, number[]>();
-
-  for (let i = 0; i < len; i++) {
-    const it = items[i];
-    const nameLower = it.name.toLowerCase();
-    const aliasLower = (it.alias ?? '').toLowerCase();
-    const alias1Lower = (it.alias1 ?? '').toLowerCase();
-    const nameNorm = strip(nameLower);
-    const aliasNorm = strip(aliasLower);
-    const alias1Norm = strip(alias1Lower);
-
-    const nameWords = nameLower.split(/\s+/).filter(Boolean);
-    const allWords = new Set<string>([
-      ...nameWords,
-      ...toTokens(aliasLower),
-      ...toTokens(alias1Lower),
-      ...toTokens(it.parent_group ?? ''),
-      ...toTokens(it.main_group ?? ''),
-      ...toTokens(it.item_category ?? ''),
-    ].filter(Boolean));
-
-    // Expand model concatenations like "dio 05" -> "dio05" in index words too
-    const allWordsArr = Array.from(allWords);
-    for (const w of allWordsArr) {
-      const m = w.match(/^([a-z0-9]{2,})[-_/\. ]?0?([0-9]{1,2})$/);
-      if (m) {
-        allWords.add(`${m[1]}${m[2]}`);
-        allWords.add(`${m[1]}0${m[2]}`);
-        allWords.add(m[1]); // base word
-      }
-    }
-
-    const allPhonetics = new Set<string>();
-    for (const w of allWords) {
-      if (w.length >= 4) {
-        const sx = soundex(w);
-        if (sx) allPhonetics.add(sx);
-      }
-    }
-
-    all[i] = {
-      item: it,
-      nameLower,
-      aliasLower,
-      alias1Lower,
-      nameNorm,
-      aliasNorm,
-      alias1Norm,
-      nameWords,
-      allWords,
-      allPhonetics,
-    };
-
-    indexPush(byName, nameLower, i);
-    indexPush(byAlias, aliasLower, i);
-    indexPush(byAlias1, alias1Lower, i);
-    indexPush(byNormAlias, aliasNorm, i);
-    indexPush(byNormAlias1, alias1Norm, i);
-  }
-
-  _idx = { all, byName, byAlias, byAlias1, byNormAlias, byNormAlias1 };
-  return _idx;
-}
-
-// ---------------------------------------------------------------------------
 // Levenshtein — pre-allocated typed-array buffers (zero GC in hot path).
 // Accepts adaptive maxDist for early exit.
 // ---------------------------------------------------------------------------
@@ -342,7 +173,6 @@ function levenshtein(a: string, b: string, maxDist: number): number {
 
 /**
  * Levenshtein similarity: 1 - (distance / maxLen). pasplv1 uses ≥ 0.8 for fuzzy match.
- * E.g. "pistn" vs "piston" → dist=1, sim=0.83; "brek" vs "brake" → dist=2, sim=0.6.
  */
 function similarity(a: string, b: string): number {
   if (a === b) return 1;
@@ -353,12 +183,11 @@ function similarity(a: string, b: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// Fuzzy matching — pasplv1-style: Levenshtein similarity ≥ 0.8 vs product words.
-// Checks name, alias, alias1, parent_group, main_group (allWords).
-// "pistn" matches "PISTON" (sim 0.83), "actva" matches "ACTIVA" (sim 0.8).
-// For multi-word queries, every query word must fuzzy-hit a product word.
+// Fuzzy matching helpers
 // ---------------------------------------------------------------------------
 
+const FUZZY_FALLBACK_THRESHOLD = 15;
+const PARTIAL_KEYWORD_RATIO = 0.6;
 const FUZZY_SIMILARITY_THRESHOLD = 0.8;
 const MIN_TOKEN_LEN_FOR_FUZZY = 3;
 
@@ -391,51 +220,89 @@ function phoneticMatchItem(
   qWords: string[],
   p: PrepItem,
 ): boolean {
-  // Only consider tokens >= 4 chars for phonetic matching (short tokens too noisy)
   const validPhoneticWords = qWords.filter(w => w.length >= 4);
   if (validPhoneticWords.length === 0) return false;
-
-  // ALL long query words must have a phonetic match in the item
   for (const qw of validPhoneticWords) {
     const sx = soundex(qw);
     if (!sx || !p.allPhonetics.has(sx)) return false;
   }
-
   return true;
 }
 
 // ---------------------------------------------------------------------------
-// 9-layer cascade search
+// Helper: apply brand/group filter via index sets
+// ---------------------------------------------------------------------------
+
+function getFilteredSet(
+  idx: SearchIndex,
+  brandFilter?: string | null,
+  groupFilter?: string | null,
+): Set<number> | null {
+  // No filter → null means "all items"
+  if (!brandFilter && !groupFilter) return null;
+
+  let result: Set<number> | null = null;
+
+  if (brandFilter) {
+    const brandSet = idx.brandGroups.get(brandFilter);
+    if (!brandSet) return new Set(); // brand exists but has no items → empty
+    result = new Set(brandSet);
+  }
+
+  if (groupFilter) {
+    const groupSet = idx.parentGroups.get(groupFilter);
+    if (!groupSet) return new Set();
+    if (result) {
+      // Intersect with brand filter
+      result = new Set([...result].filter(i => groupSet.has(i)));
+    } else {
+      result = new Set(groupSet);
+    }
+  }
+
+  return result;
+}
+
+function passesFilter(i: number, filterSet: Set<number> | null): boolean {
+  return filterSet === null || filterSet.has(i);
+}
+
+// ---------------------------------------------------------------------------
+// 9-layer cascade search — now using pre-built index
 //
 //  Phase 1 — O(1) hash-map lookups (layers 0-2)
 //    Layer 0  Exact name match                              → 100  field: name
 //    Layer 1  Exact alias / alias1 match                   → 100  field: alias/alias1
 //    Layer 2  Normalized alias / alias1 match              →  95  field: alias/alias1
 //
-//  Phase 2 — Linear scan (layers 3-6)
-//    Layer 3a Prefix on name (raw/norm)                    →  85  field: name
-//    Layer 3a Prefix on alias/alias1 (raw/norm)            →  88  field: alias/alias1  ← boosted
-//    Layer 3b Word-boundary prefix in name words           →  80  field: name           ← NEW
-//    Layer 4  Substring (name/alias/alias1, raw/norm)      →  75  field: whichever
-//    Layer 5  All keywords in name+alias                   →  60  field: name+alias
-//    Layer 6  ≥60% keywords in name+alias                  →  40  field: name+alias
+//  Phase 2 — Index lookups (layers 3-6)
+//    Layer 3a Prefix on name/alias/alias1 (raw/norm)       →  85-88  field: varies
+//    Layer 3b Word-boundary prefix in name words           →  80  field: name
+//    Layer 4  Substring via prefix index                   →  75  field: whichever
+//    Layer 5  All keywords via inverted word index         →  60  field: name+alias
+//    Layer 6  ≥60% keywords via inverted word index        →  40  field: name+alias
 //
-//  Phase 3 — Fuzzy & Phonetic fallback (layer 7 & 8, only if < 15 results)
-//    Layer 7  Levenshtein on name words + alias            →  30  field: name/alias
+//  Phase 3 — Fuzzy & Phonetic (layer 7 & 8, trigram-narrowed)
+//    Layer 7  Levenshtein on trigram-narrowed candidates   →  30  field: name/alias
 //    Layer 8  Soundex phonetics on long words              →  25  field: name
 // ---------------------------------------------------------------------------
 
-export function searchItems(query: string, items: Item[]): SearchResult[] {
+export function searchItems(
+  query: string,
+  idx: SearchIndex,
+  brandFilter?: string | null,
+  groupFilter?: string | null,
+): SearchResult[] {
   const raw = query;
   const q = normalizeQuery(query);
   if (!q) return [];
 
   const isCodeLike = detectCodeLike(raw);
 
-  const idx = buildIndex(items);
   const { all } = idx;
   const results: SearchResult[] = [];
   const seen = new Set<number>();
+  const filterSet = getFilteredSet(idx, brandFilter, groupFilter);
 
   // ------ Phase 1: O(1) map lookups (layers 0, 1, 2) ------
 
@@ -449,7 +316,9 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
     const hits = map.get(key);
     if (!hits) return;
     for (let k = 0; k < hits.length; k++) {
-      const p = all[hits[k]];
+      const idx = hits[k];
+      if (!passesFilter(idx, filterSet)) continue;
+      const p = all[idx];
       if (seen.has(p.item.id)) continue;
       seen.add(p.item.id);
       results.push({ item: p.item, score, matchType: layer, matchedField: field });
@@ -468,134 +337,278 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
     return results.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS);
   }
 
-  // ------ Phase 2: linear scan (layers 3a, 3b, 4, 5, 6) ------
+  // ------ Phase 1.5: Raw code prefix + brand prefix resolution ------
+  // For code-like queries, normalizeQuery may expand "lt97" → "lt lt97 lt097"
+  // which mangles the prefix lookup. Try the RAW stripped query first.
+  // Also try prepending known brand prefixes (TIDCK, INEL, etc.) to resolve
+  // short codes like "k282" → "TIDCK282".
+  const rawStripped = strip(raw.toLowerCase().trim());
+  if (isCodeLike && rawStripped.length >= 2) {
+    // 1a. Exact lookup with raw code
+    collect(idx.byNormAlias, rawStripped, 95, 'normalized', 'alias');
+    collect(idx.byNormAlias1, rawStripped, 95, 'normalized', 'alias1');
+
+    // 1b. Prefix lookup with raw code (alias1 starts with raw query)
+    if (rawStripped.length >= 3 && results.length < MAX_RESULTS) {
+      const rawPrefixHits = idx.prefixToItems.get(rawStripped);
+      if (rawPrefixHits) {
+        for (const i of rawPrefixHits) {
+          if (!passesFilter(i, filterSet)) continue;
+          const p = all[i];
+          if (seen.has(p.item.id)) continue;
+          if (
+            p.aliasNorm.startsWith(rawStripped) || p.alias1Norm.startsWith(rawStripped)
+          ) {
+            seen.add(p.item.id);
+            const field: MatchedField = p.aliasNorm.startsWith(rawStripped) ? 'alias' : 'alias1';
+            results.push({ item: p.item, score: 90, matchType: 'prefix', matchedField: field });
+          } else if (p.nameNorm.startsWith(rawStripped)) {
+            seen.add(p.item.id);
+            results.push({ item: p.item, score: 85, matchType: 'prefix', matchedField: 'name' });
+          }
+        }
+      }
+    }
+
+    // 1c. Brand prefix resolution — "k282" → try "TIDCK282", "TIDCGK282", "INELK282", etc.
+    // Common brand prefixes used in alias1 codes
+    if (results.length < MAX_RESULTS && rawStripped.length <= 10 && !raw.includes(' ')) {
+      const BRAND_PREFIXES = ['tidck', 'tidcgk', 'tidca', 'tidcsc', 'tidc', 'inel', 'ev', 'kv'];
+      for (const prefix of BRAND_PREFIXES) {
+        const prefixed = prefix + rawStripped;
+        // Try exact match first
+        const exactHits = idx.byNormAlias1.get(prefixed);
+        if (exactHits) {
+          for (const hi of exactHits) {
+            if (!passesFilter(hi, filterSet)) continue;
+            const p = all[hi];
+            if (seen.has(p.item.id)) continue;
+            seen.add(p.item.id);
+            results.push({ item: p.item, score: 92, matchType: 'normalized', matchedField: 'alias1' });
+          }
+        }
+        // Try prefix match — e.g. "k6" matches "TIDCK6", "TIDCK6N", "TIDCK6ND"
+        if (prefixed.length >= 3) {
+          const prefixHits = idx.prefixToItems.get(prefixed);
+          if (prefixHits) {
+            for (const i of prefixHits) {
+              if (!passesFilter(i, filterSet)) continue;
+              const p = all[i];
+              if (seen.has(p.item.id)) continue;
+              if (p.alias1Norm.startsWith(prefixed)) {
+                seen.add(p.item.id);
+                results.push({ item: p.item, score: 85, matchType: 'prefix', matchedField: 'alias1' });
+              }
+            }
+          }
+        }
+        if (results.length >= MAX_RESULTS) break;
+      }
+    }
+
+    if (results.length >= MAX_RESULTS) {
+      return results.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS);
+    }
+  }
+
+  // ------ Phase 2: Index-based lookups (layers 3-6) ------
 
   const qWords = q.split(/\s+/).filter(Boolean);
   const multiWord = qWords.length > 1;
   const wordCount = qWords.length;
   const partialMin = Math.ceil(wordCount * PARTIAL_KEYWORD_RATIO);
-  // For word-boundary prefix: first query token is the strongest signal
   const qFirst = qWords[0];
 
-  for (let i = 0; i < all.length; i++) {
-    const p = all[i];
-    if (seen.has(p.item.id)) continue;
-
-    let score = 0;
-    let layer: MatchLayer = 'prefix';
-    let field: MatchedField = 'name';
-
-    // Layer 3a: Prefix — alias/alias1 prefix is higher-confidence (code prefix = 88)
-    if (p.aliasLower.startsWith(q) || p.alias1Lower.startsWith(q)) {
-      score = 88;
-      layer = 'prefix';
-      field = p.aliasLower.startsWith(q) ? 'alias' : 'alias1';
-    } else if (p.aliasNorm.startsWith(qNorm) || p.alias1Norm.startsWith(qNorm)) {
-      score = 88;
-      layer = 'prefix';
-      field = p.aliasNorm.startsWith(qNorm) ? 'alias' : 'alias1';
-    } else if (p.nameLower.startsWith(q) || p.nameNorm.startsWith(qNorm)) {
-      score = 85;
-      layer = 'prefix';
-      field = 'name';
-    }
-
-    // Layer 3b: Word-boundary prefix — query matches start of any name word
-    else if (p.nameWords.some(w => w.startsWith(qFirst))) {
-      score = 80;
-      layer = 'word-prefix';
-      field = 'name';
-    }
-
-    // Layer 4: Substring — raw then normalized; check alias fields too
-    else if (
-      p.nameLower.includes(q) ||
-      p.aliasLower.includes(q) ||
-      p.alias1Lower.includes(q)
-    ) {
-      score = 75;
-      layer = 'substring';
-      field = p.nameLower.includes(q)
-        ? 'name'
-        : p.aliasLower.includes(q)
-          ? 'alias'
-          : 'alias1';
-    } else if (
-      p.nameNorm.includes(qNorm) ||
-      p.aliasNorm.includes(qNorm) ||
-      p.alias1Norm.includes(qNorm)
-    ) {
-      score = 75;
-      layer = 'substring';
-      field = p.nameNorm.includes(qNorm)
-        ? 'name'
-        : p.aliasNorm.includes(qNorm)
-          ? 'alias'
-          : 'alias1';
-    }
-
-    // Layer 5 & 6: Keyword matching — require words in item.name
-    else if (multiWord) {
-      let nameHits = 0;
-      for (let k = 0; k < wordCount; k++) {
-        const w = qWords[k];
-        if (p.nameLower.includes(w)) {
-          nameHits++;
+  // Layer 3a: Prefix matching via prefix index — O(1)
+  if (qNorm.length >= 3) {
+    // Check alias/alias1 prefix (score 88)
+    const aliasPrefixKey = qNorm;
+    const aliasPrefixHits = idx.prefixToItems.get(aliasPrefixKey);
+    if (aliasPrefixHits) {
+      for (const i of aliasPrefixHits) {
+        if (!passesFilter(i, filterSet)) continue;
+        const p = all[i];
+        if (seen.has(p.item.id)) continue;
+        // Verify this is actually a prefix match on alias/alias1 (not name)
+        if (
+          p.aliasLower.startsWith(q) || p.alias1Lower.startsWith(q) ||
+          p.aliasNorm.startsWith(qNorm) || p.alias1Norm.startsWith(qNorm)
+        ) {
+          seen.add(p.item.id);
+          const field: MatchedField =
+            p.aliasLower.startsWith(q) || p.aliasNorm.startsWith(qNorm) ? 'alias' : 'alias1';
+          results.push({ item: p.item, score: 88, matchType: 'prefix', matchedField: field });
+        } else if (p.nameLower.startsWith(q) || p.nameNorm.startsWith(qNorm)) {
+          seen.add(p.item.id);
+          results.push({ item: p.item, score: 85, matchType: 'prefix', matchedField: 'name' });
         }
       }
-
-      if (nameHits === wordCount) {
-        score = 60;
-        layer = 'keywords';
-        field = 'name';
-      } else if (nameHits >= partialMin) {
-        score = 40;
-        layer = 'partial';
-        field = 'name';
-      }
     }
 
-    // Brand / group boost for word-like queries (discovery)
-    if (score === 0 && !isCodeLike && qFirst) {
-      if (hasTokenPrefix(p.item.main_group, qFirst)) {
-        score = 55;
-        layer = 'keywords';
-        field = 'name';
-      } else if (hasTokenPrefix(p.item.parent_group, qFirst)) {
-        score = 50;
-        layer = 'keywords';
-        field = 'name';
-      }
-    }
-
-    // Layer: fuzzy-token (pasplv1-style) — Levenshtein similarity ≥ 0.8 vs product words
-    if (score === 0 && !isCodeLike && qWords.every(qw => tokenFuzzyMatches(qw, p.allWords))) {
-      score = 50;
-      layer = 'fuzzy';
-      field = 'name';
-    }
-
-    if (score > 0) {
-      // Keyword-overlap bonus: boost items matching more query tokens
-      // e.g. "cdi dis100 varroc" → item with cdi+discover+varroc gets +3 bonus vs one with only cdi
-      if (multiWord && score < 100) {
-        let overlap = 0;
-        for (const qw of qWords) {
-          if (p.allWords.has(qw) || p.nameLower.includes(qw) || p.aliasLower.includes(qw)) {
-            overlap++;
-          }
-        }
-        score += Math.min(overlap, wordCount);
-      }
-      results.push({ item: p.item, score, matchType: layer, matchedField: field });
-      seen.add(p.item.id);
+    if (results.length >= MAX_RESULTS) {
+      return results.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS);
     }
   }
 
+  // Layer 3b: Word-boundary prefix via 'w:' prefix index — O(1)
+  if (qFirst && qFirst.length >= 3) {
+    const wordPrefixKey = 'w:' + qFirst;
+    const wordPrefixHits = idx.prefixToItems.get(wordPrefixKey);
+    if (wordPrefixHits) {
+      for (const i of wordPrefixHits) {
+        if (!passesFilter(i, filterSet)) continue;
+        const p = all[i];
+        if (seen.has(p.item.id)) continue;
+        seen.add(p.item.id);
+        results.push({ item: p.item, score: 80, matchType: 'word-prefix', matchedField: 'name' });
+      }
+    }
+    if (results.length >= MAX_RESULTS) {
+      return results.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS);
+    }
+  }
+
+  // Layer 4: Substring — for items found via prefix index that contain the query
+  // (The prefix index already catches startsWith; for contains/substring we check via
+  //  trigram overlap for longer queries, or fall through to keyword matching)
+
+  // Layer 5 & 6: Keyword matching via inverted word index — O(words × intersection)
+  if (qWords.length > 0) {
+    // Get posting lists for each query word
+    const postingLists: (Set<number> | null)[] = qWords.map(w => {
+      return idx.wordToItems.get(w) ?? null;
+    });
+
+    // Layer 5: ALL keywords match — intersect posting lists
+    const validLists = postingLists.filter((s): s is Set<number> => s !== null && s.size > 0);
+
+    if (validLists.length === wordCount && wordCount > 0) {
+      // Sort by size (smallest first) for efficient intersection
+      const sorted = [...validLists].sort((a, b) => a.size - b.size);
+      let candidates = new Set(sorted[0]);
+      for (let ci = 1; ci < sorted.length; ci++) {
+        const next = sorted[ci];
+        candidates = new Set([...candidates].filter(i => next.has(i)));
+        if (candidates.size === 0) break;
+      }
+
+      // Apply brand/group filter
+      if (filterSet) {
+        candidates = new Set([...candidates].filter(i => filterSet.has(i)));
+      }
+
+      for (const i of candidates) {
+        const p = all[i];
+        if (seen.has(p.item.id)) continue;
+        seen.add(p.item.id);
+        results.push({ item: p.item, score: 60, matchType: 'keywords', matchedField: 'name+alias' });
+        if (results.length >= MAX_RESULTS) break;
+      }
+    }
+
+    // Layer 6: Partial keyword match (≥60% of words)
+    if (results.length < MAX_RESULTS && wordCount >= 2) {
+      const allCandidates = new Map<number, number>(); // idx → match count
+      for (const postings of validLists) {
+        for (const i of postings) {
+          if (!passesFilter(i, filterSet)) continue;
+          allCandidates.set(i, (allCandidates.get(i) || 0) + 1);
+        }
+      }
+
+      const partialResults = [...allCandidates.entries()]
+        .filter(([i, count]) => count >= partialMin && !seen.has(all[i].item.id))
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, MAX_RESULTS - results.length);
+
+      for (const [i, count] of partialResults) {
+        const p = all[i];
+        seen.add(p.item.id);
+        results.push({
+          item: p.item,
+          score: Math.round((count / wordCount) * 60),
+          matchType: 'partial',
+          matchedField: 'name+alias',
+        });
+      }
+    }
+  }
+
+  // Brand / group boost for word-like queries (discovery) — via index
+  if (!isCodeLike && qFirst && results.length < MAX_RESULTS) {
+    // Check brand groups that match qFirst prefix
+    for (const [brand, indices] of idx.brandGroups) {
+      if (!hasTokenPrefix(brand, qFirst)) continue;
+      for (const i of indices) {
+        if (!passesFilter(i, filterSet)) continue;
+        const p = all[i];
+        if (seen.has(p.item.id)) continue;
+        seen.add(p.item.id);
+        results.push({ item: p.item, score: 55, matchType: 'keywords', matchedField: 'name' });
+        if (results.length >= MAX_RESULTS) break;
+      }
+      if (results.length >= MAX_RESULTS) break;
+    }
+    // Check parent groups
+    if (results.length < MAX_RESULTS) {
+      for (const [group, indices] of idx.parentGroups) {
+        if (!hasTokenPrefix(group, qFirst)) continue;
+        for (const i of indices) {
+          if (!passesFilter(i, filterSet)) continue;
+          const p = all[i];
+          if (seen.has(p.item.id)) continue;
+          seen.add(p.item.id);
+          results.push({ item: p.item, score: 50, matchType: 'keywords', matchedField: 'name' });
+          if (results.length >= MAX_RESULTS) break;
+        }
+        if (results.length >= MAX_RESULTS) break;
+      }
+    }
+  }
+
+  if (results.length >= MAX_RESULTS) {
+    return results.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS);
+  }
+
   // ------ Phase 3: fuzzy & phonetic fallback (layer 7 & 8) ------
-  // Only for non code-like (wordy) queries
+  // Trigram-narrowed: instead of scanning all 12,470 items, use trigram index
+  // to get a small candidate set, then run Levenshtein only on those
+
   if (!isCodeLike && results.length < FUZZY_FALLBACK_THRESHOLD) {
-    for (let i = 0; i < all.length; i++) {
+    // Use trigram index to narrow candidates for fuzzy matching
+    let fuzzyCandidates: Set<number>;
+
+    if (qNorm.length >= 3) {
+      // Generate trigrams from query
+      const queryTrigrams: string[] = [];
+      for (let ti = 0; ti <= qNorm.length - 3; ti++) {
+        queryTrigrams.push(qNorm.substring(ti, ti + 3));
+      }
+
+      // Get posting lists for each trigram, intersect to narrow
+      const trigramSets = queryTrigrams
+        .map(t => idx.trigramToItems.get(t))
+        .filter((s): s is Set<number> => s !== undefined)
+        .sort((a, b) => a.size - b.size);
+
+      if (trigramSets.length > 0) {
+        // Intersect up to first 4 trigrams for a narrow set
+        fuzzyCandidates = new Set(trigramSets[0]);
+        for (let ti = 1; ti < Math.min(trigramSets.length, 4); ti++) {
+          fuzzyCandidates = new Set([...fuzzyCandidates].filter(i => trigramSets[ti].has(i)));
+          if (fuzzyCandidates.size < 50) break; // narrow enough
+        }
+      } else {
+        fuzzyCandidates = new Set();
+      }
+    } else {
+      // Query too short for trigrams — use full scan as fallback
+      fuzzyCandidates = new Set(Array.from({ length: all.length }, (_, i) => i));
+    }
+
+    // Run fuzzy + phonetic only on the narrowed candidates
+    for (const i of fuzzyCandidates) {
+      if (!passesFilter(i, filterSet)) continue;
       const p = all[i];
       if (seen.has(p.item.id)) continue;
       if (fuzzyMatchItem(qNorm, qWords, p)) {
@@ -605,6 +618,22 @@ export function searchItems(query: string, items: Item[]): SearchResult[] {
         seen.add(p.item.id);
         results.push({ item: p.item, score: 25, matchType: 'phonetic', matchedField: 'name' });
       }
+    }
+  }
+
+  // Apply keyword-overlap bonus for multi-word queries
+  if (multiWord) {
+    for (const r of results) {
+      if (r.score >= 100) continue;
+      const p = all.find(pp => pp.item.id === r.item.id);
+      if (!p) continue;
+      let overlap = 0;
+      for (const qw of qWords) {
+        if (p.allWords.has(qw) || p.nameLower.includes(qw) || p.aliasLower.includes(qw)) {
+          overlap++;
+        }
+      }
+      r.score += Math.min(overlap, wordCount);
     }
   }
 
