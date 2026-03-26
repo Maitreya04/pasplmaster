@@ -230,6 +230,19 @@ function phoneticMatchItem(
 }
 
 // ---------------------------------------------------------------------------
+// Helper: intersect two sets without intermediate array allocation
+// ---------------------------------------------------------------------------
+
+function intersectSets(a: Set<number>, b: Set<number>): Set<number> {
+  const [smaller, larger] = a.size <= b.size ? [a, b] : [b, a];
+  const out = new Set<number>();
+  for (const v of smaller) {
+    if (larger.has(v)) out.add(v);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Helper: apply brand/group filter via index sets
 // ---------------------------------------------------------------------------
 
@@ -238,26 +251,20 @@ function getFilteredSet(
   brandFilter?: string | null,
   groupFilter?: string | null,
 ): Set<number> | null {
-  // No filter → null means "all items"
   if (!brandFilter && !groupFilter) return null;
 
   let result: Set<number> | null = null;
 
   if (brandFilter) {
     const brandSet = idx.brandGroups.get(brandFilter);
-    if (!brandSet) return new Set(); // brand exists but has no items → empty
+    if (!brandSet) return new Set();
     result = new Set(brandSet);
   }
 
   if (groupFilter) {
     const groupSet = idx.parentGroups.get(groupFilter);
     if (!groupSet) return new Set();
-    if (result) {
-      // Intersect with brand filter
-      result = new Set([...result].filter(i => groupSet.has(i)));
-    } else {
-      result = new Set(groupSet);
-    }
+    result = result ? intersectSets(result, groupSet) : new Set(groupSet);
   }
 
   return result;
@@ -483,18 +490,15 @@ export function searchItems(
     const validLists = postingLists.filter((s): s is Set<number> => s !== null && s.size > 0);
 
     if (validLists.length === wordCount && wordCount > 0) {
-      // Sort by size (smallest first) for efficient intersection
       const sorted = [...validLists].sort((a, b) => a.size - b.size);
       let candidates = new Set(sorted[0]);
       for (let ci = 1; ci < sorted.length; ci++) {
-        const next = sorted[ci];
-        candidates = new Set([...candidates].filter(i => next.has(i)));
+        candidates = intersectSets(candidates, sorted[ci]);
         if (candidates.size === 0) break;
       }
 
-      // Apply brand/group filter
       if (filterSet) {
-        candidates = new Set([...candidates].filter(i => filterSet.has(i)));
+        candidates = intersectSets(candidates, filterSet);
       }
 
       for (const i of candidates) {
@@ -592,11 +596,10 @@ export function searchItems(
         .sort((a, b) => a.size - b.size);
 
       if (trigramSets.length > 0) {
-        // Intersect up to first 4 trigrams for a narrow set
         fuzzyCandidates = new Set(trigramSets[0]);
         for (let ti = 1; ti < Math.min(trigramSets.length, 4); ti++) {
-          fuzzyCandidates = new Set([...fuzzyCandidates].filter(i => trigramSets[ti].has(i)));
-          if (fuzzyCandidates.size < 50) break; // narrow enough
+          fuzzyCandidates = intersectSets(fuzzyCandidates, trigramSets[ti]);
+          if (fuzzyCandidates.size < 50) break;
         }
       } else {
         fuzzyCandidates = new Set();
@@ -625,8 +628,9 @@ export function searchItems(
   if (multiWord) {
     for (const r of results) {
       if (r.score >= 100) continue;
-      const p = all.find(pp => pp.item.id === r.item.id);
-      if (!p) continue;
+      const pi = idx.idToIndex.get(r.item.id);
+      if (pi === undefined) continue;
+      const p = all[pi];
       let overlap = 0;
       for (const qw of qWords) {
         if (p.allWords.has(qw) || p.nameLower.includes(qw) || p.aliasLower.includes(qw)) {

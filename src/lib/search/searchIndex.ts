@@ -34,6 +34,9 @@ export interface SearchIndex {
   // PrepItem array
   all: PrepItem[];
 
+  // item.id → index in `all` for O(1) reverse lookup
+  idToIndex: Map<number, number>;
+
   // Layer 1: Exact lookup maps — O(1)
   byName: Map<string, number[]>;
   byAlias: Map<string, number[]>;
@@ -42,7 +45,6 @@ export interface SearchIndex {
   byNormAlias1: Map<string, number[]>;
 
   // Layer 2: Inverted word index — word → set of item indices
-  // Every word (≥2 chars) from name, alias1 is indexed
   wordToItems: Map<string, Set<number>>;
 
   // Layer 3: Prefix index — all prefixes (3-10 chars) of nameLower, aliasLower, alias1Lower, nameNorm, aliasNorm, alias1Norm
@@ -134,6 +136,7 @@ export function buildSearchIndex(items: Item[]): SearchIndex {
 
   const len = items.length;
   const all: PrepItem[] = new Array(len);
+  const idToIndex = new Map<number, number>();
 
   // Exact lookup maps
   const byName = new Map<string, number[]>();
@@ -200,6 +203,8 @@ export function buildSearchIndex(items: Item[]): SearchIndex {
       allPhonetics,
     };
 
+    idToIndex.set(it.id, i);
+
     // --- Exact lookup maps ---
     indexPush(byName, nameLower, i);
     indexPush(byAlias, aliasLower, i);
@@ -256,6 +261,7 @@ export function buildSearchIndex(items: Item[]): SearchIndex {
 
   _idx = {
     all,
+    idToIndex,
     byName, byAlias, byAlias1, byNormAlias, byNormAlias1,
     wordToItems,
     prefixToItems,
