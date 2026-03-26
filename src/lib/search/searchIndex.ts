@@ -164,6 +164,7 @@ export function buildSearchIndex(items: Item[]): SearchIndex {
     const nameWords = nameLower.split(/\s+/).filter(Boolean);
     const allWords = new Set<string>([
       ...nameWords,
+      ...toTokens(nameLower),
       ...toTokens(aliasLower),
       ...toTokens(alias1Lower),
       ...toTokens(it.parent_group ?? ''),

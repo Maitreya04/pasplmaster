@@ -44,21 +44,6 @@ export const SHORTHAND_MAP: Record<string, string> = {
   sup: 'suspension',
 };
 
-// ---------------------------------------------------------------------------
-// Noise filtering — strip qty / packaging words that salespeople mix in
-// "K27 10" → "K27", "cdi cddlx 2+4 socket wali 2pc" → "cdi cddlx socket"
-// ---------------------------------------------------------------------------
-
-/** Matches quantity-like tokens: 3pc, 10pcs, 2peti, 1box, 5litr, 15kit, etc. */
-const NOISE_QTY_RE = /^\d+(pc|pcs|peti|box|kit|set|litr|ltr|nos?|bucket|pkt)s?$/i;
-
-/** Standalone noise words that carry no search meaning */
-const NOISE_WORDS = new Set([
-  'wali', 'wala', 'wale', 'type', 'no', 'single', 'double',
-  'bucket', 'peti', 'litr', 'ltr', 'pcs', 'pc', 'nos',
-  'box', 'packets', 'packet', 'pkt',
-]);
-
 /**
  * Expands a single token using shorthand and abbreviation/misspelling maps (pasplv1-style).
  */
@@ -67,24 +52,13 @@ function expandToken(t: string): string {
   return SHORTHAND_MAP[lower] ?? EXPAND_MAP[lower] ?? lower;
 }
 
-/** Check if a token is purely noise (quantity/packaging). */
-function isNoise(t: string): boolean {
-  return NOISE_WORDS.has(t) || NOISE_QTY_RE.test(t) || /^\d+$/.test(t);
-}
-
 export function normalizeQuery(q: string): string {
-  let tokens = q
+  const tokens = q
     .toLowerCase()
     .trim()
     .replace(/\s+/g, ' ')
     .split(' ')
     .filter(Boolean);
-
-  // Strip noise tokens only if we'd still have ≥1 meaningful token left
-  if (tokens.length > 1) {
-    const meaningful = tokens.filter(t => !isNoise(t));
-    if (meaningful.length > 0) tokens = meaningful;
-  }
 
   const expanded: string[] = [];
   for (const t of tokens) {
@@ -284,10 +258,9 @@ function passesFilter(i: number, filterSet: Set<number> | null): boolean {
 //
 //  Phase 2 — Index lookups (layers 3-6)
 //    Layer 3a Prefix on name/alias/alias1 (raw/norm)       →  85-88  field: varies
-//    Layer 3b Word-boundary prefix in name words           →  80  field: name
-//    Layer 4  Substring via prefix index                   →  75  field: whichever
-//    Layer 5  All keywords via inverted word index         →  60  field: name+alias
-//    Layer 6  ≥60% keywords via inverted word index        →  40  field: name+alias
+//    Layer 5  All keywords via inverted word index         →  85  field: name+alias
+//    Layer 6  ≥60% keywords via inverted word index        →  ≤80  field: name+alias
+//    Layer 3b Word-boundary prefix in name words (fallback)→  75  field: name
 //
 //  Phase 3 — Fuzzy & Phonetic (layer 7 & 8, trigram-narrowed)
 //    Layer 7  Levenshtein on trigram-narrowed candidates   →  30  field: name/alias
@@ -457,38 +430,16 @@ export function searchItems(
     }
   }
 
-  // Layer 3b: Word-boundary prefix via 'w:' prefix index — O(1)
-  if (qFirst && qFirst.length >= 3) {
-    const wordPrefixKey = 'w:' + qFirst;
-    const wordPrefixHits = idx.prefixToItems.get(wordPrefixKey);
-    if (wordPrefixHits) {
-      for (const i of wordPrefixHits) {
-        if (!passesFilter(i, filterSet)) continue;
-        const p = all[i];
-        if (seen.has(p.item.id)) continue;
-        seen.add(p.item.id);
-        results.push({ item: p.item, score: 80, matchType: 'word-prefix', matchedField: 'name' });
-      }
-    }
-    if (results.length >= MAX_RESULTS) {
-      return results.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS);
-    }
-  }
-
-  // Layer 4: Substring — for items found via prefix index that contain the query
-  // (The prefix index already catches startsWith; for contains/substring we check via
-  //  trigram overlap for longer queries, or fall through to keyword matching)
-
-  // Layer 5 & 6: Keyword matching via inverted word index — O(words × intersection)
+  // Keyword matching — runs BEFORE word-prefix so multi-word queries
+  // prioritise items matching ALL terms over single-word prefix hits.
   if (qWords.length > 0) {
-    // Get posting lists for each query word
     const postingLists: (Set<number> | null)[] = qWords.map(w => {
       return idx.wordToItems.get(w) ?? null;
     });
 
-    // Layer 5: ALL keywords match — intersect posting lists
     const validLists = postingLists.filter((s): s is Set<number> => s !== null && s.size > 0);
 
+    // All keywords match — intersect posting lists
     if (validLists.length === wordCount && wordCount > 0) {
       const sorted = [...validLists].sort((a, b) => a.size - b.size);
       let candidates = new Set(sorted[0]);
@@ -505,14 +456,14 @@ export function searchItems(
         const p = all[i];
         if (seen.has(p.item.id)) continue;
         seen.add(p.item.id);
-        results.push({ item: p.item, score: 60, matchType: 'keywords', matchedField: 'name+alias' });
+        results.push({ item: p.item, score: 85, matchType: 'keywords', matchedField: 'name+alias' });
         if (results.length >= MAX_RESULTS) break;
       }
     }
 
-    // Layer 6: Partial keyword match (≥60% of words)
+    // Partial keyword match (≥60% of words)
     if (results.length < MAX_RESULTS && wordCount >= 2) {
-      const allCandidates = new Map<number, number>(); // idx → match count
+      const allCandidates = new Map<number, number>();
       for (const postings of validLists) {
         for (const i of postings) {
           if (!passesFilter(i, filterSet)) continue;
@@ -530,11 +481,33 @@ export function searchItems(
         seen.add(p.item.id);
         results.push({
           item: p.item,
-          score: Math.round((count / wordCount) * 60),
+          score: Math.round((count / wordCount) * 80),
           matchType: 'partial',
           matchedField: 'name+alias',
         });
       }
+    }
+  }
+
+  if (results.length >= MAX_RESULTS) {
+    return results.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS);
+  }
+
+  // Word-boundary prefix — fallback for items not already matched by keywords
+  if (qFirst && qFirst.length >= 3) {
+    const wordPrefixKey = 'w:' + qFirst;
+    const wordPrefixHits = idx.prefixToItems.get(wordPrefixKey);
+    if (wordPrefixHits) {
+      for (const i of wordPrefixHits) {
+        if (!passesFilter(i, filterSet)) continue;
+        const p = all[i];
+        if (seen.has(p.item.id)) continue;
+        seen.add(p.item.id);
+        results.push({ item: p.item, score: 75, matchType: 'word-prefix', matchedField: 'name' });
+      }
+    }
+    if (results.length >= MAX_RESULTS) {
+      return results.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS);
     }
   }
 
@@ -633,11 +606,13 @@ export function searchItems(
       const p = all[pi];
       let overlap = 0;
       for (const qw of qWords) {
-        if (p.allWords.has(qw) || p.nameLower.includes(qw) || p.aliasLower.includes(qw)) {
+        if (p.allWords.has(qw)) {
+          overlap++;
+        } else if (qw.length >= 3 && (p.nameLower.includes(qw) || p.aliasLower.includes(qw))) {
           overlap++;
         }
       }
-      r.score += Math.min(overlap, wordCount);
+      r.score += Math.min(overlap * 2, wordCount * 2);
     }
   }
 
