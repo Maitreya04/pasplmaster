@@ -1,4 +1,4 @@
-import { PRODUCT_TYPE_TOKENS, VEHICLE_TOKENS } from './brandPatterns';
+import { VEHICLE_TOKENS } from './brandPatterns';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────
 
@@ -64,10 +64,6 @@ function normalizeFuzzy(str: string): string {
     .replace(/[OQ]/g, '0')
     .replace(/[B]/g, '8')
     .replace(/[I]/g, '1');
-}
-
-function tokenize(text: string): string[] {
-  return text.toUpperCase().split(/[^A-Z0-9]+/).filter(w => w.length >= 2);
 }
 
 // ─── Product Type Extraction ──────────────────────────────────────────────
