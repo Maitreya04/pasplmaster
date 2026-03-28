@@ -183,6 +183,13 @@ export function buildSearchIndex(items: Item[]): SearchIndex {
       }
     }
 
+    const ctBlob = `${nameLower} ${aliasLower} ${alias1Lower}`;
+    if (/\b(ct\s*-?\s*100|c\s*100|ct100)\b/i.test(ctBlob)) {
+      allWords.add('ct100');
+      allWords.add('c100');
+      allWords.add('100');
+    }
+
     const allPhonetics = new Set<string>();
     for (const w of allWords) {
       if (w.length >= 4) {

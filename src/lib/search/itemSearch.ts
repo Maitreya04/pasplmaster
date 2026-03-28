@@ -60,8 +60,13 @@ const SHORTHAND_MAP: Record<string, string> = {
   // pas -> passion removed: "disk pas" means "disk pad", not "disk passion"
   disc: 'disc',
   sh: 'shock',
+  shocker: 'shock',
   sup: 'suspension',
 };
+
+/** OEM chain kits: boost TIDC when user says chain + kit + a vehicle line */
+const CHAIN_KIT_VEHICLE_HINT =
+  /\b(activa|splendor|discover|pulsar|shine|passion|platina|glamour|maestro|jupiter|apache|unicorn|wego|ct\s*100|ct100|c100|honda|hero|bajaj|yamaha|disc)\b/i;
 
 /**
  * Expands a single token using shorthand and abbreviation/misspelling maps (pasplv1-style).
@@ -71,33 +76,67 @@ function expandToken(t: string): string {
   return SHORTHAND_MAP[lower] ?? EXPAND_MAP[lower] ?? lower;
 }
 
-export function normalizeQuery(q: string): string {
-  const tokens = q
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, ' ')
-    .split(' ')
-    .filter(Boolean);
+/** CT100 / C100 naming is inconsistent in the catalog — search all variants. */
+function expandCt100TokenVariants(t: string): string[] {
+  const compact = t.toLowerCase().replace(/-/g, '');
+  if (compact === 'ct100' || compact === 'c100') {
+    return ['ct100', 'c100', '100'];
+  }
+  return [];
+}
 
-  const expanded: string[] = [];
-  for (const t of tokens) {
-    const et = expandToken(t);
-    // Only expand model-code variants for tokens that have BOTH letters AND digits
-    // e.g. "dis100" → "discover 100" (via abbreviation), "dio05" → variants
-    // But NOT "shine" or "rear" which are pure words
-    if (/[a-z]/i.test(t) && /\d/.test(t)) {
-      const m = et.match(/^([a-z]{2,})[-_/\. ]?0?(\d{1,3})$/i);
-      if (m) {
-        const base = m[1];
-        const num = m[2];
-        expanded.push(base, `${base}${num}`, `${base}0${num}`, et);
-      } else {
-        expanded.push(et);
-      }
+function pushExpandedModelCodeVariants(t: string, et: string, expanded: string[]): void {
+  if (/[a-z]/i.test(t) && /\d/.test(t)) {
+    const m = et.match(/^([a-z]{2,})[-_/\. ]?0?(\d{1,3})$/i);
+    if (m) {
+      const base = m[1];
+      const num = m[2];
+      expanded.push(base, `${base}${num}`, `${base}0${num}`, et);
     } else {
-      // Pure word token — just expand abbreviations, no model-code variants
       expanded.push(et);
     }
+  } else {
+    expanded.push(et);
+  }
+}
+
+export function normalizeQuery(q: string): string {
+  let s = q.toLowerCase().trim().replace(/\s+/g, ' ');
+  s = s.replace(/\bmain handle\b/g, 'handle bar');
+
+  const tokens = s.split(' ').filter(Boolean);
+  const expanded: string[] = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    const next = tokens[i + 1];
+
+    if (t === 'ct' && next === '100') {
+      expanded.push('ct100', 'c100', '100', 'ct');
+      i++;
+      continue;
+    }
+
+    const ctVars = expandCt100TokenVariants(t);
+    if (ctVars.length > 0) {
+      expanded.push(...ctVars);
+      continue;
+    }
+
+    const et = expandToken(t);
+    if (et.includes(' ')) {
+      for (const part of et.split(/\s+/).filter(Boolean)) {
+        const ePart = expandToken(part);
+        pushExpandedModelCodeVariants(part, ePart, expanded);
+      }
+      continue;
+    }
+
+    pushExpandedModelCodeVariants(t, et, expanded);
+  }
+
+  if (/\bchain\b/.test(s) && /\bkit\b/.test(s) && CHAIN_KIT_VEHICLE_HINT.test(s)) {
+    expanded.push('tidc');
   }
 
   return Array.from(new Set(expanded)).join(' ');
@@ -108,6 +147,98 @@ function hasTokenPrefix(value: string | null | undefined, token: string): boolea
   const v = value.toLowerCase();
   const t = token.toLowerCase();
   return v.split(/\s+/).some(word => word.startsWith(t));
+}
+
+/** Alias1 codes often start with these OEM prefixes (TIDC, INEL, …). */
+const KNOWN_ALIAS_BRAND_PREFIXES = [
+  'tidck',
+  'tidcgk',
+  'tidca',
+  'tidcsc',
+  'tidc',
+  'inel',
+  'ev',
+  'kv',
+  'ask',
+] as const;
+
+const BRAND_CODE_PREFIXES = KNOWN_ALIAS_BRAND_PREFIXES;
+
+/** Loose substring matches (e.g. K39 inside DK39) must not outrank true brand codes. */
+const SUBSTRING_MATCH_CAP = 60;
+
+/** True if match is continued by more alphanumerics (K390, 37800K24901). */
+function isNormSubstringContinued(norm: string, q: string, pos: number): boolean {
+  const after = norm[pos + q.length];
+  return !!(after && /[a-z0-9]/i.test(after));
+}
+
+/** For w.includes(token): reject "k39" inside "k390" or "37800k24901". */
+function substringBoundaryOkForIncludes(haystack: string, needle: string): boolean {
+  if (needle.length === 0) return true;
+  let pos = 0;
+  while ((pos = haystack.indexOf(needle, pos)) >= 0) {
+    if (!isNormSubstringContinued(haystack, needle, pos)) return true;
+    pos += 1;
+  }
+  return false;
+}
+
+/**
+ * Score for query q as substring of alias norm. 0 = no match or invalid continuation.
+ * K39 in K390 → 0; K39 in TIDCK39 / DK39 → bounded (≤ SUBSTRING_MATCH_CAP for weak embeds).
+ */
+function scoreAliasNormSubstring(norm: string, q: string): number {
+  if (!q || q.length < 2 || norm.length < q.length) return 0;
+  const pos = norm.indexOf(q);
+  if (pos < 0) return 0;
+  if (isNormSubstringContinued(norm, q, pos)) return 0;
+  let score = 58;
+  const before = pos > 0 ? norm[pos - 1] : '';
+  if (pos > 0 && /[a-z0-9]/i.test(before)) {
+    score = 48;
+    for (const p of KNOWN_ALIAS_BRAND_PREFIXES) {
+      if (norm.startsWith(p) && pos === p.length) {
+        score = 58;
+        break;
+      }
+    }
+  }
+  if (KNOWN_ALIAS_BRAND_PREFIXES.some(pref => norm.startsWith(pref))) {
+    score += 10;
+  }
+  return Math.min(score, SUBSTRING_MATCH_CAP);
+}
+
+function scoreSubstringTokenAgainstPrep(p: PrepItem, qw: string): number {
+  const q = strip(qw.toLowerCase());
+  if (q.length < 2) return 0;
+  let best = 0;
+  for (const norm of [p.alias1Norm, p.aliasNorm]) {
+    if (!norm) continue;
+    const s = scoreAliasNormSubstring(norm, q);
+    if (s > best) best = s;
+  }
+  const nl = p.nameLower;
+  const ql = qw.toLowerCase();
+  const pos = nl.indexOf(ql);
+  if (pos >= 0 && !isNormSubstringContinued(nl, ql, pos)) {
+    best = Math.max(best, 52);
+  }
+  return best;
+}
+
+function aliasOrNameIncludesBounded(p: PrepItem, qw: string): boolean {
+  const ql = qw.toLowerCase();
+  const qn = strip(ql);
+  for (const norm of [p.alias1Norm, p.aliasNorm]) {
+    if (!norm || qn.length < 2) continue;
+    const pos = norm.indexOf(qn);
+    if (pos >= 0 && !isNormSubstringContinued(norm, qn, pos)) return true;
+  }
+  const np = p.nameLower.indexOf(ql);
+  if (np >= 0 && !isNormSubstringContinued(p.nameLower, ql, np)) return true;
+  return false;
 }
 
 /**
@@ -189,7 +320,10 @@ function tokenFuzzyMatches(token: string, words: Set<string>): boolean {
   if (token.length < MIN_TOKEN_LEN_FOR_FUZZY) return false;
   for (const w of words) {
     if (w.length < MIN_TOKEN_LEN_FOR_FUZZY) continue;
-    if (w.includes(token)) return true;
+    if (w.includes(token)) {
+      if (!substringBoundaryOkForIncludes(w, token)) continue;
+      return true;
+    }
     if (similarity(token, w) >= FUZZY_SIMILARITY_THRESHOLD) return true;
   }
   return false;
@@ -333,10 +467,7 @@ function applyAllTokensMatchedBonus(
     for (const qw of qWords) {
       if (qw.length < 2) continue;
       if (p.allWords.has(qw)) continue;
-      if (
-        qw.length >= 3 &&
-        (p.nameLower.includes(qw) || p.aliasLower.includes(qw) || p.alias1Lower.includes(qw))
-      ) {
+      if (qw.length >= 3 && aliasOrNameIncludesBounded(p, qw)) {
         continue;
       }
       ok = false;
@@ -352,20 +483,6 @@ function sortSearchResultsDesc(a: SearchResult, b: SearchResult): number {
   return (a.item.name ?? '').localeCompare(b.item.name ?? '', undefined, { sensitivity: 'base' });
 }
 
-/** Full searchable blob for substring checks (matches pasplv1 buildProductText). */
-function buildSearchBlob(p: PrepItem): string {
-  return [
-    p.nameLower,
-    p.aliasLower,
-    p.alias1Lower,
-    p.item.parent_group ?? '',
-    p.item.main_group ?? '',
-    p.item.item_category ?? '',
-  ]
-    .join(' ')
-    .toLowerCase();
-}
-
 /**
  * Per-token additive score (pasplv1 intelligentSearch). Solves sparse multi-token lines
  * like "VE RR SUL SLP HH33" where intersection is empty but many items match 2–4 tokens.
@@ -374,7 +491,6 @@ function scorePrepItemBySalesTokens(p: PrepItem, significantTokens: string[]): n
   if (significantTokens.length === 0) return 0;
   let score = 0;
   let matched = 0;
-  const blob = buildSearchBlob(p);
   const n = significantTokens.length;
 
   for (const qw of significantTokens) {
@@ -383,8 +499,9 @@ function scorePrepItemBySalesTokens(p: PrepItem, significantTokens: string[]): n
       matched++;
       continue;
     }
-    if (blob.includes(qw)) {
-      score += 62;
+    const subScore = scoreSubstringTokenAgainstPrep(p, qw);
+    if (subScore > 0) {
+      score += subScore;
       matched++;
       continue;
     }
@@ -539,11 +656,39 @@ export function searchItems(
   // short codes like "k282" → "TIDCK282".
   const rawStripped = strip(raw.toLowerCase().trim());
   if (isCodeLike && rawStripped.length >= 2) {
-    // 1a. Exact lookup with raw code
+    // 1) Brand + short code EXACT first (score 95) — preferred over raw norm / loose substring hits
+    if (results.length < POOL_LIMIT && rawStripped.length <= 10 && !/\s/.test(raw.trim())) {
+      for (const prefix of BRAND_CODE_PREFIXES) {
+        const prefixed = prefix + rawStripped;
+        const exactA1 = idx.byNormAlias1.get(prefixed);
+        if (exactA1) {
+          for (const hi of exactA1) {
+            if (!passesFilter(hi, filterSet)) continue;
+            const p = all[hi];
+            if (seen.has(p.item.id)) continue;
+            seen.add(p.item.id);
+            results.push({ item: p.item, score: 95, matchType: 'normalized', matchedField: 'alias1' });
+          }
+        }
+        const exactAl = idx.byNormAlias.get(prefixed);
+        if (exactAl) {
+          for (const hi of exactAl) {
+            if (!passesFilter(hi, filterSet)) continue;
+            const p = all[hi];
+            if (seen.has(p.item.id)) continue;
+            seen.add(p.item.id);
+            results.push({ item: p.item, score: 95, matchType: 'normalized', matchedField: 'alias' });
+          }
+        }
+        if (results.length >= POOL_LIMIT) break;
+      }
+    }
+
+    // 2) Exact lookup with raw stripped code (no OEM prefix)
     collect(idx.byNormAlias, rawStripped, 95, 'normalized', 'alias');
     collect(idx.byNormAlias1, rawStripped, 95, 'normalized', 'alias1');
 
-    // 1b. Prefix lookup with raw code (alias1 starts with raw query)
+    // 3) Prefix from start of field only (alias/name begin with raw code)
     if (rawStripped.length >= 3 && results.length < POOL_LIMIT) {
       const rawPrefixHits = idx.prefixToItems.get(rawStripped);
       if (rawPrefixHits) {
@@ -551,9 +696,7 @@ export function searchItems(
           if (!passesFilter(i, filterSet)) continue;
           const p = all[i];
           if (seen.has(p.item.id)) continue;
-          if (
-            p.aliasNorm.startsWith(rawStripped) || p.alias1Norm.startsWith(rawStripped)
-          ) {
+          if (p.aliasNorm.startsWith(rawStripped) || p.alias1Norm.startsWith(rawStripped)) {
             seen.add(p.item.id);
             const field: MatchedField = p.aliasNorm.startsWith(rawStripped) ? 'alias' : 'alias1';
             results.push({ item: p.item, score: 90, matchType: 'prefix', matchedField: field });
@@ -565,42 +708,25 @@ export function searchItems(
       }
     }
 
-    // 1c. Brand prefix resolution — "k282" → try "TIDCK282", "TIDCGK282", "INELK282", etc.
-    // Common brand prefixes used in alias1 codes
-    if (results.length < POOL_LIMIT && rawStripped.length <= 10 && !raw.includes(' ')) {
-      const BRAND_PREFIXES = ['tidck', 'tidcgk', 'tidca', 'tidcsc', 'tidc', 'inel', 'ev', 'kv'];
-      for (const prefix of BRAND_PREFIXES) {
+    // 4) Brand-prefixed alias1 that *extends* the code (TIDCK39ND) — below exact / union substring caps
+    if (results.length < POOL_LIMIT && rawStripped.length <= 10 && !/\s/.test(raw.trim())) {
+      for (const prefix of BRAND_CODE_PREFIXES) {
         const prefixed = prefix + rawStripped;
-        // Try exact match first
-        const exactHits = idx.byNormAlias1.get(prefixed);
-        if (exactHits) {
-          for (const hi of exactHits) {
-            if (!passesFilter(hi, filterSet)) continue;
-            const p = all[hi];
-            if (seen.has(p.item.id)) continue;
+        if (prefixed.length < 3) continue;
+        const prefixHits = idx.prefixToItems.get(prefixed);
+        if (!prefixHits) continue;
+        for (const i of prefixHits) {
+          if (!passesFilter(i, filterSet)) continue;
+          const p = all[i];
+          if (seen.has(p.item.id)) continue;
+          if (p.alias1Norm.startsWith(prefixed) && p.alias1Norm.length > prefixed.length) {
             seen.add(p.item.id);
-            results.push({ item: p.item, score: 92, matchType: 'normalized', matchedField: 'alias1' });
-          }
-        }
-        // Try prefix match — e.g. "k6" matches "TIDCK6", "TIDCK6N", "TIDCK6ND"
-        if (prefixed.length >= 3) {
-          const prefixHits = idx.prefixToItems.get(prefixed);
-          if (prefixHits) {
-            for (const i of prefixHits) {
-              if (!passesFilter(i, filterSet)) continue;
-              const p = all[i];
-              if (seen.has(p.item.id)) continue;
-              if (p.alias1Norm.startsWith(prefixed)) {
-                seen.add(p.item.id);
-                results.push({ item: p.item, score: 85, matchType: 'prefix', matchedField: 'alias1' });
-              }
-            }
+            results.push({ item: p.item, score: 88, matchType: 'prefix', matchedField: 'alias1' });
           }
         }
         if (results.length >= POOL_LIMIT) break;
       }
     }
-
   }
 
   // ------ Phase 2: Index-based lookups (layers 3-6) ------
@@ -817,7 +943,7 @@ export function searchItems(
       for (const qw of qWords) {
         if (p.allWords.has(qw)) {
           overlap++;
-        } else if (qw.length >= 3 && (p.nameLower.includes(qw) || p.aliasLower.includes(qw))) {
+        } else if (qw.length >= 3 && aliasOrNameIncludesBounded(p, qw)) {
           overlap++;
         }
       }

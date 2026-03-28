@@ -244,6 +244,7 @@ const MISSPELLINGS: Record<string, string> = {
   va1ve: 'valve',
   sp0cket: 'sprocket',
   cha1n: 'chain',
+  mainhandle: 'handle bar',
   carburetor: 'carburetor',
   hero: 'hero',
   honda: 'honda',
