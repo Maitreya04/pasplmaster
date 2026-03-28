@@ -7,9 +7,17 @@ import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
 import { useCustomers } from '../../hooks/useCustomers';
 import { usePendingItems } from '../../hooks/usePendingItems';
-import { searchItems, normalizeQuery, detectCodeLike } from '../../lib/search/itemSearch';
+import {
+  searchItems,
+  normalizeQuery,
+  detectCodeLike,
+  MAX_RESULTS,
+  STRONG_THRESHOLD,
+} from '../../lib/search/itemSearch';
 import type { SearchResult, MatchedField } from '../../lib/search/itemSearch';
+import { buildNarrowIndex, buildNarrowSuggestions } from '../../lib/search/narrowSuggestions';
 import { buildSearchIndex } from '../../lib/search/searchIndex';
+import { formatCurrency, formatShortDate } from '../../utils/formatters';
 import { supabase } from '../../lib/supabase/client';
 import {
   PageHeader,
@@ -22,14 +30,9 @@ import {
 } from '../../components/shared';
 import type { Item, Customer } from '../../types';
 
-type NarrowSuggestionType = 'brand' | 'group';
-
-interface NarrowSuggestion {
-  type: NarrowSuggestionType;
-  value: string;
-  label: string;
-  count: number;
-}
+/** First paint of "More results" before expanding; search still returns up to MAX_RESULTS. */
+const INITIAL_MORE_VISIBLE = 36;
+const MORE_RESULTS_PAGE = 36;
 
 interface BrandOption {
   name: string;
@@ -55,13 +58,6 @@ interface TrendingRow {
   total_order_count: number | null;
 }
 
-function hasTokenPrefix(value: string | null | undefined, token: string): boolean {
-  if (!value) return false;
-  const v = value.toLowerCase();
-  const t = token.toLowerCase();
-  return v.split(/\s+/).some(word => word.startsWith(t));
-}
-
 function stripMatchingTokens(rawQuery: string, value: string): string {
   const valueTokens = normalizeQuery(value).split(' ').filter(Boolean);
   const queryTokens = normalizeQuery(rawQuery).split(' ').filter(Boolean);
@@ -70,74 +66,6 @@ function stripMatchingTokens(rawQuery: string, value: string): string {
   );
   return remaining.join(' ');
 }
-
-function buildNarrowSuggestions(
-  items: Item[],
-  rawQuery: string,
-  activeBrand: string | null,
-  activeGroup: string | null,
-): NarrowSuggestion[] {
-  const q = normalizeQuery(rawQuery);
-  const tokens = q.split(' ').filter(Boolean);
-  if (!tokens.length) return [];
-  const last = tokens[tokens.length - 1];
-  if (last.length < 2) return [];
-
-  const brandCounts = new Map<string, number>();
-  const groupCounts = new Map<string, number>();
-
-  for (const it of items) {
-    if (activeBrand && it.main_group !== activeBrand) continue;
-    if (activeGroup && it.parent_group !== activeGroup) continue;
-
-    if (hasTokenPrefix(it.main_group, last)) {
-      brandCounts.set(it.main_group!, (brandCounts.get(it.main_group!) ?? 0) + 1);
-    }
-    if (hasTokenPrefix(it.parent_group, last)) {
-      groupCounts.set(it.parent_group!, (groupCounts.get(it.parent_group!) ?? 0) + 1);
-    }
-  }
-
-  let focusedBrand: string | null = activeBrand;
-  if (!focusedBrand && brandCounts.size) {
-    const sorted = [...brandCounts.entries()].sort((a, b) => b[1] - a[1]);
-    const topCount = sorted[0][1];
-    const secondCount = sorted.length > 1 ? sorted[1][1] : 0;
-    if (sorted.length === 1 || topCount > secondCount * 3) {
-      focusedBrand = sorted[0][0];
-    }
-  }
-  if (focusedBrand && !activeGroup) {
-    for (const it of items) {
-      if (it.main_group !== focusedBrand || !it.parent_group) continue;
-      groupCounts.set(it.parent_group, (groupCounts.get(it.parent_group) ?? 0) + 1);
-    }
-  }
-
-  const brandSuggestions: NarrowSuggestion[] = [...brandCounts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([value, count]) => ({
-      type: 'brand' as const,
-      value,
-      label: value,
-      count,
-    }));
-
-  const groupSuggestions: NarrowSuggestion[] = [...groupCounts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 12)
-    .map(([value, count]) => ({
-      type: 'group' as const,
-      value,
-      label: value,
-      count,
-    }));
-
-  return [...brandSuggestions, ...groupSuggestions];
-}
-
-import { formatCurrency, formatShortDate } from '../../utils/formatters';
 
 function BrandFilterSheetContent({
   brands,
@@ -664,7 +592,15 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
 // ---------------------------------------------------------------------------
 function highlightText(text: string, query: string): ReactNode {
   const normalized = normalizeQuery(query);
-  const tokens = normalized.split(' ').filter(Boolean);
+  const rawTokens = query
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ')
+    .split(' ')
+    .filter(Boolean);
+  const normTokens = normalized.split(' ').filter(Boolean);
+  // Union raw + expanded tokens so "RR" and "rear" both highlight (sales shorthand).
+  const tokens = [...new Set([...rawTokens, ...normTokens])].filter(t => t.length >= 1);
   if (!tokens.length) return text;
 
   const escaped = tokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
@@ -672,7 +608,7 @@ function highlightText(text: string, query: string): ReactNode {
   const parts = text.split(regex);
 
   return parts.map((part, i) =>
-    regex.test(part) ? (
+    tokens.some(t => t.length > 0 && part.toLowerCase() === t.toLowerCase()) ? (
       <span key={i} className="text-[var(--bg-accent)] font-bold">
         {part}
       </span>
@@ -906,6 +842,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [rateItem, setRateItem] = useState<Item | null>(null);
   const [rateValue, setRateValue] = useState('');
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
+  const [moreVisible, setMoreVisible] = useState(INITIAL_MORE_VISIBLE);
   const searchRef = useRef<HTMLDivElement | null>(null);
 
   const focusSearchInput = () => {
@@ -915,33 +852,31 @@ export default function NewOrderPage(): React.JSX.Element | null {
     });
   };
 
+  const narrowIndex = useMemo(() => buildNarrowIndex(items), [items]);
+
   const brandOptions: BrandOption[] = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const item of items) {
-      if (item.main_group) counts.set(item.main_group, (counts.get(item.main_group) ?? 0) + 1);
-    }
-    return [...counts.entries()]
+    return [...narrowIndex.itemCountByMainGroup.entries()]
       .sort((a, b) => b[1] - a[1])
       .map(([name, count]) => ({ name, count }));
-  }, [items]);
+  }, [narrowIndex]);
 
   const subGroupsForBrand = useMemo(() => {
     if (!selectedBrand) return [];
-    const counts = new Map<string, number>();
-    for (const item of items) {
-      if (item.main_group === selectedBrand && item.parent_group) {
-        counts.set(item.parent_group, (counts.get(item.parent_group) ?? 0) + 1);
-      }
-    }
-    return [...counts.entries()]
+    const gmap = narrowIndex.countsByBrandGroup.get(selectedBrand);
+    if (!gmap) return [];
+    return [...gmap.entries()]
       .sort((a, b) => b[1] - a[1])
       .map(([name, count]) => ({ name, count }));
-  }, [items, selectedBrand]);
+  }, [narrowIndex, selectedBrand]);
 
   const effectiveQuery = query.trim();
   const isCodeMode = detectCodeLike(effectiveQuery);
   const deferredQuery = useDeferredValue(effectiveQuery);
   const isStale = deferredQuery !== effectiveQuery;
+
+  useEffect(() => {
+    setMoreVisible(INITIAL_MORE_VISIBLE);
+  }, [deferredQuery]);
 
   // Build the search index ONCE from all items — brand/group filtering is done inside searchItems()
   const searchIndex = useMemo(() => buildSearchIndex(items), [items]);
@@ -949,7 +884,29 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const searchResults = useMemo(() => {
     let results: SearchResult[] = [];
     if (deferredQuery) {
-      results = searchItems(deferredQuery, searchIndex, selectedBrand, selectedGroup);
+      // Align boosts with deferred results (same heuristic as detectedBrand, but on deferredQuery)
+      let detectedForSearch: string | null = null;
+      if (!selectedBrand) {
+        const narrowForDeferred = buildNarrowSuggestions(
+          narrowIndex,
+          deferredQuery,
+          selectedBrand,
+          selectedGroup,
+        );
+        const brands = narrowForDeferred.filter(s => s.type === 'brand');
+        if (brands.length === 1) {
+          detectedForSearch = brands[0].value;
+        } else if (brands.length >= 2 && brands[0].count > brands[1].count * 3) {
+          detectedForSearch = brands[0].value;
+        }
+      }
+      results = searchItems(
+        deferredQuery,
+        searchIndex,
+        selectedBrand,
+        selectedGroup,
+        detectedForSearch,
+      );
     } else if (selectedBrand) {
       const brandSet = searchIndex.brandGroups.get(selectedBrand);
       if (brandSet) {
@@ -963,7 +920,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
           }
         }
         results = indices
-          .slice(0, 20)
+          .slice(0, MAX_RESULTS)
           .map(i => ({
             item: searchIndex.all[i].item,
             score: 100,
@@ -973,23 +930,33 @@ export default function NewOrderPage(): React.JSX.Element | null {
       }
     }
     return results;
-  }, [deferredQuery, searchIndex, selectedBrand, selectedGroup]);
+  }, [deferredQuery, searchIndex, selectedBrand, selectedGroup, narrowIndex]);
 
   // When browsing a brand with no query there's no meaningful "best match" split
   const bestMatches = useMemo(
     () => (deferredQuery ? searchResults.slice(0, 3).filter(r => r.score >= 80) : []),
     [searchResults, deferredQuery],
   );
+  const bestMatchIds = useMemo(() => new Set(bestMatches.map(r => r.item.id)), [bestMatches]);
   const moreResults = useMemo(
-    () => searchResults.slice(bestMatches.length, 20),
-    [searchResults, bestMatches.length],
+    () => searchResults.filter(r => !bestMatchIds.has(r.item.id)),
+    [searchResults, bestMatchIds],
   );
+  const moreDisplayed = useMemo(() => moreResults.slice(0, moreVisible), [moreResults, moreVisible]);
+  const hasMoreResults = moreResults.length > moreDisplayed.length;
 
   const narrowSuggestions = useMemo(
     () =>
-      buildNarrowSuggestions(items, effectiveQuery, selectedBrand, selectedGroup),
-    [items, effectiveQuery, selectedBrand, selectedGroup],
+      buildNarrowSuggestions(narrowIndex, effectiveQuery, selectedBrand, selectedGroup),
+    [narrowIndex, effectiveQuery, selectedBrand, selectedGroup],
   );
+
+  const searchRankStrong =
+    deferredQuery.length >= 2 &&
+    searchResults.length >= 6 &&
+    searchResults[0] != null &&
+    searchResults[0].score >= STRONG_THRESHOLD;
+  const showGenericNarrow = !searchRankStrong;
 
   const detectedBrand = useMemo(() => {
     if (selectedBrand) return null;
@@ -1002,16 +969,12 @@ export default function NewOrderPage(): React.JSX.Element | null {
 
   const subGroupsForDetectedBrand = useMemo(() => {
     if (!detectedBrand) return [];
-    const counts = new Map<string, number>();
-    for (const item of items) {
-      if (item.main_group === detectedBrand && item.parent_group) {
-        counts.set(item.parent_group, (counts.get(item.parent_group) ?? 0) + 1);
-      }
-    }
-    return [...counts.entries()]
+    const gmap = narrowIndex.countsByBrandGroup.get(detectedBrand);
+    if (!gmap) return [];
+    return [...gmap.entries()]
       .sort((a, b) => b[1] - a[1])
       .map(([name, count]) => ({ name, count }));
-  }, [items, detectedBrand]);
+  }, [narrowIndex, detectedBrand]);
 
   const getCartQty = (id: number) => getCartItem(id)?.qty ?? 0;
   const getPrice = (item: Item) => getCartItem(item.id)?.specialRate ?? item.sales_price;
@@ -1066,6 +1029,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
               onChange={setQuery}
               loading={itemsLoading}
               autoFocus
+              debounceMs={0}
               leftContent={
                 <div className="flex items-center h-full min-w-0">
                   <button
@@ -1103,7 +1067,9 @@ export default function NewOrderPage(): React.JSX.Element | null {
             )}
           </div>
 
-          {(narrowSuggestions.length > 0 || (selectedBrand && subGroupsForBrand.length > 0) || (detectedBrand && subGroupsForDetectedBrand.length > 0)) && (
+          {((selectedBrand && subGroupsForBrand.length > 0) ||
+            (detectedBrand && subGroupsForDetectedBrand.length > 0) ||
+            (narrowSuggestions.length > 0 && showGenericNarrow)) && (
             <div className="rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-3 shadow-sm space-y-1.5">
               <p className="text-xs uppercase tracking-wide text-[var(--content-tertiary)]">
                 Narrow by
@@ -1156,8 +1122,8 @@ export default function NewOrderPage(): React.JSX.Element | null {
                   </>
                 )}
 
-                {/* Case 3: No brand intent → show all narrow suggestions */}
-                {!selectedBrand && !(detectedBrand && subGroupsForDetectedBrand.length > 0)
+                {/* Case 3: No brand intent → show all narrow suggestions (hidden when ranked results are already strong) */}
+                {!selectedBrand && !(detectedBrand && subGroupsForDetectedBrand.length > 0) && showGenericNarrow
                   && narrowSuggestions.map(s => (
                       <FilterChip
                         key={`${s.type}-${s.value}`}
@@ -1247,7 +1213,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
               />
               <ResultSection
                 label={bestMatches.length ? 'More results' : 'Results'}
-                results={moreResults}
+                results={moreDisplayed}
                 query={effectiveQuery}
                 onAdd={handleAdd}
                 onDecrement={handleDecrement}
@@ -1259,6 +1225,17 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 getPrice={getPrice}
                 onUpdateQty={updateQty}
               />
+              {hasMoreResults && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setMoreVisible(v => Math.min(v + MORE_RESULTS_PAGE, moreResults.length))
+                  }
+                  className="w-full py-3 rounded-xl text-sm font-semibold text-[var(--bg-accent)] bg-[var(--bg-secondary)] border border-[var(--border-subtle)] hover:bg-[var(--bg-tertiary)] active:scale-[0.99]"
+                >
+                  Show more ({moreResults.length - moreDisplayed.length} left)
+                </button>
+              )}
             </>
           )}
         </div>

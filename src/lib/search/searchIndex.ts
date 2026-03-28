@@ -66,7 +66,7 @@ function strip(s: string): string {
   return s.replace(/[\s.\-/\\]/g, '');
 }
 
-function toTokens(s: string): string[] {
+export function toTokens(s: string): string[] {
   return String(s)
     .toLowerCase()
     .split(/[^a-z0-9]+/)

@@ -12,6 +12,7 @@ import {
   detectCodeLike,
   type SearchResult,
 } from '../src/lib/search/itemSearch';
+import { buildSearchIndex } from '../src/lib/search/searchIndex';
 import type { Item } from '../src/types';
 
 const PRESSURE_TEST_QUERIES = [
@@ -71,12 +72,14 @@ function main() {
   console.log('Loading catalog from', csvPath);
   const items = parseCSV(csvPath);
   console.log('Items loaded:', items.length);
-  console.log('\n--- Pressure test: normalizeQuery + searchItems ---\n');
+  const idx = buildSearchIndex(items);
+  console.log('Search index built.\n');
+  console.log('--- Pressure test: normalizeQuery + searchItems ---\n');
 
   for (const raw of PRESSURE_TEST_QUERIES) {
     const normalized = normalizeQuery(raw);
     const isCode = detectCodeLike(raw);
-    const results: SearchResult[] = searchItems(raw, items);
+    const results: SearchResult[] = searchItems(raw, idx, null, null, null);
     const top = results.slice(0, 5);
 
     console.log(`Query: "${raw}"`);

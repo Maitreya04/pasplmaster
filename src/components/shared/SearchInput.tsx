@@ -38,6 +38,10 @@ export function SearchInput({
   const debouncedOnChange = useCallback(
     (v: string) => {
       clearTimeout(timerRef.current);
+      if (debounceMs <= 0) {
+        onChange(v);
+        return;
+      }
       timerRef.current = setTimeout(() => onChange(v), debounceMs);
     },
     [onChange, debounceMs],
