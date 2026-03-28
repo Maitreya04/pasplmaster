@@ -7,13 +7,13 @@ const TARGET_YEAR = '2025-26';
 // Imported history in salesperson_fy_sales uses "2025" for FY 2025-26
 const HISTORY_FYEAR_KEY = '2025';
 
-export interface ProductGroupTarget {
+interface ProductGroupTarget {
   product_group: string;
   annual_target_lakhs: number;
   achieved: number; // rupees, 0 for now
 }
 
-export interface SalesDashboardData {
+interface SalesDashboardData {
   annualTargetLakhs: number;
   fyAchievement: number; // sum of total_value in FY
   monthlyTargetLakhs: number;

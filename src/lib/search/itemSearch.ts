@@ -31,7 +31,7 @@ const MAX_RESULTS = 20;
 // ---------------------------------------------------------------------------
 
 /** Expands common shorthand tokens used by auto-parts salespeople. */
-export const SHORTHAND_MAP: Record<string, string> = {
+const SHORTHAND_MAP: Record<string, string> = {
   rr: 'rear',
   fr: 'front',
   dlx: 'deluxe',

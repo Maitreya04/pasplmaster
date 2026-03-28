@@ -274,11 +274,5 @@ export function buildSearchIndex(items: Item[]): SearchIndex {
   return _idx;
 }
 
-/** Force-clear cached index (useful if items ref changes identity). */
-export function clearSearchIndex(): void {
-  _ref = null;
-  _idx = null;
-}
-
 // Re-export strip for use in itemSearch.ts
 export { strip, soundex };

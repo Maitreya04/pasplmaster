@@ -138,6 +138,7 @@ export default function PickPage() {
   const [flagNotes, setFlagNotes] = useState('');
   const [flagBoxPrice, setFlagBoxPrice] = useState('');
   const [liveScanTarget, setLiveScanTarget] = useState<OrderItem | null>(null);
+  const [showComplete, setShowComplete] = useState(false);
 
   const pickItems = useMemo(() => {
     if (!order?.items) return [];
@@ -454,8 +455,6 @@ export default function PickPage() {
     navigate('/picking');
     return null;
   }
-
-  const [showComplete, setShowComplete] = useState(false);
 
   if (showComplete && order) {
     return (

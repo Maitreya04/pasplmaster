@@ -99,7 +99,6 @@ export async function importItems(
 
   const headerRow = raw[headerRowIndex] ?? [];
   const cols = detectColumnIndices(headerRow);
-  console.log('[Import items_price] Detected columns:', cols);
 
   const dataStartIndex = headerRowIndex + 1;
   const dataRows = raw.slice(dataStartIndex).filter(
@@ -210,7 +209,6 @@ export async function importItems(
     status: 'completed',
   });
 
-  console.log(`[Import items_price] Total rows successfully imported: ${processed.toLocaleString()}`);
   if (failedCount > 0) {
     console.warn(`[Import items_price] ${failedCount.toLocaleString()} rows failed (batches with errors)`);
   }

@@ -1,16 +1,6 @@
 import { supabase } from '../supabase/client';
-import { matchOcrToItem } from './ocrMatcher';
-import { buildScanResultFromMatch } from './scanResult';
-import type { ScanResult } from '../../types';
 
-interface ItemMeta {
-  mrp?: number;
-  mainGroup?: string | null;
-  parentGroup?: string | null;
-  alias1?: string | null;
-}
-
-export interface AIVerifyResult {
+interface AIVerifyResult {
   match: boolean;
   confidence: number;
   extracted_code?: string;
@@ -49,75 +39,3 @@ export async function verifyWithAI(
   }
 }
 
-export function buildScanResultFromAI(
-  aiResult: AIVerifyResult,
-  ocrText: string,
-  expectedItem: { item_name: string; item_alias: string | null },
-): ScanResult {
-  return {
-    scannedText: ocrText,
-    confidence: aiResult.confidence,
-    isMatch: aiResult.match,
-    matchedAgainst: aiResult.extracted_code || expectedItem.item_alias || expectedItem.item_name,
-    matchStrategy: 'ai_verify',
-    ocrExtracted: {
-      partNumber: aiResult.extracted_code ?? null,
-      mrp: aiResult.extracted_mrp ? parseFloat(aiResult.extracted_mrp) || null : null,
-      brand: aiResult.extracted_brand ?? null,
-      vehicleModel: null,
-    },
-    signals: [{
-      signal: 'ai',
-      score: aiResult.match ? aiResult.confidence : 0,
-      maxScore: 100,
-      detail: aiResult.reason,
-    }],
-    method: 'ai_verify',
-    timestamp: new Date().toISOString(),
-  };
-}
-
-export async function verifyPickFull(
-  ocrText: string,
-  imageBase64: string,
-  expectedItem: { item_name: string; item_alias: string | null },
-  meta: ItemMeta,
-): Promise<{ scanResult: ScanResult; usedAI: boolean }> {
-  const matchResult = matchOcrToItem(
-    ocrText,
-    expectedItem,
-    meta.mrp,
-    meta.mainGroup ?? null,
-    meta.alias1 ?? null,
-    meta.parentGroup ?? null,
-  );
-
-  if (matchResult.isMatch) {
-    const scanResult = buildScanResultFromMatch({
-      rawText: ocrText,
-      matchResult,
-      expectedItem,
-    });
-    scanResult.method = 'local_match';
-    return { scanResult, usedAI: false };
-  }
-
-  const aiResult = await verifyWithAI(imageBase64, {
-    name: expectedItem.item_name,
-    alias1: meta.alias1,
-    mrp: meta.mrp,
-  });
-
-  if (aiResult.match) {
-    const scanResult = buildScanResultFromAI(aiResult, ocrText, expectedItem);
-    return { scanResult, usedAI: true };
-  }
-
-  const scanResult = buildScanResultFromMatch({
-    rawText: ocrText,
-    matchResult,
-    expectedItem,
-  });
-  scanResult.method = 'local_match';
-  return { scanResult, usedAI: true };
-}

@@ -161,7 +161,6 @@ export async function importStock(
     status: 'completed',
   });
 
-  console.log(`[Import items_stock] Total rows successfully imported: ${processed.toLocaleString()}`);
   if (failedCount > 0) {
     console.warn(`[Import items_stock] ${failedCount.toLocaleString()} rows failed (batches with errors)`);
   }

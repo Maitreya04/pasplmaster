@@ -121,7 +121,6 @@ export async function importCustomers(
     status: 'completed',
   });
 
-  console.log(`[Import customers] Total rows successfully imported: ${processed.toLocaleString()}`);
   if (failedCount > 0) {
     console.warn(`[Import customers] ${failedCount.toLocaleString()} rows failed (batches with errors)`);
   }

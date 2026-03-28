@@ -57,8 +57,6 @@ export default function UploadPage() {
       const data: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
       const first10 = data.slice(0, 10);
       setDebugRows(first10);
-      console.log('[Upload] First 10 rows of', file.name);
-      first10.forEach((row, i) => console.log(`  row ${i}:`, row));
       const result = detectFileType(wb);
       setWorkbook(wb);
       setDetection(result);

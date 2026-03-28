@@ -4,19 +4,9 @@ const currencyFormatter = new Intl.NumberFormat('en-IN', {
   maximumFractionDigits: 0,
 });
 
-const currencyFormatterPrecise = new Intl.NumberFormat('en-IN', {
-  style: 'currency',
-  currency: 'INR',
-  maximumFractionDigits: 2,
-});
-
 export function formatCurrency(n: number | null | undefined): string {
   if (n == null || n <= 0) return '—';
   return currencyFormatter.format(n);
-}
-
-export function formatCurrencyPrecise(n: number): string {
-  return currencyFormatterPrecise.format(n);
 }
 
 export function formatCurrencyRaw(n: number): string {
