@@ -91,7 +91,7 @@ function OrderCard({
   onTap: () => void;
 }) {
   return (
-    <Card pressable onClick={onTap} className="min-h-[56px]">
+    <Card pressable onClick={onTap} className="min-h-14">
       <div className="flex flex-col gap-2">
         <div className="flex items-start justify-between gap-3">
           <span className="font-mono text-sm text-[var(--content-tertiary)]">

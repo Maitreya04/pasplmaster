@@ -13,7 +13,7 @@ function PendingCard({ item }: { item: PendingItem }) {
     <Card
       pressable
       onClick={() => navigate(`/billing/review/${item.order_id}`)}
-      className="min-h-[64px]"
+      className="min-h-16"
     >
       <div className="flex flex-col gap-2">
         <div className="flex items-start justify-between gap-3">
@@ -32,7 +32,7 @@ function PendingCard({ item }: { item: PendingItem }) {
             <p className="text-xs text-[var(--content-tertiary)]">
               {formatTimeAgo(item.created_at)}
             </p>
-            <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] text-[11px] font-semibold px-2 py-0.5">
+            <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] text-xs font-semibold px-2 py-0.5">
               <HourglassHigh size={12} weight="bold" />
               Pending
             </div>
@@ -52,11 +52,11 @@ function PendingCard({ item }: { item: PendingItem }) {
             </p>
           </div>
           <div className="shrink-0 text-right">
-            <p className="text-[11px] text-[var(--content-tertiary)] mb-1">
+            <p className="text-xs text-[var(--content-tertiary)] mb-1">
               {item.source === 'billing' ? 'From billing' : 'From picking'}
             </p>
             {item.created_by && (
-              <p className="text-[11px] text-[var(--content-tertiary)]">
+              <p className="text-xs text-[var(--content-tertiary)] mt-0.5">
                 by <span className="font-medium">{item.created_by}</span>
               </p>
             )}

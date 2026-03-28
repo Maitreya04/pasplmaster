@@ -134,7 +134,7 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
 
       <div
         ref={sheetRef}
-        className="relative z-10 w-full max-h-[85vh] bg-[var(--bg-secondary)]/95 backdrop-blur-xl rounded-t-[2rem] flex flex-col shadow-2xl ring-1 ring-white/10 animate-slide-up"
+        className="relative z-10 w-full max-h-[85vh] bg-[var(--bg-secondary)]/95 backdrop-blur-xl rounded-t-2xl flex flex-col shadow-2xl ring-1 ring-white/10 animate-slide-up"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -148,7 +148,7 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
             <h2 className="text-lg font-semibold text-[var(--content-primary)]">{title}</h2>
             <button
               onClick={onClose}
-              className="p-2 -mr-2 rounded-lg text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors duration-150"
+              className="p-2 min-h-11 min-w-11 flex items-center justify-center -mr-2 rounded-lg text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors duration-150"
               aria-label="Close"
             >
               <X size={20} weight="regular" />

@@ -104,7 +104,7 @@ export default function RoleSelectPage(): React.JSX.Element | null {
           selectRole('admin');
           navigate('/admin-passcode');
         }}
-        className="mx-auto mt-6 text-xs text-[var(--content-tertiary)] hover:text-[var(--content-primary)] transition-colors duration-[var(--transition-ui)] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--content-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] rounded"
+        className="mx-auto mt-6 min-h-11 min-w-11 flex items-center justify-center text-xs text-[var(--content-tertiary)] hover:text-[var(--content-primary)] transition-colors duration-[var(--transition-ui)] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--content-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] rounded"
       >
         Admin
       </button>

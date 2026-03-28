@@ -88,7 +88,7 @@ function HeroCard({
       <div className="relative flex flex-col items-center gap-3 pt-6 pb-3">
         {lastUpdatedAt && (
           <div className="absolute left-0 top-0">
-            <span className="inline-flex items-center rounded-full border border-white/30 bg-white/10 px-2.5 py-0.5 text-[10px] font-medium text-white/90 backdrop-blur-sm">
+            <span className="inline-flex items-center rounded-full border border-white/30 bg-white/10 px-2 py-0.5 text-xs font-medium text-white/90 backdrop-blur-sm">
               As of{' '}
               {new Date(lastUpdatedAt).toLocaleDateString('en-IN', {
                 day: 'numeric',
@@ -187,7 +187,7 @@ function ProductGroupBar({
     <div className="space-y-1.5">
       <div className="flex justify-between items-baseline gap-2">
         <span className="text-sm font-medium text-[var(--content-primary)] truncate">{group}</span>
-        <span className="font-mono text-[11px] text-[var(--content-tertiary)] shrink-0">
+        <span className="font-mono text-xs text-[var(--content-tertiary)] shrink-0">
           Target ₹{formatLakhs(targetLakhs)}
         </span>
       </div>
@@ -197,7 +197,7 @@ function ProductGroupBar({
           style={{ width: `${Math.min(100, pct)}%` }}
         />
       </div>
-      <p className="text-[11px]">
+      <p className="text-xs mt-1">
         <span className="font-semibold text-[var(--content-secondary)]">
           Gap <span className="font-mono">₹{formatLakhs(gapLakhs)}</span>
         </span>

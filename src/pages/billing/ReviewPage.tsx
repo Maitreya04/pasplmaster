@@ -491,11 +491,11 @@ export default function ReviewPage(): React.JSX.Element | null {
                               )}
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-[11px] text-[var(--content-secondary)]">
+                              <span className="text-xs text-[var(--content-secondary)]">
                                 Invoice price (per unit):
                               </span>
                               <div className="flex items-center gap-1">
-                                <span className="text-[11px] text-[var(--content-tertiary)]">₹</span>
+                                <span className="text-xs text-[var(--content-tertiary)]">₹</span>
                                 <input
                                   type="number"
                                   inputMode="decimal"
@@ -508,7 +508,7 @@ export default function ReviewPage(): React.JSX.Element | null {
                                       Number.parseFloat(e.target.value || '0'),
                                     )
                                   }
-                                  className="w-24 px-2 py-1 rounded-md border border-[var(--border-opaque)] text-[11px] text-[var(--content-primary)] bg-[var(--bg-secondary)]"
+                                  className="w-24 px-2 py-1 rounded-xl border border-[var(--border-opaque)] text-xs text-[var(--content-primary)] bg-[var(--bg-secondary)] min-h-11"
                                 />
                               </div>
                             </div>
@@ -549,7 +549,7 @@ export default function ReviewPage(): React.JSX.Element | null {
                         <button
                           type="button"
                           onClick={() => removeItem(item.id)}
-                          className="min-h-[48px] min-w-[48px] flex items-center justify-center rounded-lg text-[var(--content-negative)] hover:bg-[var(--bg-negative-subtle)] transition-colors"
+                          className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-[var(--content-negative)] hover:bg-[var(--bg-negative-subtle)] transition-colors"
                           aria-label="Remove item"
                         >
                           <X size={22} weight="bold" />

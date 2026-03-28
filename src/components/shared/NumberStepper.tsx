@@ -37,7 +37,7 @@ export function NumberStepper({
         <button
           onClick={decrement}
           disabled={value <= min}
-          className="w-10 h-10 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] hover:opacity-90 active:opacity-80 transition-opacity duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
+          className="min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] hover:opacity-90 active:opacity-80 transition-opacity duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
           aria-label="Decrease quantity"
         >
           <Minus size={16} weight="regular" />
@@ -49,13 +49,13 @@ export function NumberStepper({
           onCancel={() => {}}
           min={min}
           max={max}
-          className="min-w-[48px] h-10 text-sm"
+          className="min-w-[48px] h-11 text-sm"
         />
 
         <button
           onClick={increment}
           disabled={max !== undefined && value >= max}
-          className="w-10 h-10 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] hover:opacity-90 active:opacity-80 transition-opacity duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
+          className="min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] hover:opacity-90 active:opacity-80 transition-opacity duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
           aria-label="Increase quantity"
         >
           <Plus size={16} weight="regular" />
@@ -114,7 +114,7 @@ export function NumberStepper({
             onClick={() => onChange(clamp(preset))}
             data-inverse-primary={value === preset ? '' : undefined}
             className={`
-              px-3 h-8 rounded-lg text-sm font-medium font-mono
+              px-3 min-h-11 h-11 rounded-lg text-sm font-medium font-mono
               transition-colors duration-150
               ${
                 value === preset

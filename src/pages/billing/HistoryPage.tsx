@@ -43,7 +43,7 @@ function OrderCard({
   onTap: () => void;
 }) {
   return (
-    <Card pressable onClick={onTap} className="min-h-[56px]">
+    <Card pressable onClick={onTap} className="min-h-14">
       <div className="flex flex-col gap-2">
         <div className="flex items-start justify-between gap-3">
           <span className="font-mono text-sm text-[var(--content-secondary)]">
@@ -126,7 +126,7 @@ export default function HistoryPage(): React.JSX.Element | null {
                   id="date-range"
                   value={dateRange}
                   onChange={(e) => setDateRange(e.target.value as DateRange)}
-                  className="appearance-none h-9 pl-3 pr-8 rounded-lg border border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)] text-sm font-medium leading-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+                  className="appearance-none min-h-11 pl-3 pr-8 rounded-xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)] text-sm font-medium leading-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
                 >
                   <option value="7">Last 7 days</option>
                   <option value="30">Last 30 days</option>
@@ -146,7 +146,7 @@ export default function HistoryPage(): React.JSX.Element | null {
                   id="status-filter"
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as OrderStatus | 'all')}
-                  className="appearance-none h-9 pl-3 pr-8 rounded-lg border border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)] text-sm font-medium leading-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+                  className="appearance-none min-h-11 pl-3 pr-8 rounded-xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)] text-sm font-medium leading-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
                 >
                   {STATUS_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>

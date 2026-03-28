@@ -21,7 +21,7 @@ export function PageHeader({ title, onBack, action }: PageHeaderProps): React.JS
           <button
             onClick={onBack}
             className="
-              -ml-2 min-h-[48px] min-w-[48px]
+              -ml-2 min-h-12 min-w-12
               flex items-center justify-center
               rounded-lg text-[var(--content-secondary)]
               hover:bg-[var(--bg-tertiary)] transition-colors duration-150

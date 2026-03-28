@@ -84,7 +84,7 @@ function SearchableCustomerDropdown({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search by name or city…"
-                  className="w-full min-h-[48px] pl-9 pr-3 rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] text-base border-none outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
+                  className="w-full min-h-12 pl-9 pr-3 rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] text-base border-none outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
                   autoFocus
                 />
               </div>
@@ -108,7 +108,7 @@ function SearchableCustomerDropdown({
                       setOpen(false);
                       setQuery('');
                     }}
-                    className="w-full text-left px-4 py-3 flex items-center justify-between gap-2 hover:bg-[var(--bg-tertiary)] transition-colors min-h-[48px]"
+                    className="w-full text-left px-4 py-3 flex items-center justify-between gap-2 hover:bg-[var(--bg-tertiary)] transition-colors min-h-12"
                   >
                     <span className="text-[var(--content-primary)] truncate">
                       {c.name}
@@ -285,7 +285,7 @@ export default function CartPage(): React.JSX.Element | null {
                 <button
                   type="button"
                   onClick={() => navigate('/sales/new')}
-                  className="flex items-center gap-1.5 min-h-[48px] px-3 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-accent)] font-semibold hover:bg-[var(--bg-accent-subtle)] transition-colors"
+                  className="flex items-center gap-1.5 min-h-12 px-3 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-accent)] font-semibold hover:bg-[var(--bg-accent-subtle)] transition-colors"
                 >
                   <Plus size={18} weight="bold" />
                   Add More Items
@@ -298,14 +298,14 @@ export default function CartPage(): React.JSX.Element | null {
                   return (
                     <li
                       key={ci.item.id}
-                      className="flex items-center gap-3 p-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-[56px]"
+                      className="flex items-center gap-3 p-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-14"
                     >
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-[var(--content-primary)] truncate">
                           {ci.item.name}
                         </p>
                         {partNo && (
-                          <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-[var(--content-tertiary)] font-mono bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">
+                          <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-[var(--content-tertiary)] font-mono bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">
                             <span>{partNo}</span>
                           </p>
                         )}
@@ -323,7 +323,7 @@ export default function CartPage(): React.JSX.Element | null {
                       </div>
                       <button
                         onClick={() => removeItem(ci.item.id)}
-                        className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg text-[var(--content-tertiary)] hover:bg-[var(--bg-negative-subtle)] hover:text-[var(--content-negative)] transition-colors min-h-[48px] min-w-[48px]"
+                        className="shrink-0 w-12 h-12 flex items-center justify-center rounded-lg text-[var(--content-tertiary)] hover:bg-[var(--bg-negative-subtle)] hover:text-[var(--content-negative)] transition-colors min-h-12 min-w-12"
                         aria-label="Remove item"
                       >
                         <X size={20} weight="bold" />
@@ -428,7 +428,7 @@ export default function CartPage(): React.JSX.Element | null {
               <div className="flex justify-between items-baseline text-sm text-[var(--content-secondary)]">
                 <div>
                   <span>Transport</span>
-                  <p className="text-[11px] text-[var(--content-tertiary)]">
+                  <p className="text-xs text-[var(--content-tertiary)]">
                     {transport ? transport.name : 'Not selected'}
                   </p>
                 </div>
@@ -448,7 +448,7 @@ export default function CartPage(): React.JSX.Element | null {
                 onClick={() => setShowItemBreakdown((prev) => !prev)}
               >
                 <span>{showItemBreakdown ? 'Hide item-wise calculation' : 'Show item-wise calculation'}</span>
-                <span className="text-[10px]">
+                <span className="text-xs">
                   {showItemBreakdown ? '▲' : '▼'}
                 </span>
               </button>
@@ -459,13 +459,13 @@ export default function CartPage(): React.JSX.Element | null {
                     const lineTotal = price * ci.qty;
                     const partNo = ci.item.alias1 ?? ci.item.alias;
                     return (
-                      <div key={ci.item.id} className="flex justify-between gap-3 text-[11px] text-[var(--content-secondary)]">
+                      <div key={ci.item.id} className="flex justify-between gap-3 text-xs mt-1 text-[var(--content-secondary)]">
                         <div className="min-w-0">
                           <p className="truncate">
                             {ci.item.name}
                           </p>
                           {partNo && (
-                            <p className="font-mono text-[10px] text-[var(--content-tertiary)] truncate">
+                            <p className="font-mono text-xs text-[var(--content-tertiary)] truncate">
                               {partNo}
                             </p>
                           )}

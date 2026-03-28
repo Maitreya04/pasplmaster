@@ -28,7 +28,7 @@ export function Card({
           : undefined
       }
       className={`
-        rounded-[1.25rem] p-5
+        rounded-lg p-5
         bg-[var(--bg-secondary)]
         border border-[var(--border-subtle)]
         shadow-[var(--shadow-card)]

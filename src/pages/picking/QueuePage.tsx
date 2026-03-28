@@ -337,7 +337,7 @@ function OrderCard({
             hover:opacity-90 active:scale-95
             transition-all duration-150
             disabled:opacity-50 disabled:cursor-not-allowed
-            min-h-[44px]
+            min-h-11
             ${
               isUrgent
                 ? 'bg-[var(--bg-negative)] text-[var(--content-on-color)]'

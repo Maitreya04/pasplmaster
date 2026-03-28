@@ -448,7 +448,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                   const customer = nameToCustomer.get(c.customer_name) ?? null;
                   onCustomerSelect(customer);
                 }}
-                className={`min-w-[180px] max-w-[220px] px-3 py-3 rounded-2xl text-left flex flex-col justify-between gap-1.5 ${
+                className={`min-w-44 max-w-56 px-3 py-3 rounded-lg text-left flex flex-col justify-between gap-1.5 ${
                   isActive
                     ? 'bg-[var(--role-primary-subtle)] border border-[var(--role-primary)] shadow-sm'
                     : 'bg-[var(--bg-secondary)] border border-[var(--border-subtle)]'
@@ -460,7 +460,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                 <p className="text-xs text-[var(--content-secondary)]">
                   {c.order_count} order{c.order_count === 1 ? '' : 's'}
                 </p>
-                <p className="text-[10px] text-[var(--content-tertiary)]">
+                <p className="text-xs text-[var(--content-tertiary)] mt-1">
                   Last order {formatShortDate(c.last_order_date)}
                 </p>
               </button>
@@ -476,7 +476,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
             <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
               Pending from last orders
             </h3>
-            <p className="text-[10px] text-[var(--content-tertiary)]">
+            <p className="text-xs text-[var(--content-tertiary)] mt-1">
               Items that were out of stock earlier
             </p>
           </div>
@@ -494,7 +494,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                   <p className="font-semibold text-sm text-[var(--content-primary)] truncate">
                     {row.item.name}
                   </p>
-                  <p className="text-[11px] text-[var(--content-tertiary)]">
+                  <p className="text-xs text-[var(--content-tertiary)] mt-1">
                     Pending last time:{' '}
                     <span className="font-mono font-semibold">{row.qty}</span> pcs
                   </p>
@@ -516,7 +516,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
               Quick Reorder: {activeCustomerName}
             </h3>
             {quickReorderItems.length > 0 && (
-              <p className="text-[10px] text-[var(--content-tertiary)]">
+              <p className="text-xs text-[var(--content-tertiary)] mt-1">
                 Based on past orders
               </p>
             )}
@@ -539,7 +539,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                   key={row.item.id}
                   type="button"
                   onClick={() => toggleQuickReorderItem(row.item.id)}
-                  className="w-full px-3 py-3 min-h-[80px] rounded-xl bg-[var(--bg-secondary)] flex items-start gap-3 text-left cursor-pointer"
+                  className="w-full px-3 py-3 min-h-20 rounded-xl bg-[var(--bg-secondary)] flex items-start gap-3 text-left cursor-pointer"
                   role="checkbox"
                   aria-checked={row.checked}
                 >
@@ -558,7 +558,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                     <p className="font-semibold text-sm text-[var(--content-primary)] whitespace-normal break-words line-clamp-2 leading-snug">
                       {row.item.name}
                     </p>
-                    <p className="text-[11px] text-[var(--content-tertiary)]">
+                    <p className="text-xs text-[var(--content-tertiary)] mt-1">
                       Ordered {row.orderCount} time{row.orderCount === 1 ? '' : 's'}, usually{' '}
                       {row.mostCommonQty && row.mostCommonQty > 0
                         ? Number(row.mostCommonQty)
@@ -713,7 +713,7 @@ function AliasCode({
   const isMatched = matchedField === 'alias1' || matchedField === 'alias' || matchedField === 'name+alias';
   return (
     <span
-      className={`font-mono text-[10px] px-1.5 py-0.5 rounded shrink-0 max-w-[120px] truncate ${
+      className={`font-mono text-xs px-1.5 py-0.5 rounded shrink-0 max-w-28 truncate ${
         placeholder
           ? 'bg-[var(--bg-tertiary)] text-[var(--content-quaternary)]'
           : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
@@ -744,7 +744,7 @@ const ItemRow = memo(function ItemRow({
   const productCodeValue = productCode || '—';
 
   return (
-    <li className="flex items-center gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-[60px]">
+    <li className="flex items-center gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-14">
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-[var(--content-primary)] leading-snug">
           {highlightText(item.name, query)}
@@ -1044,7 +1044,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
           totalCount > 0 ? (
             <button
               onClick={() => navigate('/sales/cart')}
-              className="flex items-center gap-1.5 min-h-[48px] min-w-[48px] px-2 rounded-lg text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]"
+              className="flex items-center gap-1.5 min-h-12 min-w-12 px-2 rounded-lg text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]"
             >
               <ShoppingCart size={22} weight="regular" />
               <span className="font-mono text-sm font-semibold">{totalCount}</span>
@@ -1097,7 +1097,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
               }
             />
             {isCodeMode && (
-              <span className="absolute right-12 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide bg-[var(--bg-accent)] text-[var(--content-on-color)] pointer-events-none">
+              <span className="absolute right-12 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-xs font-bold tracking-wide bg-[var(--bg-accent)] text-[var(--content-on-color)] pointer-events-none">
                 CODE
               </span>
             )}
@@ -1105,7 +1105,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
 
           {(narrowSuggestions.length > 0 || (selectedBrand && subGroupsForBrand.length > 0) || (detectedBrand && subGroupsForDetectedBrand.length > 0)) && (
             <div className="rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-3 shadow-sm space-y-1.5">
-              <p className="text-[10px] uppercase tracking-wide text-[var(--content-tertiary)]">
+              <p className="text-xs uppercase tracking-wide text-[var(--content-tertiary)]">
                 Narrow by
               </p>
               <div className="flex gap-2 overflow-x-auto scrollbar-none py-1">
@@ -1185,8 +1185,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
 
         {/* Results area */}
         <div
-          className={`space-y-4 transition-opacity duration-100 ${totalCount > 0 ? 'pb-32' : ''}`}
-          style={{ opacity: isStale ? 0.6 : 1 }}
+          className={`space-y-4 transition-opacity duration-100 ${totalCount > 0 ? 'pb-32' : ''} ${isStale ? 'opacity-60' : 'opacity-100'}`}
         >
           {itemsLoading ? (
             <Skeleton variant="list" count={1} lines={6} />
@@ -1281,7 +1280,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
           </div>
           <button
             onClick={() => navigate('/sales/cart')}
-            className="flex items-center gap-1.5 min-h-[48px] px-4 rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] font-semibold hover:opacity-90 active:scale-95"
+            className="flex items-center gap-1.5 min-h-12 px-4 rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] font-semibold hover:opacity-90 active:scale-95"
           >
             View Cart
             <CaretRight size={20} weight="bold" />

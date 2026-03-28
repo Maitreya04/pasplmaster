@@ -23,7 +23,7 @@ function OrderCard({
           <span className="font-mono text-[var(--content-tertiary)] text-sm">
             {order.order_number}
             {order.status !== 'flagged' && 'items' in order && order.items && (order.items as OrderItem[]).some((i: OrderItem) => i.state === 'flagged') && (
-              <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] px-1.5 py-0.5 rounded">
+              <span className="ml-2 inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] px-2 py-0.5 rounded-full">
                 Has Rejections
               </span>
             )}
@@ -90,7 +90,7 @@ function OrderDetailSheet({
                     </p>
                     {isFlagged && (
                       <div className="mt-1 mb-1 space-y-0.5">
-                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]">
+                        <span className="inline-block px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]">
                           Rejected: {item.flag_reason || 'See notes'}
                         </span>
                         {item.flag_notes && (
@@ -151,7 +151,7 @@ function OrderDetailSheet({
                     Pending (no stock)
                   </span>
                   {pendingLoading && (
-                    <span className="text-[10px] text-[var(--content-tertiary)]">
+                    <span className="text-xs text-[var(--content-tertiary)]">
                       updating…
                     </span>
                   )}

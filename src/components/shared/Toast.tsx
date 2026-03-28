@@ -44,14 +44,14 @@ function ToastNotification({ toast, onDismiss }: ToastNotificationProps) {
       {toast.action && (
         <button
           onClick={handleAction}
-          className="text-sm font-semibold text-white hover:opacity-90 shrink-0"
+          className="text-sm font-semibold text-[var(--content-inverse-primary)] hover:opacity-90 shrink-0"
         >
           {toast.action.label}
         </button>
       )}
       <button
         onClick={handleDismiss}
-        className="p-1 rounded opacity-40 hover:opacity-80 transition-opacity duration-150 shrink-0"
+        className="p-1 min-w-11 min-h-11 flex items-center justify-center rounded opacity-40 hover:opacity-80 transition-opacity duration-150 shrink-0"
         aria-label="Dismiss"
       >
         <X size={16} weight="regular" />

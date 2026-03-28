@@ -16,7 +16,7 @@ export default function AdminPage(): React.JSX.Element | null {
               switchRole();
               navigate('/select-role');
             }}
-            className="flex items-center gap-2 text-sm text-[var(--content-tertiary)] hover:text-[var(--content-primary)] transition-colors"
+            className="flex items-center gap-2 text-sm text-[var(--content-tertiary)] hover:text-[var(--content-primary)] transition-colors min-h-11"
           >
             <SignOut size={18} weight="regular" />
             Switch Role

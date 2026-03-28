@@ -535,7 +535,7 @@ export default function PickPage(): React.JSX.Element | null {
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/picking')}
-            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-[var(--content-secondary)]"
+            className="min-h-11 min-w-11 flex items-center justify-center rounded-lg text-[var(--content-secondary)]"
           >
             <CaretLeft size={24} weight="bold" />
           </button>
@@ -676,7 +676,7 @@ export default function PickPage(): React.JSX.Element | null {
                 onClick={() => setFlagReason(reason)}
                 className={`
                   px-3 py-3 rounded-xl text-sm font-medium text-left
-                  transition-colors duration-150 min-h-[48px]
+                  transition-colors duration-150 min-h-12
                   ${
                     flagReason === reason
                       ? 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] ring-1 ring-[var(--border-negative)]'
@@ -802,7 +802,7 @@ function PickItemCard({
       {/* NEXT badge */}
       {isNext && !isDone && (
         <div className="flex items-center gap-1.5 mb-2">
-          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)]">
+          <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)]">
             Next
           </span>
         </div>

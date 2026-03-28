@@ -124,7 +124,7 @@ export function InlineQtyEditor({
         type="button"
         onClick={startEditing}
         className={`
-          min-w-[2rem] h-9 px-2 flex items-center justify-center
+          min-w-11 min-h-11 h-11 px-2 flex items-center justify-center
           font-mono font-semibold text-[var(--content-primary)] text-sm
           rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors duration-150
           ${className}
@@ -149,7 +149,7 @@ export function InlineQtyEditor({
         onKeyDown={handleKeyDown}
         aria-label="Quantity"
         className="
-          w-14 h-9 text-center font-mono text-base font-semibold
+          w-14 min-h-11 h-11 text-center font-mono text-base font-semibold
           bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]
           text-[var(--content-primary)] rounded-lg
           focus:outline-none focus:ring-1 focus:ring-[var(--border-subtle)]
@@ -162,7 +162,7 @@ export function InlineQtyEditor({
           cancel();
         }}
         className="
-          w-9 h-9 flex items-center justify-center
+          min-w-11 min-h-11 flex items-center justify-center
           rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-secondary)]
           hover:opacity-90 active:scale-95 transition-all
         "
@@ -177,7 +177,7 @@ export function InlineQtyEditor({
           confirm();
         }}
         className="
-          w-9 h-9 flex items-center justify-center
+          min-w-11 min-h-11 flex items-center justify-center
           rounded-lg bg-[var(--bg-accent)] text-[var(--content-on-color)]
           hover:opacity-90 active:scale-95 transition-all
         "

@@ -85,7 +85,7 @@ export function SearchInput({
         {!loading && localValue && (
           <button
             onClick={handleClear}
-            className="p-1 rounded-full hover:bg-[var(--bg-elevated)]"
+            className="p-1 min-w-11 min-h-11 flex items-center justify-center rounded-full hover:bg-[var(--bg-elevated)]"
             aria-label="Clear search"
           >
             <X size={16} weight="regular" className="text-[var(--content-tertiary)]" />

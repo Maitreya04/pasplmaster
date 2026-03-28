@@ -86,7 +86,7 @@ export default function LoginPage(): React.JSX.Element | null {
       </div>
 
       {/* Number pad */}
-      <div className="w-full max-w-[280px]">
+      <div className="w-full max-w-xs">
         <div className="grid grid-cols-3 gap-3">
           {digits.map((d) => (
             <button

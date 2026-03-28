@@ -75,7 +75,7 @@ export function PickCompleteScreen({
         <BigButton
           variant="secondary"
           onClick={() => navigate('/picking')}
-          className="bg-white text-[var(--content-primary)] font-semibold"
+          className="bg-[var(--bg-primary)] text-[var(--content-primary)] font-semibold"
         >
           Done
         </BigButton>
