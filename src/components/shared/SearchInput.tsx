@@ -20,7 +20,7 @@ export function SearchInput({
   autoFocus = true,
   debounceMs = 150,
   leftContent,
-}: SearchInputProps) {
+}: SearchInputProps): React.JSX.Element | null {
   const [localValue, setLocalValue] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);

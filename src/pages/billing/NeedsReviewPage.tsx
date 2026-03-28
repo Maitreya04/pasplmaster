@@ -46,7 +46,7 @@ function OrderCard({
   );
 }
 
-export default function NeedsReviewPage() {
+export default function NeedsReviewPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const { data: overdueOrders, isLoading: overdueLoading } = useOverdueOrders();
   const { data: todaySubmitted, isLoading: todayLoading } = useOrders({

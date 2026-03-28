@@ -31,7 +31,7 @@ interface CartContextValue {
 
 const CartContext = createContext<CartContextValue | null>(null);
 
-export function CartProvider({ children }: { children: ReactNode }) {
+export function CartProvider({ children }: { children: ReactNode }): React.JSX.Element | null {
   const [items, setItems] = useState<CartItemType[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedTransport, setSelectedTransport] = useState<Transport | null>(null);

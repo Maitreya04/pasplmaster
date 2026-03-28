@@ -25,7 +25,7 @@ export function InlineQtyEditor({
   open: controlledOpen,
   onOpenChange,
   className = '',
-}: InlineQtyEditorProps) {
+}: InlineQtyEditorProps): React.JSX.Element | null {
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
   const isEditing = isControlled ? controlledOpen : internalOpen;

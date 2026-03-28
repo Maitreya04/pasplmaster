@@ -33,7 +33,7 @@ const EMPTY_PROGRESS: ImportProgress = {
   failedCount: 0,
 };
 
-export default function UploadPage() {
+export default function UploadPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const toast = useToast();
   const inputRef = useRef<HTMLInputElement>(null);

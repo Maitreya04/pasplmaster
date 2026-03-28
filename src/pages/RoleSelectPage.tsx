@@ -39,7 +39,7 @@ const ROLES = [
   },
 ] as const;
 
-export default function RoleSelectPage() {
+export default function RoleSelectPage(): React.JSX.Element | null {
   const [sheetMode, setSheetMode] = useState<SheetMode>(null);
   const navigate = useNavigate();
   const { selectRole } = useAuth();

@@ -50,7 +50,7 @@ export async function importCustomers(
       !hasVlookup(row),
   );
 
-  const { data: existing } = await supabase.from('customers').select('name');
+  const { data: existing } = await supabase.from('customers').select('name').returns<{name: string}[]>();
   const existingNames = new Set((existing ?? []).map(r => r.name));
 
   const total = dataRows.length;

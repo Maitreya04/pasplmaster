@@ -18,7 +18,7 @@ export function NumberStepper({
   max,
   presets = [1, 2, 5, 10, 25, 50],
   variant = 'default',
-}: NumberStepperProps) {
+}: NumberStepperProps): React.JSX.Element | null {
   const clamp = useCallback(
     (v: number) => {
       let clamped = Math.max(min, v);

@@ -135,7 +135,7 @@ function SearchableCustomerDropdown({
 // ---------------------------------------------------------------------------
 // CartPage
 // ---------------------------------------------------------------------------
-export default function CartPage() {
+export default function CartPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const {

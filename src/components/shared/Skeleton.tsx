@@ -59,7 +59,7 @@ export function Skeleton({
   count = 1,
   lines = 3,
   className = '',
-}: SkeletonProps) {
+}: SkeletonProps): React.JSX.Element | null {
   return (
     <div className={`space-y-4 ${className}`}>
       {Array.from({ length: count }).map((_, i) => {

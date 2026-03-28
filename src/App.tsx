@@ -59,7 +59,7 @@ function RootRedirect() {
   return <Navigate to="/select-role" replace />;
 }
 
-export default function App() {
+export default function App(): React.JSX.Element | null {
   return (
     <Suspense
       fallback={

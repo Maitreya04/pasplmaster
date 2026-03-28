@@ -177,7 +177,7 @@ function OrderDetailSheet({
   );
 }
 
-export default function MyOrdersPage() {
+export default function MyOrdersPage(): React.JSX.Element | null {
   const { userName } = useAuth();
   const { data: orders, isLoading, error } = useOrders({
     salespersonName: userName ?? undefined,

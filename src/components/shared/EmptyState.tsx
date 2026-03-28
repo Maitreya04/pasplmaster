@@ -13,7 +13,7 @@ interface EmptyStateProps {
   action?: EmptyStateAction;
 }
 
-export function EmptyState({ icon: IconCmp, title, description, action }: EmptyStateProps) {
+export function EmptyState({ icon: IconCmp, title, description, action }: EmptyStateProps): React.JSX.Element | null {
   return (
     <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
       <IconCmp size={48} weight="regular" className="text-[var(--content-disabled)] mb-4" />

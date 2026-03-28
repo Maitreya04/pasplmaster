@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { Upload, SignOut } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 
-export default function AdminPage() {
+export default function AdminPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const { switchRole } = useAuth();
 

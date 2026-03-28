@@ -125,7 +125,7 @@ const VALID_STATUSES: OrderStatus[] = [
   'flagged',
 ];
 
-export default function DashboardPage() {
+export default function DashboardPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const statusParam = searchParams.get('status') as OrderStatus | null;
@@ -155,7 +155,7 @@ export default function DashboardPage() {
       approved: 0,
       picking: 0,
       completed: 0,
-      dispatched: 0,
+      rejected: 0,
       flagged: 0,
     };
     for (const o of list) {

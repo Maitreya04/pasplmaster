@@ -21,7 +21,7 @@ interface EditableItem extends OrderItem {
   qty_approved: number;
 }
 
-export default function ReviewPage() {
+export default function ReviewPage(): React.JSX.Element | null {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();

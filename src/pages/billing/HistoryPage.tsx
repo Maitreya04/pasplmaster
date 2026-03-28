@@ -32,7 +32,7 @@ const STATUS_OPTIONS: { value: OrderStatus | 'all'; label: string }[] = [
   { value: 'picking', label: 'Picking' },
   { value: 'completed', label: 'Completed' },
   { value: 'flagged', label: 'Flagged' },
-  { value: 'dispatched', label: 'Dispatched' },
+  { value: 'rejected', label: 'Rejected' },
 ];
 
 function OrderCard({
@@ -71,7 +71,7 @@ function OrderCard({
   );
 }
 
-export default function HistoryPage() {
+export default function HistoryPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>('7');

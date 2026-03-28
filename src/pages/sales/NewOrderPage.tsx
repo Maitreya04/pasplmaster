@@ -1,4 +1,4 @@
-import { useState, useMemo, useDeferredValue, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useMemo, useDeferredValue, useRef, useEffect, memo, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Minus, ShoppingCart, CaretRight, CaretDown, CurrencyInr, Check, X } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
@@ -246,8 +246,16 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
     queryKey: ['customer_top_items_trending'],
     staleTime: 10 * 60 * 1000,
     queryFn: async () => {
-      const { data, error } = await (supabase
-        .from('customer_top_items') as any)
+      const query = supabase.from('customer_top_items') as unknown as {
+        select: (s: string) => {
+          group: (g: string) => {
+            order: (o: string, opts: { ascending: boolean }) => {
+              limit: (l: number) => Promise<{ data: any[] | null; error: any }>
+            }
+          }
+        }
+      };
+      const { data, error } = await query
         .select('item_name, total_order_count:order_count.sum()')
         .group('item_name')
         .order('total_order_count', { ascending: false })
@@ -717,7 +725,7 @@ function AliasCode({
   );
 }
 
-function ItemRow({
+const ItemRow = memo(function ItemRow({
   result,
   query,
   onAdd,
@@ -806,7 +814,15 @@ function ItemRow({
       )}
     </li>
   );
-}
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.result.item.id === nextProps.result.item.id &&
+    prevProps.query === nextProps.query &&
+    prevProps.editingItemId === nextProps.editingItemId &&
+    prevProps.inCartQty === nextProps.inCartQty &&
+    prevProps.price === nextProps.price
+  );
+});
 
 // ---------------------------------------------------------------------------
 // ResultSection
@@ -869,7 +885,7 @@ function ResultSection({
 // ---------------------------------------------------------------------------
 // NewOrderPage
 // ---------------------------------------------------------------------------
-export default function NewOrderPage() {
+export default function NewOrderPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const { data: items = [], isLoading: itemsLoading } = useItems();
   const {
@@ -931,27 +947,32 @@ export default function NewOrderPage() {
   const searchIndex = useMemo(() => buildSearchIndex(items), [items]);
 
   const searchResults = useMemo(() => {
-    if (deferredQuery) return searchItems(deferredQuery, searchIndex, selectedBrand, selectedGroup);
-    // Brand chip selected but no text: show items in that group via index
-    if (selectedBrand) {
+    let results: SearchResult[] = [];
+    if (deferredQuery) {
+      results = searchItems(deferredQuery, searchIndex, selectedBrand, selectedGroup);
+    } else if (selectedBrand) {
       const brandSet = searchIndex.brandGroups.get(selectedBrand);
-      if (!brandSet) return [];
-      let indices = [...brandSet];
-      if (selectedGroup) {
-        const groupSet = searchIndex.parentGroups.get(selectedGroup);
-        if (!groupSet) return [];
-        indices = indices.filter(i => groupSet.has(i));
+      if (brandSet) {
+        let indices = [...brandSet];
+        if (selectedGroup) {
+          const groupSet = searchIndex.parentGroups.get(selectedGroup);
+          if (groupSet) {
+            indices = indices.filter(i => groupSet.has(i));
+          } else {
+            indices = [];
+          }
+        }
+        results = indices
+          .slice(0, 20)
+          .map(i => ({
+            item: searchIndex.all[i].item,
+            score: 100,
+            matchType: 'exact-name' as const,
+            matchedField: 'name' as const,
+          }));
       }
-      return indices
-        .slice(0, 20)
-        .map(i => ({
-          item: searchIndex.all[i].item,
-          score: 100,
-          matchType: 'exact-name' as const,
-          matchedField: 'name' as const,
-        }));
     }
-    return [];
+    return results;
   }, [deferredQuery, searchIndex, selectedBrand, selectedGroup]);
 
   // When browsing a brand with no query there's no meaningful "best match" split

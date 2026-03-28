@@ -82,7 +82,7 @@ function loadFromStorage() {
   };
 }
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }): React.JSX.Element | null {
   const [isAuthenticated, setIsAuthenticated] = useState(() => loadFromStorage().isAuthenticated);
   const [role, setRole] = useState<Role>(() => loadFromStorage().role);
   const [userName, setUserName] = useState<string | null>(() => loadFromStorage().userName);

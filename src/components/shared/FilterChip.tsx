@@ -17,7 +17,7 @@ export function FilterChip({
   count,
   removable,
   onRemove,
-}: FilterChipProps) {
+}: FilterChipProps): React.JSX.Element | null {
   return (
     <button
       onClick={onClick}

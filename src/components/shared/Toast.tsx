@@ -65,7 +65,7 @@ interface ToastContainerProps {
   onDismiss: (id: string) => void;
 }
 
-export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
+export function ToastContainer({ toasts, onDismiss }: ToastContainerProps): React.JSX.Element | null {
   if (toasts.length === 0) return null;
 
   return (

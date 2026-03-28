@@ -35,9 +35,9 @@ export function usePendingItems(options?: UsePendingItemsOptions) {
         q = q.eq('customer_id', opts.customerId);
       }
 
-      const { data, error } = await q;
+      const { data, error } = await q.returns<PendingItem[]>();
       if (error) throw error;
-      return data as PendingItem[];
+      return data ?? [];
     },
     staleTime: 0,
     enabled,

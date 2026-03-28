@@ -67,7 +67,7 @@ function PendingCard({ item }: { item: PendingItem }) {
   );
 }
 
-export default function PendingPage() {
+export default function PendingPage(): React.JSX.Element | null {
   const { data, isLoading, error } = usePendingItems({ status: 'pending' });
 
   const { totalCount, customerCount } = useMemo(() => {

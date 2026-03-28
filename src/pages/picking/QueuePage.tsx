@@ -46,7 +46,7 @@ function sortOrders(orders: Order[]): Order[] {
   });
 }
 
-export default function QueuePage() {
+export default function QueuePage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();

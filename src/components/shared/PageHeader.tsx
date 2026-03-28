@@ -7,7 +7,7 @@ interface PageHeaderProps {
   action?: ReactNode;
 }
 
-export function PageHeader({ title, onBack, action }: PageHeaderProps) {
+export function PageHeader({ title, onBack, action }: PageHeaderProps): React.JSX.Element | null {
   return (
     <header
       className="

@@ -86,7 +86,7 @@ function uiStateFromDb(oi: OrderItem): PickItemUiState {
   if (oi.state === 'picked') return 'picked';
   if (oi.state === 'flagged') return 'flagged';
   if (oi.scan_result) {
-    const res = oi.scan_result as Record<string, any>;
+    const res = oi.scan_result;
     if (res?.isMatch) return 'matched';
     if ((res?.confidence || 0) >= 35) return 'warning';
     return 'error';
@@ -94,7 +94,7 @@ function uiStateFromDb(oi: OrderItem): PickItemUiState {
   return 'pending';
 }
 
-export default function PickPage() {
+export default function PickPage(): React.JSX.Element | null {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -108,9 +108,15 @@ export default function PickPage() {
 
   const [itemMeta, setItemMeta] = useState<ItemMetaMap>(new Map());
 
+  // Prevent refetching item metadata on every order state change (like picks/scans)
+  const itemIdsStr = useMemo(() => {
+    if (!order?.items) return '';
+    return [...new Set(order.items.map(oi => oi.item_id))].sort().join(',');
+  }, [order?.items]);
+
   useEffect(() => {
-    if (!order?.items?.length) return;
-    const ids = order.items.map((oi) => oi.item_id);
+    if (!itemIdsStr) return;
+    const ids = itemIdsStr.split(',').map(Number);
     supabase
       .from('items')
       .select('id,mrp,main_group,parent_group,alias1')
@@ -128,11 +134,25 @@ export default function PickPage() {
         }
         setItemMeta(m);
       });
-  }, [order?.items]);
+  }, [itemIdsStr]);
 
   const [localItems, setLocalItems] = useState<Map<number, Partial<PickItemLocal>>>(
     new Map(),
   );
+
+  // Track localItems for unmount cleanup
+  const localItemsRef = useRef(localItems);
+  useEffect(() => {
+    localItemsRef.current = localItems;
+  }, [localItems]);
+
+  useEffect(() => {
+    return () => {
+      localItemsRef.current.forEach((item) => {
+        if (item.thumbnailUrl) URL.revokeObjectURL(item.thumbnailUrl);
+      });
+    };
+  }, []);
   const [flagTarget, setFlagTarget] = useState<number | null>(null);
   const [flagReason, setFlagReason] = useState<FlagReason | ''>('');
   const [flagNotes, setFlagNotes] = useState('');
@@ -359,6 +379,13 @@ export default function PickPage() {
     if (!file || !liveScanTarget) return;
 
     const itemId = liveScanTarget.id;
+    
+    // Cleanup previous object URL to prevent memory leaks
+    const existing = localItems.get(itemId);
+    if (existing?.thumbnailUrl) {
+      URL.revokeObjectURL(existing.thumbnailUrl);
+    }
+
     const thumbnailUrl = URL.createObjectURL(file);
     updateLocalItem(itemId, { uiState: 'scanning', thumbnailUrl });
 
@@ -372,12 +399,21 @@ export default function PickPage() {
         mrp: meta?.mrp ?? undefined,
       });
 
-      const result = {
+      const result: ScanResult = {
         isMatch: aiResult.match,
         confidence: aiResult.confidence,
-        extractedCode: aiResult.extracted_code ?? '',
-        extractedDescription: aiResult.extracted_description ?? '',
+        extractedCode: aiResult.extracted_code ?? undefined,
+        extractedDescription: aiResult.extracted_description ?? undefined,
         reason: aiResult.reason,
+        scannedText: aiResult.extracted_description ?? '',
+        matchedAgainst: liveScanTarget.item_name || '',
+        matchStrategy: 'ai_verify',
+        ocrExtracted: {
+          partNumber: aiResult.extracted_code ?? null,
+          mrp: null
+        },
+        method: 'ai_verify',
+        timestamp: new Date().toISOString()
       };
 
       let uiState: PickItemUiState = 'error';
@@ -386,13 +422,13 @@ export default function PickPage() {
 
       updateLocalItem(itemId, {
         uiState,
-        scanResult: result as any,
+        scanResult: result,
         thumbnailUrl
       });
 
       saveScanResultMutation.mutate({
         itemId,
-        scanResult: result as any
+        scanResult: result
       });
     } catch (err) {
       console.error(err);
@@ -840,7 +876,7 @@ function PickItemCard({
             )}
             {item.uiState === 'matched' && item.scanResult && (
               <span className="text-xs text-[var(--content-positive)] truncate max-w-[200px] flex items-center gap-1">
-                ✓ Verified {(item.scanResult as any).extractedCode && `- ${(item.scanResult as any).extractedCode}`} {(item.scanResult as any).reason && `- ${(item.scanResult as any).reason}`}
+                ✓ Verified {item.scanResult.extractedCode && `- ${item.scanResult.extractedCode}`} {item.scanResult.reason && `- ${item.scanResult.reason}`}
               </span>
             )}
           </div>
@@ -850,6 +886,7 @@ function PickItemCard({
             <img
               src={item.thumbnailUrl}
               alt="Scan"
+              loading="lazy"
               className="mt-2 h-12 rounded-lg object-cover"
             />
           )}
@@ -860,10 +897,10 @@ function PickItemCard({
               <Warning size={16} weight="bold" className="shrink-0 mt-0.5" />
               <span className="leading-tight">
                 <span className="font-semibold block mb-0.5 text-[var(--content-warning)]">Verification Warning</span>
-                {(item.scanResult as any).reason || 'Item mismatch'}
-                {(item.scanResult as any).extractedDescription && (
+                {item.scanResult.reason || 'Item mismatch'}
+                {item.scanResult.extractedDescription && (
                   <span className="block mt-1 text-[var(--content-tertiary)]">
-                    Read: {(item.scanResult as any).extractedDescription}
+                    Read: {item.scanResult.extractedDescription}
                   </span>
                 )}
               </span>
@@ -874,10 +911,10 @@ function PickItemCard({
               <Warning size={16} weight="bold" className="shrink-0 mt-0.5" />
               <span className="leading-tight">
                 <span className="font-semibold block mb-0.5 text-[var(--content-negative)]">Verification Failed</span>
-                {(item.scanResult as any).reason || 'Item mismatch or barcode not recognized'}
-                {(item.scanResult as any).extractedDescription && (
+                {item.scanResult.reason || 'Item mismatch or barcode not recognized'}
+                {item.scanResult.extractedDescription && (
                   <span className="block mt-1 text-[var(--content-tertiary)]">
-                    Read: {(item.scanResult as any).extractedDescription}
+                    Read: {item.scanResult.extractedDescription}
                   </span>
                 )}
               </span>

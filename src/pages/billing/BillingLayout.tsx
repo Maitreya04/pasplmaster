@@ -15,7 +15,7 @@ const NAV_ITEMS = [
   { icon: ClockCounterClockwise, label: 'History', path: '/billing/history' },
 ];
 
-export default function BillingLayout() {
+export default function BillingLayout(): React.JSX.Element | null {
   const location = useLocation();
   const navigate = useNavigate();
 

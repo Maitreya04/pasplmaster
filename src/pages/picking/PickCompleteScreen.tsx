@@ -16,7 +16,7 @@ export function PickCompleteScreen({
   pickedCount,
   flaggedCount,
   totalCount,
-}: PickCompleteScreenProps) {
+}: PickCompleteScreenProps): React.JSX.Element | null {
   const navigate = useNavigate();
   const hasFlagged = flaggedCount > 0;
 

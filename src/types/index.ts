@@ -39,7 +39,7 @@ export type OrderStatus =
   | 'approved'
   | 'picking'
   | 'completed'
-  | 'dispatched'
+  | 'rejected'
   | 'flagged';
 export type OrderPriority = 'normal' | 'urgent';
 export type OrderItemState = 'pending' | 'picked' | 'flagged';
@@ -127,6 +127,9 @@ export interface ScanResult {
   signals?: ScanSignal[];
   method?: 'local_match' | 'ai_verify' | 'manual';
   timestamp: string;
+  extractedCode?: string;
+  extractedDescription?: string;
+  reason?: string;
 }
 
 export interface OrderWithItems extends Order {

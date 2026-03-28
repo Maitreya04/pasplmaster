@@ -8,7 +8,7 @@ const NAV_ITEMS = [
   { icon: ListChecks, label: 'Active Pick', path: '/picking' },
 ];
 
-export default function PickingLayout() {
+export default function PickingLayout(): React.JSX.Element | null {
   const location = useLocation();
   const isPickPage = location.pathname.startsWith('/picking/pick/');
 

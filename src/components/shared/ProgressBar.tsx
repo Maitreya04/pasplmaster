@@ -15,7 +15,7 @@ const colorMap: Record<Segment['color'], string> = {
   gray: 'bg-[var(--border-subtle)]',
 };
 
-export function ProgressBar({ segments, total, className = '' }: ProgressBarProps) {
+export function ProgressBar({ segments, total, className = '' }: ProgressBarProps): React.JSX.Element | null {
   if (total === 0) return null;
 
   return (

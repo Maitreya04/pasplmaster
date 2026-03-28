@@ -46,7 +46,7 @@ export function useItems() {
   return useQuery<Item[]>({
     queryKey: ITEMS_QUERY_KEY,
     queryFn: fetchAllItems,
-    staleTime: 30 * 60 * 1000,
+    staleTime: Number.POSITIVE_INFINITY,
   });
 }
 
@@ -55,6 +55,6 @@ export function prefetchItems() {
   void queryClient.prefetchQuery({
     queryKey: ITEMS_QUERY_KEY,
     queryFn: fetchAllItems,
-    staleTime: 30 * 60 * 1000,
+    staleTime: Number.POSITIVE_INFINITY,
   });
 }

@@ -81,7 +81,7 @@ export async function importStock(
       !hasVlookup(row),
   );
 
-  const { data: existing } = await supabase.from('items').select('name');
+  const { data: existing } = await supabase.from('items').select('name').returns<{name: string}[]>();
   const existingNames = new Set((existing ?? []).map(r => r.name));
 
   const total = dataRows.length;

@@ -32,7 +32,7 @@ export function BigButton({
   children,
   className = '',
   ...rest
-}: BigButtonProps) {
+}: BigButtonProps): React.JSX.Element | null {
   return (
     <button
       disabled={disabled || loading}

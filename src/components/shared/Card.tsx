@@ -11,7 +11,7 @@ export function Card({
   className = '',
   onClick,
   ...rest
-}: CardProps) {
+}: CardProps): React.JSX.Element | null {
   return (
     <div
       role={pressable ? 'button' : undefined}

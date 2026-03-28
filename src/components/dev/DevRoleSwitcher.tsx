@@ -20,7 +20,7 @@ const ROLE_LABEL: Record<RoleKey, string> = {
   admin: 'Admin',
 };
 
-export function DevRoleSwitcher() {
+export function DevRoleSwitcher(): React.JSX.Element | null {
   const { isAuthenticated, role, selectRole } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);

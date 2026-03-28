@@ -12,7 +12,7 @@ const NAV_ITEMS = [
   { icon: ListBullets, label: 'My Orders', path: '/sales/orders' },
 ];
 
-export default function SalesLayout() {
+export default function SalesLayout(): React.JSX.Element | null {
   useEffect(() => { prefetchItems(); }, []);
 
   return (

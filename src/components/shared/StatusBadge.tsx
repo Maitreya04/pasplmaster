@@ -3,7 +3,7 @@ type Status =
   | 'approved'
   | 'picking'
   | 'completed'
-  | 'dispatched'
+  | 'rejected'
   | 'flagged'
   | 'urgent';
 
@@ -49,12 +49,12 @@ const statusConfig: Record<Status, StatusStyle> = {
     bg: 'bg-[var(--bg-positive-subtle)]',
     border: 'border-[var(--border-positive)]',
   },
-  dispatched: {
-    label: 'Dispatched',
-    dot: 'bg-[var(--content-accent)]',
-    text: 'text-[var(--content-accent)]',
-    bg: 'bg-[var(--bg-accent-subtle)]',
-    border: 'border-[var(--border-accent)]',
+  rejected: {
+    label: 'Rejected',
+    dot: 'bg-[var(--bg-negative)]',
+    text: 'text-[var(--bg-negative)]',
+    bg: 'bg-[var(--bg-negative-subtle)]',
+    border: 'border-[var(--border-negative)]',
   },
   flagged: {
     label: 'Flagged',
@@ -72,7 +72,7 @@ const statusConfig: Record<Status, StatusStyle> = {
   },
 };
 
-export function StatusBadge({ status, className = '' }: StatusBadgeProps) {
+export function StatusBadge({ status, className = '' }: StatusBadgeProps): React.JSX.Element | null {
   const config = statusConfig[status];
   const isUrgent = status === 'urgent';
 

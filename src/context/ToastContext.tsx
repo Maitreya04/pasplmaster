@@ -30,7 +30,7 @@ const ToastContext = createContext<ToastAPI | null>(null);
 
 const AUTO_DISMISS_MS = 3000;
 
-export function ToastProvider({ children }: { children: ReactNode }) {
+export function ToastProvider({ children }: { children: ReactNode }): React.JSX.Element | null {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const counterRef = useRef(0);
   const timeoutRefs = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());

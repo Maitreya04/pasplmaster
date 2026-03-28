@@ -226,7 +226,7 @@ function RecentOrderCard({ order }: { order: Order }) {
   );
 }
 
-export default function SalesHome() {
+export default function SalesHome(): React.JSX.Element | null {
   const { userName } = useAuth();
   const { data, isLoading } = useSalesDashboard(userName);
 

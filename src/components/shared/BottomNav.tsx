@@ -11,7 +11,7 @@ interface BottomNavProps {
   items: BottomNavItem[];
 }
 
-export function BottomNav({ items }: BottomNavProps) {
+export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
   const location = useLocation();
 
   return (

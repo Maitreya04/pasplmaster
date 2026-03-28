@@ -3,7 +3,7 @@ import { useNavigate, Navigate } from 'react-router-dom';
 import { Backspace } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 
-export default function LoginPage() {
+export default function LoginPage(): React.JSX.Element | null {
   const [code, setCode] = useState('');
   const [error, setError] = useState(false);
   const [checking, setChecking] = useState(false);
