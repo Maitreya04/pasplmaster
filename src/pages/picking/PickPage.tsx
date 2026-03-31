@@ -352,7 +352,7 @@ export default function PickPage(): React.JSX.Element | null {
           p_order_id: order.id,
           p_claim_id: claimId,
           p_user_id: userId,
-          p_has_flagged_items: hasFlagged,
+          p_has_flags: hasFlagged,
         });
         if (error) throw error;
       } else {
