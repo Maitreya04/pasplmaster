@@ -221,6 +221,17 @@ export default function QueuePage(): React.JSX.Element | null {
                   {pushAlerts.error}
                 </p>
               )}
+              <div className="mt-3 rounded-xl bg-[var(--bg-primary)]/60 border border-[var(--border-subtle)] px-3 py-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--content-tertiary)]">
+                  Push diagnostics
+                </p>
+                <p className="mt-1 text-[11px] text-[var(--content-secondary)]">
+                  supported: {String(pushAlerts.diagnostics.supported)} · standalone: {String(pushAlerts.diagnostics.standalone)} · permission: {pushAlerts.diagnostics.permission}
+                </p>
+                <p className="text-[11px] text-[var(--content-secondary)]">
+                  sw controller: {String(pushAlerts.diagnostics.serviceWorkerController)} · existing sub: {String(pushAlerts.diagnostics.hasExistingSubscription)}
+                </p>
+              </div>
             </div>
             {pushAlerts.supported && (
               pushAlerts.enabled ? (

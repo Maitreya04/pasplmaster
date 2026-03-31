@@ -10,7 +10,11 @@ import {
   registerPushServiceWorker,
   vapidPublicKeyToUint8Array,
 } from '../lib/push';
-import type { PushCapabilityState, PushSubscriptionRecord } from '../types';
+import type {
+  PushCapabilityState,
+  PushDiagnostics,
+  PushSubscriptionRecord,
+} from '../types';
 
 interface UsePickerPushNotificationsOptions {
   role: 'sales' | 'billing' | 'picking' | 'admin' | null;
@@ -37,6 +41,18 @@ export function usePickerPushNotifications({
     enabled: false,
     loading: false,
     error: null,
+  });
+  const [diagnostics, setDiagnostics] = useState<PushDiagnostics>({
+    supported: isPushSupported(),
+    standalone: isStandaloneDisplayMode(),
+    permission: getNotificationPermission(),
+    serviceWorkerController:
+      typeof navigator !== 'undefined' && 'serviceWorker' in navigator
+        ? Boolean(navigator.serviceWorker.controller)
+        : false,
+    hasExistingSubscription: false,
+    userAgent:
+      typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
   });
   const touchTimeoutRef = useRef<number | null>(null);
 
@@ -74,6 +90,12 @@ export function usePickerPushNotifications({
 
   const refreshState = useCallback(async () => {
     if (!isPushSupported()) {
+      setDiagnostics((prev) => ({
+        ...prev,
+        supported: false,
+        standalone: isStandaloneDisplayMode(),
+        permission: getNotificationPermission(),
+      }));
       setState({
         supported: false,
         standalone: isStandaloneDisplayMode(),
@@ -89,6 +111,18 @@ export function usePickerPushNotifications({
       const subscription = await getExistingPushSubscription();
       const permission = getNotificationPermission();
       const enabled = await syncSubscription(subscription);
+      setDiagnostics({
+        supported: true,
+        standalone: isStandaloneDisplayMode(),
+        permission,
+        serviceWorkerController:
+          typeof navigator !== 'undefined' && 'serviceWorker' in navigator
+            ? Boolean(navigator.serviceWorker.controller)
+            : false,
+        hasExistingSubscription: Boolean(subscription),
+        userAgent:
+          typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+      });
       setState((prev) => ({
         ...prev,
         supported: true,
@@ -99,6 +133,16 @@ export function usePickerPushNotifications({
         error: null,
       }));
     } catch (error) {
+      setDiagnostics((prev) => ({
+        ...prev,
+        supported: true,
+        standalone: isStandaloneDisplayMode(),
+        permission: getNotificationPermission(),
+        serviceWorkerController:
+          typeof navigator !== 'undefined' && 'serviceWorker' in navigator
+            ? Boolean(navigator.serviceWorker.controller)
+            : false,
+      }));
       setState((prev) => ({
         ...prev,
         supported: true,
@@ -185,6 +229,16 @@ export function usePickerPushNotifications({
 
     try {
       const permission = await Notification.requestPermission();
+      setDiagnostics((prev) => ({
+        ...prev,
+        supported: true,
+        standalone: isStandaloneDisplayMode(),
+        permission,
+        serviceWorkerController:
+          typeof navigator !== 'undefined' && 'serviceWorker' in navigator
+            ? Boolean(navigator.serviceWorker.controller)
+            : false,
+      }));
       if (permission !== 'granted') {
         const error =
           permission === 'denied'
@@ -214,6 +268,18 @@ export function usePickerPushNotifications({
       }
 
       await syncSubscription(subscription);
+      setDiagnostics({
+        supported: true,
+        standalone: true,
+        permission,
+        serviceWorkerController:
+          typeof navigator !== 'undefined' && 'serviceWorker' in navigator
+            ? Boolean(navigator.serviceWorker.controller)
+            : false,
+        hasExistingSubscription: Boolean(subscription),
+        userAgent:
+          typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+      });
       setState({
         supported: true,
         standalone: true,
@@ -225,6 +291,16 @@ export function usePickerPushNotifications({
       return { ok: true, error: null } satisfies PushActionResult;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to enable alerts';
+      setDiagnostics((prev) => ({
+        ...prev,
+        supported: isPushSupported(),
+        standalone: isStandaloneDisplayMode(),
+        permission: getNotificationPermission(),
+        serviceWorkerController:
+          typeof navigator !== 'undefined' && 'serviceWorker' in navigator
+            ? Boolean(navigator.serviceWorker.controller)
+            : false,
+      }));
       setState((prev) => ({
         ...prev,
         standalone: isStandaloneDisplayMode(),
@@ -286,6 +362,7 @@ export function usePickerPushNotifications({
 
   return {
     ...state,
+    diagnostics,
     enable,
     disable,
     refresh: refreshState,
