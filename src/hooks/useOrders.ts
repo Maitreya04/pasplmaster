@@ -25,6 +25,8 @@ interface UseOrdersOptions {
   sort?: 'newest-first' | 'oldest-first';
 }
 
+const LIVE_REFRESH_MS = 5_000;
+
 function getTodayStartIso(): string {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -85,6 +87,10 @@ export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
       return data as Order[];
     },
     staleTime: 0,
+    refetchInterval: (query) => (query.state.data !== undefined ? LIVE_REFRESH_MS : false),
+    refetchIntervalInBackground: false,
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
   });
 
   // Realtime subscription: invalidate orders when table changes.
