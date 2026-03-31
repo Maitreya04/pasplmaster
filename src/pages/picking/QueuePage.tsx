@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Package,
@@ -9,9 +9,12 @@ import {
   SpinnerGap,
   Warning,
   User,
+  Bell,
+  BellSlash,
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
+import { usePickerPushNotifications } from '../../hooks/usePickerPushNotifications';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import {
@@ -48,9 +51,13 @@ function sortOrders(orders: OrderWithClaimInfo[]): OrderWithClaimInfo[] {
 
 export default function QueuePage(): React.JSX.Element | null {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { userId, userName } = useAuth();
+  const { role, userId, userName } = useAuth();
+  const autoClaimAttemptRef = useRef<string | null>(null);
+  const claimOrderIdParam = searchParams.get('claimOrderId');
+  const autoClaimOrderId = claimOrderIdParam ? Number.parseInt(claimOrderIdParam, 10) : null;
 
   const {
     available,
@@ -62,11 +69,16 @@ export default function QueuePage(): React.JSX.Element | null {
     stage: 'picking',
     workflowStatus: ['approved', 'picking'],
   });
+  const pushAlerts = usePickerPushNotifications({ role, userId, userName });
 
   const availableOrders = useMemo(
     () => sortOrders([...available, ...stale]),
     [available, stale],
   );
+
+  const clearNotificationIntent = useCallback(() => {
+    navigate('/picking', { replace: true });
+  }, [navigate]);
 
   const claimMutation = useMutation({
     mutationFn: async (orderId: number) => {
@@ -79,24 +91,95 @@ export default function QueuePage(): React.JSX.Element | null {
       if (error) throw error;
       const result = data as { success: boolean, reason?: string, claimed_by?: string };
       if (!result.success) {
-        throw new Error(`ALREADY_CLAIMED:${result.claimed_by || 'someone'}`);
+        if (result.reason === 'already_claimed') {
+          throw new Error(`ALREADY_CLAIMED:${result.claimed_by || 'someone'}`);
+        }
+        throw new Error(result.reason || 'CLAIM_FAILED');
       }
+      return orderId;
     },
-    onSuccess: (_data, orderId) => {
+    onSuccess: (claimedOrderId) => {
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-      navigate(`/picking/pick/${orderId}`);
+      navigate(`/picking/pick/${claimedOrderId}`, { replace: true });
     },
     onError: (err) => {
       const msg = err instanceof Error ? err.message : '';
       if (msg.startsWith('ALREADY_CLAIMED:')) {
         const pickerName = msg.replace('ALREADY_CLAIMED:', '');
         toast.error(`This order is already being picked by ${pickerName}. Please choose another.`);
+      } else if (msg === 'Missing orderId or userId') {
+        toast.error('Select a picker name before claiming orders.');
+      } else if (msg === 'Order not found') {
+        toast.error('This order is no longer available for picking.');
       } else {
         toast.error('Failed to claim order.');
       }
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+      if (claimOrderIdParam) {
+        clearNotificationIntent();
+      }
     },
   });
+
+  useEffect(() => {
+    if (!claimOrderIdParam) {
+      autoClaimAttemptRef.current = null;
+    }
+  }, [claimOrderIdParam]);
+
+  useEffect(() => {
+    if (!claimOrderIdParam || !userId) return;
+    if (!Number.isInteger(autoClaimOrderId) || (autoClaimOrderId ?? 0) <= 0) {
+      toast.error('That picker alert is no longer valid.');
+      clearNotificationIntent();
+      return;
+    }
+    const claimTargetId = autoClaimOrderId as number;
+    if (autoClaimAttemptRef.current === claimOrderIdParam || claimMutation.isPending) return;
+
+    if (myActive.length > 0) {
+      const existingClaim = myActive.find((order) => order.id === claimTargetId);
+      autoClaimAttemptRef.current = claimOrderIdParam;
+      if (existingClaim) {
+        navigate(`/picking/pick/${existingClaim.id}`, { replace: true });
+      } else {
+        toast.info('Finish or release your current pick before claiming another order.');
+        clearNotificationIntent();
+      }
+      return;
+    }
+
+    autoClaimAttemptRef.current = claimOrderIdParam;
+    claimMutation.mutate(claimTargetId);
+  }, [
+    autoClaimOrderId,
+    claimMutation.isPending,
+    claimMutation.mutate,
+    claimOrderIdParam,
+    clearNotificationIntent,
+    myActive,
+    navigate,
+    toast,
+    userId,
+  ]);
+
+  const handleEnableAlerts = async () => {
+    const enabled = await pushAlerts.enable();
+    if (enabled) {
+      toast.success('Picker alerts enabled on this device');
+    } else {
+      toast.error('Failed to enable picker alerts.');
+    }
+  };
+
+  const handleDisableAlerts = async () => {
+    const disabled = await pushAlerts.disable();
+    if (disabled) {
+      toast.info('Picker alerts turned off on this device');
+    } else {
+      toast.error('Failed to disable picker alerts.');
+    }
+  };
 
   return (
     <div className="min-h-screen">
@@ -113,6 +196,60 @@ export default function QueuePage(): React.JSX.Element | null {
       />
 
       <div className="p-4 space-y-6">
+        <Card className="border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <Bell size={18} weight="fill" className="text-[var(--content-warning)]" />
+                <p className="font-semibold text-[var(--content-primary)]">
+                  Picker alerts
+                </p>
+              </div>
+              <p className="text-sm text-[var(--content-secondary)]">
+                {pushAlerts.supported
+                  ? pushAlerts.enabled
+                    ? 'This device will receive browser alerts when billing approves an order.'
+                    : pushAlerts.permission === 'denied'
+                      ? 'Browser notifications are blocked on this device. Re-enable them in browser settings to receive picker alerts.'
+                      : 'Turn on alerts on this device to receive new ready-to-pick orders.'
+                  : 'This browser does not support push notifications. Queue updates will still appear live in the app.'}
+              </p>
+              {pushAlerts.error && (
+                <p className="mt-2 text-xs text-[var(--content-negative)]">
+                  {pushAlerts.error}
+                </p>
+              )}
+            </div>
+            {pushAlerts.supported && (
+              pushAlerts.enabled ? (
+                <button
+                  type="button"
+                  onClick={handleDisableAlerts}
+                  disabled={pushAlerts.loading}
+                  className="min-h-11 px-4 rounded-xl text-sm font-semibold border border-[var(--border-warning)] text-[var(--content-warning)] bg-[var(--bg-primary)] disabled:opacity-50"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <BellSlash size={16} weight="bold" />
+                    {pushAlerts.loading ? 'Updating…' : 'Disable'}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleEnableAlerts}
+                  disabled={pushAlerts.loading || !userName}
+                  className="min-h-11 px-4 rounded-xl text-sm font-semibold bg-[var(--bg-warning)] text-[var(--content-primary)] disabled:opacity-50"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <Bell size={16} weight="fill" />
+                    {pushAlerts.loading ? 'Enabling…' : 'Enable Alerts'}
+                  </span>
+                </button>
+              )
+            )}
+          </div>
+        </Card>
+
         {/* My Active Picks — prominent amber banners */}
         {myActive.length > 0 && (
           <section className="space-y-3">

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, CheckCircle, XCircle, Hourglass, Warning } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
+import { sendPickerReadyNotification } from '../../lib/pickerPush';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { useAuth } from '../../context/AuthContext';
@@ -190,6 +191,7 @@ export default function ReviewPage(): React.JSX.Element | null {
       if (!order) throw new Error('No order');
       const reviewer = userName || 'Billing';
       const resolvingFlags = order.workflow_status === 'flagged';
+      const approvedAt = new Date().toISOString();
 
       // Update each remaining item's qty_approved (and price / flags)
       for (const item of visibleItems) {
@@ -276,10 +278,25 @@ export default function ReviewPage(): React.JSX.Element | null {
           orderUpdate.priority = 'normal';
         } else {
           orderUpdate.workflow_status = 'approved';
-          orderUpdate.approved_at = new Date().toISOString();
+          orderUpdate.approved_at = approvedAt;
         }
 
         await supabase.from('orders').update(orderUpdate).eq('id', order.id);
+      }
+
+      if (!resolvingFlags) {
+        try {
+          await sendPickerReadyNotification({
+            eventType: 'order_ready_to_pick',
+            orderId: order.id,
+            orderNumber: order.order_number,
+            customerName: order.customer_name,
+            priority: order.priority,
+            approvedAt,
+          });
+        } catch (pushError) {
+          console.error('Failed to send picker push notification', pushError);
+        }
       }
     },
     onSuccess: () => {

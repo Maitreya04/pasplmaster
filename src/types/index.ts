@@ -155,6 +155,7 @@ export interface AuthState {
 // ─── Work Claims System Types ───────────────────────────────
 
 export type UserRole = 'sales' | 'billing' | 'picking' | 'admin';
+export type NotificationEventType = 'order_ready_to_pick';
 
 export interface AppUser {
   id: number;
@@ -196,4 +197,37 @@ export interface OrderEvent {
 /** Order enriched with its active claim info (used by queue views) */
 export interface OrderWithClaim extends Order {
   active_claim?: WorkClaim | null;
+}
+
+export interface PushSubscriptionRecord {
+  id: number;
+  user_id: number | null;
+  user_name: string | null;
+  role: UserRole;
+  device_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  enabled: boolean;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PushCapabilityState {
+  supported: boolean;
+  permission: NotificationPermission;
+  enabled: boolean;
+  loading: boolean;
+  error: string | null;
+}
+
+export interface PickerPushPayload {
+  type: NotificationEventType;
+  orderId: number;
+  orderNumber: string;
+  customerName: string;
+  priority: OrderPriority;
+  url: string;
+  approvedAt: string | null;
 }

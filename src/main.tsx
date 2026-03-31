@@ -6,8 +6,11 @@ import { Analytics } from '@vercel/analytics/react';
 import { queryClient } from './lib/queryClient';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
+import { registerPushServiceWorker } from './lib/push';
 import './index.css';
 import App from './App';
+
+void registerPushServiceWorker().catch(() => undefined);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
