@@ -29,6 +29,31 @@ interface PushActionResult {
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_PUSH_VAPID_PUBLIC_KEY as string | undefined;
 
+function describeUnknownError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object') {
+    const candidate = error as Record<string, unknown>;
+    const messageParts = [
+      typeof candidate.message === 'string' ? candidate.message : null,
+      typeof candidate.details === 'string' ? candidate.details : null,
+      typeof candidate.hint === 'string' ? candidate.hint : null,
+      typeof candidate.code === 'string' ? `code=${candidate.code}` : null,
+    ].filter(Boolean);
+
+    if (messageParts.length > 0) {
+      return messageParts.join(' | ');
+    }
+
+    try {
+      return JSON.stringify(candidate);
+    } catch {
+      return 'Unknown error object';
+    }
+  }
+  return 'Unknown error';
+}
+
 export function usePickerPushNotifications({
   role,
   userId,
@@ -58,6 +83,7 @@ export function usePickerPushNotifications({
       typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
   });
   const touchTimeoutRef = useRef<number | null>(null);
+  const currentStepRef = useRef('idle');
 
   const getRegistrationState = useCallback((registration?: ServiceWorkerRegistration | null) => {
     if (!registration) return 'none' as const;
@@ -126,6 +152,7 @@ export function usePickerPushNotifications({
       const subscription = await getExistingPushSubscription();
       const permission = getNotificationPermission();
       const enabled = await syncSubscription(subscription);
+      currentStepRef.current = 'refresh';
       setDiagnostics({
         supported: true,
         standalone: isStandaloneDisplayMode(),
@@ -160,7 +187,7 @@ export function usePickerPushNotifications({
           typeof navigator !== 'undefined' && 'serviceWorker' in navigator
             ? Boolean(navigator.serviceWorker.controller)
             : false,
-        lastError: error instanceof Error ? error.message : 'Failed to refresh alerts',
+        lastError: describeUnknownError(error),
         lastStep: 'refresh-error',
       }));
       setState((prev) => ({
@@ -249,6 +276,7 @@ export function usePickerPushNotifications({
 
     try {
       const permission = await Notification.requestPermission();
+      currentStepRef.current = 'permission-granted';
       setDiagnostics((prev) => ({
         ...prev,
         supported: true,
@@ -277,6 +305,7 @@ export function usePickerPushNotifications({
       }
 
       const registration = await registerPushServiceWorker();
+      currentStepRef.current = 'service-worker-registered';
       setDiagnostics((prev) => ({
         ...prev,
         registrationState: getRegistrationState(registration),
@@ -293,6 +322,7 @@ export function usePickerPushNotifications({
 
       let subscription = await registration.pushManager.getSubscription();
       if (!subscription) {
+        currentStepRef.current = 'subscribing';
         setDiagnostics((prev) => ({
           ...prev,
           registrationState: getRegistrationState(registration),
@@ -305,6 +335,7 @@ export function usePickerPushNotifications({
         });
       }
 
+      currentStepRef.current = 'saving-subscription';
       setDiagnostics((prev) => ({
         ...prev,
         registrationState: getRegistrationState(registration),
@@ -313,6 +344,7 @@ export function usePickerPushNotifications({
         lastStep: 'saving-subscription',
       }));
       await syncSubscription(subscription);
+      currentStepRef.current = 'enabled';
       setDiagnostics({
         supported: true,
         standalone: true,
@@ -338,7 +370,7 @@ export function usePickerPushNotifications({
       });
       return { ok: true, error: null } satisfies PushActionResult;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to enable alerts';
+      const message = describeUnknownError(error);
       setDiagnostics((prev) => ({
         ...prev,
         supported: isPushSupported(),
@@ -348,8 +380,9 @@ export function usePickerPushNotifications({
           typeof navigator !== 'undefined' && 'serviceWorker' in navigator
             ? Boolean(navigator.serviceWorker.controller)
             : false,
+        hasExistingSubscription: prev.hasExistingSubscription,
         lastError: message,
-        lastStep: 'enable-error',
+        lastStep: `${currentStepRef.current}-error`,
       }));
       setState((prev) => ({
         ...prev,
