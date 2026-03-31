@@ -18,6 +18,11 @@ interface UsePickerPushNotificationsOptions {
   userName: string | null;
 }
 
+interface PushActionResult {
+  ok: boolean;
+  error: string | null;
+}
+
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_PUSH_VAPID_PUBLIC_KEY as string | undefined;
 
 export function usePickerPushNotifications({
@@ -141,35 +146,39 @@ export function usePickerPushNotifications({
 
   const enable = useCallback(async () => {
     if (!isPushSupported()) {
+      const error = 'This browser does not support push notifications.';
       setState((prev) => ({
         ...prev,
         supported: false,
         standalone: isStandaloneDisplayMode(),
-        error: 'This browser does not support push notifications.',
+        error,
       }));
-      return false;
+      return { ok: false, error } satisfies PushActionResult;
     }
     if (!isStandaloneDisplayMode()) {
+      const error = 'On iPhone and iPad, open the installed Home Screen app to enable alerts.';
       setState((prev) => ({
         ...prev,
         standalone: false,
-        error: 'On iPhone and iPad, open the installed Home Screen app to enable alerts.',
+        error,
       }));
-      return false;
+      return { ok: false, error } satisfies PushActionResult;
     }
     if (role !== 'picking' || !userId || !userName) {
+      const error = 'Select a picker name before enabling alerts.';
       setState((prev) => ({
         ...prev,
-        error: 'Select a picker name before enabling alerts.',
+        error,
       }));
-      return false;
+      return { ok: false, error } satisfies PushActionResult;
     }
     if (!VAPID_PUBLIC_KEY) {
+      const error = 'Push public key is not configured.';
       setState((prev) => ({
         ...prev,
-        error: 'Push public key is not configured.',
+        error,
       }));
-      return false;
+      return { ok: false, error } satisfies PushActionResult;
     }
 
     setState((prev) => ({ ...prev, loading: true, error: null }));
@@ -177,17 +186,18 @@ export function usePickerPushNotifications({
     try {
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') {
+        const error =
+          permission === 'denied'
+            ? 'Browser notifications are blocked for this device.'
+            : 'Notification permission was not granted.';
         setState((prev) => ({
           ...prev,
           permission,
           enabled: false,
           loading: false,
-          error:
-            permission === 'denied'
-              ? 'Browser notifications are blocked for this device.'
-              : 'Notification permission was not granted.',
+          error,
         }));
-        return false;
+        return { ok: false, error } satisfies PushActionResult;
       }
 
       const registration = await registerPushServiceWorker();
@@ -212,17 +222,18 @@ export function usePickerPushNotifications({
         loading: false,
         error: null,
       });
-      return true;
+      return { ok: true, error: null } satisfies PushActionResult;
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to enable alerts';
       setState((prev) => ({
         ...prev,
         standalone: isStandaloneDisplayMode(),
         permission: getNotificationPermission(),
         enabled: false,
         loading: false,
-        error: error instanceof Error ? error.message : 'Failed to enable alerts',
+        error: message,
       }));
-      return false;
+      return { ok: false, error: message } satisfies PushActionResult;
     }
   }, [role, syncSubscription, userId, userName]);
 
@@ -259,16 +270,17 @@ export function usePickerPushNotifications({
         loading: false,
         error: null,
       }));
-      return true;
+      return { ok: true, error: null } satisfies PushActionResult;
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to disable alerts';
       setState((prev) => ({
         ...prev,
         standalone: isStandaloneDisplayMode(),
         permission: getNotificationPermission(),
         loading: false,
-        error: error instanceof Error ? error.message : 'Failed to disable alerts',
+        error: message,
       }));
-      return false;
+      return { ok: false, error: message } satisfies PushActionResult;
     }
   }, [role, userId]);
 

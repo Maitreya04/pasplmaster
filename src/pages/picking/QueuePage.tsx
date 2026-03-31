@@ -164,20 +164,20 @@ export default function QueuePage(): React.JSX.Element | null {
   ]);
 
   const handleEnableAlerts = async () => {
-    const enabled = await pushAlerts.enable();
-    if (enabled) {
+    const result = await pushAlerts.enable();
+    if (result.ok) {
       toast.success('Picker alerts enabled on this device');
     } else {
-      toast.error('Failed to enable picker alerts.');
+      toast.error(result.error || 'Failed to enable picker alerts.');
     }
   };
 
   const handleDisableAlerts = async () => {
-    const disabled = await pushAlerts.disable();
-    if (disabled) {
+    const result = await pushAlerts.disable();
+    if (result.ok) {
       toast.info('Picker alerts turned off on this device');
     } else {
-      toast.error('Failed to disable picker alerts.');
+      toast.error(result.error || 'Failed to disable picker alerts.');
     }
   };
 
