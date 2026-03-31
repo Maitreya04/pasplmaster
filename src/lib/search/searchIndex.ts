@@ -175,7 +175,7 @@ export function buildSearchIndex(items: Item[]): SearchIndex {
     // Expand model concatenations like "dio 05" -> "dio05" in index words too
     const allWordsArr = Array.from(allWords);
     for (const w of allWordsArr) {
-      const m = w.match(/^([a-z0-9]{2,})[-_/\. ]?0?([0-9]{1,2})$/);
+      const m = w.match(/^([a-z0-9]{2,})[-_/. ]?0?([0-9]{1,2})$/);
       if (m) {
         allWords.add(`${m[1]}${m[2]}`);
         allWords.add(`${m[1]}0${m[2]}`);

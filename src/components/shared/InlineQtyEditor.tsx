@@ -105,6 +105,7 @@ export function InlineQtyEditor({
   }, [cancel]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!isEditing) setInputValue(String(value));
   }, [value, isEditing]);
 
@@ -112,6 +113,7 @@ export function InlineQtyEditor({
   const prevControlledOpen = useRef(controlledOpen);
   useEffect(() => {
     if (isControlled && prevControlledOpen.current === true && controlledOpen === false) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setInputValue(String(value));
       onCancel();
     }

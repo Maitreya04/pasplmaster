@@ -1,21 +1,24 @@
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ClipboardText } from '@phosphor-icons/react';
-import { useOrders, useOverdueOrders } from '../../hooks/useOrders';
+import { useClaimableOrders } from '../../hooks/useClaimableOrders';
 import { Card, StatusBadge, EmptyState, Skeleton } from '../../components/shared';
 import { formatCurrency, formatTimeAgo, formatOverdueDate } from '../../utils/formatters';
-import type { Order } from '../../types';
+import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 
 function OrderCard({
   order,
   onTap,
   isOverdue,
 }: {
-  order: Order;
+  order: OrderWithClaimInfo;
   onTap: () => void;
   isOverdue?: boolean;
 }) {
+  const claim = order.claim_info;
+
   return (
-    <Card pressable onClick={onTap} className="min-h-14">
+    <Card pressable onClick={onTap} className={`min-h-14 ${claim?.is_stale ? 'border-[var(--border-warning)] ring-1 ring-[var(--border-warning)]' : ''}`}>
       <div className="flex flex-col gap-2">
         <div className="flex items-start justify-between gap-3">
           <span className="font-mono text-sm text-[var(--content-secondary)]">
@@ -27,12 +30,31 @@ function OrderCard({
                 Since {formatOverdueDate(order.created_at)}
               </span>
             )}
-            {order.priority === 'urgent' && order.status !== 'completed' && (
+            {order.priority === 'urgent' && order.workflow_status !== 'completed' && (
               <StatusBadge status="urgent" className="text-xs" />
             )}
-            <StatusBadge status={order.status} />
+            <StatusBadge status={order.workflow_status} />
           </div>
         </div>
+
+        {/* Claim status row */}
+        {claim && (
+          <div className={`text-xs px-2 py-1 rounded inline-flex w-max ${
+            claim.is_stale 
+              ? 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] font-semibold'
+              : order.is_mine
+                ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] font-semibold'
+                : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
+          }`}>
+            {claim.is_stale 
+              ? `Stale claim by ${claim.claimed_by_name} (${formatTimeAgo(claim.last_heartbeat_at)})`
+              : order.is_mine
+                ? 'Claimed by you'
+                : `Processing by ${claim.claimed_by_name}`
+            }
+          </div>
+        )}
+
         <p className="font-bold text-[var(--content-primary)]">{order.customer_name}</p>
         <p className="text-sm text-[var(--content-secondary)]">{order.salesperson_name}</p>
         <div className="flex items-center justify-between text-sm">
@@ -48,15 +70,30 @@ function OrderCard({
 
 export default function NeedsReviewPage(): React.JSX.Element | null {
   const navigate = useNavigate();
-  const { data: overdueOrders, isLoading: overdueLoading } = useOverdueOrders();
-  const { data: todaySubmitted, isLoading: todayLoading } = useOrders({
-    todayOnly: true,
-    status: 'submitted',
+  const { all: submittedOrders, isLoading } = useClaimableOrders({
+    stage: 'billing',
+    workflowStatus: 'submitted',
   });
 
-  const isLoading = overdueLoading || todayLoading;
-  const hasOverdue = (overdueOrders?.length ?? 0) > 0;
-  const hasToday = (todaySubmitted?.length ?? 0) > 0;
+  const { overdueOrders, todayOrders } = useMemo(() => {
+    const overdue: OrderWithClaimInfo[] = [];
+    const today: OrderWithClaimInfo[] = [];
+    const todayIso = new Date();
+    todayIso.setHours(0, 0, 0, 0);
+    const msToday = todayIso.getTime();
+
+    for (const order of submittedOrders) {
+      if (new Date(order.created_at).getTime() < msToday) {
+        overdue.push(order);
+      } else {
+        today.push(order);
+      }
+    }
+    return { overdueOrders: overdue, todayOrders: today };
+  }, [submittedOrders]);
+
+  const hasOverdue = overdueOrders.length > 0;
+  const hasToday = todayOrders.length > 0;
   const isEmpty = !hasOverdue && !hasToday;
 
   return (
@@ -106,10 +143,10 @@ export default function NeedsReviewPage(): React.JSX.Element | null {
               <section>
                 <h2 className="text-lg font-semibold text-[var(--content-primary)] mb-3 flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-[var(--bg-accent)]" />
-                  Today&apos;s submitted ({todaySubmitted!.length})
+                  Today&apos;s submitted ({todayOrders.length})
                 </h2>
                 <div className="space-y-3">
-                  {todaySubmitted!.map((order) => (
+                  {todayOrders.map((order) => (
                     <OrderCard
                       key={order.id}
                       order={order}

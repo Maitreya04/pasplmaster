@@ -2,10 +2,10 @@ import { useEffect, useId } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { queryClient } from '../lib/queryClient';
-import type { Order, OrderStatus } from '../types';
+import type { Order, WorkflowStatus } from '../types';
 
 interface UseOrdersOptions {
-  status?: OrderStatus;
+  status?: WorkflowStatus;
   salespersonName?: string | null;
   /** Filter to orders created today (default: false) */
   todayOnly?: boolean;
@@ -31,7 +31,7 @@ function getTodayStartIso(): string {
   return d.toISOString();
 }
 
-export function useOrders(options?: UseOrdersOptions | OrderStatus) {
+export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
   const opts: UseOrdersOptions =
     typeof options === 'string' ? { status: options } : options ?? {};
   const uid = useId();
@@ -59,7 +59,7 @@ export function useOrders(options?: UseOrdersOptions | OrderStatus) {
         .order('created_at', { ascending: orderAsc });
 
       if (opts.status && !opts.overdueOnly) {
-        q = q.eq('status', opts.status);
+        q = q.eq('workflow_status', opts.status);
       }
       if (opts.salespersonName) {
         q = q.eq('salesperson_name', opts.salespersonName);
@@ -68,7 +68,7 @@ export function useOrders(options?: UseOrdersOptions | OrderStatus) {
         q = q.gte('created_at', todayIso);
       }
       if (opts.overdueOnly) {
-        q = q.eq('status', 'submitted').lt('created_at', todayIso);
+        q = q.eq('workflow_status', 'submitted').lt('created_at', todayIso);
       }
       if (opts.dateFrom) {
         q = q.gte('created_at', opts.dateFrom);
@@ -98,6 +98,14 @@ export function useOrders(options?: UseOrdersOptions | OrderStatus) {
         { event: '*', schema: 'public', table: 'orders' },
         () => {
           queryClient.invalidateQueries({ queryKey: ['orders'] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'work_claims' },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['orders'] });
+          queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
         }
       )
       .subscribe();

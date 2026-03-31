@@ -87,7 +87,7 @@ function expandCt100TokenVariants(t: string): string[] {
 
 function pushExpandedModelCodeVariants(t: string, et: string, expanded: string[]): void {
   if (/[a-z]/i.test(t) && /\d/.test(t)) {
-    const m = et.match(/^([a-z]{2,})[-_/\. ]?0?(\d{1,3})$/i);
+    const m = et.match(/^([a-z]{2,})[-_/. ]?0?(\d{1,3})$/i);
     if (m) {
       const base = m[1];
       const num = m[2];
@@ -250,7 +250,7 @@ function aliasOrNameIncludesBounded(p: PrepItem, qw: string): boolean {
  */
 export function detectCodeLike(q: string): boolean {
   const t = q.trim();
-  if (/\d{4,}[/\-]\d{2,}/.test(t)) return true;           // 51122-04
+  if (/\d{4,}[/-]\d{2,}/.test(t)) return true;           // 51122-04
   if (/^\d{5,}$/.test(t)) return true;                     // 52204499
   if (/^[a-z0-9]{4,}-[a-z0-9]{2,}$/i.test(t)) return true; // DIS-PR-02
   // Short alphanumeric code: must have both letter(s) AND digit(s), 2-8 chars total

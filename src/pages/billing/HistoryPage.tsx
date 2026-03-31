@@ -10,7 +10,7 @@ import {
   SearchInput,
 } from '../../components/shared';
 import { formatCurrency, formatTimeAgo, formatFullDate } from '../../utils/formatters';
-import type { Order, OrderStatus } from '../../types';
+import type { Order, WorkflowStatus } from '../../types';
 
 const HISTORY_LIMIT = 100;
 
@@ -25,7 +25,7 @@ function getDateFromIso(range: DateRange): string | undefined {
   return d.toISOString();
 }
 
-const STATUS_OPTIONS: { value: OrderStatus | 'all'; label: string }[] = [
+const STATUS_OPTIONS: { value: WorkflowStatus | 'all'; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'submitted', label: 'Submitted' },
   { value: 'approved', label: 'Approved' },
@@ -50,10 +50,10 @@ function OrderCard({
             {order.order_number}
           </span>
           <div className="flex items-center gap-2 shrink-0">
-            {order.priority === 'urgent' && order.status !== 'completed' && (
+            {order.priority === 'urgent' && order.workflow_status !== 'completed' && (
               <StatusBadge status="urgent" className="text-xs" />
             )}
-            <StatusBadge status={order.status} />
+            <StatusBadge status={order.workflow_status} />
           </div>
         </div>
         <p className="font-bold text-[var(--content-primary)]">{order.customer_name}</p>
@@ -75,7 +75,7 @@ export default function HistoryPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [dateRange, setDateRange] = useState<DateRange>('7');
-  const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<WorkflowStatus | 'all'>('all');
 
   const dateFrom = getDateFromIso(dateRange);
 
@@ -145,7 +145,7 @@ export default function HistoryPage(): React.JSX.Element | null {
                 <select
                   id="status-filter"
                   value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as OrderStatus | 'all')}
+                  onChange={(e) => setStatusFilter(e.target.value as WorkflowStatus | 'all')}
                   className="appearance-none min-h-11 pl-3 pr-8 rounded-xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)] text-sm font-medium leading-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
                 >
                   {STATUS_OPTIONS.map((opt) => (

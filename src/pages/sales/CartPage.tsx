@@ -173,7 +173,7 @@ export default function CartPage(): React.JSX.Element | null {
           transport_id: transport?.id ?? null,
           transport_name: transport?.name ?? null,
           salesperson_name: userName,
-          status: 'submitted',
+          workflow_status: 'submitted',
           priority,
           notes: notes.trim() || null,
           item_count: totalCount,

@@ -72,6 +72,7 @@ export function ToastProvider({ children }: { children: ReactNode }): React.JSX.
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useToast(): ToastAPI {
   const ctx = useContext(ToastContext);
   if (!ctx) {

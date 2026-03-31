@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Package, HourglassHigh } from '@phosphor-icons/react';
+import { Package, HourglassHigh, Warning } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { useOrders } from '../../hooks/useOrders';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
@@ -20,15 +20,13 @@ function OrderCard({
     <Card pressable onClick={onTap}>
       <div className="space-y-2">
         <div className="flex items-start justify-between gap-3">
-          <span className="font-mono text-[var(--content-tertiary)] text-sm">
-            {order.order_number}
-            {order.status !== 'flagged' && 'items' in order && order.items && (order.items as OrderItem[]).some((i: OrderItem) => i.state === 'flagged') && (
-              <span className="ml-2 inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] px-2 py-0.5 rounded-full">
-                Has Rejections
-              </span>
+          <div className="flex items-center gap-2">
+            <span className="font-mono font-bold text-[var(--content-primary)]">{order.order_number}</span>
+            {order.workflow_status !== 'flagged' && 'items' in order && order.items && (order.items as OrderItem[]).some((i: OrderItem) => i.state === 'flagged') && (
+              <Warning size={16} weight="fill" className="text-[var(--content-warning)]" />
             )}
-          </span>
-          <StatusBadge status={order.status} />
+          </div>
+          <StatusBadge status={order.workflow_status} />
         </div>
         <p className="font-bold text-[var(--content-primary)]">{order.customer_name}</p>
         <div className="flex items-center justify-between text-sm">

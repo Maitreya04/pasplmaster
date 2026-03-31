@@ -178,6 +178,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
         select: (s: string) => {
           group: (g: string) => {
             order: (o: string, opts: { ascending: boolean }) => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               limit: (l: number) => Promise<{ data: any[] | null; error: any }>
             }
           }
@@ -244,6 +245,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
   // Build quick reorder items when selection or source data changes
   useEffect(() => {
     if (!customerTopItems || !customerTopItems.length) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuickReorderItems([]);
       return;
     }
@@ -875,6 +877,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const isStale = deferredQuery !== effectiveQuery;
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMoreVisible(INITIAL_MORE_VISIBLE);
   }, [deferredQuery]);
 

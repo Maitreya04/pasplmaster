@@ -18,6 +18,7 @@ const RESPONSE_SCHEMA = {
   required: ['match', 'confidence', 'reason'],
 } as const
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function callGemini(model: string, imageBase64: string, expectedItem: any) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
@@ -101,6 +102,7 @@ serve(async (req) => {
     }
 
     const fastText = fastData?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let fastResult: any
     try {
       fastResult = typeof fastText === 'string' ? JSON.parse(fastText) : fastText
@@ -130,6 +132,7 @@ serve(async (req) => {
     }
 
     const accText = accData?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let accResult: any
     try {
       accResult = typeof accText === 'string' ? JSON.parse(accText) : accText

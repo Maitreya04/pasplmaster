@@ -55,8 +55,8 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
     return () => {
       viewport.removeEventListener('resize', syncWithViewport);
       viewport.removeEventListener('scroll', syncWithViewport);
-      if (containerRef.current) {
-        containerRef.current.style.transform = '';
+      if (container) {
+        container.style.transform = '';
       }
     };
   }, [isOpen]);

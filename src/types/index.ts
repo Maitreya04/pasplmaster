@@ -34,13 +34,16 @@ export interface Transport {
   is_active: boolean;
 }
 
-export type OrderStatus =
+export type WorkflowStatus =
   | 'submitted'
   | 'approved'
   | 'picking'
   | 'completed'
   | 'rejected'
   | 'flagged';
+
+/** @deprecated Use WorkflowStatus instead */
+export type OrderStatus = WorkflowStatus;
 export type OrderPriority = 'normal' | 'urgent';
 export type OrderItemState = 'pending' | 'picked' | 'flagged';
 
@@ -55,7 +58,7 @@ export interface Order {
   salesperson_name: string;
   reviewer_name: string | null;
   picker_name: string | null;
-  status: OrderStatus;
+  workflow_status: WorkflowStatus;
   priority: OrderPriority;
   notes: string | null;
   item_count: number;
@@ -146,4 +149,51 @@ export interface AuthState {
   isAuthenticated: boolean;
   role: 'sales' | 'billing' | 'picking' | 'admin' | null;
   userName: string | null;
+  userId: number | null;
+}
+
+// ─── Work Claims System Types ───────────────────────────────
+
+export type UserRole = 'sales' | 'billing' | 'picking' | 'admin';
+
+export interface AppUser {
+  id: number;
+  full_name: string;
+  role: UserRole;
+  is_active: boolean;
+  station_label: string | null;
+  created_at: string;
+}
+
+export type ClaimStatus = 'active' | 'released' | 'completed' | 'expired';
+export type ClaimStage = 'billing' | 'picking';
+
+export interface WorkClaim {
+  id: number;
+  order_id: number;
+  stage: ClaimStage;
+  claimed_by_user_id: number;
+  claimed_at: string;
+  last_heartbeat_at: string;
+  released_at: string | null;
+  completed_at: string | null;
+  status: ClaimStatus;
+  claim_version: number;
+  /** Joined from users table — available when fetched with useClaimableOrders */
+  claimed_by_name?: string;
+}
+
+export interface OrderEvent {
+  id: number;
+  order_id: number;
+  event_type: string;
+  actor_user_id: number | null;
+  stage: ClaimStage | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+/** Order enriched with its active claim info (used by queue views) */
+export interface OrderWithClaim extends Order {
+  active_claim?: WorkClaim | null;
 }

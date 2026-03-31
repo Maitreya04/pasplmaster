@@ -11,6 +11,7 @@ import {
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
+import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -99,10 +100,23 @@ export default function PickPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { userName } = useAuth();
+  const { userName, userId } = useAuth();
 
   const orderId = id ? parseInt(id, 10) : null;
   const { data: order, isLoading, error } = useOrderDetail(orderId);
+
+  // Initialize work claim for heartbeats
+  const { claimId, isClaimedByMe, claim, error: claimError } = useWorkClaim(
+    orderId,
+    'picking'
+  );
+
+  // Auto-claim if picking (usually claimed in QueuePage, this starts the heartbeat)
+  useEffect(() => {
+    if (order?.workflow_status === 'picking' && !isClaimedByMe && !claimError) {
+      claim();
+    }
+  }, [order?.workflow_status, isClaimedByMe, claim, claimError]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -332,24 +346,36 @@ export default function PickPage(): React.JSX.Element | null {
     mutationFn: async () => {
       if (!order) throw new Error('No order');
       const isCompleted = !hasFlagged;
-      const updates: {
-        status: 'completed' | 'flagged';
-        completed_at?: string;
-        priority?: 'normal';
-      } = {
-        status: isCompleted ? 'completed' : 'flagged',
-      };
-      if (!order.completed_at && isCompleted) {
-        updates.completed_at = new Date().toISOString();
+      
+      if (claimId && userId) {
+        const { error } = await supabase.rpc('complete_picking', {
+          p_order_id: order.id,
+          p_claim_id: claimId,
+          p_user_id: userId,
+          p_has_flagged_items: hasFlagged,
+        });
+        if (error) throw error;
+      } else {
+        // Fallback for orders without claims
+        const updates: {
+          workflow_status: 'completed' | 'flagged';
+          completed_at?: string;
+          priority?: 'normal';
+        } = {
+          workflow_status: isCompleted ? 'completed' : 'flagged',
+        };
+        if (!order.completed_at && isCompleted) {
+          updates.completed_at = new Date().toISOString();
+        }
+        if (isCompleted) {
+          updates.priority = 'normal';
+        }
+        const { error } = await supabase
+          .from('orders')
+          .update(updates)
+          .eq('id', order.id);
+        if (error) throw error;
       }
-      if (isCompleted) {
-        updates.priority = 'normal';
-      }
-      const { error } = await supabase
-        .from('orders')
-        .update(updates)
-        .eq('id', order.id);
-      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
@@ -506,16 +532,18 @@ export default function PickPage(): React.JSX.Element | null {
 
   if (isLoading) {
     return (
-      <div className="p-4 space-y-4">
-        <Skeleton variant="text" lines={2} />
-        <Skeleton variant="card" count={5} />
+      <div className="min-h-screen pb-32">
+        <div className="p-4 space-y-4">
+          <Skeleton variant="text" lines={2} />
+          <Skeleton variant="card" count={5} />
+        </div>
       </div>
     );
   }
 
   if (error || !order) {
     return (
-      <div className="p-4 text-center">
+      <div className="min-h-screen pb-32 p-4 text-center">
         <p className="text-[var(--content-negative)]">Failed to load order</p>
         <BigButton
           variant="secondary"
@@ -524,6 +552,26 @@ export default function PickPage(): React.JSX.Element | null {
         >
           Back to Queue
         </BigButton>
+      </div>
+    );
+  }
+
+  if (claimError) {
+    return (
+      <div className="min-h-screen pb-32 p-4">
+        <div className="mb-6 p-4 rounded-xl bg-[var(--bg-negative-subtle)] border-2 border-[var(--border-negative)] flex items-start gap-3">
+          <Warning size={24} className="text-[var(--content-negative)] mt-0.5 shrink-0" weight="fill" />
+          <div>
+            <h3 className="font-bold text-[var(--content-negative)]">Cannot pick this order</h3>
+            <p className="text-[var(--content-negative)] text-sm mt-1 opacity-90">{claimError}</p>
+            <button 
+              onClick={() => navigate('/picking')}
+              className="mt-3 px-4 py-2 bg-[var(--bg-negative)] text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors"
+            >
+              Go back to queue
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

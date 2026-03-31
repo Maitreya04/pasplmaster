@@ -11,7 +11,7 @@ import {
   User,
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
-import { useOrders } from '../../hooks/useOrders';
+import { useClaimableOrders } from '../../hooks/useClaimableOrders';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import {
@@ -22,7 +22,7 @@ import {
   EmptyState,
   Skeleton,
 } from '../../components/shared';
-import type { Order } from '../../types';
+import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return '';
@@ -36,7 +36,7 @@ function timeAgo(dateStr: string | null): string {
   return `${days}d ago`;
 }
 
-function sortOrders(orders: Order[]): Order[] {
+function sortOrders(orders: OrderWithClaimInfo[]): OrderWithClaimInfo[] {
   return [...orders].sort((a, b) => {
     if (a.priority === 'urgent' && b.priority !== 'urgent') return -1;
     if (a.priority !== 'urgent' && b.priority === 'urgent') return 1;
@@ -50,71 +50,53 @@ export default function QueuePage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { userName } = useAuth();
+  const { userId, userName } = useAuth();
 
-  const { data: approvedOrders, isLoading: loadingApproved } = useOrders({
-    status: 'approved',
+  const {
+    available,
+    myActive,
+    otherActive,
+    stale,
+    isLoading
+  } = useClaimableOrders({
+    stage: 'picking',
+    workflowStatus: ['approved', 'picking'],
   });
-  const { data: pickingOrders, isLoading: loadingPicking } = useOrders({
-    status: 'picking',
-  });
-
-  const myActivePicks = useMemo(
-    () => (pickingOrders ?? []).filter((o) => o.picker_name === userName),
-    [pickingOrders, userName],
-  );
-
-  const otherPickingOrders = useMemo(
-    () => (pickingOrders ?? []).filter((o) => o.picker_name !== userName),
-    [pickingOrders, userName],
-  );
 
   const availableOrders = useMemo(
-    () => sortOrders(approvedOrders ?? []),
-    [approvedOrders],
+    () => sortOrders([...available, ...stale]),
+    [available, stale],
   );
 
   const claimMutation = useMutation({
     mutationFn: async (orderId: number) => {
-      const { data: current, error: checkError } = await supabase
-        .from('orders')
-        .select('status, picker_name')
-        .eq('id', orderId)
-        .single();
-      if (checkError) throw checkError;
-
-      if (current.status === 'picking' && current.picker_name) {
-        throw new Error(`ALREADY_CLAIMED:${current.picker_name}`);
-      }
-
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          status: 'picking',
-          picker_name: userName,
-          picked_at: new Date().toISOString(),
-        })
-        .eq('id', orderId)
-        .eq('status', 'approved');
+      if (!userId) throw new Error('Not logged in');
+      const { data, error } = await supabase.rpc('claim_order', {
+        p_order_id: orderId,
+        p_stage: 'picking',
+        p_user_id: userId,
+      });
       if (error) throw error;
+      const result = data as { success: boolean, reason?: string, claimed_by?: string };
+      if (!result.success) {
+        throw new Error(`ALREADY_CLAIMED:${result.claimed_by || 'someone'}`);
+      }
     },
     onSuccess: (_data, orderId) => {
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       navigate(`/picking/pick/${orderId}`);
     },
     onError: (err) => {
       const msg = err instanceof Error ? err.message : '';
       if (msg.startsWith('ALREADY_CLAIMED:')) {
         const pickerName = msg.replace('ALREADY_CLAIMED:', '');
-        toast.error(`This order is already being picked by ${pickerName}. Please choose another order.`);
+        toast.error(`This order is already being picked by ${pickerName}. Please choose another.`);
       } else {
-        toast.error('Failed to claim order — it may have been taken by another picker');
+        toast.error('Failed to claim order.');
       }
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
     },
   });
-
-  const isLoading = loadingApproved || loadingPicking;
 
   return (
     <div className="min-h-screen">
@@ -132,9 +114,9 @@ export default function QueuePage(): React.JSX.Element | null {
 
       <div className="p-4 space-y-6">
         {/* My Active Picks — prominent amber banners */}
-        {myActivePicks.length > 0 && (
+        {myActive.length > 0 && (
           <section className="space-y-3">
-            {myActivePicks.map((pick) => (
+            {myActive.map((pick) => (
               <div
                 key={pick.id}
                 onClick={() => navigate(`/picking/pick/${pick.id}`)}
@@ -231,16 +213,16 @@ export default function QueuePage(): React.JSX.Element | null {
         </section>
 
         {/* Other Picking Orders — being picked by other pickers */}
-        {otherPickingOrders.length > 0 && (
+        {otherActive.length > 0 && (
           <section>
             <h2 className="text-sm font-semibold text-[var(--content-tertiary)] uppercase tracking-wider mb-3">
               Being Picked by Others
               <span className="ml-2 text-[var(--content-secondary)]">
-                ({otherPickingOrders.length})
+                ({otherActive.length})
               </span>
             </h2>
             <div className="space-y-2">
-              {otherPickingOrders.map((order) => (
+              {otherActive.map((order) => (
                 <Card key={order.id} className="flex items-center gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-0.5">
@@ -256,7 +238,7 @@ export default function QueuePage(): React.JSX.Element | null {
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-xs text-[var(--content-tertiary)]">
-                      {order.picker_name}
+                      {order.claim_info?.claimed_by_name || order.picker_name}
                     </p>
                     <p className="text-xs text-[var(--content-quaternary)]">
                       {order.item_count} items
@@ -277,7 +259,7 @@ function OrderCard({
   onClaim,
   claiming,
 }: {
-  order: Order;
+  order: OrderWithClaimInfo;
   onClaim: () => void;
   claiming: boolean;
 }) {
@@ -298,6 +280,11 @@ function OrderCard({
               {order.order_number}
             </span>
             {isUrgent && <StatusBadge status="urgent" />}
+            {order.claim_info?.is_stale && (
+              <span className="text-[10px] uppercase font-bold text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] px-2 py-0.5 rounded border border-[var(--border-warning)]">
+                Stale (Takeover)
+              </span>
+            )}
           </div>
           <p className="text-sm text-[var(--content-secondary)] truncate">
             {order.customer_name}

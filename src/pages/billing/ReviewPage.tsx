@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, CheckCircle, XCircle, Hourglass, Warning } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
+import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import {
@@ -26,10 +27,23 @@ export default function ReviewPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { userName } = useAuth();
+  const { userName, userId } = useAuth();
 
   const orderId = id ? parseInt(id, 10) : null;
   const { data: order, isLoading, error } = useOrderDetail(orderId);
+
+  // Initialize work claim
+  const { claimId, isClaimedByMe, claim, error: claimError } = useWorkClaim(
+    orderId,
+    'billing'
+  );
+
+  // Auto-claim if submitted
+  useEffect(() => {
+    if (order?.workflow_status === 'submitted' && !isClaimedByMe && !claimError) {
+      claim();
+    }
+  }, [order?.workflow_status, isClaimedByMe, claim, claimError]);
 
   const [items, setItems] = useState<EditableItem[]>([]);
   const [removedIds, setRemovedIds] = useState<Set<number>>(new Set());
@@ -41,6 +55,7 @@ export default function ReviewPage(): React.JSX.Element | null {
   // Sync items from order when loaded
   useEffect(() => {
     if (order?.items) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setItems(
         order.items.map((i) => ({
           ...i,
@@ -126,7 +141,7 @@ export default function ReviewPage(): React.JSX.Element | null {
       remaining,
       done,
     };
-  }, [order?.items]);
+  }, [order]);
 
   const updateQty = useCallback((itemId: number, qty: number) => {
     setItems((prev) =>
@@ -174,7 +189,7 @@ export default function ReviewPage(): React.JSX.Element | null {
     mutationFn: async () => {
       if (!order) throw new Error('No order');
       const reviewer = userName || 'Billing';
-      const resolvingFlags = order.status === 'flagged';
+      const resolvingFlags = order.workflow_status === 'flagged';
 
       // Update each remaining item's qty_approved (and price / flags)
       for (const item of visibleItems) {
@@ -239,30 +254,39 @@ export default function ReviewPage(): React.JSX.Element | null {
         }
       }
 
-      // Update order
-      const orderUpdate: Record<string, unknown> = {
-        reviewer_name: reviewer,
-        item_count: visibleItems.length,
-        total_value: grandTotal,
-      };
-
-      if (resolvingFlags) {
-        // Picker already completed; billing is just resolving flags
-        orderUpdate.status = 'completed';
-        // Once the order is fully completed, clear any urgent priority
-        orderUpdate.priority = 'normal';
+      // Run the complete_billing RPC if we have an active claim
+      if (claimId && userId) {
+        const { error: rpcError } = await supabase.rpc('complete_billing', {
+          p_order_id: order.id,
+          p_claim_id: claimId,
+          p_user_id: userId,
+          p_is_resolving_flags: resolvingFlags,
+        });
+        if (rpcError) throw rpcError;
       } else {
-        orderUpdate.status = 'approved';
-        orderUpdate.approved_at = new Date().toISOString();
-      }
+        // Fallback for orders without claims (e.g. already flagged or old records)
+        const orderUpdate: Record<string, unknown> = {
+          reviewer_name: reviewer,
+          item_count: visibleItems.length,
+          total_value: grandTotal,
+        };
 
-      await supabase.from('orders').update(orderUpdate).eq('id', order.id);
+        if (resolvingFlags) {
+          orderUpdate.workflow_status = 'completed';
+          orderUpdate.priority = 'normal';
+        } else {
+          orderUpdate.workflow_status = 'approved';
+          orderUpdate.approved_at = new Date().toISOString();
+        }
+
+        await supabase.from('orders').update(orderUpdate).eq('id', order.id);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       toast.success(
-        order?.status === 'flagged'
+        order?.workflow_status === 'flagged'
           ? 'Flags resolved and order marked completed'
           : 'Order approved and sent to picking'
       );
@@ -279,7 +303,7 @@ export default function ReviewPage(): React.JSX.Element | null {
       await supabase
         .from('orders')
         .update({
-          status: 'flagged',
+          workflow_status: 'flagged',
           notes: rejectReason.trim() || 'Rejected by billing',
         })
         .eq('id', order.id);
@@ -301,7 +325,7 @@ export default function ReviewPage(): React.JSX.Element | null {
             supabase
               .from('orders')
               .update({
-                status: 'submitted',
+                workflow_status: 'submitted',
                 notes: previousNotes,
               })
               .eq('id', order!.id)
@@ -344,6 +368,22 @@ export default function ReviewPage(): React.JSX.Element | null {
       />
 
       <div className="p-4 lg:px-8 lg:py-6 max-w-4xl mx-auto">
+        {claimError && (
+          <div className="mb-6 p-4 rounded-xl bg-[var(--bg-negative-subtle)] border-2 border-[var(--border-negative)] flex items-start gap-3">
+            <XCircle size={24} className="text-[var(--content-negative)] mt-0.5 shrink-0" weight="fill" />
+            <div>
+              <h3 className="font-bold text-[var(--content-negative)]">Cannot review this order</h3>
+              <p className="text-[var(--content-negative)] text-sm mt-1 opacity-90">{claimError}</p>
+              <button 
+                onClick={() => navigate('/billing')}
+                className="mt-3 px-4 py-2 bg-[var(--bg-negative)] text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors"
+              >
+                Go back to dashboard
+              </button>
+            </div>
+          </div>
+        )}
+
         {isLoading ? (
           <div className="animate-pulse space-y-4">
             <div className="h-8 bg-[var(--bg-tertiary)] rounded w-1/3" />
@@ -371,7 +411,7 @@ export default function ReviewPage(): React.JSX.Element | null {
                   <span className="font-mono text-[var(--content-secondary)]">
                     {order.order_number}
                   </span>
-                  <StatusBadge status={order.status} />
+                  <StatusBadge status={order.workflow_status} />
                   {order.priority === 'urgent' && (
                     <StatusBadge status="urgent" />
                   )}
@@ -383,7 +423,7 @@ export default function ReviewPage(): React.JSX.Element | null {
             </Card>
 
             {/* Flag resolution banner */}
-            {order.status === 'flagged' && (
+            {order.workflow_status === 'flagged' && (
               <Card className="mb-6 border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]">
                 <div className="flex items-start gap-3">
                   <Warning className="text-[var(--content-warning)] mt-0.5" size={20} weight="fill" />
@@ -402,9 +442,9 @@ export default function ReviewPage(): React.JSX.Element | null {
 
             {/* Picking progress (for approved / picking / completed orders) */}
             {pickingSummary &&
-              (order.status === 'approved' ||
-                order.status === 'picking' ||
-                order.status === 'completed') && (
+              (order.workflow_status === 'approved' ||
+                order.workflow_status === 'picking' ||
+                order.workflow_status === 'completed') && (
                 <Card className="mb-6 lg:mb-8">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between gap-3">
@@ -645,13 +685,13 @@ export default function ReviewPage(): React.JSX.Element | null {
                 onClick={() => approveMutation.mutate()}
                 loading={approveMutation.isPending}
                 className={`sm:flex-[2] hover:opacity-90 ${
-                  order.status === 'flagged'
+                  order.workflow_status === 'flagged'
                     ? 'bg-[var(--bg-warning)]'
                     : 'bg-[var(--bg-positive)]'
                 }`}
               >
                 <CheckCircle size={20} weight="bold" />
-                {order.status === 'flagged'
+                {order.workflow_status === 'flagged'
                   ? 'Confirm & Generate Bill'
                   : 'Approve & Send to Picking'}
               </BigButton>

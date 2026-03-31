@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShoppingCart, ClipboardText, Package } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { BottomSheet } from '../components/shared';
+import { useTeamUsers } from '../hooks/useTeamUsers';
 
-type SheetMode = 'sales' | 'picking' | null;
+type SheetMode = 'sales' | 'billing' | 'picking' | null;
 
-import { SALES_NAMES, PICKER_NAMES } from '../utils/constants';
+import { SALES_NAMES, PICKER_NAMES, BILLING_NAMES } from '../utils/constants';
 
 /* Design system: indigo (sales), blue (billing), amber (picking) — use palette tokens */
 const ROLES = [
@@ -44,10 +45,34 @@ export default function RoleSelectPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const { selectRole } = useAuth();
 
+  // Fetch user names from DB, fall back to hardcoded constants
+  const { data: salesUsers } = useTeamUsers('sales');
+  const { data: billingUsers } = useTeamUsers('billing');
+  const { data: pickingUsers } = useTeamUsers('picking');
+
+  const salesNames = useMemo(
+    () => salesUsers?.map(u => u.full_name) ?? SALES_NAMES,
+    [salesUsers],
+  );
+  const billingNames = useMemo(
+    () => billingUsers?.map(u => u.full_name) ?? BILLING_NAMES,
+    [billingUsers],
+  );
+  const pickerNames = useMemo(
+    () => pickingUsers?.map(u => u.full_name) ?? PICKER_NAMES,
+    [pickingUsers],
+  );
+
   function handleSalesSelect(name: string) {
     selectRole('sales', name);
     setSheetMode(null);
     navigate('/sales');
+  }
+
+  function handleBillingSelect(name: string) {
+    selectRole('billing', name);
+    setSheetMode(null);
+    navigate('/billing');
   }
 
   function handlePickerSelect(name: string) {
@@ -75,8 +100,7 @@ export default function RoleSelectPage(): React.JSX.Element | null {
             key={key}
             onClick={() => {
               if (key === 'billing') {
-                selectRole('billing');
-                navigate('/billing');
+                setSheetMode('billing');
               } else if (key === 'picking') {
                 setSheetMode('picking');
               } else {
@@ -112,7 +136,7 @@ export default function RoleSelectPage(): React.JSX.Element | null {
       {/* Sales name picker */}
       <BottomSheet isOpen={sheetMode === 'sales'} onClose={() => setSheetMode(null)} title="Select your name">
         <div className="space-y-1">
-          {SALES_NAMES.map((name) => (
+          {salesNames.map((name) => (
             <button
               key={name}
               onClick={() => handleSalesSelect(name)}
@@ -124,10 +148,25 @@ export default function RoleSelectPage(): React.JSX.Element | null {
         </div>
       </BottomSheet>
 
+      {/* Billing name picker */}
+      <BottomSheet isOpen={sheetMode === 'billing'} onClose={() => setSheetMode(null)} title="Select your name">
+        <div className="space-y-1">
+          {billingNames.map((name) => (
+            <button
+              key={name}
+              onClick={() => handleBillingSelect(name)}
+              className="w-full text-left px-4 py-3 rounded-xl text-[var(--content-primary)] hover:bg-[var(--bg-tertiary)] active:bg-[var(--bg-tertiary)] transition-colors duration-150 text-base"
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      </BottomSheet>
+
       {/* Picker name picker */}
       <BottomSheet isOpen={sheetMode === 'picking'} onClose={() => setSheetMode(null)} title="Select your name">
         <div className="space-y-1">
-          {PICKER_NAMES.map((name) => (
+          {pickerNames.map((name) => (
             <button
               key={name}
               onClick={() => handlePickerSelect(name)}

@@ -7,6 +7,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   role: Role;
   userName: string | null;
+  userId: number | null;
   adminUnlocked: boolean;
   login: (code: string) => Promise<boolean>;
   unlockAdmin: (code: string) => boolean;
@@ -21,6 +22,7 @@ const LS_KEYS = {
   authenticated: 'paspl_authenticated',
   role: 'paspl_role',
   userName: 'paspl_userName',
+  userId: 'paspl_userId',
   adminUnlocked: 'paspl_admin_unlocked',
 } as const;
 
@@ -46,38 +48,48 @@ function safeLocalStorageSet(key: string, value: string) {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(key, value);
-  } catch {}
+  } catch {
+    // ignore
+  }
 }
 
 function safeLocalStorageRemove(key: string) {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.removeItem(key);
-  } catch {}
+  } catch {
+    // ignore
+  }
 }
 
 function safeSessionStorageSet(key: string, value: string) {
   if (typeof window === 'undefined') return;
   try {
     window.sessionStorage.setItem(key, value);
-  } catch {}
+  } catch {
+    // ignore
+  }
 }
 
 function safeSessionStorageRemove(key: string) {
   if (typeof window === 'undefined') return;
   try {
     window.sessionStorage.removeItem(key);
-  } catch {}
+  } catch {
+    // ignore
+  }
 }
 
 /** Admin section passcode (separate from app access code). */
 const ADMIN_PASSCODE = '0807';
 
 function loadFromStorage() {
+  const userIdStr = safeLocalStorageGet(LS_KEYS.userId);
   return {
     isAuthenticated: safeLocalStorageGet(LS_KEYS.authenticated) === 'true',
     role: (safeLocalStorageGet(LS_KEYS.role) as Role) || null,
     userName: safeLocalStorageGet(LS_KEYS.userName),
+    userId: userIdStr ? parseInt(userIdStr, 10) : null,
     adminUnlocked: safeSessionStorageGet(LS_KEYS.adminUnlocked) === 'true',
   };
 }
@@ -86,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   const [isAuthenticated, setIsAuthenticated] = useState(() => loadFromStorage().isAuthenticated);
   const [role, setRole] = useState<Role>(() => loadFromStorage().role);
   const [userName, setUserName] = useState<string | null>(() => loadFromStorage().userName);
+  const [userId, setUserId] = useState<number | null>(() => loadFromStorage().userId);
   const [adminUnlocked, setAdminUnlocked] = useState(() => loadFromStorage().adminUnlocked);
 
   const login = useCallback(async (code: string): Promise<boolean> => {
@@ -124,35 +137,63 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     } else {
       safeLocalStorageRemove(LS_KEYS.userName);
     }
+
+    // Resolve userId from users table
+    if (resolvedName) {
+      supabase
+        .from('users')
+        .select('id')
+        .eq('full_name', resolvedName)
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle()
+        .then(({ data }) => {
+          const id = data?.id ?? null;
+          setUserId(id);
+          if (id !== null) {
+            safeLocalStorageSet(LS_KEYS.userId, String(id));
+          } else {
+            safeLocalStorageRemove(LS_KEYS.userId);
+          }
+        });
+    } else {
+      setUserId(null);
+      safeLocalStorageRemove(LS_KEYS.userId);
+    }
   }, []);
 
   const switchRole = useCallback(() => {
     setRole(null);
     setUserName(null);
+    setUserId(null);
     setAdminUnlocked(false);
     safeSessionStorageRemove(LS_KEYS.adminUnlocked);
     safeLocalStorageRemove(LS_KEYS.role);
     safeLocalStorageRemove(LS_KEYS.userName);
+    safeLocalStorageRemove(LS_KEYS.userId);
   }, []);
 
   const logout = useCallback(() => {
     setIsAuthenticated(false);
     setRole(null);
     setUserName(null);
+    setUserId(null);
     setAdminUnlocked(false);
     safeLocalStorageRemove(LS_KEYS.authenticated);
     safeLocalStorageRemove(LS_KEYS.role);
     safeLocalStorageRemove(LS_KEYS.userName);
+    safeLocalStorageRemove(LS_KEYS.userId);
     safeSessionStorageRemove(LS_KEYS.adminUnlocked);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, role, userName, adminUnlocked, login, unlockAdmin, selectRole, logout, switchRole }}>
+    <AuthContext.Provider value={{ isAuthenticated, role, userName, userId, adminUnlocked, login, unlockAdmin, selectRole, logout, switchRole }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
