@@ -228,7 +228,10 @@ export interface PushDiagnostics {
   standalone: boolean;
   permission: NotificationPermission;
   serviceWorkerController: boolean;
+  registrationState: 'none' | 'installing' | 'waiting' | 'active';
   hasExistingSubscription: boolean;
+  lastError: string | null;
+  lastStep: string;
   userAgent: string;
 }
 

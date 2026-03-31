@@ -50,11 +50,22 @@ export function usePickerPushNotifications({
       typeof navigator !== 'undefined' && 'serviceWorker' in navigator
         ? Boolean(navigator.serviceWorker.controller)
         : false,
+    registrationState: 'none',
     hasExistingSubscription: false,
+    lastError: null,
+    lastStep: 'idle',
     userAgent:
       typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
   });
   const touchTimeoutRef = useRef<number | null>(null);
+
+  const getRegistrationState = useCallback((registration?: ServiceWorkerRegistration | null) => {
+    if (!registration) return 'none' as const;
+    if (registration.installing) return 'installing' as const;
+    if (registration.waiting) return 'waiting' as const;
+    if (registration.active) return 'active' as const;
+    return 'none' as const;
+  }, []);
 
   const syncSubscription = useCallback(
     async (subscription: PushSubscription | null): Promise<boolean> => {
@@ -95,6 +106,9 @@ export function usePickerPushNotifications({
         supported: false,
         standalone: isStandaloneDisplayMode(),
         permission: getNotificationPermission(),
+        registrationState: 'none',
+        lastError: null,
+        lastStep: 'unsupported',
       }));
       setState({
         supported: false,
@@ -108,6 +122,7 @@ export function usePickerPushNotifications({
     }
 
     try {
+      const registration = await registerPushServiceWorker();
       const subscription = await getExistingPushSubscription();
       const permission = getNotificationPermission();
       const enabled = await syncSubscription(subscription);
@@ -119,7 +134,10 @@ export function usePickerPushNotifications({
           typeof navigator !== 'undefined' && 'serviceWorker' in navigator
             ? Boolean(navigator.serviceWorker.controller)
             : false,
+        registrationState: getRegistrationState(registration),
         hasExistingSubscription: Boolean(subscription),
+        lastError: null,
+        lastStep: 'refresh',
         userAgent:
           typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
       });
@@ -142,6 +160,8 @@ export function usePickerPushNotifications({
           typeof navigator !== 'undefined' && 'serviceWorker' in navigator
             ? Boolean(navigator.serviceWorker.controller)
             : false,
+        lastError: error instanceof Error ? error.message : 'Failed to refresh alerts',
+        lastStep: 'refresh-error',
       }));
       setState((prev) => ({
         ...prev,
@@ -238,6 +258,8 @@ export function usePickerPushNotifications({
           typeof navigator !== 'undefined' && 'serviceWorker' in navigator
             ? Boolean(navigator.serviceWorker.controller)
             : false,
+        lastError: null,
+        lastStep: 'permission-granted',
       }));
       if (permission !== 'granted') {
         const error =
@@ -255,18 +277,41 @@ export function usePickerPushNotifications({
       }
 
       const registration = await registerPushServiceWorker();
+      setDiagnostics((prev) => ({
+        ...prev,
+        registrationState: getRegistrationState(registration),
+        serviceWorkerController:
+          typeof navigator !== 'undefined' && 'serviceWorker' in navigator
+            ? Boolean(navigator.serviceWorker.controller)
+            : false,
+        lastError: null,
+        lastStep: 'service-worker-registered',
+      }));
       if (!registration) {
         throw new Error('Service worker registration failed');
       }
 
       let subscription = await registration.pushManager.getSubscription();
       if (!subscription) {
+        setDiagnostics((prev) => ({
+          ...prev,
+          registrationState: getRegistrationState(registration),
+          lastError: null,
+          lastStep: 'subscribing',
+        }));
         subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: vapidPublicKeyToUint8Array(VAPID_PUBLIC_KEY) as BufferSource,
         });
       }
 
+      setDiagnostics((prev) => ({
+        ...prev,
+        registrationState: getRegistrationState(registration),
+        hasExistingSubscription: Boolean(subscription),
+        lastError: null,
+        lastStep: 'saving-subscription',
+      }));
       await syncSubscription(subscription);
       setDiagnostics({
         supported: true,
@@ -276,7 +321,10 @@ export function usePickerPushNotifications({
           typeof navigator !== 'undefined' && 'serviceWorker' in navigator
             ? Boolean(navigator.serviceWorker.controller)
             : false,
+        registrationState: getRegistrationState(registration),
         hasExistingSubscription: Boolean(subscription),
+        lastError: null,
+        lastStep: 'enabled',
         userAgent:
           typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
       });
@@ -300,6 +348,8 @@ export function usePickerPushNotifications({
           typeof navigator !== 'undefined' && 'serviceWorker' in navigator
             ? Boolean(navigator.serviceWorker.controller)
             : false,
+        lastError: message,
+        lastStep: 'enable-error',
       }));
       setState((prev) => ({
         ...prev,
@@ -311,7 +361,7 @@ export function usePickerPushNotifications({
       }));
       return { ok: false, error: message } satisfies PushActionResult;
     }
-  }, [role, syncSubscription, userId, userName]);
+  }, [getRegistrationState, role, syncSubscription, userId, userName]);
 
   const disable = useCallback(async () => {
     setState((prev) => ({ ...prev, loading: true, error: null }));

@@ -229,8 +229,16 @@ export default function QueuePage(): React.JSX.Element | null {
                   supported: {String(pushAlerts.diagnostics.supported)} · standalone: {String(pushAlerts.diagnostics.standalone)} · permission: {pushAlerts.diagnostics.permission}
                 </p>
                 <p className="text-[11px] text-[var(--content-secondary)]">
-                  sw controller: {String(pushAlerts.diagnostics.serviceWorkerController)} · existing sub: {String(pushAlerts.diagnostics.hasExistingSubscription)}
+                  sw controller: {String(pushAlerts.diagnostics.serviceWorkerController)} · reg: {pushAlerts.diagnostics.registrationState} · existing sub: {String(pushAlerts.diagnostics.hasExistingSubscription)}
                 </p>
+                <p className="text-[11px] text-[var(--content-secondary)]">
+                  step: {pushAlerts.diagnostics.lastStep}
+                </p>
+                {pushAlerts.diagnostics.lastError && (
+                  <p className="text-[11px] text-[var(--content-negative)]">
+                    error: {pushAlerts.diagnostics.lastError}
+                  </p>
+                )}
               </div>
             </div>
             {pushAlerts.supported && (
