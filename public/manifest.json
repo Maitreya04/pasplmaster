@@ -1,0 +1,18 @@
+{
+  "id": "/",
+  "name": "PASPL Master",
+  "short_name": "PASPL",
+  "description": "Warehouse order workflow for sales, billing, and picking.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f1e8",
+  "theme_color": "#f5f1e8",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

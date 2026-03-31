@@ -209,6 +209,8 @@ export default function QueuePage(): React.JSX.Element | null {
                 {pushAlerts.supported
                   ? pushAlerts.enabled
                     ? 'This device will receive browser alerts when billing approves an order.'
+                    : !pushAlerts.standalone
+                      ? 'Open the installed Home Screen app to enable picker alerts on iPhone or iPad.'
                     : pushAlerts.permission === 'denied'
                       ? 'Browser notifications are blocked on this device. Re-enable them in browser settings to receive picker alerts.'
                       : 'Turn on alerts on this device to receive new ready-to-pick orders.'

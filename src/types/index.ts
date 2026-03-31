@@ -216,6 +216,7 @@ export interface PushSubscriptionRecord {
 
 export interface PushCapabilityState {
   supported: boolean;
+  standalone: boolean;
   permission: NotificationPermission;
   enabled: boolean;
   loading: boolean;

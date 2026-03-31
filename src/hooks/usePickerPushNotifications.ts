@@ -5,6 +5,7 @@ import {
   getNotificationPermission,
   getPushDeviceId,
   isPushSupported,
+  isStandaloneDisplayMode,
   parseSubscriptionKeys,
   registerPushServiceWorker,
   vapidPublicKeyToUint8Array,
@@ -26,6 +27,7 @@ export function usePickerPushNotifications({
 }: UsePickerPushNotificationsOptions) {
   const [state, setState] = useState<PushCapabilityState>({
     supported: isPushSupported(),
+    standalone: isStandaloneDisplayMode(),
     permission: getNotificationPermission(),
     enabled: false,
     loading: false,
@@ -69,6 +71,7 @@ export function usePickerPushNotifications({
     if (!isPushSupported()) {
       setState({
         supported: false,
+        standalone: isStandaloneDisplayMode(),
         permission: getNotificationPermission(),
         enabled: false,
         loading: false,
@@ -84,6 +87,7 @@ export function usePickerPushNotifications({
       setState((prev) => ({
         ...prev,
         supported: true,
+        standalone: isStandaloneDisplayMode(),
         permission,
         enabled,
         loading: false,
@@ -93,6 +97,7 @@ export function usePickerPushNotifications({
       setState((prev) => ({
         ...prev,
         supported: true,
+        standalone: isStandaloneDisplayMode(),
         permission: getNotificationPermission(),
         enabled: false,
         loading: false,
@@ -139,7 +144,16 @@ export function usePickerPushNotifications({
       setState((prev) => ({
         ...prev,
         supported: false,
+        standalone: isStandaloneDisplayMode(),
         error: 'This browser does not support push notifications.',
+      }));
+      return false;
+    }
+    if (!isStandaloneDisplayMode()) {
+      setState((prev) => ({
+        ...prev,
+        standalone: false,
+        error: 'On iPhone and iPad, open the installed Home Screen app to enable alerts.',
       }));
       return false;
     }
@@ -192,6 +206,7 @@ export function usePickerPushNotifications({
       await syncSubscription(subscription);
       setState({
         supported: true,
+        standalone: true,
         permission,
         enabled: true,
         loading: false,
@@ -201,6 +216,7 @@ export function usePickerPushNotifications({
     } catch (error) {
       setState((prev) => ({
         ...prev,
+        standalone: isStandaloneDisplayMode(),
         permission: getNotificationPermission(),
         enabled: false,
         loading: false,
@@ -237,6 +253,7 @@ export function usePickerPushNotifications({
 
       setState((prev) => ({
         ...prev,
+        standalone: isStandaloneDisplayMode(),
         permission: getNotificationPermission(),
         enabled: false,
         loading: false,
@@ -246,6 +263,7 @@ export function usePickerPushNotifications({
     } catch (error) {
       setState((prev) => ({
         ...prev,
+        standalone: isStandaloneDisplayMode(),
         permission: getNotificationPermission(),
         loading: false,
         error: error instanceof Error ? error.message : 'Failed to disable alerts',

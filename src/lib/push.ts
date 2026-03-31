@@ -15,6 +15,20 @@ export function isPushSupported(): boolean {
   );
 }
 
+export function isStandaloneDisplayMode(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  const mediaStandalone =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(display-mode: standalone)').matches;
+  const navigatorStandalone =
+    'standalone' in navigator &&
+    typeof navigator.standalone === 'boolean' &&
+    navigator.standalone;
+
+  return Boolean(mediaStandalone || navigatorStandalone);
+}
+
 export async function registerPushServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (!isPushSupported()) return null;
   return navigator.serviceWorker.register('/sw.js');
