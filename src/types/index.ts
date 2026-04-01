@@ -140,6 +140,7 @@ export interface OrderWithItems extends Order {
 }
 
 export interface CartItem {
+  lineId: string;
   item: Item;
   qty: number;
   specialRate: number | null;

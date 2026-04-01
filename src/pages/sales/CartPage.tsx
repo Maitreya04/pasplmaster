@@ -148,7 +148,7 @@ interface SwipeableCartRowProps {
   item: CartItem;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  onUpdateQty: (itemId: number, qty: number) => void;
+  onUpdateQty: (lineId: string, qty: number) => void;
   onRatePress: (item: CartItem) => void;
   onDeletePress: (item: CartItem) => void;
 }
@@ -288,7 +288,7 @@ function SwipeableCartRow({
         <div className="shrink-0">
           <NumberStepper
             value={cartItem.qty}
-            onChange={(q) => onUpdateQty(cartItem.item.id, q)}
+            onChange={(q) => onUpdateQty(cartItem.lineId, q)}
             min={1}
             presets={[]}
           />
@@ -326,30 +326,30 @@ export default function CartPage(): React.JSX.Element | null {
 
   const [submittedOrderNumber, setSubmittedOrderNumber] = useState<string | null>(null);
   const [showItemBreakdown, setShowItemBreakdown] = useState(false);
-  const [openActionsItemId, setOpenActionsItemId] = useState<number | null>(null);
-  const [rateItemId, setRateItemId] = useState<number | null>(null);
+  const [openActionsItemId, setOpenActionsItemId] = useState<string | null>(null);
+  const [rateItemId, setRateItemId] = useState<string | null>(null);
   const [rateValue, setRateValue] = useState('');
-  const [deleteItemId, setDeleteItemId] = useState<number | null>(null);
+  const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
 
-  const rateCartItem = rateItemId !== null ? items.find((ci) => ci.item.id === rateItemId) ?? null : null;
-  const deleteCartItem = deleteItemId !== null ? items.find((ci) => ci.item.id === deleteItemId) ?? null : null;
+  const rateCartItem = rateItemId !== null ? items.find((ci) => ci.lineId === rateItemId) ?? null : null;
+  const deleteCartItem = deleteItemId !== null ? items.find((ci) => ci.lineId === deleteItemId) ?? null : null;
 
   const openRateSheet = (cartItem: CartItem) => {
     setOpenActionsItemId(null);
-    setRateItemId(cartItem.item.id);
+    setRateItemId(cartItem.lineId);
     setRateValue(cartItem.specialRate !== null ? String(cartItem.specialRate) : '');
   };
 
   const handleSaveRate = () => {
     if (!rateCartItem) return;
     const parsed = parseFloat(rateValue.replace(/,/g, ''));
-    setSpecialRate(rateCartItem.item.id, Number.isNaN(parsed) || parsed < 0 ? null : parsed);
+    setSpecialRate(rateCartItem.lineId, Number.isNaN(parsed) || parsed < 0 ? null : parsed);
     setRateItemId(null);
   };
 
   const openDeleteSheet = (cartItem: CartItem) => {
     setOpenActionsItemId(null);
-    setDeleteItemId(cartItem.item.id);
+    setDeleteItemId(cartItem.lineId);
   };
 
   const submitMutation = useMutation({
@@ -487,10 +487,10 @@ export default function CartPage(): React.JSX.Element | null {
                 {items.map((ci) => {
                   return (
                     <SwipeableCartRow
-                      key={ci.item.id}
+                      key={ci.lineId}
                       item={ci}
-                      isOpen={openActionsItemId === ci.item.id}
-                      onOpenChange={(open) => setOpenActionsItemId(open ? ci.item.id : null)}
+                      isOpen={openActionsItemId === ci.lineId}
+                      onOpenChange={(open) => setOpenActionsItemId(open ? ci.lineId : null)}
                       onUpdateQty={updateQty}
                       onRatePress={openRateSheet}
                       onDeletePress={openDeleteSheet}
@@ -625,7 +625,7 @@ export default function CartPage(): React.JSX.Element | null {
                     const lineTotal = price * ci.qty;
                     const partNo = ci.item.alias1 ?? ci.item.alias;
                     return (
-                      <div key={ci.item.id} className="flex justify-between gap-3 text-xs mt-1 text-[var(--content-secondary)]">
+                      <div key={ci.lineId} className="flex justify-between gap-3 text-xs mt-1 text-[var(--content-secondary)]">
                         <div className="min-w-0">
                           <p className="truncate">
                             {ci.item.name}
@@ -691,7 +691,7 @@ export default function CartPage(): React.JSX.Element | null {
             <div className="flex gap-3">
               <button
                 onClick={() => {
-                  setSpecialRate(rateCartItem.item.id, null);
+                  setSpecialRate(rateCartItem.lineId, null);
                   setRateItemId(null);
                 }}
                 className="flex-1 h-12 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-secondary)] font-semibold hover:opacity-90"
@@ -728,7 +728,7 @@ export default function CartPage(): React.JSX.Element | null {
               </button>
               <button
                 onClick={() => {
-                  removeItem(deleteCartItem.item.id);
+                  removeItem(deleteCartItem.lineId);
                   setDeleteItemId(null);
                 }}
                 className="flex-1 h-12 rounded-xl bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] font-semibold hover:opacity-90 active:scale-95"

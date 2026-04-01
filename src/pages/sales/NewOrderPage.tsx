@@ -1,6 +1,6 @@
 import { useState, useMemo, useDeferredValue, useRef, useEffect, memo, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Minus, ShoppingCart, CaretRight, CaretDown, CurrencyInr, Check, X } from '@phosphor-icons/react';
+import { Plus, ShoppingCart, CaretRight, CaretDown, CurrencyInr, Check, X } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
@@ -628,17 +628,12 @@ interface ItemRowProps {
   query: string;
   onStartAdd: (item: Item) => void;
   onConfirmAdd: (item: Item, qty: number) => void;
+  onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
   onCancelAdd: () => void;
   pendingAddItemId: number | null;
-  onDecrement: (item: Item, currentQty: number) => void;
-  onIncrement: (item: Item, currentQty: number) => void;
-  onRatePress: (item: Item) => void;
-  onQtyEditOpen: (itemId: number | null) => void;
-  editingItemId: number | null;
-  inCartQty: number;
+  totalInOrderQty: number;
   price: number;
-  specialRate: number | null;
-  onUpdateQty: (itemId: number, qty: number) => void;
+  hasSpecialLine: boolean;
 }
 
 function SpecialRateChip() {
@@ -680,30 +675,23 @@ const ItemRow = memo(function ItemRow({
   query,
   onStartAdd,
   onConfirmAdd,
+  onConfirmSpecialRateAdd,
   onCancelAdd,
   pendingAddItemId,
-  onDecrement,
-  onIncrement,
-  onRatePress,
-  onQtyEditOpen,
-  editingItemId,
-  inCartQty,
+  totalInOrderQty,
   price,
-  specialRate,
-  onUpdateQty,
+  hasSpecialLine,
 }: ItemRowProps) {
   const { item, matchedField } = result;
-  const isEditingQty = editingItemId === item.id;
   const isPendingAdd = pendingAddItemId === item.id;
   const productCode = (item.alias1 ?? item.alias ?? '').toString().trim();
   const productCodeValue = productCode || '—';
-  const hasSpecialRate = specialRate !== null;
 
   return (
     <li
-      className={`flex items-center gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-14 ${inCartQty === 0 ? 'cursor-pointer' : ''}`}
+      className="flex items-center gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-14 cursor-pointer"
       onClick={() => {
-        if (inCartQty === 0 && !isPendingAdd) {
+        if (!isPendingAdd) {
           onStartAdd(item);
         }
       }}
@@ -719,75 +707,34 @@ const ItemRow = memo(function ItemRow({
             matchedField={matchedField}
             placeholder={!productCode}
           />
-          {hasSpecialRate && <SpecialRateChip />}
+          {hasSpecialLine && <SpecialRateChip />}
+          {totalInOrderQty > 0 && (
+            <span className="text-xs font-medium text-[var(--content-tertiary)]">
+              {totalInOrderQty} in order
+            </span>
+          )}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-2">
           <span className="font-mono text-sm font-semibold text-[var(--content-secondary)] inline-block">
             {formatCurrency(price)}
           </span>
-          {hasSpecialRate && (
-            <span className="font-mono text-xs text-[var(--content-tertiary)] line-through">
-              {formatCurrency(item.sales_price)}
-            </span>
-          )}
         </div>
       </div>
 
-      {inCartQty > 0 ? (
-        <div className="flex items-center gap-1 shrink-0">
-          {!isEditingQty && (
-            <button
-              onClick={() => onDecrement(item, inCartQty)}
-              className="w-9 h-9 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] hover:opacity-90 active:scale-95"
-              aria-label="Decrease"
-            >
-              <Minus size={16} weight="bold" />
-            </button>
-          )}
-          <InlineQtyEditor
-            value={inCartQty}
-            open={isEditingQty}
-            onOpenChange={(open) => onQtyEditOpen(open ? item.id : null)}
-            onConfirm={(qty) => {
-              onUpdateQty(item.id, qty);
-              onQtyEditOpen(null);
-            }}
-            onCancel={() => onQtyEditOpen(null)}
-            allowZero
-            min={1}
-            max={item.stock_qty > 0 ? Math.floor(item.stock_qty) : undefined}
-          />
-          {!isEditingQty && (
-            <button
-              onClick={() => onIncrement(item, inCartQty)}
-              className="w-9 h-9 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] hover:opacity-90 active:scale-95"
-              aria-label="Increase"
-            >
-              <Plus size={16} weight="bold" />
-            </button>
-          )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onRatePress(item);
-            }}
-            className="w-9 h-9 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-tertiary)] hover:opacity-90 active:scale-95 ml-0.5"
-            aria-label="Set special rate"
-          >
-            <CurrencyInr size={14} weight="bold" />
-          </button>
-        </div>
-      ) : isPendingAdd ? (
+      {isPendingAdd ? (
         <div className="flex items-center gap-1 shrink-0">
           <InlineQtyEditor
             value={1}
             open
-            onConfirm={(qty) => {
-              onConfirmAdd(item, qty);
-            }}
+            onConfirm={(qty) => onConfirmAdd(item, qty)}
             onCancel={onCancelAdd}
             min={1}
             max={item.stock_qty > 0 ? Math.floor(item.stock_qty) : undefined}
+            secondaryAction={{
+              icon: <CurrencyInr size={18} weight="bold" />,
+              ariaLabel: `Add ${item.name} with special rate`,
+              onAction: (qty) => onConfirmSpecialRateAdd(item, qty),
+            }}
           />
         </div>
       ) : (
@@ -808,11 +755,10 @@ const ItemRow = memo(function ItemRow({
   return (
     prevProps.result.item.id === nextProps.result.item.id &&
     prevProps.query === nextProps.query &&
-    prevProps.editingItemId === nextProps.editingItemId &&
     prevProps.pendingAddItemId === nextProps.pendingAddItemId &&
-    prevProps.inCartQty === nextProps.inCartQty &&
+    prevProps.totalInOrderQty === nextProps.totalInOrderQty &&
     prevProps.price === nextProps.price &&
-    prevProps.specialRate === nextProps.specialRate
+    prevProps.hasSpecialLine === nextProps.hasSpecialLine
   );
 });
 
@@ -825,34 +771,24 @@ function ResultSection({
   query,
   onStartAdd,
   onConfirmAdd,
+  onConfirmSpecialRateAdd,
   onCancelAdd,
   pendingAddItemId,
-  onDecrement,
-  onIncrement,
-  onRatePress,
-  onQtyEditOpen,
-  editingItemId,
-  getCartQty,
+  getTotalInOrderQty,
   getPrice,
-  getSpecialRate,
-  onUpdateQty,
+  hasSpecialLine,
 }: {
   label: string;
   results: SearchResult[];
   query: string;
   onStartAdd: (item: Item) => void;
   onConfirmAdd: (item: Item, qty: number) => void;
+  onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
   onCancelAdd: () => void;
   pendingAddItemId: number | null;
-  onDecrement: (item: Item, qty: number) => void;
-  onIncrement: (item: Item, qty: number) => void;
-  onRatePress: (item: Item) => void;
-  onQtyEditOpen: (itemId: number | null) => void;
-  editingItemId: number | null;
-  getCartQty: (id: number) => number;
+  getTotalInOrderQty: (id: number) => number;
   getPrice: (item: Item) => number;
-  getSpecialRate: (id: number) => number | null;
-  onUpdateQty: (itemId: number, qty: number) => void;
+  hasSpecialLine: (id: number) => boolean;
 }) {
   if (!results.length) return null;
   return (
@@ -868,17 +804,12 @@ function ResultSection({
             query={query}
             pendingAddItemId={pendingAddItemId}
             onConfirmAdd={onConfirmAdd}
+            onConfirmSpecialRateAdd={onConfirmSpecialRateAdd}
             onCancelAdd={onCancelAdd}
-            inCartQty={getCartQty(r.item.id)}
+            totalInOrderQty={getTotalInOrderQty(r.item.id)}
             price={getPrice(r.item)}
-            specialRate={getSpecialRate(r.item.id)}
+            hasSpecialLine={hasSpecialLine(r.item.id)}
             onStartAdd={onStartAdd}
-            onDecrement={onDecrement}
-            onIncrement={onIncrement}
-            onRatePress={onRatePress}
-            onQtyEditOpen={onQtyEditOpen}
-            editingItemId={editingItemId}
-            onUpdateQty={onUpdateQty}
           />
         ))}
       </ul>
@@ -895,9 +826,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const {
     items: cartItems,
     addItem,
-    updateQty,
-    setSpecialRate,
-    getCartItem,
     totalCount,
     totalValue,
     setSelectedCustomer,
@@ -908,8 +836,8 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [isBrandSheetOpen, setIsBrandSheetOpen] = useState(false);
   const [rateItem, setRateItem] = useState<Item | null>(null);
+  const [rateQty, setRateQty] = useState(1);
   const [rateValue, setRateValue] = useState('');
-  const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [pendingAddItemId, setPendingAddItemId] = useState<number | null>(null);
   const [moreVisible, setMoreVisible] = useState(INITIAL_MORE_VISIBLE);
   const searchRef = useRef<HTMLDivElement | null>(null);
@@ -1048,9 +976,25 @@ export default function NewOrderPage(): React.JSX.Element | null {
       .map(([name, count]) => ({ name, count }));
   }, [narrowIndex, detectedBrand]);
 
-  const getCartQty = (id: number) => getCartItem(id)?.qty ?? 0;
-  const getPrice = (item: Item) => getCartItem(item.id)?.specialRate ?? item.sales_price;
-  const getSpecialRate = (id: number) => getCartItem(id)?.specialRate ?? null;
+  const cartQtyByItem = useMemo(() => {
+    const totals = new Map<number, number>();
+    for (const line of cartItems) {
+      totals.set(line.item.id, (totals.get(line.item.id) ?? 0) + line.qty);
+    }
+    return totals;
+  }, [cartItems]);
+
+  const specialLineItemIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const line of cartItems) {
+      if (line.specialRate !== null) ids.add(line.item.id);
+    }
+    return ids;
+  }, [cartItems]);
+
+  const getTotalInOrderQty = (id: number) => cartQtyByItem.get(id) ?? 0;
+  const getPrice = (item: Item) => item.sales_price;
+  const hasSpecialLine = (id: number) => specialLineItemIds.has(id);
 
   const handleQueryChange = (value: string) => {
     if (value.trim()) {
@@ -1060,7 +1004,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
   };
 
   const handleStartAdd = (item: Item) => {
-    setEditingItemId(null);
     setPendingAddItemId(item.id);
   };
 
@@ -1075,19 +1018,23 @@ export default function NewOrderPage(): React.JSX.Element | null {
     setPendingAddItemId(null);
     focusSearchInput(60);
   };
-  const handleDecrement = (item: Item, qty: number) => updateQty(item.id, Math.max(1, qty - 1));
-  const handleIncrement = (item: Item, qty: number) => updateQty(item.id, qty + 1);
 
-  const handleRatePress = (item: Item) => {
+  const handleConfirmSpecialRateAdd = (item: Item, qty: number) => {
+    setPendingAddItemId(null);
     setRateItem(item);
-    setRateValue(String(getCartItem(item.id)?.specialRate ?? ''));
+    setRateQty(qty);
+    setRateValue('');
   };
 
   const handleRateSave = () => {
     if (!rateItem) return;
     const n = parseFloat(rateValue.replace(/,/g, ''));
-    setSpecialRate(rateItem.id, isNaN(n) || n < 0 ? null : n);
+    if (isNaN(n) || n < 0) return;
+    addItem(rateItem, rateQty, n);
     setRateItem(null);
+    setRateValue('');
+    setQuery('');
+    focusSearchInput(60);
   };
 
   return (
@@ -1294,17 +1241,12 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 query={effectiveQuery}
                 onStartAdd={handleStartAdd}
                 onConfirmAdd={handleConfirmAdd}
+                onConfirmSpecialRateAdd={handleConfirmSpecialRateAdd}
                 onCancelAdd={handleCancelAdd}
                 pendingAddItemId={pendingAddItemId}
-                onDecrement={handleDecrement}
-                onIncrement={handleIncrement}
-                onRatePress={handleRatePress}
-                onQtyEditOpen={setEditingItemId}
-                editingItemId={editingItemId}
-                getCartQty={getCartQty}
+                getTotalInOrderQty={getTotalInOrderQty}
                 getPrice={getPrice}
-                getSpecialRate={getSpecialRate}
-                onUpdateQty={updateQty}
+                hasSpecialLine={hasSpecialLine}
               />
               <ResultSection
                 label={bestMatches.length ? 'More results' : 'Results'}
@@ -1312,17 +1254,12 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 query={effectiveQuery}
                 onStartAdd={handleStartAdd}
                 onConfirmAdd={handleConfirmAdd}
+                onConfirmSpecialRateAdd={handleConfirmSpecialRateAdd}
                 onCancelAdd={handleCancelAdd}
                 pendingAddItemId={pendingAddItemId}
-                onDecrement={handleDecrement}
-                onIncrement={handleIncrement}
-                onRatePress={handleRatePress}
-                onQtyEditOpen={setEditingItemId}
-                editingItemId={editingItemId}
-                getCartQty={getCartQty}
+                getTotalInOrderQty={getTotalInOrderQty}
                 getPrice={getPrice}
-                getSpecialRate={getSpecialRate}
-                onUpdateQty={updateQty}
+                hasSpecialLine={hasSpecialLine}
               />
               {hasMoreResults && (
                 <button
@@ -1367,13 +1304,16 @@ export default function NewOrderPage(): React.JSX.Element | null {
       {/* Special rate sheet */}
       <BottomSheet
         isOpen={!!rateItem}
-        onClose={() => setRateItem(null)}
+        onClose={() => {
+          setRateItem(null);
+          focusSearchInput(60);
+        }}
         title={rateItem ? `Special rate: ${rateItem.name}` : ''}
       >
         {rateItem && (
           <div className="space-y-4">
             <p className="text-sm text-[var(--content-tertiary)]">
-              Default: {formatCurrency(rateItem.sales_price)}
+              Qty: <span className="font-mono">{rateQty}</span> · Default: {formatCurrency(rateItem.sales_price)}
             </p>
             <input
               type="text"
@@ -1386,10 +1326,13 @@ export default function NewOrderPage(): React.JSX.Element | null {
             />
             <div className="flex gap-3">
               <button
-                onClick={() => { setSpecialRate(rateItem.id, null); setRateItem(null); }}
+                onClick={() => {
+                  setRateItem(null);
+                  focusSearchInput(60);
+                }}
                 className="flex-1 h-12 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-secondary)] font-semibold hover:opacity-90"
               >
-                Clear rate
+                Cancel
               </button>
               <button
                 onClick={handleRateSave}

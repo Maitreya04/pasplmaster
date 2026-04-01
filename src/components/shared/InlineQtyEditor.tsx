@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
 import { Check, X } from '@phosphor-icons/react';
 
 export interface InlineQtyEditorProps {
@@ -13,6 +13,12 @@ export interface InlineQtyEditorProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   className?: string;
+  secondaryAction?: {
+    icon: ReactNode;
+    ariaLabel: string;
+    onAction: (qty: number) => void;
+    className?: string;
+  };
 }
 
 export function InlineQtyEditor({
@@ -25,6 +31,7 @@ export function InlineQtyEditor({
   open: controlledOpen,
   onOpenChange,
   className = '',
+  secondaryAction,
 }: InlineQtyEditorProps): React.JSX.Element | null {
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
@@ -66,7 +73,7 @@ export function InlineQtyEditor({
     onCancel();
   }, [value, onCancel, setOpen, isControlled]);
 
-  const confirm = useCallback(() => {
+  const commitValue = useCallback((onValid: (qty: number) => void) => {
     committedByButtonRef.current = true;
     const trimmed = inputValue.trim();
     if (trimmed === '') {
@@ -81,8 +88,12 @@ export function InlineQtyEditor({
     const clamped = clamp(parsed);
     setOpen(false);
     if (!isControlled) setInternalOpen(false);
-    onConfirm(clamped);
-  }, [inputValue, allowZero, clamp, onConfirm, cancel, setOpen, isControlled]);
+    onValid(clamped);
+  }, [inputValue, allowZero, clamp, cancel, setOpen, isControlled]);
+
+  const confirm = useCallback(() => {
+    commitValue(onConfirm);
+  }, [commitValue, onConfirm]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -180,6 +191,24 @@ export function InlineQtyEditor({
       >
         <X size={18} weight="bold" />
       </button>
+      {secondaryAction && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            commitValue(secondaryAction.onAction);
+          }}
+          className={`
+            min-w-11 min-h-11 flex items-center justify-center
+            rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-accent)]
+            hover:opacity-90 active:scale-95 transition-all
+            ${secondaryAction.className ?? ''}
+          `}
+          aria-label={secondaryAction.ariaLabel}
+        >
+          {secondaryAction.icon}
+        </button>
+      )}
       <button
         type="button"
         onClick={(e) => {
