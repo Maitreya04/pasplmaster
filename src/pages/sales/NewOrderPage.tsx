@@ -664,11 +664,13 @@ interface ItemRowProps {
   onStartAdd: (item: Item) => void;
   onConfirmAdd: (item: Item, qty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
+  onRequestPo: (item: Item) => void;
   onCancelAdd: () => void;
   pendingAddItemId: number | null;
   totalInOrderQty: number;
   price: number;
   hasSpecialLine: boolean;
+  poRequested: boolean;
 }
 
 function SpecialRateChip() {
@@ -693,15 +695,92 @@ function AliasCode({
   const isMatched = matchedField === 'alias1' || matchedField === 'alias' || matchedField === 'name+alias';
   return (
     <span
-      className={`font-mono text-xs px-1.5 py-0.5 rounded shrink-0 max-w-28 truncate ${
+      className={`inline-flex max-w-full items-center rounded-md border px-2 py-1 font-mono text-[13px] font-semibold tracking-[0.04em] shrink-0 truncate ${
         placeholder
-          ? 'bg-[var(--bg-tertiary)] text-[var(--content-quaternary)]'
-          : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
+          ? 'border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--content-quaternary)]'
+          : 'border-[var(--border-opaque)] bg-[var(--bg-tertiary)] text-[var(--content-primary)]'
       }`}
       aria-label={placeholder ? 'Product code (missing)' : 'Product code'}
     >
       {isMatched && !placeholder ? highlightText(value, query) : value}
     </span>
+  );
+}
+
+type StockTone = 'positive' | 'warning' | 'negative' | 'neutral';
+
+function getStockPresentation(stockQty: number | null | undefined): {
+  label: string;
+  detail?: string;
+  tone: StockTone;
+  canAdd: boolean;
+} {
+  if (typeof stockQty !== 'number' || Number.isNaN(stockQty)) {
+    return {
+      label: 'Stock unknown',
+      tone: 'neutral',
+      canAdd: true,
+    };
+  }
+
+  if (stockQty <= 0) {
+    return {
+      label: 'Out of stock',
+      tone: 'negative',
+      canAdd: false,
+    };
+  }
+
+  if (stockQty <= 5) {
+    return {
+      label: 'Low stock',
+      detail: `${Math.floor(stockQty)} left`,
+      tone: 'warning',
+      canAdd: true,
+    };
+  }
+
+  return {
+    label: 'In stock',
+    detail: `${Math.floor(stockQty)} available`,
+    tone: 'positive',
+    canAdd: true,
+  };
+}
+
+function StockStatus({
+  stockQty,
+  poRequested,
+}: {
+  stockQty: number | null | undefined;
+  poRequested: boolean;
+}) {
+  const status = getStockPresentation(stockQty);
+  const toneClass =
+    status.tone === 'positive'
+      ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
+      : status.tone === 'warning'
+        ? 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)]'
+        : status.tone === 'negative'
+          ? 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]'
+          : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]';
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${toneClass}`}>
+        {status.label}
+      </span>
+      {status.detail && (
+        <span className="text-xs font-medium text-[var(--content-tertiary)]">
+          {status.detail}
+        </span>
+      )}
+      {poRequested && (
+        <span className="text-xs font-semibold text-[var(--content-secondary)]">
+          Purchase requested
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -711,79 +790,125 @@ const ItemRow = memo(function ItemRow({
   onStartAdd,
   onConfirmAdd,
   onConfirmSpecialRateAdd,
+  onRequestPo,
   onCancelAdd,
   pendingAddItemId,
   totalInOrderQty,
   price,
   hasSpecialLine,
+  poRequested,
 }: ItemRowProps) {
   const { item, matchedField } = result;
   const isPendingAdd = pendingAddItemId === item.id;
   const productCode = (item.alias1 ?? item.alias ?? '').toString().trim();
   const productCodeValue = productCode || '—';
+  const stock = getStockPresentation(item.stock_qty);
+  const canAdd = stock.canAdd;
+  const showQtyEditor = isPendingAdd && canAdd;
 
   return (
     <li
-      className="flex items-center gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-14 cursor-pointer"
+      className={`rounded-2xl border bg-[var(--bg-secondary)] px-3 py-3.5 min-h-[104px] ${
+        canAdd ? 'cursor-pointer border-[var(--border-subtle)]' : 'border-[var(--border-subtle)]'
+      }`}
       onClick={() => {
-        if (!isPendingAdd) {
+        if (!isPendingAdd && canAdd) {
           onStartAdd(item);
         }
       }}
     >
-      <div className="flex-1 min-w-0">
-        <p className="font-semibold text-[var(--content-primary)] leading-snug">
-          {highlightText(item.name, query)}
-        </p>
-        <div className="mt-0.5 flex flex-wrap items-center gap-2 min-w-0">
-          <AliasCode
-            value={productCodeValue}
-            query={query}
-            matchedField={matchedField}
-            placeholder={!productCode}
-          />
-          {hasSpecialLine && <SpecialRateChip />}
-          {totalInOrderQty > 0 && (
-            <span className="text-xs font-medium text-[var(--content-tertiary)]">
-              {totalInOrderQty} in order
-            </span>
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <AliasCode
+                value={productCodeValue}
+                query={query}
+                matchedField={matchedField}
+                placeholder={!productCode}
+              />
+            </div>
+            <div className="shrink-0 text-right">
+              <p className="font-mono text-[22px] font-bold leading-none text-[var(--content-primary)]">
+                {formatCurrency(price)}
+              </p>
+              {hasSpecialLine && (
+                <div className="mt-2 flex justify-end">
+                  <SpecialRateChip />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <p className="mt-2 text-[17px] font-semibold leading-snug text-[var(--content-primary)] line-clamp-2">
+            {highlightText(item.name, query)}
+          </p>
+
+          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <StockStatus stockQty={item.stock_qty} poRequested={poRequested} />
+          </div>
+
+          {(totalInOrderQty > 0 || hasSpecialLine) && (
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+              {totalInOrderQty > 0 && (
+                <span className="text-xs font-medium text-[var(--content-tertiary)]">
+                  {totalInOrderQty} in order
+                </span>
+              )}
+            </div>
           )}
         </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-2">
-          <span className="font-mono text-sm font-semibold text-[var(--content-secondary)] inline-block">
-            {formatCurrency(price)}
-          </span>
+
+        <div className="shrink-0 self-center">
+          {showQtyEditor ? (
+            <div className="flex items-center gap-1">
+              <InlineQtyEditor
+                value={1}
+                open
+                onConfirm={(qty) => onConfirmAdd(item, qty)}
+                onCancel={onCancelAdd}
+                min={1}
+                max={item.stock_qty > 0 ? Math.floor(item.stock_qty) : undefined}
+                secondaryAction={{
+                  icon: <CurrencyInr size={18} weight="bold" />,
+                  ariaLabel: `Add ${item.name} with special rate`,
+                  onAction: (qty) => onConfirmSpecialRateAdd(item, qty),
+                }}
+              />
+            </div>
+          ) : canAdd ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onStartAdd(item);
+              }}
+              className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] transition-transform hover:opacity-90 active:scale-95"
+              aria-label="Add to cart"
+            >
+              <Plus size={20} weight="bold" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!poRequested) {
+                  onRequestPo(item);
+                }
+              }}
+              className={`min-h-11 rounded-xl px-3 text-sm font-semibold transition-colors ${
+                poRequested
+                  ? 'bg-[var(--bg-tertiary)] text-[var(--content-tertiary)]'
+                  : 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] hover:opacity-90 active:scale-95'
+              }`}
+              aria-label={poRequested ? `Purchase already requested for ${item.name}` : `Request purchase for ${item.name}`}
+              disabled={poRequested}
+            >
+              {poRequested ? 'PO requested' : 'Request PO'}
+            </button>
+          )}
         </div>
       </div>
-
-      {isPendingAdd ? (
-        <div className="flex items-center gap-1 shrink-0">
-          <InlineQtyEditor
-            value={1}
-            open
-            onConfirm={(qty) => onConfirmAdd(item, qty)}
-            onCancel={onCancelAdd}
-            min={1}
-            max={item.stock_qty > 0 ? Math.floor(item.stock_qty) : undefined}
-            secondaryAction={{
-              icon: <CurrencyInr size={18} weight="bold" />,
-              ariaLabel: `Add ${item.name} with special rate`,
-              onAction: (qty) => onConfirmSpecialRateAdd(item, qty),
-            }}
-          />
-        </div>
-      ) : (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onStartAdd(item);
-          }}
-          className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] hover:opacity-90 active:scale-95 transition-transform"
-          aria-label="Add to cart"
-        >
-          <Plus size={20} weight="bold" />
-        </button>
-      )}
     </li>
   );
 }, (prevProps, nextProps) => {
@@ -793,7 +918,8 @@ const ItemRow = memo(function ItemRow({
     prevProps.pendingAddItemId === nextProps.pendingAddItemId &&
     prevProps.totalInOrderQty === nextProps.totalInOrderQty &&
     prevProps.price === nextProps.price &&
-    prevProps.hasSpecialLine === nextProps.hasSpecialLine
+    prevProps.hasSpecialLine === nextProps.hasSpecialLine &&
+    prevProps.poRequested === nextProps.poRequested
   );
 });
 
@@ -807,11 +933,13 @@ function ResultSection({
   onStartAdd,
   onConfirmAdd,
   onConfirmSpecialRateAdd,
+  onRequestPo,
   onCancelAdd,
   pendingAddItemId,
   getTotalInOrderQty,
   getPrice,
   hasSpecialLine,
+  isPoRequested,
 }: {
   label: string;
   results: SearchResult[];
@@ -819,11 +947,13 @@ function ResultSection({
   onStartAdd: (item: Item) => void;
   onConfirmAdd: (item: Item, qty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
+  onRequestPo: (item: Item) => void;
   onCancelAdd: () => void;
   pendingAddItemId: number | null;
   getTotalInOrderQty: (id: number) => number;
   getPrice: (item: Item) => number;
   hasSpecialLine: (id: number) => boolean;
+  isPoRequested: (item: Item) => boolean;
 }) {
   if (!results.length) return null;
   return (
@@ -840,10 +970,12 @@ function ResultSection({
             pendingAddItemId={pendingAddItemId}
             onConfirmAdd={onConfirmAdd}
             onConfirmSpecialRateAdd={onConfirmSpecialRateAdd}
+            onRequestPo={onRequestPo}
             onCancelAdd={onCancelAdd}
             totalInOrderQty={getTotalInOrderQty(r.item.id)}
             price={getPrice(r.item)}
             hasSpecialLine={hasSpecialLine(r.item.id)}
+            poRequested={isPoRequested(r.item)}
             onStartAdd={onStartAdd}
           />
         ))}
@@ -863,6 +995,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
     addItem,
     totalCount,
     totalValue,
+    selectedCustomer,
     setSelectedCustomer,
   } = useCart();
 
@@ -875,6 +1008,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [rateQty, setRateQty] = useState(1);
   const [rateValue, setRateValue] = useState('');
   const [pendingAddItemId, setPendingAddItemId] = useState<number | null>(null);
+  const [poRequestedKeys, setPoRequestedKeys] = useState<Set<string>>(() => new Set());
   const [moreVisible, setMoreVisible] = useState(INITIAL_MORE_VISIBLE);
   const searchRef = useRef<HTMLDivElement | null>(null);
 
@@ -1003,6 +1137,8 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const getTotalInOrderQty = (id: number) => cartQtyByItem.get(id) ?? 0;
   const getPrice = (item: Item) => item.sales_price;
   const hasSpecialLine = (id: number) => specialLineItemIds.has(id);
+  const getPoRequestKey = (item: Item) => `${selectedCustomer?.id ?? 'draft'}:${item.id}`;
+  const isPoRequested = (item: Item) => poRequestedKeys.has(getPoRequestKey(item));
 
   const handleQueryChange = (value: string) => {
     if (value.trim()) {
@@ -1032,6 +1168,15 @@ export default function NewOrderPage(): React.JSX.Element | null {
     setRateItem(item);
     setRateQty(qty);
     setRateValue('');
+  };
+
+  const handleRequestPo = (item: Item) => {
+    setPendingAddItemId(null);
+    setPoRequestedKeys(prev => {
+      const next = new Set(prev);
+      next.add(getPoRequestKey(item));
+      return next;
+    });
   };
 
   const handleRateSave = () => {
@@ -1186,11 +1331,13 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 onStartAdd={handleStartAdd}
                 onConfirmAdd={handleConfirmAdd}
                 onConfirmSpecialRateAdd={handleConfirmSpecialRateAdd}
+                onRequestPo={handleRequestPo}
                 onCancelAdd={handleCancelAdd}
                 pendingAddItemId={pendingAddItemId}
                 getTotalInOrderQty={getTotalInOrderQty}
                 getPrice={getPrice}
                 hasSpecialLine={hasSpecialLine}
+                isPoRequested={isPoRequested}
               />
               <ResultSection
                 label={bestMatches.length ? 'More results' : 'Results'}
@@ -1199,11 +1346,13 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 onStartAdd={handleStartAdd}
                 onConfirmAdd={handleConfirmAdd}
                 onConfirmSpecialRateAdd={handleConfirmSpecialRateAdd}
+                onRequestPo={handleRequestPo}
                 onCancelAdd={handleCancelAdd}
                 pendingAddItemId={pendingAddItemId}
                 getTotalInOrderQty={getTotalInOrderQty}
                 getPrice={getPrice}
                 hasSpecialLine={hasSpecialLine}
+                isPoRequested={isPoRequested}
               />
               {hasMoreResults && (
                 <button
