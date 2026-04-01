@@ -290,35 +290,27 @@ function SwipeableCartRow({
         }}
       >
         <div className="min-w-0">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-base font-semibold leading-5 text-[var(--content-primary)] whitespace-normal break-words">
-                {cartItem.item.name}
+          <p className="text-base font-semibold leading-5 text-[var(--content-primary)] whitespace-normal break-words">
+            {cartItem.item.name}
+          </p>
+
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            {partNo && (
+              <p className="inline-flex items-center rounded-md bg-[var(--bg-tertiary)] px-2 py-1 font-mono text-xs text-[var(--content-secondary)]">
+                {partNo}
               </p>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                {partNo && (
-                  <p className="inline-flex items-center gap-1 rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 font-mono text-xs text-[var(--content-tertiary)]">
-                    <span>{partNo}</span>
-                  </p>
-                )}
-                {hasSpecialRate && <SpecialRateChip />}
-              </div>
-            </div>
-            <div className="shrink-0 text-right">
-              <p className="font-mono text-sm font-semibold text-[var(--content-primary)]">
-                {formatCurrency(lineTotal)}
-              </p>
-              <p className="mt-1 text-xs text-[var(--content-tertiary)]">
-                {cartItem.qty} pc{cartItem.qty !== 1 ? 's' : ''}
-              </p>
-            </div>
+            )}
+            {hasSpecialRate && <SpecialRateChip />}
           </div>
 
-          <div className="mt-3 flex items-end justify-between gap-3">
+          <div className="mt-4 flex items-end justify-between gap-3">
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <div className="flex flex-wrap items-end gap-x-2 gap-y-1">
+                <p className="font-mono text-lg font-semibold text-[var(--content-primary)]">
+                  {formatCurrency(price)}
+                </p>
                 <p className="text-sm text-[var(--content-tertiary)]">
-                  {formatCurrency(price)} / pc
+                  / pc
                 </p>
                 {hasSpecialRate && (
                   <p className="font-mono text-xs text-[var(--content-tertiary)] line-through">
@@ -326,11 +318,11 @@ function SwipeableCartRow({
                   </p>
                 )}
               </div>
-              <p className="mt-1 text-xs text-[var(--content-tertiary)]">
-                Swipe left for rate or delete
+              <p className="mt-1 font-mono text-sm text-[var(--content-secondary)]">
+                {formatCurrency(lineTotal)}
               </p>
             </div>
-            <div className="shrink-0">
+            <div className="shrink-0 self-center">
               <NumberStepper
                 value={cartItem.qty}
                 onChange={(q) => onUpdateQty(cartItem.lineId, q)}
@@ -520,27 +512,12 @@ export default function CartPage(): React.JSX.Element | null {
           <>
             {/* Item list */}
             <section>
-              <div className="mb-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-base font-semibold text-[var(--content-primary)]">
-                      Review items
-                    </h2>
-                    <p className="mt-1 text-sm text-[var(--content-tertiary)]">
-                      {items.length} line{items.length !== 1 ? 's' : ''} · {totalCount} pc{totalCount !== 1 ? 's' : ''}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs uppercase tracking-wide text-[var(--content-tertiary)]">
-                      Subtotal
-                    </p>
-                    <p className="font-mono text-lg font-semibold text-[var(--content-primary)]">
-                      {formatCurrency(totalValue)}
-                    </p>
-                  </div>
-                </div>
-                <p className="mt-3 text-xs text-[var(--content-tertiary)]">
-                  Adjust quantities inline. Swipe any row left to set a special rate or remove it.
+              <div className="mb-3 flex items-center justify-between gap-3 px-1">
+                <h2 className="text-base font-semibold text-[var(--content-primary)]">
+                  Items
+                </h2>
+                <p className="text-sm text-[var(--content-tertiary)]">
+                  {items.length} line{items.length !== 1 ? 's' : ''}
                 </p>
               </div>
               <ul className="space-y-2">
@@ -563,14 +540,9 @@ export default function CartPage(): React.JSX.Element | null {
             </section>
 
             <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-5">
-              <div>
-                <h2 className="text-base font-semibold text-[var(--content-primary)]">
-                  Order details
-                </h2>
-                <p className="mt-1 text-sm text-[var(--content-tertiary)]">
-                  Add the delivery context before you submit.
-                </p>
-              </div>
+              <h2 className="text-base font-semibold text-[var(--content-primary)]">
+                Order details
+              </h2>
 
               {/* Customer */}
               <div>
@@ -646,9 +618,6 @@ export default function CartPage(): React.JSX.Element | null {
                     </span>
                   </button>
                 </div>
-                <p className="mt-2 text-xs text-[var(--content-tertiary)]">
-                  {priority === 'urgent' ? 'Urgent orders are highlighted for faster handling.' : 'Normal is the default priority for standard processing.'}
-                </p>
               </div>
 
               {/* Notes */}
@@ -753,23 +722,13 @@ export default function CartPage(): React.JSX.Element | null {
           style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}
         >
           <div className="mx-auto max-w-screen-sm rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
-            <div className="mb-3 flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-[var(--content-primary)]">
-                  Ready to submit
-                </p>
-                <p className="mt-1 text-xs text-[var(--content-tertiary)]">
-                  {items.length} line{items.length !== 1 ? 's' : ''} · {totalCount} pc{totalCount !== 1 ? 's' : ''}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-xs uppercase tracking-wide text-[var(--content-tertiary)]">
-                  Grand total
-                </p>
-                <p className="font-mono text-lg font-semibold text-[var(--content-primary)]">
-                  {formatCurrency(totalValue)}
-                </p>
-              </div>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm font-medium text-[var(--content-secondary)]">
+                Grand total
+              </p>
+              <p className="font-mono text-lg font-semibold text-[var(--content-primary)]">
+                {formatCurrency(totalValue)}
+              </p>
             </div>
             <div className="grid grid-cols-[auto_1fr] gap-2">
               <button
