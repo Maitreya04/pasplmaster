@@ -223,18 +223,6 @@ export interface PushCapabilityState {
   error: string | null;
 }
 
-export interface PushDiagnostics {
-  supported: boolean;
-  standalone: boolean;
-  permission: NotificationPermission;
-  serviceWorkerController: boolean;
-  registrationState: 'none' | 'installing' | 'waiting' | 'active';
-  hasExistingSubscription: boolean;
-  lastError: string | null;
-  lastStep: string;
-  userAgent: string;
-}
-
 export interface PickerPushPayload {
   type: NotificationEventType;
   orderId: number;
