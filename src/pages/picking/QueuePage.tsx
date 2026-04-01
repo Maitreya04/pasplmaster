@@ -10,7 +10,6 @@ import {
   Warning,
   User,
   Bell,
-  BellSlash,
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
@@ -186,56 +185,54 @@ export default function QueuePage(): React.JSX.Element | null {
       <PageHeader
         title="Pick Queue"
         action={
-          userName ? (
-            <span className="flex items-center gap-1 text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] px-2 py-1 rounded-full">
-              <User size={12} weight="bold" />
-              {userName}
-            </span>
-          ) : undefined
+          <div className="flex items-center gap-2">
+            {pushAlerts.enabled && (
+              <button
+                type="button"
+                onClick={handleDisableAlerts}
+                disabled={pushAlerts.loading}
+                className="min-h-9 px-3 rounded-full text-xs font-semibold border border-[var(--border-subtle)] text-[var(--content-secondary)] bg-[var(--bg-tertiary)] disabled:opacity-50"
+              >
+                {pushAlerts.loading ? 'Updating…' : 'Disable alerts'}
+              </button>
+            )}
+            {userName ? (
+              <span className="flex items-center gap-1 text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] px-2 py-1 rounded-full">
+                <User size={12} weight="bold" />
+                {userName}
+              </span>
+            ) : null}
+          </div>
         }
       />
 
       <div className="p-4 space-y-6">
-        <Card className="border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <Bell size={18} weight="fill" className="text-[var(--content-warning)]" />
-                <p className="font-semibold text-[var(--content-primary)]">
-                  Picker alerts
-                </p>
-              </div>
-              <p className="text-sm text-[var(--content-secondary)]">
-                {pushAlerts.supported
-                  ? pushAlerts.enabled
-                    ? 'This device will receive browser alerts when billing approves an order.'
-                    : !pushAlerts.standalone
+        {!pushAlerts.enabled && (
+          <Card className="border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <Bell size={18} weight="fill" className="text-[var(--content-warning)]" />
+                  <p className="font-semibold text-[var(--content-primary)]">
+                    Picker alerts
+                  </p>
+                </div>
+                <p className="text-sm text-[var(--content-secondary)]">
+                  {pushAlerts.supported
+                    ? !pushAlerts.standalone
                       ? 'Open the installed Home Screen app to enable picker alerts on iPhone or iPad.'
-                    : pushAlerts.permission === 'denied'
-                      ? 'Browser notifications are blocked on this device. Re-enable them in browser settings to receive picker alerts.'
-                      : 'Turn on alerts on this device to receive new ready-to-pick orders.'
-                  : 'This browser does not support push notifications. Queue updates will still appear live in the app.'}
-              </p>
-              {pushAlerts.error && (
-                <p className="mt-2 text-xs text-[var(--content-negative)]">
-                  {pushAlerts.error}
+                      : pushAlerts.permission === 'denied'
+                        ? 'Browser notifications are blocked on this device. Re-enable them in browser settings to receive picker alerts.'
+                        : 'Turn on alerts on this device to receive new ready-to-pick orders.'
+                    : 'This browser does not support push notifications. Queue updates will still appear live in the app.'}
                 </p>
-              )}
-            </div>
-            {pushAlerts.supported && (
-              pushAlerts.enabled ? (
-                <button
-                  type="button"
-                  onClick={handleDisableAlerts}
-                  disabled={pushAlerts.loading}
-                  className="min-h-11 px-4 rounded-xl text-sm font-semibold border border-[var(--border-warning)] text-[var(--content-warning)] bg-[var(--bg-primary)] disabled:opacity-50"
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <BellSlash size={16} weight="bold" />
-                    {pushAlerts.loading ? 'Updating…' : 'Disable'}
-                  </span>
-                </button>
-              ) : (
+                {pushAlerts.error && (
+                  <p className="mt-2 text-xs text-[var(--content-negative)]">
+                    {pushAlerts.error}
+                  </p>
+                )}
+              </div>
+              {pushAlerts.supported && (
                 <button
                   type="button"
                   onClick={handleEnableAlerts}
@@ -247,10 +244,10 @@ export default function QueuePage(): React.JSX.Element | null {
                     {pushAlerts.loading ? 'Enabling…' : 'Enable Alerts'}
                   </span>
                 </button>
-              )
-            )}
-          </div>
-        </Card>
+              )}
+            </div>
+          </Card>
+        )}
 
         {/* My Active Picks — prominent amber banners */}
         {myActive.length > 0 && (
