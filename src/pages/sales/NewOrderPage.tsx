@@ -726,7 +726,7 @@ const ItemRow = memo(function ItemRow({
   return (
     <li
       className={`rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3 cursor-pointer ${
-        showQtyEditor ? 'min-h-[136px]' : 'min-h-[104px]'
+        showQtyEditor ? 'min-h-[136px]' : 'min-h-[96px]'
       }`}
       onClick={() => {
         if (!isPendingAdd) {
@@ -734,9 +734,56 @@ const ItemRow = memo(function ItemRow({
         }
       }}
     >
-      <div className="min-w-0">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0 flex-1">
+      {showQtyEditor ? (
+        <div className="min-w-0">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <AliasCode
+                value={productCodeValue}
+                query={query}
+                matchedField={matchedField}
+                placeholder={!productCode}
+              />
+            </div>
+            <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
+              {formatCurrency(price)}
+            </p>
+          </div>
+
+          <p className="mt-2 text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
+            {highlightText(item.name, query)}
+          </p>
+
+          {(totalInOrderQty > 0 || hasSpecialLine) && (
+            <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
+              {totalInOrderQty > 0 && (
+                <span className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
+                  {totalInOrderQty} in order
+                </span>
+              )}
+              {hasSpecialLine && <SpecialRateChip />}
+            </div>
+          )}
+
+          <div className="mt-3">
+            <InlineQtyEditor
+              value={1}
+              open
+              onConfirm={(qty) => onConfirmAdd(item, qty)}
+              onCancel={onCancelAdd}
+              min={1}
+              className="w-full justify-end"
+              secondaryAction={{
+                icon: <CurrencyInr size={18} weight="bold" />,
+                ariaLabel: `Add ${item.name} with special rate`,
+                onAction: (qty) => onConfirmSpecialRateAdd(item, qty),
+              }}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-[minmax(0,1fr)_72px] grid-rows-[auto_auto] gap-x-3 gap-y-2 min-w-0">
+          <div className="min-w-0 flex items-start">
             <AliasCode
               value={productCodeValue}
               query={query}
@@ -747,38 +794,25 @@ const ItemRow = memo(function ItemRow({
           <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
             {formatCurrency(price)}
           </p>
-        </div>
 
-        <p className="mt-2 text-[14px] font-semibold leading-[1.4] text-[var(--content-primary)] line-clamp-2 break-words">
-          {highlightText(item.name, query)}
-        </p>
+          <div className="min-w-0">
+            <p className="text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
+              {highlightText(item.name, query)}
+            </p>
 
-        {(totalInOrderQty > 0 || hasSpecialLine) && (
-          <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
-            {totalInOrderQty > 0 && (
-              <span className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
-                {totalInOrderQty} in order
-              </span>
+            {(totalInOrderQty > 0 || hasSpecialLine) && (
+              <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
+                {totalInOrderQty > 0 && (
+                  <span className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
+                    {totalInOrderQty} in order
+                  </span>
+                )}
+                {hasSpecialLine && <SpecialRateChip />}
+              </div>
             )}
-            {hasSpecialLine && <SpecialRateChip />}
           </div>
-        )}
 
-        <div className="mt-3 flex items-center justify-end">
-          {showQtyEditor ? (
-            <InlineQtyEditor
-              value={1}
-              open
-              onConfirm={(qty) => onConfirmAdd(item, qty)}
-              onCancel={onCancelAdd}
-              min={1}
-              secondaryAction={{
-                icon: <CurrencyInr size={18} weight="bold" />,
-                ariaLabel: `Add ${item.name} with special rate`,
-                onAction: (qty) => onConfirmSpecialRateAdd(item, qty),
-              }}
-            />
-          ) : (
+          <div className="flex items-center justify-end self-center">
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -789,9 +823,9 @@ const ItemRow = memo(function ItemRow({
             >
               <Plus size={20} weight="bold" />
             </button>
-          )}
+          </div>
         </div>
-      </div>
+      )}
     </li>
   );
 }, (prevProps, nextProps) => {
