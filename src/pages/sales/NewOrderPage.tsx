@@ -705,76 +705,6 @@ function AliasCode({
   );
 }
 
-type StockTone = 'positive' | 'warning' | 'negative' | 'neutral';
-
-function getStockPresentation(stockQty: number | null | undefined): {
-  label: string;
-  detail?: string;
-  tone: StockTone;
-  canAdd: boolean;
-} {
-  if (typeof stockQty !== 'number' || Number.isNaN(stockQty)) {
-    return {
-      label: 'Stock unknown',
-      tone: 'neutral',
-      canAdd: true,
-    };
-  }
-
-  if (stockQty <= 0) {
-    return {
-      label: 'Out of stock',
-      tone: 'negative',
-      canAdd: false,
-    };
-  }
-
-  if (stockQty <= 5) {
-    return {
-      label: 'Low stock',
-      detail: `${Math.floor(stockQty)} left`,
-      tone: 'warning',
-      canAdd: true,
-    };
-  }
-
-  return {
-    label: 'In stock',
-    detail: `${Math.floor(stockQty)} available`,
-    tone: 'positive',
-    canAdd: true,
-  };
-}
-
-function StockStatus({
-  stockQty,
-}: {
-  stockQty: number | null | undefined;
-}) {
-  const status = getStockPresentation(stockQty);
-  const toneClass =
-    status.tone === 'positive'
-      ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
-      : status.tone === 'warning'
-        ? 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)]'
-        : status.tone === 'negative'
-          ? 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]'
-          : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]';
-
-  return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${toneClass}`}>
-        {status.label}
-      </span>
-      {status.detail && (
-        <span className="text-[11px] font-medium text-[var(--content-tertiary)]">
-          {status.detail}
-        </span>
-      )}
-    </div>
-  );
-}
-
 const ItemRow = memo(function ItemRow({
   result,
   query,
@@ -791,61 +721,49 @@ const ItemRow = memo(function ItemRow({
   const isPendingAdd = pendingAddItemId === item.id;
   const productCode = (item.alias1 ?? item.alias ?? '').toString().trim();
   const productCodeValue = productCode || '—';
-  const stock = getStockPresentation(item.stock_qty);
-  const showQtyEditor = isPendingAdd && stock.canAdd;
+  const showQtyEditor = isPendingAdd;
 
   return (
     <li
-      className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3 min-h-[96px]"
+      className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3 min-h-[104px] cursor-pointer"
       onClick={() => {
-        if (!isPendingAdd && stock.canAdd) {
+        if (!isPendingAdd) {
           onStartAdd(item);
         }
       }}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-stretch gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <AliasCode
-                value={productCodeValue}
-                query={query}
-                matchedField={matchedField}
-                placeholder={!productCode}
-              />
-            </div>
-            <div className="shrink-0 text-right">
-              <p className="font-mono text-[18px] font-semibold leading-none text-[var(--content-primary)]">
-                {formatCurrency(price)}
-              </p>
-              {hasSpecialLine && (
-                <div className="mt-1.5 flex justify-end">
-                  <SpecialRateChip />
-                </div>
-              )}
-            </div>
+          <div className="flex items-center gap-3">
+            <AliasCode
+              value={productCodeValue}
+              query={query}
+              matchedField={matchedField}
+              placeholder={!productCode}
+            />
           </div>
 
           <p className="mt-2 text-[15px] font-semibold leading-5 text-[var(--content-primary)] line-clamp-2">
             {highlightText(item.name, query)}
           </p>
 
-          <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <StockStatus stockQty={item.stock_qty} />
-          </div>
-
           {(totalInOrderQty > 0 || hasSpecialLine) && (
-            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2">
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
               {totalInOrderQty > 0 && (
                 <span className="text-[11px] font-medium text-[var(--content-tertiary)]">
                   {totalInOrderQty} in order
                 </span>
               )}
+              {hasSpecialLine && <SpecialRateChip />}
             </div>
           )}
         </div>
 
-        <div className="shrink-0 self-center pt-0.5">
+        <div className="flex w-14 shrink-0 flex-col items-end justify-between gap-3">
+          <p className="pt-0.5 text-right font-mono text-[17px] font-semibold leading-none text-[var(--content-primary)]">
+            {formatCurrency(price)}
+          </p>
+
           {showQtyEditor ? (
             <div className="flex items-center gap-1">
               <InlineQtyEditor
@@ -854,7 +772,6 @@ const ItemRow = memo(function ItemRow({
                 onConfirm={(qty) => onConfirmAdd(item, qty)}
                 onCancel={onCancelAdd}
                 min={1}
-                max={item.stock_qty > 0 ? Math.floor(item.stock_qty) : undefined}
                 secondaryAction={{
                   icon: <CurrencyInr size={18} weight="bold" />,
                   ariaLabel: `Add ${item.name} with special rate`,
@@ -862,19 +779,17 @@ const ItemRow = memo(function ItemRow({
                 }}
               />
             </div>
-          ) : stock.canAdd ? (
+          ) : (
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 onStartAdd(item);
               }}
-              className="flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)] transition-transform hover:bg-[var(--bg-tertiary)] active:scale-95"
+              className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] shadow-sm transition-transform hover:opacity-95 active:scale-95"
               aria-label="Add to cart"
             >
               <Plus size={20} weight="bold" />
             </button>
-          ) : (
-            <div className="h-11 w-11 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]" aria-hidden />
           )}
         </div>
       </div>
