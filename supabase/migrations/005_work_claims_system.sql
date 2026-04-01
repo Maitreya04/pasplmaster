@@ -47,12 +47,12 @@ INSERT INTO users (full_name, role) VALUES
   ('Abhishek', 'picking'),
   ('Guddu', 'picking');
 
--- Seed: Billing team (placeholder names — update with real names)
+-- Seed: Billing team
 INSERT INTO users (full_name, role, station_label) VALUES
-  ('Billing 1', 'billing', 'Station 1'),
-  ('Billing 2', 'billing', 'Station 2'),
-  ('Billing 3', 'billing', 'Station 3'),
-  ('Billing 4', 'billing', 'Station 4');
+  ('Govind', 'billing', 'Station 1'),
+  ('Deepak Yogi', 'billing', 'Station 2'),
+  ('Neetu', 'billing', 'Station 3'),
+  ('Kamlakar', 'billing', 'Station 4');
 
 -- ─── 2. work_claims ─────────────────────────────────────────
 CREATE TABLE work_claims (

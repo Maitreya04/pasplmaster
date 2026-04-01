@@ -10,10 +10,10 @@ export const FLAG_REASONS = [
 export type FlagReason = (typeof FLAG_REASONS)[number];
 
 export const BILLING_NAMES = [
-  'Billing 1',
-  'Billing 2',
-  'Billing 3',
-  'Billing 4',
+  'Govind',
+  'Deepak Yogi',
+  'Neetu',
+  'Kamlakar',
 ];
 
 export const PICKER_NAMES = [
