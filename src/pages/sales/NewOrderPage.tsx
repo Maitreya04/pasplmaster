@@ -1,6 +1,6 @@
 import { useState, useMemo, useDeferredValue, useRef, useEffect, memo, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ShoppingCart, CaretRight, CaretDown, CurrencyInr, Check, X } from '@phosphor-icons/react';
+import { Plus, ShoppingCart, CaretRight, CurrencyInr, Check, FunnelSimple } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
@@ -12,7 +12,6 @@ import {
   normalizeQuery,
   detectCodeLike,
   MAX_RESULTS,
-  STRONG_THRESHOLD,
 } from '../../lib/search/itemSearch';
 import type { SearchResult, MatchedField } from '../../lib/search/itemSearch';
 import { buildNarrowIndex, buildNarrowSuggestions } from '../../lib/search/narrowSuggestions';
@@ -22,7 +21,6 @@ import { supabase } from '../../lib/supabase/client';
 import {
   PageHeader,
   SearchInput,
-  FilterChip,
   BottomSheet,
   Skeleton,
   InlineQtyEditor,
@@ -58,23 +56,20 @@ interface TrendingRow {
   total_order_count: number | null;
 }
 
-function stripMatchingTokens(rawQuery: string, value: string): string {
-  const valueTokens = normalizeQuery(value).split(' ').filter(Boolean);
-  const queryTokens = normalizeQuery(rawQuery).split(' ').filter(Boolean);
-  const remaining = queryTokens.filter(qt =>
-    !valueTokens.some(vt => vt.startsWith(qt) || qt.startsWith(vt)),
-  );
-  return remaining.join(' ');
-}
-
 function BrandFilterSheetContent({
   brands,
   selectedBrand,
+  groups,
+  selectedGroup,
   onSelect,
+  onSelectGroup,
 }: {
   brands: BrandOption[];
   selectedBrand: string | null;
+  groups: BrandOption[];
+  selectedGroup: string | null;
   onSelect: (brand: string | null) => void;
+  onSelectGroup: (group: string | null) => void;
 }) {
   const [search, setSearch] = useState('');
 
@@ -131,6 +126,46 @@ function BrandFilterSheetContent({
           </button>
         ))}
       </div>
+      {selectedBrand && (
+        <div className="space-y-2 border-t border-[var(--border-subtle)] pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--content-tertiary)]">
+              Sub-category
+            </p>
+            {selectedGroup && (
+              <button
+                type="button"
+                onClick={() => onSelectGroup(null)}
+                className="text-xs font-medium text-[var(--bg-accent)]"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {groups.length === 0 ? (
+              <p className="text-sm text-[var(--content-tertiary)]">
+                No sub-categories for this brand
+              </p>
+            ) : (
+              groups.map((group) => (
+                <button
+                  key={group.name}
+                  type="button"
+                  onClick={() => onSelectGroup(selectedGroup === group.name ? null : group.name)}
+                  className={`h-10 rounded-full px-3 text-sm font-medium transition-colors ${
+                    selectedGroup === group.name
+                      ? 'bg-[var(--bg-accent)] text-[var(--content-on-color)]'
+                      : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
+                  }`}
+                >
+                  {group.name}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -835,6 +870,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [isBrandSheetOpen, setIsBrandSheetOpen] = useState(false);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [rateItem, setRateItem] = useState<Item | null>(null);
   const [rateQty, setRateQty] = useState(1);
   const [rateValue, setRateValue] = useState('');
@@ -872,6 +908,9 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const isCodeMode = detectCodeLike(effectiveQuery);
   const deferredQuery = useDeferredValue(effectiveQuery);
   const isStale = deferredQuery !== effectiveQuery;
+  const isSearchMode = isSearchFocused || effectiveQuery.length > 0;
+  const activeFilterCount = (selectedBrand ? 1 : 0) + (selectedGroup ? 1 : 0);
+  const activeFilterSummary = [selectedBrand, selectedGroup].filter(Boolean).join(' · ');
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -945,37 +984,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const moreDisplayed = useMemo(() => moreResults.slice(0, moreVisible), [moreResults, moreVisible]);
   const hasMoreResults = moreResults.length > moreDisplayed.length;
 
-  const narrowSuggestions = useMemo(
-    () =>
-      buildNarrowSuggestions(narrowIndex, effectiveQuery, selectedBrand, selectedGroup),
-    [narrowIndex, effectiveQuery, selectedBrand, selectedGroup],
-  );
-
-  const searchRankStrong =
-    deferredQuery.length >= 2 &&
-    searchResults.length >= 6 &&
-    searchResults[0] != null &&
-    searchResults[0].score >= STRONG_THRESHOLD;
-  const showGenericNarrow = !searchRankStrong;
-
-  const detectedBrand = useMemo(() => {
-    if (selectedBrand) return null;
-    const brands = narrowSuggestions.filter(s => s.type === 'brand');
-    if (brands.length === 0) return null;
-    if (brands.length === 1) return brands[0].value;
-    if (brands[0].count > brands[1].count * 3) return brands[0].value;
-    return null;
-  }, [narrowSuggestions, selectedBrand]);
-
-  const subGroupsForDetectedBrand = useMemo(() => {
-    if (!detectedBrand) return [];
-    const gmap = narrowIndex.countsByBrandGroup.get(detectedBrand);
-    if (!gmap) return [];
-    return [...gmap.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([name, count]) => ({ name, count }));
-  }, [narrowIndex, detectedBrand]);
-
   const cartQtyByItem = useMemo(() => {
     const totals = new Map<number, number>();
     for (const line of cartItems) {
@@ -1039,152 +1047,77 @@ export default function NewOrderPage(): React.JSX.Element | null {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <PageHeader
-        title="New Order"
-        action={
-          totalCount > 0 ? (
-            <button
-              onClick={() => navigate('/sales/cart')}
-              className="flex items-center gap-1.5 min-h-12 min-w-12 px-2 rounded-lg text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]"
-            >
-              <ShoppingCart size={22} weight="regular" />
-              <span className="font-mono text-sm font-semibold">{totalCount}</span>
-            </button>
-          ) : null
-        }
-      />
+      {!isSearchMode && (
+        <PageHeader
+          title="New Order"
+          action={
+            totalCount > 0 ? (
+              <button
+                onClick={() => navigate('/sales/cart')}
+                className="flex items-center gap-1.5 min-h-12 min-w-12 px-2 rounded-lg text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]"
+              >
+                <ShoppingCart size={22} weight="regular" />
+                <span className="font-mono text-sm font-semibold">{totalCount}</span>
+              </button>
+            ) : null
+          }
+        />
+      )}
 
       <div className="px-4 pb-4">
         {/* Sticky search + filters */}
         <div
           ref={searchRef}
-          className="sticky top-11 z-30 -mx-4 px-4 pt-1.5 pb-2 space-y-1.5 bg-[var(--bg-primary)] border-b border-[var(--border-subtle)]"
+          className={`sticky z-30 -mx-4 px-4 ${isSearchMode ? 'top-0 pt-2' : 'top-11 pt-1.5'} pb-2 space-y-1.5 bg-[var(--bg-primary)] border-b border-[var(--border-subtle)]`}
         >
-          <div className="relative">
-            <SearchInput
-              placeholder="Search parts, name or code…"
-              value={query}
-              onChange={handleQueryChange}
-              loading={itemsLoading}
-              autoFocus
-              debounceMs={0}
-              leftContent={
-                <div className="flex items-center h-full min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => setIsBrandSheetOpen(true)}
-                    className="flex items-center gap-1 px-3 h-full text-sm font-medium text-[var(--content-secondary)] hover:text-[var(--content-primary)] transition-colors min-w-0"
-                    aria-label={selectedBrand ? `Brand: ${selectedBrand}` : 'All brands'}
-                  >
-                    <span className="truncate">
-                      {selectedBrand ?? 'All brands'}
-                    </span>
-                    <CaretDown size={14} weight="bold" className="shrink-0" />
-                  </button>
-                  {selectedBrand && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedBrand(null);
-                        setSelectedGroup(null);
-                      }}
-                      className="flex items-center justify-center w-8 h-full shrink-0 text-[var(--content-tertiary)] hover:text-[var(--content-primary)] transition-colors"
-                      aria-label="Reset to all brands"
-                    >
-                      <X size={14} weight="bold" />
-                    </button>
-                  )}
-                </div>
-              }
-            />
-            {isCodeMode && (
-              <span className="absolute right-12 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-xs font-bold tracking-wide bg-[var(--bg-accent)] text-[var(--content-on-color)] pointer-events-none">
-                CODE
-              </span>
-            )}
+          <div className="flex items-center gap-2">
+            <div className="flex-1 min-w-0">
+              <SearchInput
+                placeholder="Search parts, name or code…"
+                value={query}
+                onChange={handleQueryChange}
+                onFocus={() => setIsSearchFocused(true)}
+                onBlur={() => setIsSearchFocused(false)}
+                loading={itemsLoading}
+                autoFocus
+                debounceMs={0}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsBrandSheetOpen(true)}
+              className={`relative h-12 min-w-12 px-3 rounded-xl border transition-colors ${
+                activeFilterCount > 0
+                  ? 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+                  : 'border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-secondary)]'
+              }`}
+              aria-label={activeFilterCount > 0 ? `Filters active: ${activeFilterCount}` : 'Open filters'}
+            >
+              <FunnelSimple size={18} weight="bold" />
+              {activeFilterCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)] text-[11px] font-bold flex items-center justify-center">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
           </div>
-
-          {((selectedBrand && subGroupsForBrand.length > 0) ||
-            (detectedBrand && subGroupsForDetectedBrand.length > 0) ||
-            (narrowSuggestions.length > 0 && showGenericNarrow)) && (
-            <div className="rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-3 shadow-sm space-y-1.5">
-              <p className="text-xs uppercase tracking-wide text-[var(--content-tertiary)]">
-                Narrow by
+          {activeFilterSummary && (
+            <div className="flex items-center justify-between gap-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-2">
+              <p className="text-sm text-[var(--content-secondary)] truncate">
+                Filtered by <span className="text-[var(--content-primary)] font-medium">{activeFilterSummary}</span>
               </p>
-              <div className="flex gap-2 overflow-x-auto scrollbar-none py-1">
-                {/* Case 1: Brand selected from dropdown/pill → subcategory chips */}
-                {selectedBrand && subGroupsForBrand.length > 0
-                  && subGroupsForBrand.map(({ name, count }) => (
-                      <FilterChip
-                        key={name}
-                        label={name}
-                        count={count}
-                        selected={selectedGroup === name}
-                        removable={selectedGroup === name}
-                        onRemove={() => setSelectedGroup(null)}
-                        onClick={() =>
-                          setSelectedGroup(prev => (prev === name ? null : name))
-                        }
-                      />
-                    ))}
-
-                {/* Case 2: Brand detected from query (e.g. "usha") → brand chip + subcategory chips */}
-                {!selectedBrand && detectedBrand && subGroupsForDetectedBrand.length > 0 && (
-                  <>
-                    <FilterChip
-                      key={`brand-${detectedBrand}`}
-                      label={detectedBrand}
-                      count={narrowSuggestions.find(s => s.type === 'brand' && s.value === detectedBrand)?.count}
-                      selected={false}
-                      onClick={() => {
-                        setSelectedBrand(detectedBrand);
-                        setQuery(stripMatchingTokens(query, detectedBrand));
-                        focusSearchInput();
-                      }}
-                    />
-                    {subGroupsForDetectedBrand.map(({ name, count }) => (
-                      <FilterChip
-                        key={`det-${name}`}
-                        label={name}
-                        count={count}
-                        selected={false}
-                        onClick={() => {
-                          setSelectedBrand(detectedBrand);
-                          setSelectedGroup(name);
-                          setQuery(stripMatchingTokens(query, detectedBrand));
-                          focusSearchInput();
-                        }}
-                      />
-                    ))}
-                  </>
-                )}
-
-                {/* Case 3: No brand intent → show all narrow suggestions (hidden when ranked results are already strong) */}
-                {!selectedBrand && !(detectedBrand && subGroupsForDetectedBrand.length > 0) && showGenericNarrow
-                  && narrowSuggestions.map(s => (
-                      <FilterChip
-                        key={`${s.type}-${s.value}`}
-                        label={s.label}
-                        count={s.count}
-                        selected={false}
-                        onClick={() => {
-                          if (s.type === 'brand') {
-                            setSelectedBrand(s.value);
-                            setQuery(stripMatchingTokens(query, s.value));
-                          }
-                          if (s.type === 'group') {
-                            setSelectedGroup(s.value);
-                            setQuery(stripMatchingTokens(query, s.value));
-                          }
-                          focusSearchInput();
-                        }}
-                      />
-                    ))}
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedBrand(null);
+                  setSelectedGroup(null);
+                }}
+                className="text-sm font-medium text-[var(--bg-accent)] shrink-0"
+              >
+                Clear
+              </button>
             </div>
           )}
-
         </div>
 
         {/* Results area */}
@@ -1224,14 +1157,25 @@ export default function NewOrderPage(): React.JSX.Element | null {
                     ? 'Code not found — check the number and try again'
                     : 'Try a shorter name or use a part code'}
               </p>
-              {selectedBrand && (
+              <div className="flex items-center justify-center gap-4">
+                {selectedBrand && (
+                  <button
+                    onClick={() => {
+                      setSelectedBrand(null);
+                      setSelectedGroup(null);
+                    }}
+                    className="text-sm text-[var(--bg-accent)] underline"
+                  >
+                    Search all groups
+                  </button>
+                )}
                 <button
-                  onClick={() => setSelectedBrand(null)}
+                  onClick={() => setIsBrandSheetOpen(true)}
                   className="text-sm text-[var(--bg-accent)] underline"
                 >
-                  Search all groups
+                  Open filters
                 </button>
-              )}
+              </div>
             </div>
           ) : (
             <>
@@ -1349,17 +1293,38 @@ export default function NewOrderPage(): React.JSX.Element | null {
       <BottomSheet
         isOpen={isBrandSheetOpen}
         onClose={() => setIsBrandSheetOpen(false)}
-        title="Filter by brand"
+        title="Filters"
       >
         <BrandFilterSheetContent
           brands={brandOptions}
           selectedBrand={selectedBrand}
+          groups={subGroupsForBrand}
+          selectedGroup={selectedGroup}
           onSelect={brand => {
             setSelectedBrand(brand);
             setSelectedGroup(null);
-            setIsBrandSheetOpen(false);
           }}
+          onSelectGroup={setSelectedGroup}
         />
+        <div className="mt-4 flex gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedBrand(null);
+              setSelectedGroup(null);
+            }}
+            className="flex-1 h-12 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-secondary)] font-semibold"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsBrandSheetOpen(false)}
+            className="flex-1 h-12 rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] font-semibold"
+          >
+            Done
+          </button>
+        </div>
       </BottomSheet>
     </div>
   );

@@ -5,6 +5,8 @@ interface SearchInputProps {
   placeholder?: string;
   value: string;
   onChange: (value: string) => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
   loading?: boolean;
   autoFocus?: boolean;
   debounceMs?: number;
@@ -16,6 +18,8 @@ export function SearchInput({
   placeholder = 'Search...',
   value,
   onChange,
+  onFocus,
+  onBlur,
   loading = false,
   autoFocus = true,
   debounceMs = 150,
@@ -75,6 +79,8 @@ export function SearchInput({
         type="text"
         value={localValue}
         onChange={handleChange}
+        onFocus={onFocus}
+        onBlur={onBlur}
         placeholder={placeholder}
         className={
           leftContent
