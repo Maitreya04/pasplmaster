@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -8,8 +8,8 @@ import {
   Clock,
   SpinnerGap,
   Warning,
-  User,
   Bell,
+  GearSix,
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
@@ -55,6 +55,7 @@ export default function QueuePage(): React.JSX.Element | null {
   const toast = useToast();
   const { role, userId, userName } = useAuth();
   const autoClaimAttemptRef = useRef<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const claimOrderIdParam = searchParams.get('claimOrderId');
   const autoClaimOrderId = claimOrderIdParam ? Number.parseInt(claimOrderIdParam, 10) : null;
 
@@ -174,6 +175,7 @@ export default function QueuePage(): React.JSX.Element | null {
   const handleDisableAlerts = async () => {
     const result = await pushAlerts.disable();
     if (result.ok) {
+      setSettingsOpen(false);
       toast.info('Picker alerts turned off on this device');
     } else {
       toast.error(result.error || 'Failed to disable picker alerts.');
@@ -185,28 +187,48 @@ export default function QueuePage(): React.JSX.Element | null {
       <PageHeader
         title="Pick Queue"
         action={
-          <div className="flex items-center gap-2">
-            {pushAlerts.enabled && (
-              <button
-                type="button"
-                onClick={handleDisableAlerts}
-                disabled={pushAlerts.loading}
-                className="min-h-9 px-3 rounded-full text-xs font-semibold border border-[var(--border-subtle)] text-[var(--content-secondary)] bg-[var(--bg-tertiary)] disabled:opacity-50"
-              >
-                {pushAlerts.loading ? 'Updating…' : 'Disable alerts'}
-              </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen((open) => !open)}
+              className="min-h-10 min-w-10 flex items-center justify-center rounded-full text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors duration-150"
+              aria-label="Open queue settings"
+              aria-expanded={settingsOpen}
+            >
+              <GearSix size={20} weight="bold" />
+            </button>
+            {settingsOpen && (
+              <div className="absolute right-0 top-full mt-2 w-44 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] shadow-lg p-2">
+                {pushAlerts.enabled ? (
+                  <button
+                    type="button"
+                    onClick={handleDisableAlerts}
+                    disabled={pushAlerts.loading}
+                    className="w-full min-h-11 px-3 rounded-xl text-left text-sm font-medium text-[var(--content-primary)] hover:bg-[var(--bg-tertiary)] disabled:opacity-50"
+                  >
+                    {pushAlerts.loading ? 'Updating…' : 'Disable alerts'}
+                  </button>
+                ) : (
+                  <p className="px-3 py-2 text-xs text-[var(--content-tertiary)]">
+                    No queue settings yet
+                  </p>
+                )}
+              </div>
             )}
-            {userName ? (
-              <span className="flex items-center gap-1 text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] px-2 py-1 rounded-full">
-                <User size={12} weight="bold" />
-                {userName}
-              </span>
-            ) : null}
           </div>
         }
       />
 
       <div className="p-4 space-y-6">
+        <header className="space-y-1">
+          <h2 className="text-2xl font-bold text-[var(--content-primary)]">
+            Hey, {userName ?? 'there'}
+          </h2>
+          <p className="text-sm text-[var(--content-tertiary)]">
+            Ready orders will appear here as billing approves them.
+          </p>
+        </header>
+
         {!pushAlerts.enabled && (
           <Card className="border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]">
             <div className="flex items-start justify-between gap-4">
