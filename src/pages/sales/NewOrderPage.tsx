@@ -673,7 +673,7 @@ interface ItemRowProps {
 
 function SpecialRateChip() {
   return (
-    <span className="inline-flex items-center rounded-md bg-[var(--bg-accent-subtle)] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--content-accent)]">
+    <span className="inline-flex items-center rounded-full bg-[var(--bg-accent-subtle)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-accent)]">
       special rate
     </span>
   );
@@ -693,10 +693,10 @@ function AliasCode({
   const isMatched = matchedField === 'alias1' || matchedField === 'alias' || matchedField === 'name+alias';
   return (
     <span
-      className={`inline-flex max-w-full items-center rounded-md border px-2 py-1 font-mono text-[13px] font-semibold tracking-[0.04em] shrink-0 truncate ${
+      className={`inline-flex max-w-full items-center rounded-full px-2 py-1 font-mono text-[11px] font-semibold tracking-[0.04em] shrink-0 truncate ${
         placeholder
-          ? 'border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--content-quaternary)]'
-          : 'border-[var(--border-opaque)] bg-[var(--bg-tertiary)] text-[var(--content-primary)]'
+          ? 'bg-[var(--bg-tertiary)] text-[var(--content-quaternary)]'
+          : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
       }`}
       aria-label={placeholder ? 'Product code (missing)' : 'Product code'}
     >
@@ -725,16 +725,18 @@ const ItemRow = memo(function ItemRow({
 
   return (
     <li
-      className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3 min-h-[104px] cursor-pointer"
+      className={`rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3 cursor-pointer ${
+        showQtyEditor ? 'min-h-[136px]' : 'min-h-[104px]'
+      }`}
       onClick={() => {
         if (!isPendingAdd) {
           onStartAdd(item);
         }
       }}
     >
-      <div className="flex items-stretch gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-3">
+      <div className="min-w-0">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
             <AliasCode
               value={productCodeValue}
               query={query}
@@ -742,50 +744,47 @@ const ItemRow = memo(function ItemRow({
               placeholder={!productCode}
             />
           </div>
-
-          <p className="mt-2 text-[15px] font-semibold leading-5 text-[var(--content-primary)] line-clamp-2">
-            {highlightText(item.name, query)}
-          </p>
-
-          {(totalInOrderQty > 0 || hasSpecialLine) && (
-            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
-              {totalInOrderQty > 0 && (
-                <span className="text-[11px] font-medium text-[var(--content-tertiary)]">
-                  {totalInOrderQty} in order
-                </span>
-              )}
-              {hasSpecialLine && <SpecialRateChip />}
-            </div>
-          )}
-        </div>
-
-        <div className="flex w-14 shrink-0 flex-col items-end justify-between gap-3">
-          <p className="pt-0.5 text-right font-mono text-[17px] font-semibold leading-none text-[var(--content-primary)]">
+          <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
             {formatCurrency(price)}
           </p>
+        </div>
 
+        <p className="mt-2 text-[14px] font-semibold leading-[1.4] text-[var(--content-primary)] line-clamp-2 break-words">
+          {highlightText(item.name, query)}
+        </p>
+
+        {(totalInOrderQty > 0 || hasSpecialLine) && (
+          <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
+            {totalInOrderQty > 0 && (
+              <span className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
+                {totalInOrderQty} in order
+              </span>
+            )}
+            {hasSpecialLine && <SpecialRateChip />}
+          </div>
+        )}
+
+        <div className="mt-3 flex items-center justify-end">
           {showQtyEditor ? (
-            <div className="flex items-center gap-1">
-              <InlineQtyEditor
-                value={1}
-                open
-                onConfirm={(qty) => onConfirmAdd(item, qty)}
-                onCancel={onCancelAdd}
-                min={1}
-                secondaryAction={{
-                  icon: <CurrencyInr size={18} weight="bold" />,
-                  ariaLabel: `Add ${item.name} with special rate`,
-                  onAction: (qty) => onConfirmSpecialRateAdd(item, qty),
-                }}
-              />
-            </div>
+            <InlineQtyEditor
+              value={1}
+              open
+              onConfirm={(qty) => onConfirmAdd(item, qty)}
+              onCancel={onCancelAdd}
+              min={1}
+              secondaryAction={{
+                icon: <CurrencyInr size={18} weight="bold" />,
+                ariaLabel: `Add ${item.name} with special rate`,
+                onAction: (qty) => onConfirmSpecialRateAdd(item, qty),
+              }}
+            />
           ) : (
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 onStartAdd(item);
               }}
-              className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] shadow-sm transition-transform hover:opacity-95 active:scale-95"
+              className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--bg-accent)] text-[var(--content-on-color)] shadow-sm transition-transform hover:opacity-95 active:scale-95"
               aria-label="Add to cart"
             >
               <Plus size={20} weight="bold" />
@@ -837,7 +836,7 @@ function ResultSection({
   if (!results.length) return null;
   return (
     <div className="space-y-2">
-      <p className="text-xs font-semibold uppercase tracking-wide text-[var(--content-tertiary)] px-0.5">
+      <p className="px-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
         {label}
       </p>
       <ul className="space-y-2">
