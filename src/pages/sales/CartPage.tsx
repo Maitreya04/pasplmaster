@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MagnifyingGlass, CheckCircle, Plus, CurrencyInr, Trash } from '@phosphor-icons/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -133,8 +133,9 @@ function SearchableCustomerDropdown({
   );
 }
 
-const SWIPE_ACTION_WIDTH = 160;
-const SWIPE_OPEN_THRESHOLD = 72;
+const SWIPE_ACTION_WIDTH = 144;
+const SWIPE_OPEN_THRESHOLD = 44;
+const SWIPE_PREVIEW_OFFSET = 42;
 
 function SpecialRateChip() {
   return (
@@ -149,8 +150,10 @@ interface SwipeableCartRowProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onUpdateQty: (lineId: string, qty: number) => void;
+  onRemove: (lineId: string) => void;
   onRatePress: (item: CartItem) => void;
   onDeletePress: (item: CartItem) => void;
+  previewOnMount?: boolean;
 }
 
 function SwipeableCartRow({
@@ -158,18 +161,40 @@ function SwipeableCartRow({
   isOpen,
   onOpenChange,
   onUpdateQty,
+  onRemove,
   onRatePress,
   onDeletePress,
+  previewOnMount = false,
 }: SwipeableCartRowProps) {
   const [offset, setOffset] = useState(isOpen ? SWIPE_ACTION_WIDTH : 0);
   const [isDragging, setIsDragging] = useState(false);
+  const [previewOffset, setPreviewOffset] = useState(0);
   const startXRef = useRef<number | null>(null);
   const startYRef = useRef<number | null>(null);
   const baseOffsetRef = useRef(0);
   const isHorizontalGestureRef = useRef(false);
+  const hasPreviewedRef = useRef(false);
+
+  useEffect(() => {
+    if (!previewOnMount || hasPreviewedRef.current) return;
+    hasPreviewedRef.current = true;
+
+    const previewIn = window.setTimeout(() => {
+      setPreviewOffset(SWIPE_PREVIEW_OFFSET);
+    }, 350);
+    const previewOut = window.setTimeout(() => {
+      setPreviewOffset(0);
+    }, 1050);
+
+    return () => {
+      window.clearTimeout(previewIn);
+      window.clearTimeout(previewOut);
+    };
+  }, [previewOnMount]);
 
   const closeActions = useCallback(() => {
     setOffset(0);
+    setPreviewOffset(0);
     onOpenChange(false);
   }, [onOpenChange]);
 
@@ -179,6 +204,7 @@ function SwipeableCartRow({
     startYRef.current = touch.clientY;
     baseOffsetRef.current = isOpen ? SWIPE_ACTION_WIDTH : 0;
     isHorizontalGestureRef.current = false;
+    setPreviewOffset(0);
     setIsDragging(true);
   };
 
@@ -190,7 +216,7 @@ function SwipeableCartRow({
     const deltaY = Math.abs(startYRef.current - touch.clientY);
 
     if (!isHorizontalGestureRef.current) {
-      if (Math.abs(deltaX) < 8) return;
+      if (Math.abs(deltaX) < 4) return;
       if (Math.abs(deltaX) <= deltaY) {
         setIsDragging(false);
         return;
@@ -200,7 +226,7 @@ function SwipeableCartRow({
 
     const nextOffset = Math.min(
       SWIPE_ACTION_WIDTH,
-      Math.max(0, baseOffsetRef.current + deltaX),
+      Math.max(0, baseOffsetRef.current + (deltaX * 1.15)),
     );
     setOffset(nextOffset);
     event.preventDefault();
@@ -251,7 +277,7 @@ function SwipeableCartRow({
 
       <div
         className={`relative flex items-center gap-3 p-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-14 ${isDragging ? '' : 'transition-transform duration-200 ease-out'}`}
-        style={{ transform: `translate3d(-${isDragging ? offset : (isOpen ? SWIPE_ACTION_WIDTH : 0)}px, 0, 0)` }}
+        style={{ transform: `translate3d(-${isDragging ? offset : (isOpen ? SWIPE_ACTION_WIDTH : previewOffset)}px, 0, 0)` }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -291,6 +317,8 @@ function SwipeableCartRow({
             onChange={(q) => onUpdateQty(cartItem.lineId, q)}
             min={1}
             presets={[]}
+            showRemoveAtMin
+            onRemove={() => onRemove(cartItem.lineId)}
           />
         </div>
       </div>
@@ -471,9 +499,14 @@ export default function CartPage(): React.JSX.Element | null {
             {/* Item list */}
             <section>
               <div className="flex items-center justify-between gap-3 mb-3">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--content-tertiary)]">
-                  {items.length} item{items.length !== 1 ? 's' : ''}
-                </h2>
+                <div>
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--content-tertiary)]">
+                    {items.length} item{items.length !== 1 ? 's' : ''}
+                  </h2>
+                  <p className="text-xs text-[var(--content-tertiary)] mt-1">
+                    Swipe left on a line for rate or delete
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={() => navigate('/sales/new')}
@@ -492,8 +525,10 @@ export default function CartPage(): React.JSX.Element | null {
                       isOpen={openActionsItemId === ci.lineId}
                       onOpenChange={(open) => setOpenActionsItemId(open ? ci.lineId : null)}
                       onUpdateQty={updateQty}
+                      onRemove={removeItem}
                       onRatePress={openRateSheet}
                       onDeletePress={openDeleteSheet}
+                      previewOnMount={ci === items[0]}
                     />
                   );
                 })}

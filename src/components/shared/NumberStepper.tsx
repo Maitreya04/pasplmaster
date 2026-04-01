@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { Minus, Plus } from '@phosphor-icons/react';
+import { Minus, Plus, Trash } from '@phosphor-icons/react';
 import { InlineQtyEditor } from './InlineQtyEditor';
 
 interface NumberStepperProps {
@@ -9,6 +9,8 @@ interface NumberStepperProps {
   max?: number;
   presets?: number[];
   variant?: 'default' | 'compact';
+  showRemoveAtMin?: boolean;
+  onRemove?: () => void;
 }
 
 export function NumberStepper({
@@ -18,6 +20,8 @@ export function NumberStepper({
   max,
   presets = [1, 2, 5, 10, 25, 50],
   variant = 'default',
+  showRemoveAtMin = false,
+  onRemove,
 }: NumberStepperProps): React.JSX.Element | null {
   const clamp = useCallback(
     (v: number) => {
@@ -30,18 +34,31 @@ export function NumberStepper({
 
   const decrement = () => onChange(clamp(value - 1));
   const increment = () => onChange(clamp(value + 1));
+  const shouldShowRemove = showRemoveAtMin && value <= min;
+
+  const leadingButton = shouldShowRemove ? (
+    <button
+      onClick={() => onRemove?.()}
+      className="min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] hover:opacity-90 active:opacity-80 transition-opacity duration-150"
+      aria-label="Remove item"
+    >
+      <Trash size={variant === 'compact' ? 16 : 18} weight="regular" />
+    </button>
+  ) : (
+    <button
+      onClick={decrement}
+      disabled={value <= min}
+      className="min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] hover:opacity-90 active:opacity-80 transition-opacity duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
+      aria-label="Decrease quantity"
+    >
+      <Minus size={variant === 'compact' ? 16 : 20} weight="regular" />
+    </button>
+  );
 
   if (variant === 'compact') {
     return (
       <div className="inline-flex items-center gap-2">
-        <button
-          onClick={decrement}
-          disabled={value <= min}
-          className="min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] hover:opacity-90 active:opacity-80 transition-opacity duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
-          aria-label="Decrease quantity"
-        >
-          <Minus size={16} weight="regular" />
-        </button>
+        {leadingButton}
 
         <InlineQtyEditor
           value={value}
@@ -67,20 +84,7 @@ export function NumberStepper({
   return (
     <div className="flex flex-col items-center gap-3">
       <div className="flex items-center gap-3">
-        <button
-          onClick={decrement}
-          disabled={value <= min}
-          className="
-            w-12 h-12 flex items-center justify-center
-            rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)]
-            hover:opacity-90 active:opacity-80
-            transition-opacity duration-150
-            disabled:opacity-30 disabled:cursor-not-allowed
-          "
-          aria-label="Decrease quantity"
-        >
-          <Minus size={20} weight="regular" />
-        </button>
+        {leadingButton}
 
         <InlineQtyEditor
           value={value}
