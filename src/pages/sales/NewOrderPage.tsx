@@ -626,7 +626,10 @@ function highlightText(text: string, query: string): ReactNode {
 interface ItemRowProps {
   result: SearchResult;
   query: string;
-  onAdd: (item: Item) => void;
+  onStartAdd: (item: Item) => void;
+  onConfirmAdd: (item: Item, qty: number) => void;
+  onCancelAdd: () => void;
+  pendingAddItemId: number | null;
   onDecrement: (item: Item, currentQty: number) => void;
   onIncrement: (item: Item, currentQty: number) => void;
   onRatePress: (item: Item) => void;
@@ -675,7 +678,10 @@ function AliasCode({
 const ItemRow = memo(function ItemRow({
   result,
   query,
-  onAdd,
+  onStartAdd,
+  onConfirmAdd,
+  onCancelAdd,
+  pendingAddItemId,
   onDecrement,
   onIncrement,
   onRatePress,
@@ -688,12 +694,20 @@ const ItemRow = memo(function ItemRow({
 }: ItemRowProps) {
   const { item, matchedField } = result;
   const isEditingQty = editingItemId === item.id;
+  const isPendingAdd = pendingAddItemId === item.id;
   const productCode = (item.alias1 ?? item.alias ?? '').toString().trim();
   const productCodeValue = productCode || '—';
   const hasSpecialRate = specialRate !== null;
 
   return (
-    <li className="flex items-center gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-14">
+    <li
+      className={`flex items-center gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-14 ${inCartQty === 0 ? 'cursor-pointer' : ''}`}
+      onClick={() => {
+        if (inCartQty === 0 && !isPendingAdd) {
+          onStartAdd(item);
+        }
+      }}
+    >
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-[var(--content-primary)] leading-snug">
           {highlightText(item.name, query)}
@@ -753,16 +767,35 @@ const ItemRow = memo(function ItemRow({
             </button>
           )}
           <button
-            onClick={() => onRatePress(item)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRatePress(item);
+            }}
             className="w-9 h-9 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-tertiary)] hover:opacity-90 active:scale-95 ml-0.5"
             aria-label="Set special rate"
           >
             <CurrencyInr size={14} weight="bold" />
           </button>
         </div>
+      ) : isPendingAdd ? (
+        <div className="flex items-center gap-1 shrink-0">
+          <InlineQtyEditor
+            value={1}
+            open
+            onConfirm={(qty) => {
+              onConfirmAdd(item, qty);
+            }}
+            onCancel={onCancelAdd}
+            min={1}
+            max={item.stock_qty > 0 ? Math.floor(item.stock_qty) : undefined}
+          />
+        </div>
       ) : (
         <button
-          onClick={() => onAdd(item)}
+          onClick={(e) => {
+            e.stopPropagation();
+            onStartAdd(item);
+          }}
           className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] hover:opacity-90 active:scale-95 transition-transform"
           aria-label="Add to cart"
         >
@@ -776,6 +809,7 @@ const ItemRow = memo(function ItemRow({
     prevProps.result.item.id === nextProps.result.item.id &&
     prevProps.query === nextProps.query &&
     prevProps.editingItemId === nextProps.editingItemId &&
+    prevProps.pendingAddItemId === nextProps.pendingAddItemId &&
     prevProps.inCartQty === nextProps.inCartQty &&
     prevProps.price === nextProps.price &&
     prevProps.specialRate === nextProps.specialRate
@@ -789,7 +823,10 @@ function ResultSection({
   label,
   results,
   query,
-  onAdd,
+  onStartAdd,
+  onConfirmAdd,
+  onCancelAdd,
+  pendingAddItemId,
   onDecrement,
   onIncrement,
   onRatePress,
@@ -803,7 +840,10 @@ function ResultSection({
   label: string;
   results: SearchResult[];
   query: string;
-  onAdd: (item: Item) => void;
+  onStartAdd: (item: Item) => void;
+  onConfirmAdd: (item: Item, qty: number) => void;
+  onCancelAdd: () => void;
+  pendingAddItemId: number | null;
   onDecrement: (item: Item, qty: number) => void;
   onIncrement: (item: Item, qty: number) => void;
   onRatePress: (item: Item) => void;
@@ -826,10 +866,13 @@ function ResultSection({
             key={r.item.id}
             result={r}
             query={query}
+            pendingAddItemId={pendingAddItemId}
+            onConfirmAdd={onConfirmAdd}
+            onCancelAdd={onCancelAdd}
             inCartQty={getCartQty(r.item.id)}
             price={getPrice(r.item)}
             specialRate={getSpecialRate(r.item.id)}
-            onAdd={onAdd}
+            onStartAdd={onStartAdd}
             onDecrement={onDecrement}
             onIncrement={onIncrement}
             onRatePress={onRatePress}
@@ -867,15 +910,17 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [rateItem, setRateItem] = useState<Item | null>(null);
   const [rateValue, setRateValue] = useState('');
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
-  const [recentlyAddedItemId, setRecentlyAddedItemId] = useState<number | null>(null);
+  const [pendingAddItemId, setPendingAddItemId] = useState<number | null>(null);
   const [moreVisible, setMoreVisible] = useState(INITIAL_MORE_VISIBLE);
   const searchRef = useRef<HTMLDivElement | null>(null);
 
-  const focusSearchInput = () => {
-    requestAnimationFrame(() => {
-      const input = searchRef.current?.querySelector('input:not([type="hidden"])') as HTMLInputElement | null;
-      input?.focus();
-    });
+  const focusSearchInput = (delayMs = 0) => {
+    window.setTimeout(() => {
+      requestAnimationFrame(() => {
+        const input = searchRef.current?.querySelector('input:not([type="hidden"])') as HTMLInputElement | null;
+        input?.focus();
+      });
+    }, delayMs);
   };
 
   const narrowIndex = useMemo(() => buildNarrowIndex(items), [items]);
@@ -1006,31 +1051,29 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const getCartQty = (id: number) => getCartItem(id)?.qty ?? 0;
   const getPrice = (item: Item) => getCartItem(item.id)?.specialRate ?? item.sales_price;
   const getSpecialRate = (id: number) => getCartItem(id)?.specialRate ?? null;
-  const recentlyAddedCartItem = !effectiveQuery && recentlyAddedItemId !== null
-    ? getCartItem(recentlyAddedItemId)
-    : undefined;
-  const recentlyAddedResult = recentlyAddedCartItem
-    ? {
-        item: recentlyAddedCartItem.item,
-        score: 100,
-        matchType: 'exact-name' as const,
-        matchedField: 'name' as const,
-      }
-    : null;
 
   const handleQueryChange = (value: string) => {
     if (value.trim()) {
-      setRecentlyAddedItemId(null);
+      setPendingAddItemId(null);
     }
     setQuery(value);
   };
 
-  const handleAdd = (item: Item) => {
-    addItem(item, 1);
-    setEditingItemId(item.id);
-    setRecentlyAddedItemId(item.id);
+  const handleStartAdd = (item: Item) => {
+    setEditingItemId(null);
+    setPendingAddItemId(item.id);
+  };
+
+  const handleConfirmAdd = (item: Item, qty: number) => {
+    addItem(item, qty);
+    setPendingAddItemId(null);
     setQuery('');
-    focusSearchInput();
+    focusSearchInput(60);
+  };
+
+  const handleCancelAdd = () => {
+    setPendingAddItemId(null);
+    focusSearchInput(60);
   };
   const handleDecrement = (item: Item, qty: number) => updateQty(item.id, Math.max(1, qty - 1));
   const handleIncrement = (item: Item, qty: number) => updateQty(item.id, qty + 1);
@@ -1204,51 +1247,26 @@ export default function NewOrderPage(): React.JSX.Element | null {
           {itemsLoading ? (
             <Skeleton variant="list" count={1} lines={6} />
           ) : !effectiveQuery && !selectedBrand ? (
-            <>
-              {recentlyAddedResult && (
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--content-tertiary)] px-0.5">
-                    Recently added
-                  </p>
-                  <ul className="space-y-2">
-                    <ItemRow
-                      result={recentlyAddedResult}
-                      query=""
-                      inCartQty={recentlyAddedCartItem?.qty ?? 0}
-                      price={getPrice(recentlyAddedResult.item)}
-                      specialRate={getSpecialRate(recentlyAddedResult.item.id)}
-                      onAdd={handleAdd}
-                      onDecrement={handleDecrement}
-                      onIncrement={handleIncrement}
-                      onRatePress={handleRatePress}
-                      onQtyEditOpen={setEditingItemId}
-                      editingItemId={editingItemId}
-                      onUpdateQty={updateQty}
-                    />
-                  </ul>
-                </div>
-              )}
-              <SmartLanding
-                items={items}
-                onCustomerSelect={customer => {
+            <SmartLanding
+              items={items}
+              onCustomerSelect={customer => {
+                setSelectedCustomer(customer);
+              }}
+              onQuickReorderApply={(customer, entries) => {
+                if (customer) {
                   setSelectedCustomer(customer);
-                }}
-                onQuickReorderApply={(customer, entries) => {
-                  if (customer) {
-                    setSelectedCustomer(customer);
-                  }
-                  for (const entry of entries) {
-                    addItem(entry.item, entry.qty);
-                  }
-                  navigate('/sales/cart');
-                }}
-                scrollToSearch={() => {
-                  if (searchRef.current) {
-                    searchRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  }
-                }}
-              />
-            </>
+                }
+                for (const entry of entries) {
+                  addItem(entry.item, entry.qty);
+                }
+                navigate('/sales/cart');
+              }}
+              scrollToSearch={() => {
+                if (searchRef.current) {
+                  searchRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+              }}
+            />
           ) : searchResults.length === 0 && !isStale && effectiveQuery ? (
             <div className="pt-6 text-center space-y-4">
               <p className="font-semibold text-[var(--content-primary)]">No results</p>
@@ -1274,7 +1292,10 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 label="Best match"
                 results={bestMatches}
                 query={effectiveQuery}
-                onAdd={handleAdd}
+                onStartAdd={handleStartAdd}
+                onConfirmAdd={handleConfirmAdd}
+                onCancelAdd={handleCancelAdd}
+                pendingAddItemId={pendingAddItemId}
                 onDecrement={handleDecrement}
                 onIncrement={handleIncrement}
                 onRatePress={handleRatePress}
@@ -1289,7 +1310,10 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 label={bestMatches.length ? 'More results' : 'Results'}
                 results={moreDisplayed}
                 query={effectiveQuery}
-                onAdd={handleAdd}
+                onStartAdd={handleStartAdd}
+                onConfirmAdd={handleConfirmAdd}
+                onCancelAdd={handleCancelAdd}
+                pendingAddItemId={pendingAddItemId}
                 onDecrement={handleDecrement}
                 onIncrement={handleIncrement}
                 onRatePress={handleRatePress}

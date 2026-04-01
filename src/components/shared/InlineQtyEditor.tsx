@@ -109,6 +109,14 @@ export function InlineQtyEditor({
     if (!isEditing) setInputValue(String(value));
   }, [value, isEditing]);
 
+  useEffect(() => {
+    if (!isEditing) return;
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+  }, [isEditing]);
+
   // When controlled and parent sets open to false, revert and notify cancel
   const prevControlledOpen = useRef(controlledOpen);
   useEffect(() => {
