@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, MagnifyingGlass, CheckCircle, Plus } from '@phosphor-icons/react';
+import { MagnifyingGlass, CheckCircle, Plus, CurrencyInr, Trash } from '@phosphor-icons/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
@@ -12,8 +12,9 @@ import {
   NumberStepper,
   BigButton,
   SelectTrigger,
+  BottomSheet,
 } from '../../components/shared';
-import type { Customer } from '../../types';
+import type { Customer, CartItem } from '../../types';
 
 import { formatCurrencyRaw as formatCurrency } from '../../utils/formatters';
 
@@ -132,6 +133,171 @@ function SearchableCustomerDropdown({
   );
 }
 
+const SWIPE_ACTION_WIDTH = 160;
+const SWIPE_OPEN_THRESHOLD = 72;
+
+function SpecialRateChip() {
+  return (
+    <span className="inline-flex items-center rounded-md bg-[var(--bg-accent-subtle)] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--content-accent)]">
+      special rate
+    </span>
+  );
+}
+
+interface SwipeableCartRowProps {
+  item: CartItem;
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  onUpdateQty: (itemId: number, qty: number) => void;
+  onRatePress: (item: CartItem) => void;
+  onDeletePress: (item: CartItem) => void;
+}
+
+function SwipeableCartRow({
+  item: cartItem,
+  isOpen,
+  onOpenChange,
+  onUpdateQty,
+  onRatePress,
+  onDeletePress,
+}: SwipeableCartRowProps) {
+  const [offset, setOffset] = useState(isOpen ? SWIPE_ACTION_WIDTH : 0);
+  const [isDragging, setIsDragging] = useState(false);
+  const startXRef = useRef<number | null>(null);
+  const startYRef = useRef<number | null>(null);
+  const baseOffsetRef = useRef(0);
+  const isHorizontalGestureRef = useRef(false);
+
+  const closeActions = useCallback(() => {
+    setOffset(0);
+    onOpenChange(false);
+  }, [onOpenChange]);
+
+  const handleTouchStart = (event: React.TouchEvent) => {
+    const touch = event.touches[0];
+    startXRef.current = touch.clientX;
+    startYRef.current = touch.clientY;
+    baseOffsetRef.current = isOpen ? SWIPE_ACTION_WIDTH : 0;
+    isHorizontalGestureRef.current = false;
+    setIsDragging(true);
+  };
+
+  const handleTouchMove = (event: React.TouchEvent) => {
+    if (startXRef.current === null || startYRef.current === null) return;
+
+    const touch = event.touches[0];
+    const deltaX = startXRef.current - touch.clientX;
+    const deltaY = Math.abs(startYRef.current - touch.clientY);
+
+    if (!isHorizontalGestureRef.current) {
+      if (Math.abs(deltaX) < 8) return;
+      if (Math.abs(deltaX) <= deltaY) {
+        setIsDragging(false);
+        return;
+      }
+      isHorizontalGestureRef.current = true;
+    }
+
+    const nextOffset = Math.min(
+      SWIPE_ACTION_WIDTH,
+      Math.max(0, baseOffsetRef.current + deltaX),
+    );
+    setOffset(nextOffset);
+    event.preventDefault();
+  };
+
+  const handleTouchEnd = () => {
+    if (isHorizontalGestureRef.current) {
+      if (offset >= SWIPE_OPEN_THRESHOLD) {
+        setOffset(SWIPE_ACTION_WIDTH);
+        onOpenChange(true);
+      } else {
+        closeActions();
+      }
+    }
+
+    setIsDragging(false);
+    startXRef.current = null;
+    startYRef.current = null;
+    isHorizontalGestureRef.current = false;
+  };
+
+  const price = cartItem.specialRate ?? cartItem.item.sales_price;
+  const partNo = cartItem.item.alias1 ?? cartItem.item.alias;
+  const hasSpecialRate = cartItem.specialRate !== null;
+
+  return (
+    <li className="relative overflow-hidden rounded-xl">
+      <div className="absolute inset-y-0 right-0 flex">
+        <button
+          type="button"
+          onClick={() => onRatePress(cartItem)}
+          className="flex w-20 flex-col items-center justify-center gap-1 bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]"
+          aria-label={`Set special rate for ${cartItem.item.name}`}
+        >
+          <CurrencyInr size={20} weight="bold" />
+          <span className="text-xs font-semibold">Rate</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onDeletePress(cartItem)}
+          className="flex w-20 flex-col items-center justify-center gap-1 bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]"
+          aria-label={`Delete ${cartItem.item.name}`}
+        >
+          <Trash size={20} weight="bold" />
+          <span className="text-xs font-semibold">Delete</span>
+        </button>
+      </div>
+
+      <div
+        className={`relative flex items-center gap-3 p-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-14 ${isDragging ? '' : 'transition-transform duration-200 ease-out'}`}
+        style={{ transform: `translate3d(-${isDragging ? offset : (isOpen ? SWIPE_ACTION_WIDTH : 0)}px, 0, 0)` }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        onClick={() => {
+          if (isOpen && !isDragging) {
+            closeActions();
+          }
+        }}
+      >
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-[var(--content-primary)] truncate">
+            {cartItem.item.name}
+          </p>
+          <div className="mt-0.5 flex flex-wrap items-center gap-2">
+            {partNo && (
+              <p className="inline-flex items-center gap-1 text-xs text-[var(--content-tertiary)] font-mono bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">
+                <span>{partNo}</span>
+              </p>
+            )}
+            {hasSpecialRate && <SpecialRateChip />}
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-2">
+            <p className="text-sm text-[var(--content-tertiary)]">
+              {formatCurrency(price)} / pc
+            </p>
+            {hasSpecialRate && (
+              <p className="font-mono text-xs text-[var(--content-tertiary)] line-through">
+                {formatCurrency(cartItem.item.sales_price)}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="shrink-0">
+          <NumberStepper
+            value={cartItem.qty}
+            onChange={(q) => onUpdateQty(cartItem.item.id, q)}
+            min={1}
+            presets={[]}
+          />
+        </div>
+      </div>
+    </li>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // CartPage
 // ---------------------------------------------------------------------------
@@ -142,6 +308,7 @@ export default function CartPage(): React.JSX.Element | null {
     items,
     updateQty,
     removeItem,
+    setSpecialRate,
     clearCart,
     totalCount,
     totalValue,
@@ -159,6 +326,31 @@ export default function CartPage(): React.JSX.Element | null {
 
   const [submittedOrderNumber, setSubmittedOrderNumber] = useState<string | null>(null);
   const [showItemBreakdown, setShowItemBreakdown] = useState(false);
+  const [openActionsItemId, setOpenActionsItemId] = useState<number | null>(null);
+  const [rateItemId, setRateItemId] = useState<number | null>(null);
+  const [rateValue, setRateValue] = useState('');
+  const [deleteItemId, setDeleteItemId] = useState<number | null>(null);
+
+  const rateCartItem = rateItemId !== null ? items.find((ci) => ci.item.id === rateItemId) ?? null : null;
+  const deleteCartItem = deleteItemId !== null ? items.find((ci) => ci.item.id === deleteItemId) ?? null : null;
+
+  const openRateSheet = (cartItem: CartItem) => {
+    setOpenActionsItemId(null);
+    setRateItemId(cartItem.item.id);
+    setRateValue(cartItem.specialRate !== null ? String(cartItem.specialRate) : '');
+  };
+
+  const handleSaveRate = () => {
+    if (!rateCartItem) return;
+    const parsed = parseFloat(rateValue.replace(/,/g, ''));
+    setSpecialRate(rateCartItem.item.id, Number.isNaN(parsed) || parsed < 0 ? null : parsed);
+    setRateItemId(null);
+  };
+
+  const openDeleteSheet = (cartItem: CartItem) => {
+    setOpenActionsItemId(null);
+    setDeleteItemId(cartItem.item.id);
+  };
 
   const submitMutation = useMutation({
     mutationFn: async () => {
@@ -293,42 +485,16 @@ export default function CartPage(): React.JSX.Element | null {
               </div>
               <ul className="space-y-2">
                 {items.map((ci) => {
-                  const price = ci.specialRate ?? ci.item.sales_price;
-                  const partNo = ci.item.alias1 ?? ci.item.alias;
                   return (
-                    <li
+                    <SwipeableCartRow
                       key={ci.item.id}
-                      className="flex items-center gap-3 p-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-14"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-[var(--content-primary)] truncate">
-                          {ci.item.name}
-                        </p>
-                        {partNo && (
-                          <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-[var(--content-tertiary)] font-mono bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">
-                            <span>{partNo}</span>
-                          </p>
-                        )}
-                        <p className="text-sm text-[var(--content-tertiary)] mt-0.5">
-                          {formatCurrency(price)} / pc
-                        </p>
-                      </div>
-                      <div className="shrink-0">
-                        <NumberStepper
-                          value={ci.qty}
-                          onChange={(q) => updateQty(ci.item.id, q)}
-                          min={1}
-                          presets={[]}
-                        />
-                      </div>
-                      <button
-                        onClick={() => removeItem(ci.item.id)}
-                        className="shrink-0 w-12 h-12 flex items-center justify-center rounded-lg text-[var(--content-tertiary)] hover:bg-[var(--bg-negative-subtle)] hover:text-[var(--content-negative)] transition-colors min-h-12 min-w-12"
-                        aria-label="Remove item"
-                      >
-                        <X size={20} weight="bold" />
-                      </button>
-                    </li>
+                      item={ci}
+                      isOpen={openActionsItemId === ci.item.id}
+                      onOpenChange={(open) => setOpenActionsItemId(open ? ci.item.id : null)}
+                      onUpdateQty={updateQty}
+                      onRatePress={openRateSheet}
+                      onDeletePress={openDeleteSheet}
+                    />
                   );
                 })}
               </ul>
@@ -469,6 +635,11 @@ export default function CartPage(): React.JSX.Element | null {
                               {partNo}
                             </p>
                           )}
+                          {ci.specialRate !== null && (
+                            <div className="mt-1">
+                              <SpecialRateChip />
+                            </div>
+                          )}
                         </div>
                         <div className="text-right font-mono">
                           <p>
@@ -497,6 +668,77 @@ export default function CartPage(): React.JSX.Element | null {
           </>
         )}
       </div>
+
+      <BottomSheet
+        isOpen={!!rateCartItem}
+        onClose={() => setRateItemId(null)}
+        title={rateCartItem ? `Special rate: ${rateCartItem.item.name}` : ''}
+      >
+        {rateCartItem && (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--content-tertiary)]">
+              Default: {formatCurrency(rateCartItem.item.sales_price)}
+            </p>
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="Enter special rate…"
+              value={rateValue}
+              onChange={(e) => setRateValue(e.target.value)}
+              autoFocus
+              className="w-full h-12 px-4 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-primary)] font-mono placeholder:text-[var(--content-quaternary)] border-none outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setSpecialRate(rateCartItem.item.id, null);
+                  setRateItemId(null);
+                }}
+                className="flex-1 h-12 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-secondary)] font-semibold hover:opacity-90"
+              >
+                Clear rate
+              </button>
+              <button
+                onClick={handleSaveRate}
+                className="flex-1 h-12 rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] font-semibold hover:opacity-90 active:scale-95"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        isOpen={!!deleteCartItem}
+        onClose={() => setDeleteItemId(null)}
+        title={deleteCartItem ? `Delete ${deleteCartItem.item.name}?` : ''}
+      >
+        {deleteCartItem && (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--content-tertiary)]">
+              This removes the line from the order. You can add it again from search if needed.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeleteItemId(null)}
+                className="flex-1 h-12 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-secondary)] font-semibold hover:opacity-90"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  removeItem(deleteCartItem.item.id);
+                  setDeleteItemId(null);
+                }}
+                className="flex-1 h-12 rounded-xl bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] font-semibold hover:opacity-90 active:scale-95"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        )}
+      </BottomSheet>
     </div>
   );
 }

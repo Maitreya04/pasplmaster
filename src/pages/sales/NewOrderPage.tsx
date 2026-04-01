@@ -634,7 +634,16 @@ interface ItemRowProps {
   editingItemId: number | null;
   inCartQty: number;
   price: number;
+  specialRate: number | null;
   onUpdateQty: (itemId: number, qty: number) => void;
+}
+
+function SpecialRateChip() {
+  return (
+    <span className="inline-flex items-center rounded-md bg-[var(--bg-accent-subtle)] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--content-accent)]">
+      special rate
+    </span>
+  );
 }
 
 function AliasCode({
@@ -674,12 +683,14 @@ const ItemRow = memo(function ItemRow({
   editingItemId,
   inCartQty,
   price,
+  specialRate,
   onUpdateQty,
 }: ItemRowProps) {
   const { item, matchedField } = result;
   const isEditingQty = editingItemId === item.id;
   const productCode = (item.alias1 ?? item.alias ?? '').toString().trim();
   const productCodeValue = productCode || '—';
+  const hasSpecialRate = specialRate !== null;
 
   return (
     <li className="flex items-center gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-14">
@@ -687,17 +698,25 @@ const ItemRow = memo(function ItemRow({
         <p className="font-semibold text-[var(--content-primary)] leading-snug">
           {highlightText(item.name, query)}
         </p>
-        <div className="mt-0.5 min-w-0">
+        <div className="mt-0.5 flex flex-wrap items-center gap-2 min-w-0">
           <AliasCode
             value={productCodeValue}
             query={query}
             matchedField={matchedField}
             placeholder={!productCode}
           />
+          {hasSpecialRate && <SpecialRateChip />}
         </div>
-        <span className="font-mono text-sm font-semibold text-[var(--content-secondary)] mt-0.5 inline-block">
-          {formatCurrency(price)}
-        </span>
+        <div className="mt-0.5 flex flex-wrap items-center gap-2">
+          <span className="font-mono text-sm font-semibold text-[var(--content-secondary)] inline-block">
+            {formatCurrency(price)}
+          </span>
+          {hasSpecialRate && (
+            <span className="font-mono text-xs text-[var(--content-tertiary)] line-through">
+              {formatCurrency(item.sales_price)}
+            </span>
+          )}
+        </div>
       </div>
 
       {inCartQty > 0 ? (
@@ -758,7 +777,8 @@ const ItemRow = memo(function ItemRow({
     prevProps.query === nextProps.query &&
     prevProps.editingItemId === nextProps.editingItemId &&
     prevProps.inCartQty === nextProps.inCartQty &&
-    prevProps.price === nextProps.price
+    prevProps.price === nextProps.price &&
+    prevProps.specialRate === nextProps.specialRate
   );
 });
 
@@ -777,6 +797,7 @@ function ResultSection({
   editingItemId,
   getCartQty,
   getPrice,
+  getSpecialRate,
   onUpdateQty,
 }: {
   label: string;
@@ -790,6 +811,7 @@ function ResultSection({
   editingItemId: number | null;
   getCartQty: (id: number) => number;
   getPrice: (item: Item) => number;
+  getSpecialRate: (id: number) => number | null;
   onUpdateQty: (itemId: number, qty: number) => void;
 }) {
   if (!results.length) return null;
@@ -806,6 +828,7 @@ function ResultSection({
             query={query}
             inCartQty={getCartQty(r.item.id)}
             price={getPrice(r.item)}
+            specialRate={getSpecialRate(r.item.id)}
             onAdd={onAdd}
             onDecrement={onDecrement}
             onIncrement={onIncrement}
@@ -844,6 +867,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [rateItem, setRateItem] = useState<Item | null>(null);
   const [rateValue, setRateValue] = useState('');
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
+  const [recentlyAddedItemId, setRecentlyAddedItemId] = useState<number | null>(null);
   const [moreVisible, setMoreVisible] = useState(INITIAL_MORE_VISIBLE);
   const searchRef = useRef<HTMLDivElement | null>(null);
 
@@ -981,9 +1005,30 @@ export default function NewOrderPage(): React.JSX.Element | null {
 
   const getCartQty = (id: number) => getCartItem(id)?.qty ?? 0;
   const getPrice = (item: Item) => getCartItem(item.id)?.specialRate ?? item.sales_price;
+  const getSpecialRate = (id: number) => getCartItem(id)?.specialRate ?? null;
+  const recentlyAddedCartItem = !effectiveQuery && recentlyAddedItemId !== null
+    ? getCartItem(recentlyAddedItemId)
+    : undefined;
+  const recentlyAddedResult = recentlyAddedCartItem
+    ? {
+        item: recentlyAddedCartItem.item,
+        score: 100,
+        matchType: 'exact-name' as const,
+        matchedField: 'name' as const,
+      }
+    : null;
+
+  const handleQueryChange = (value: string) => {
+    if (value.trim()) {
+      setRecentlyAddedItemId(null);
+    }
+    setQuery(value);
+  };
 
   const handleAdd = (item: Item) => {
     addItem(item, 1);
+    setEditingItemId(item.id);
+    setRecentlyAddedItemId(item.id);
     setQuery('');
     focusSearchInput();
   };
@@ -1029,7 +1074,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
             <SearchInput
               placeholder="Search parts, name or code…"
               value={query}
-              onChange={setQuery}
+              onChange={handleQueryChange}
               loading={itemsLoading}
               autoFocus
               debounceMs={0}
@@ -1159,26 +1204,51 @@ export default function NewOrderPage(): React.JSX.Element | null {
           {itemsLoading ? (
             <Skeleton variant="list" count={1} lines={6} />
           ) : !effectiveQuery && !selectedBrand ? (
-            <SmartLanding
-              items={items}
-              onCustomerSelect={customer => {
-                setSelectedCustomer(customer);
-              }}
-              onQuickReorderApply={(customer, entries) => {
-                if (customer) {
+            <>
+              {recentlyAddedResult && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--content-tertiary)] px-0.5">
+                    Recently added
+                  </p>
+                  <ul className="space-y-2">
+                    <ItemRow
+                      result={recentlyAddedResult}
+                      query=""
+                      inCartQty={recentlyAddedCartItem?.qty ?? 0}
+                      price={getPrice(recentlyAddedResult.item)}
+                      specialRate={getSpecialRate(recentlyAddedResult.item.id)}
+                      onAdd={handleAdd}
+                      onDecrement={handleDecrement}
+                      onIncrement={handleIncrement}
+                      onRatePress={handleRatePress}
+                      onQtyEditOpen={setEditingItemId}
+                      editingItemId={editingItemId}
+                      onUpdateQty={updateQty}
+                    />
+                  </ul>
+                </div>
+              )}
+              <SmartLanding
+                items={items}
+                onCustomerSelect={customer => {
                   setSelectedCustomer(customer);
-                }
-                for (const entry of entries) {
-                  addItem(entry.item, entry.qty);
-                }
-                navigate('/sales/cart');
-              }}
-              scrollToSearch={() => {
-                if (searchRef.current) {
-                  searchRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
-              }}
-            />
+                }}
+                onQuickReorderApply={(customer, entries) => {
+                  if (customer) {
+                    setSelectedCustomer(customer);
+                  }
+                  for (const entry of entries) {
+                    addItem(entry.item, entry.qty);
+                  }
+                  navigate('/sales/cart');
+                }}
+                scrollToSearch={() => {
+                  if (searchRef.current) {
+                    searchRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }
+                }}
+              />
+            </>
           ) : searchResults.length === 0 && !isStale && effectiveQuery ? (
             <div className="pt-6 text-center space-y-4">
               <p className="font-semibold text-[var(--content-primary)]">No results</p>
@@ -1212,6 +1282,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 editingItemId={editingItemId}
                 getCartQty={getCartQty}
                 getPrice={getPrice}
+                getSpecialRate={getSpecialRate}
                 onUpdateQty={updateQty}
               />
               <ResultSection
@@ -1226,6 +1297,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 editingItemId={editingItemId}
                 getCartQty={getCartQty}
                 getPrice={getPrice}
+                getSpecialRate={getSpecialRate}
                 onUpdateQty={updateQty}
               />
               {hasMoreResults && (
