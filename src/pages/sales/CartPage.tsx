@@ -251,9 +251,10 @@ function SwipeableCartRow({
   const price = cartItem.specialRate ?? cartItem.item.sales_price;
   const partNo = cartItem.item.alias1 ?? cartItem.item.alias;
   const hasSpecialRate = cartItem.specialRate !== null;
+  const lineTotal = price * cartItem.qty;
 
   return (
-    <li className="relative overflow-hidden rounded-xl">
+    <li className="relative overflow-hidden rounded-2xl">
       <div className="absolute inset-y-0 right-0 flex">
         <button
           type="button"
@@ -276,7 +277,7 @@ function SwipeableCartRow({
       </div>
 
       <div
-        className={`relative flex items-center gap-3 p-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] min-h-14 ${isDragging ? '' : 'transition-transform duration-200 ease-out'}`}
+        className={`relative rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 ${isDragging ? '' : 'transition-transform duration-200 ease-out'}`}
         style={{ transform: `translate3d(-${isDragging ? offset : (isOpen ? SWIPE_ACTION_WIDTH : previewOffset)}px, 0, 0)` }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -288,38 +289,59 @@ function SwipeableCartRow({
           }
         }}
       >
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-[var(--content-primary)] truncate">
-            {cartItem.item.name}
-          </p>
-          <div className="mt-0.5 flex flex-wrap items-center gap-2">
-            {partNo && (
-              <p className="inline-flex items-center gap-1 text-xs text-[var(--content-tertiary)] font-mono bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">
-                <span>{partNo}</span>
+        <div className="min-w-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-base font-semibold leading-5 text-[var(--content-primary)] whitespace-normal break-words">
+                {cartItem.item.name}
               </p>
-            )}
-            {hasSpecialRate && <SpecialRateChip />}
-          </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-2">
-            <p className="text-sm text-[var(--content-tertiary)]">
-              {formatCurrency(price)} / pc
-            </p>
-            {hasSpecialRate && (
-              <p className="font-mono text-xs text-[var(--content-tertiary)] line-through">
-                {formatCurrency(cartItem.item.sales_price)}
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                {partNo && (
+                  <p className="inline-flex items-center gap-1 rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 font-mono text-xs text-[var(--content-tertiary)]">
+                    <span>{partNo}</span>
+                  </p>
+                )}
+                {hasSpecialRate && <SpecialRateChip />}
+              </div>
+            </div>
+            <div className="shrink-0 text-right">
+              <p className="font-mono text-sm font-semibold text-[var(--content-primary)]">
+                {formatCurrency(lineTotal)}
               </p>
-            )}
+              <p className="mt-1 text-xs text-[var(--content-tertiary)]">
+                {cartItem.qty} pc{cartItem.qty !== 1 ? 's' : ''}
+              </p>
+            </div>
           </div>
-        </div>
-        <div className="shrink-0">
-          <NumberStepper
-            value={cartItem.qty}
-            onChange={(q) => onUpdateQty(cartItem.lineId, q)}
-            min={1}
-            presets={[]}
-            showRemoveAtMin
-            onRemove={() => onRemove(cartItem.lineId)}
-          />
+
+          <div className="mt-3 flex items-end justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <p className="text-sm text-[var(--content-tertiary)]">
+                  {formatCurrency(price)} / pc
+                </p>
+                {hasSpecialRate && (
+                  <p className="font-mono text-xs text-[var(--content-tertiary)] line-through">
+                    {formatCurrency(cartItem.item.sales_price)}
+                  </p>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-[var(--content-tertiary)]">
+                Swipe left for rate or delete
+              </p>
+            </div>
+            <div className="shrink-0">
+              <NumberStepper
+                value={cartItem.qty}
+                onChange={(q) => onUpdateQty(cartItem.lineId, q)}
+                min={1}
+                presets={[]}
+                variant="compact"
+                showRemoveAtMin
+                onRemove={() => onRemove(cartItem.lineId)}
+              />
+            </div>
+          </div>
         </div>
       </div>
     </li>
@@ -484,7 +506,7 @@ export default function CartPage(): React.JSX.Element | null {
         onBack={() => navigate('/sales/new')}
       />
 
-      <div className="p-4 flex-1 space-y-6">
+      <div className={`flex-1 space-y-6 p-4 ${items.length > 0 ? 'pb-48' : ''}`}>
         {items.length === 0 ? (
           <div className="py-12 text-center">
             <p className="text-[var(--content-tertiary)] mb-4">
@@ -498,23 +520,28 @@ export default function CartPage(): React.JSX.Element | null {
           <>
             {/* Item list */}
             <section>
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <div>
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--content-tertiary)]">
-                    {items.length} item{items.length !== 1 ? 's' : ''}
-                  </h2>
-                  <p className="text-xs text-[var(--content-tertiary)] mt-1">
-                    Swipe left on a line for rate or delete
-                  </p>
+              <div className="mb-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-semibold text-[var(--content-primary)]">
+                      Review items
+                    </h2>
+                    <p className="mt-1 text-sm text-[var(--content-tertiary)]">
+                      {items.length} line{items.length !== 1 ? 's' : ''} · {totalCount} pc{totalCount !== 1 ? 's' : ''}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs uppercase tracking-wide text-[var(--content-tertiary)]">
+                      Subtotal
+                    </p>
+                    <p className="font-mono text-lg font-semibold text-[var(--content-primary)]">
+                      {formatCurrency(totalValue)}
+                    </p>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => navigate('/sales/new')}
-                  className="flex items-center gap-1.5 min-h-12 px-3 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-accent)] font-semibold hover:bg-[var(--bg-accent-subtle)] transition-colors"
-                >
-                  <Plus size={18} weight="bold" />
-                  Add More Items
-                </button>
+                <p className="mt-3 text-xs text-[var(--content-tertiary)]">
+                  Adjust quantities inline. Swipe any row left to set a special rate or remove it.
+                </p>
               </div>
               <ul className="space-y-2">
                 {items.map((ci) => {
@@ -535,86 +562,112 @@ export default function CartPage(): React.JSX.Element | null {
               </ul>
             </section>
 
-            {/* Customer */}
-            <section>
-              <label className="block text-sm font-semibold text-[var(--content-secondary)] mb-2">
-                Customer
-              </label>
-              <SearchableCustomerDropdown
-                value={customer}
-                onChange={setCustomer}
-              />
-            </section>
+            <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-5">
+              <div>
+                <h2 className="text-base font-semibold text-[var(--content-primary)]">
+                  Order details
+                </h2>
+                <p className="mt-1 text-sm text-[var(--content-tertiary)]">
+                  Add the delivery context before you submit.
+                </p>
+              </div>
 
-            {/* Transport */}
-            <section>
-              <label className="block text-sm font-semibold text-[var(--content-secondary)] mb-2">
-                Transport
-              </label>
-              <select
-                value={transport?.id ?? ''}
-                onChange={(e) => {
-                  const id = e.target.value ? Number(e.target.value) : null;
-                  setTransport(id ? transports.find((t) => t.id === id) ?? null : null);
-                }}
-                className="w-full h-14 px-4 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-primary)] border border-[var(--border-subtle)] focus:outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
-              >
-                <option value="">Select Transport</option>
-                {transports.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </section>
+              {/* Customer */}
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[var(--content-secondary)]">
+                  Customer
+                </label>
+                <SearchableCustomerDropdown
+                  value={customer}
+                  onChange={setCustomer}
+                />
+              </div>
 
-            {/* Priority */}
-            <section>
-              <label className="block text-sm font-semibold text-[var(--content-secondary)] mb-2">
-                Priority
-              </label>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPriority('normal')}
-                  className={`flex-1 h-12 rounded-xl font-semibold transition-colors ${
-                    priority === 'normal'
-                      ? 'bg-[var(--bg-tertiary)] text-[var(--content-primary)] border-2 border-[var(--border-subtle)]'
-                      : 'bg-[var(--bg-secondary)] text-[var(--content-tertiary)] border-2 border-transparent'
-                  }`}
+              {/* Transport */}
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[var(--content-secondary)]">
+                  Transport
+                </label>
+                <select
+                  value={transport?.id ?? ''}
+                  onChange={(e) => {
+                    const id = e.target.value ? Number(e.target.value) : null;
+                    setTransport(id ? transports.find((t) => t.id === id) ?? null : null);
+                  }}
+                  className="h-14 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 text-[var(--content-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
                 >
-                  Normal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPriority('urgent')}
-                  className={`flex-1 h-12 rounded-xl font-semibold transition-colors ${
-                    priority === 'urgent'
-                      ? 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] border-2 border-[var(--content-negative)] animate-pulse'
-                      : 'bg-[var(--bg-secondary)] text-[var(--content-tertiary)] border-2 border-transparent'
-                  }`}
-                >
-                  URGENT
-                </button>
+                  <option value="">Select Transport</option>
+                  {transports.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Priority */}
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[var(--content-secondary)]">
+                  Priority
+                </label>
+                <div className="grid grid-cols-2 gap-2 rounded-xl bg-[var(--bg-primary)] p-1">
+                  <button
+                    type="button"
+                    onClick={() => setPriority('normal')}
+                    aria-pressed={priority === 'normal'}
+                    className={`min-h-12 rounded-lg border text-sm font-semibold transition-all ${
+                      priority === 'normal'
+                        ? 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] shadow-sm'
+                        : 'border-transparent bg-transparent text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'
+                    }`}
+                  >
+                    <span className="flex items-center justify-center gap-1.5">
+                      <span>Normal</span>
+                      {priority === 'normal' && (
+                        <CheckCircle size={16} weight="fill" aria-hidden className="text-[var(--content-accent)]" />
+                      )}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPriority('urgent')}
+                    aria-pressed={priority === 'urgent'}
+                    className={`min-h-12 rounded-lg border text-sm font-semibold transition-all ${
+                      priority === 'urgent'
+                        ? 'border-[var(--content-negative)] bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] shadow-sm'
+                        : 'border-transparent bg-transparent text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'
+                    }`}
+                  >
+                    <span className="flex items-center justify-center gap-1.5">
+                      <span>Urgent</span>
+                      {priority === 'urgent' && (
+                        <CheckCircle size={16} weight="fill" aria-hidden className="text-[var(--content-negative)]" />
+                      )}
+                    </span>
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-[var(--content-tertiary)]">
+                  {priority === 'urgent' ? 'Urgent orders are highlighted for faster handling.' : 'Normal is the default priority for standard processing.'}
+                </p>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[var(--content-secondary)]">
+                  Notes
+                </label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Special instructions for billing…"
+                  rows={3}
+                  className="w-full resize-none rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3 text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] focus:outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
+                />
               </div>
             </section>
 
-            {/* Notes */}
-            <section>
-              <label className="block text-sm font-semibold text-[var(--content-secondary)] mb-2">
-                Notes
-              </label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Special instructions for billing…"
-                rows={3}
-                className="w-full px-4 py-3 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] border border-[var(--border-subtle)] focus:outline-none focus:ring-1 focus:ring-[var(--border-subtle)] resize-none"
-              />
-            </section>
-
             {/* Summary */}
-            <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] space-y-2">
+            <div className="space-y-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
               <div className="flex justify-between items-baseline text-sm text-[var(--content-secondary)]">
                 <div>
                   <span>Items</span>
@@ -690,19 +743,55 @@ export default function CartPage(): React.JSX.Element | null {
                 </div>
               )}
             </div>
-
-            {/* Submit */}
-            <BigButton
-              variant="primary"
-              onClick={handleSubmit}
-              loading={submitMutation.isPending}
-              disabled={!customer}
-            >
-              Submit Order
-            </BigButton>
           </>
         )}
       </div>
+
+      {items.length > 0 && (
+        <div
+          className="fixed bottom-16 left-0 right-0 z-30 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 px-4 pt-3 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur"
+          style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}
+        >
+          <div className="mx-auto max-w-screen-sm rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-[var(--content-primary)]">
+                  Ready to submit
+                </p>
+                <p className="mt-1 text-xs text-[var(--content-tertiary)]">
+                  {items.length} line{items.length !== 1 ? 's' : ''} · {totalCount} pc{totalCount !== 1 ? 's' : ''}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs uppercase tracking-wide text-[var(--content-tertiary)]">
+                  Grand total
+                </p>
+                <p className="font-mono text-lg font-semibold text-[var(--content-primary)]">
+                  {formatCurrency(totalValue)}
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-[auto_1fr] gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/sales/new')}
+                className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 font-semibold text-[var(--content-primary)] transition-colors hover:bg-[var(--bg-tertiary)]"
+              >
+                <Plus size={18} weight="bold" />
+                Add items
+              </button>
+              <BigButton
+                variant="primary"
+                onClick={handleSubmit}
+                loading={submitMutation.isPending}
+                disabled={!customer}
+              >
+                Submit Order
+              </BigButton>
+            </div>
+          </div>
+        </div>
+      )}
 
       <BottomSheet
         isOpen={!!rateCartItem}

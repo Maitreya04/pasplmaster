@@ -1229,7 +1229,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
         >
           <div>
             <p className="font-semibold text-[var(--content-primary)]">
-              {cartItems.length} line{cartItems.length !== 1 ? 's' : ''} · {totalCount} pcs
+              {cartItems.length} item{cartItems.length !== 1 ? 's' : ''} · {totalCount} pcs
             </p>
             <p className="font-mono text-lg font-bold text-[var(--content-primary)]">
               {formatCurrency(totalValue)}
