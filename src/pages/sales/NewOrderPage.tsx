@@ -1,4 +1,4 @@
-import { useState, useMemo, useDeferredValue, useRef, useEffect, memo, type ReactNode } from 'react';
+import { useState, useMemo, useDeferredValue, useRef, useEffect, memo, useCallback, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash, CurrencyInr } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
@@ -23,7 +23,6 @@ import {
   SearchInput,
   BottomSheet,
   Skeleton,
-  InlineQtyEditor,
   NumberStepper,
 } from '../../components/shared';
 import type { Item, Customer } from '../../types';
@@ -726,6 +725,31 @@ const ItemRow = memo(function ItemRow({
   const productCode = (item.alias1 ?? item.alias ?? '').toString().trim();
   const productCodeValue = productCode || '—';
   const showQtyEditor = isPendingAdd;
+  const qtyInputRef = useRef<HTMLInputElement | null>(null);
+  const [draftQtyInput, setDraftQtyInput] = useState('1');
+
+  const getDraftQty = useCallback(() => {
+    const parsed = parseInt(draftQtyInput.trim(), 10);
+    if (!Number.isFinite(parsed) || parsed < 1) return 1;
+    return parsed;
+  }, [draftQtyInput]);
+
+  useEffect(() => {
+    if (!showQtyEditor) return;
+    setDraftQtyInput('1');
+    requestAnimationFrame(() => {
+      qtyInputRef.current?.focus();
+      qtyInputRef.current?.select();
+    });
+  }, [showQtyEditor, item.id]);
+
+  const handleConfirmQty = useCallback(() => {
+    onConfirmAdd(item, getDraftQty());
+  }, [getDraftQty, item, onConfirmAdd]);
+
+  const handleSpecialRate = useCallback(() => {
+    onConfirmSpecialRateAdd(item, getDraftQty());
+  }, [getDraftQty, item, onConfirmSpecialRateAdd]);
 
   return (
     <li
@@ -778,7 +802,20 @@ const ItemRow = memo(function ItemRow({
           >
             <div className="overflow-hidden">
               <div className="border-t border-[var(--border-subtle)] pt-3">
-                <div className="flex items-center justify-end gap-2">
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSpecialRate();
+                    }}
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-0 text-[13px] font-semibold text-[var(--content-accent)]"
+                    aria-label={`${hasSpecialLine ? 'Edit' : 'Set'} special rate for ${item.name}`}
+                  >
+                    <CurrencyInr size={14} weight="bold" />
+                    {hasSpecialLine ? 'Edit rate' : 'Special rate'}
+                  </button>
+
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -786,30 +823,58 @@ const ItemRow = memo(function ItemRow({
                         e.stopPropagation();
                         onRemovePendingAdd();
                       }}
-                      className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] hover:opacity-90"
-                      aria-label={`Cancel adding ${item.name}`}
+                      className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] hover:opacity-90"
+                      aria-label={`Remove pending add for ${item.name}`}
                     >
                       <Trash size={18} />
                     </button>
-                    <InlineQtyEditor
-                      value={1}
-                      open
-                      onConfirm={(qty) => onConfirmAdd(item, qty)}
-                      onCancel={onCancelAdd}
-                      min={1}
-                      secondaryAction={{
-                        ariaLabel: `${hasSpecialLine ? 'Edit' : 'Set'} special rate for ${item.name}`,
-                        onAction: (qty) => onConfirmSpecialRateAdd(item, qty),
-                        className:
-                          'rounded-full px-3 text-[var(--content-accent)]',
-                        icon: (
-                          <span className="inline-flex items-center gap-1 text-[13px] font-semibold">
-                            <CurrencyInr size={14} weight="bold" />
-                            {hasSpecialLine ? 'Edit rate' : 'Special rate'}
-                          </span>
-                        ),
+
+                    <input
+                      ref={qtyInputRef}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={draftQtyInput}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setDraftQtyInput(e.target.value.replace(/[^\d]/g, ''))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleConfirmQty();
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onCancelAdd();
+                        }
                       }}
+                      aria-label="Quantity"
+                      className="h-11 w-14 rounded-[14px] border border-[var(--bg-accent)] bg-[var(--bg-secondary)] text-center font-mono text-[18px] font-semibold text-[var(--content-primary)] outline-none focus:ring-1 focus:ring-[var(--bg-accent)]"
                     />
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCancelAdd();
+                      }}
+                      className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--bg-tertiary)] text-[var(--content-secondary)] hover:opacity-90"
+                      aria-label={`Cancel adding ${item.name}`}
+                    >
+                      <span className="text-[18px] font-medium leading-none">×</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleConfirmQty();
+                      }}
+                      className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--bg-accent)] text-[var(--content-on-color)] hover:opacity-90"
+                      aria-label={`Add ${item.name}`}
+                    >
+                      <Check size={18} weight="bold" />
+                    </button>
                   </div>
                 </div>
               </div>
