@@ -693,10 +693,10 @@ function AliasCode({
   const isMatched = matchedField === 'alias1' || matchedField === 'alias' || matchedField === 'name+alias';
   return (
     <span
-      className={`inline-flex max-w-full items-center rounded-full px-2 py-1 font-mono text-[11px] font-semibold tracking-[0.04em] shrink-0 truncate ${
+      className={`inline-flex max-w-full items-center rounded-full px-3 py-1.5 font-mono text-[12px] font-semibold tracking-[0.04em] shrink-0 truncate ${
         placeholder
           ? 'bg-[var(--bg-tertiary)] text-[var(--content-quaternary)]'
-          : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
+          : 'bg-[var(--bg-tertiary)] text-[var(--content-primary)]'
       }`}
       aria-label={placeholder ? 'Product code (missing)' : 'Product code'}
     >
@@ -726,7 +726,7 @@ const ItemRow = memo(function ItemRow({
   return (
     <li
       className={`rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3 cursor-pointer ${
-        showQtyEditor ? 'min-h-[136px]' : 'min-h-[96px]'
+        showQtyEditor ? 'min-h-[140px]' : 'min-h-[104px]'
       }`}
       onClick={() => {
         if (!isPendingAdd) {
@@ -745,12 +745,12 @@ const ItemRow = memo(function ItemRow({
                 placeholder={!productCode}
               />
             </div>
-            <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
-              {formatCurrency(price)}
-            </p>
+          <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
+            {formatCurrency(price)}
+          </p>
           </div>
 
-          <p className="mt-2 text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
+          <p className="mt-2.5 max-w-[calc(100%-12px)] text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
             {highlightText(item.name, query)}
           </p>
 
@@ -782,7 +782,7 @@ const ItemRow = memo(function ItemRow({
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-[minmax(0,1fr)_72px] grid-rows-[auto_auto] gap-x-3 gap-y-2 min-w-0">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_84px] grid-rows-[auto_auto] gap-x-3 gap-y-2">
           <div className="min-w-0 flex items-start">
             <AliasCode
               value={productCodeValue}
@@ -795,7 +795,7 @@ const ItemRow = memo(function ItemRow({
             {formatCurrency(price)}
           </p>
 
-          <div className="min-w-0">
+          <div className="min-w-0 pr-1">
             <p className="text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
               {highlightText(item.name, query)}
             </p>
