@@ -1,6 +1,6 @@
 import { useState, useMemo, useDeferredValue, useRef, useEffect, memo, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ShoppingCart, CaretRight, CurrencyInr, Check, FunnelSimple } from '@phosphor-icons/react';
+import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
@@ -664,6 +664,7 @@ interface ItemRowProps {
   onStartAdd: (item: Item) => void;
   onConfirmAdd: (item: Item, qty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
+  onRemovePendingAdd: () => void;
   onCancelAdd: () => void;
   pendingAddItemId: number | null;
   totalInOrderQty: number;
@@ -711,6 +712,7 @@ const ItemRow = memo(function ItemRow({
   onStartAdd,
   onConfirmAdd,
   onConfirmSpecialRateAdd,
+  onRemovePendingAdd,
   onCancelAdd,
   pendingAddItemId,
   totalInOrderQty,
@@ -725,8 +727,10 @@ const ItemRow = memo(function ItemRow({
 
   return (
     <li
-      className={`rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3 cursor-pointer ${
-        showQtyEditor ? 'min-h-[140px]' : 'min-h-[104px]'
+      className={`overflow-hidden rounded-2xl border bg-[var(--bg-secondary)] px-3 py-3 cursor-pointer transition-[min-height,border-color,box-shadow] duration-200 ease-out ${
+        showQtyEditor
+          ? 'min-h-[140px] border-[var(--bg-accent)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--bg-accent)_12%,transparent)]'
+          : 'min-h-[104px] border-[var(--border-subtle)]'
       }`}
       onClick={() => {
         if (!isPendingAdd) {
@@ -737,59 +741,89 @@ const ItemRow = memo(function ItemRow({
       {showQtyEditor ? (
         <div className="min-w-0">
           <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2">
               <AliasCode
                 value={productCodeValue}
                 query={query}
                 matchedField={matchedField}
                 placeholder={!productCode}
               />
+              {hasSpecialLine && <SpecialRateChip />}
             </div>
-          <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
-            {formatCurrency(price)}
-          </p>
+            <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
+              {formatCurrency(price)}
+            </p>
           </div>
 
           <p className="mt-2.5 max-w-[calc(100%-12px)] text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
             {highlightText(item.name, query)}
           </p>
 
-          {(totalInOrderQty > 0 || hasSpecialLine) && (
+          {totalInOrderQty > 0 && (
             <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
               {totalInOrderQty > 0 && (
                 <span className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
                   {totalInOrderQty} in order
                 </span>
               )}
-              {hasSpecialLine && <SpecialRateChip />}
             </div>
           )}
 
-          <div className="mt-3">
-            <InlineQtyEditor
-              value={1}
-              open
-              onConfirm={(qty) => onConfirmAdd(item, qty)}
-              onCancel={onCancelAdd}
-              min={1}
-              className="w-full justify-end"
-              secondaryAction={{
-                icon: <CurrencyInr size={18} weight="bold" />,
-                ariaLabel: `Add ${item.name} with special rate`,
-                onAction: (qty) => onConfirmSpecialRateAdd(item, qty),
-              }}
-            />
+          <div
+            className={`grid transition-[grid-template-rows,opacity,transform,margin-top,padding-top] duration-200 ease-out ${
+              showQtyEditor ? 'mt-3 grid-rows-[1fr] opacity-100 translate-y-0' : 'mt-0 grid-rows-[0fr] opacity-0 -translate-y-1'
+            }`}
+          >
+            <div className="overflow-hidden">
+              <div className="border-t border-[var(--border-subtle)] pt-3">
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onConfirmSpecialRateAdd(item, 1);
+                    }}
+                    className="inline-flex min-h-9 items-center rounded-full px-0 text-[13px] font-semibold text-[var(--content-accent)]"
+                    aria-label={`${hasSpecialLine ? 'Edit' : 'Set'} special rate for ${item.name}`}
+                  >
+                    {hasSpecialLine ? 'Edit rate' : '+ special rate'}
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemovePendingAdd();
+                      }}
+                      className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--content-tertiary)] hover:bg-[var(--bg-tertiary)]"
+                      aria-label={`Cancel adding ${item.name}`}
+                    >
+                      <Trash size={18} />
+                    </button>
+                    <InlineQtyEditor
+                      value={1}
+                      open
+                      onConfirm={(qty) => onConfirmAdd(item, qty)}
+                      onCancel={onCancelAdd}
+                      min={1}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       ) : (
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_84px] grid-rows-[auto_auto] gap-x-3 gap-y-2">
-          <div className="min-w-0 flex items-start">
+          <div className="min-w-0 flex flex-wrap items-start gap-2">
             <AliasCode
               value={productCodeValue}
               query={query}
               matchedField={matchedField}
               placeholder={!productCode}
             />
+            {hasSpecialLine && <SpecialRateChip />}
           </div>
           <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
             {formatCurrency(price)}
@@ -800,14 +834,13 @@ const ItemRow = memo(function ItemRow({
               {highlightText(item.name, query)}
             </p>
 
-            {(totalInOrderQty > 0 || hasSpecialLine) && (
+            {totalInOrderQty > 0 && (
               <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
                 {totalInOrderQty > 0 && (
                   <span className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
                     {totalInOrderQty} in order
                   </span>
                 )}
-                {hasSpecialLine && <SpecialRateChip />}
               </div>
             )}
           </div>
@@ -849,6 +882,7 @@ function ResultSection({
   onStartAdd,
   onConfirmAdd,
   onConfirmSpecialRateAdd,
+  onRemovePendingAdd,
   onCancelAdd,
   pendingAddItemId,
   getTotalInOrderQty,
@@ -861,6 +895,7 @@ function ResultSection({
   onStartAdd: (item: Item) => void;
   onConfirmAdd: (item: Item, qty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
+  onRemovePendingAdd: () => void;
   onCancelAdd: () => void;
   pendingAddItemId: number | null;
   getTotalInOrderQty: (id: number) => number;
@@ -882,6 +917,7 @@ function ResultSection({
             pendingAddItemId={pendingAddItemId}
             onConfirmAdd={onConfirmAdd}
             onConfirmSpecialRateAdd={onConfirmSpecialRateAdd}
+            onRemovePendingAdd={onRemovePendingAdd}
             onCancelAdd={onCancelAdd}
             totalInOrderQty={getTotalInOrderQty(r.item.id)}
             price={getPrice(r.item)}
@@ -1076,6 +1112,11 @@ export default function NewOrderPage(): React.JSX.Element | null {
     setRateValue('');
   };
 
+  const handleRemovePendingAdd = () => {
+    setPendingAddItemId(null);
+    focusSearchInput(60);
+  };
+
   const handleRateSave = () => {
     if (!rateItem) return;
     const n = parseFloat(rateValue.replace(/,/g, ''));
@@ -1228,6 +1269,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 onStartAdd={handleStartAdd}
                 onConfirmAdd={handleConfirmAdd}
                 onConfirmSpecialRateAdd={handleConfirmSpecialRateAdd}
+                onRemovePendingAdd={handleRemovePendingAdd}
                 onCancelAdd={handleCancelAdd}
                 pendingAddItemId={pendingAddItemId}
                 getTotalInOrderQty={getTotalInOrderQty}
@@ -1241,6 +1283,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 onStartAdd={handleStartAdd}
                 onConfirmAdd={handleConfirmAdd}
                 onConfirmSpecialRateAdd={handleConfirmSpecialRateAdd}
+                onRemovePendingAdd={handleRemovePendingAdd}
                 onCancelAdd={handleCancelAdd}
                 pendingAddItemId={pendingAddItemId}
                 getTotalInOrderQty={getTotalInOrderQty}
