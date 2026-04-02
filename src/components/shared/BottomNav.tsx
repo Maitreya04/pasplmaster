@@ -18,11 +18,15 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
     <nav
       className="
         fixed bottom-0 left-0 right-0 z-50
-        h-16 pb-[env(safe-area-inset-bottom)]
+        h-[68px] pt-1
         bg-[var(--bg-secondary)]
         border-t border-[var(--border-opaque)]
         flex items-center justify-around
       "
+      style={{
+        height: 'calc(68px + env(safe-area-inset-bottom, 0px))',
+        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 4px)',
+      }}
     >
       {items.map((item) => {
         const currentFull = location.pathname + location.search;
@@ -54,4 +58,3 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
     </nav>
   );
 }
-

@@ -133,14 +133,15 @@ function SearchableCustomerDropdown({
   );
 }
 
-const SWIPE_ACTION_WIDTH = 144;
-const SWIPE_OPEN_THRESHOLD = 44;
-const SWIPE_PREVIEW_OFFSET = 42;
+const SWIPE_ACTION_BUTTON_WIDTH = 80;
+const SWIPE_ACTION_WIDTH = SWIPE_ACTION_BUTTON_WIDTH * 2;
+const SWIPE_OPEN_THRESHOLD = 64;
+const SWIPE_PREVIEW_OFFSET = 36;
 
 function SpecialRateChip() {
   return (
-    <span className="inline-flex items-center rounded-md bg-[var(--bg-accent-subtle)] px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--content-accent)]">
-      special rate
+    <span className="inline-flex items-center rounded-full bg-[var(--bg-accent-subtle)] px-2.5 py-1 text-[10px] font-medium leading-none text-[var(--content-accent)]">
+      Special rate
     </span>
   );
 }
@@ -277,7 +278,7 @@ function SwipeableCartRow({
       </div>
 
       <div
-        className={`relative rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 ${isDragging ? '' : 'transition-transform duration-200 ease-out'}`}
+        className={`relative rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 ${isDragging ? '' : 'transition-transform duration-180 ease-out'}`}
         style={{ transform: `translate3d(-${isDragging ? offset : (isOpen ? SWIPE_ACTION_WIDTH : previewOffset)}px, 0, 0)` }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}

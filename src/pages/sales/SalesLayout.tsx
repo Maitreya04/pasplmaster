@@ -18,7 +18,7 @@ export default function SalesLayout(): React.JSX.Element | null {
   return (
     <CartProvider>
       <div className="role-sales min-h-screen bg-[var(--bg-primary)] relative">
-        <div className="pb-20">
+        <div className="pb-[5.5rem]">
           <Outlet />
         </div>
         <BottomNav items={NAV_ITEMS} />

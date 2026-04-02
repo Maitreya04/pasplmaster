@@ -1,6 +1,6 @@
 import { useState, useMemo, useDeferredValue, useRef, useEffect, memo, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash } from '@phosphor-icons/react';
+import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash, CurrencyInr } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
@@ -675,8 +675,8 @@ interface ItemRowProps {
 
 function SpecialRateChip() {
   return (
-    <span className="inline-flex items-center rounded-full bg-[var(--bg-accent-subtle)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-accent)]">
-      special rate
+    <span className="inline-flex items-center rounded-full bg-[var(--bg-accent-subtle)] px-2.5 py-1 text-[10px] font-medium leading-none text-[var(--content-accent)]">
+      Special rate
     </span>
   );
 }
@@ -778,19 +778,7 @@ const ItemRow = memo(function ItemRow({
           >
             <div className="overflow-hidden">
               <div className="border-t border-[var(--border-subtle)] pt-3">
-                <div className="flex items-center justify-between gap-3">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onConfirmSpecialRateAdd(item, 1);
-                    }}
-                    className="inline-flex min-h-9 items-center rounded-full px-0 text-[13px] font-semibold text-[var(--content-accent)]"
-                    aria-label={`${hasSpecialLine ? 'Edit' : 'Set'} special rate for ${item.name}`}
-                  >
-                    {hasSpecialLine ? 'Edit rate' : '+ special rate'}
-                  </button>
-
+                <div className="flex items-center justify-end gap-2">
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -809,6 +797,18 @@ const ItemRow = memo(function ItemRow({
                       onConfirm={(qty) => onConfirmAdd(item, qty)}
                       onCancel={onCancelAdd}
                       min={1}
+                      secondaryAction={{
+                        ariaLabel: `${hasSpecialLine ? 'Edit' : 'Set'} special rate for ${item.name}`,
+                        onAction: (qty) => onConfirmSpecialRateAdd(item, qty),
+                        className:
+                          'rounded-full px-3 text-[var(--content-accent)]',
+                        icon: (
+                          <span className="inline-flex items-center gap-1 text-[13px] font-semibold">
+                            <CurrencyInr size={14} weight="bold" />
+                            {hasSpecialLine ? 'Edit rate' : 'Special rate'}
+                          </span>
+                        ),
+                      }}
                     />
                   </div>
                 </div>
@@ -1113,6 +1113,14 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const hasSpecialLine = (id: number) => specialLineItemIds.has(id);
   const isJustAdded = (id: number) => recentlyAddedItemId === id;
 
+  const clearAddedFeedback = () => {
+    if (addedFeedbackTimeoutRef.current !== null) {
+      window.clearTimeout(addedFeedbackTimeoutRef.current);
+      addedFeedbackTimeoutRef.current = null;
+    }
+    setRecentlyAddedItemId(null);
+  };
+
   const showAddedFeedback = (itemId: number) => {
     setRecentlyAddedItemId(itemId);
     setCartPulse(true);
@@ -1124,9 +1132,11 @@ export default function NewOrderPage(): React.JSX.Element | null {
     }
     addedFeedbackTimeoutRef.current = window.setTimeout(() => {
       setRecentlyAddedItemId(null);
-    }, 1200);
+      addedFeedbackTimeoutRef.current = null;
+    }, 900);
     cartPulseTimeoutRef.current = window.setTimeout(() => {
       setCartPulse(false);
+      cartPulseTimeoutRef.current = null;
     }, 450);
   };
 
@@ -1134,10 +1144,14 @@ export default function NewOrderPage(): React.JSX.Element | null {
     if (value.trim()) {
       setPendingAddItemId(null);
     }
+    clearAddedFeedback();
     setQuery(value);
   };
 
   const handleStartAdd = (item: Item) => {
+    if (recentlyAddedItemId === item.id) {
+      clearAddedFeedback();
+    }
     setPendingAddItemId(item.id);
   };
 

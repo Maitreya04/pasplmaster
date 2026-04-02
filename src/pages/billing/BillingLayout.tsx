@@ -47,7 +47,7 @@ export default function BillingLayout(): React.JSX.Element | null {
         </aside>
 
         {/* Content */}
-        <main className="flex-1 pb-20 lg:pb-0">
+        <main className="flex-1 pb-[5.5rem] lg:pb-0">
           <Outlet />
         </main>
       </div>
