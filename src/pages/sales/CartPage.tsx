@@ -145,67 +145,6 @@ function SpecialRateChip() {
   );
 }
 
-type StockTone = 'positive' | 'warning' | 'negative' | 'neutral';
-
-function getStockPresentation(stockQty: number | null | undefined): {
-  label: string;
-  detail?: string;
-  tone: StockTone;
-} {
-  if (typeof stockQty !== 'number' || Number.isNaN(stockQty)) {
-    return {
-      label: 'Stock unknown',
-      tone: 'neutral',
-    };
-  }
-
-  if (stockQty <= 0) {
-    return {
-      label: 'Out of stock',
-      tone: 'negative',
-    };
-  }
-
-  if (stockQty <= 5) {
-    return {
-      label: 'Low stock',
-      detail: `${Math.floor(stockQty)} left`,
-      tone: 'warning',
-    };
-  }
-
-  return {
-    label: 'In stock',
-    detail: `${Math.floor(stockQty)} available`,
-    tone: 'positive',
-  };
-}
-
-function StockStatus({ stockQty }: { stockQty: number | null | undefined }) {
-  const status = getStockPresentation(stockQty);
-  const toneClass =
-    status.tone === 'positive'
-      ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
-      : status.tone === 'warning'
-        ? 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)]'
-        : status.tone === 'negative'
-          ? 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]'
-          : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]';
-
-  return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${toneClass}`}>
-        {status.label}
-      </span>
-      {status.detail && (
-        <span className="text-[11px] font-medium text-[var(--content-tertiary)]">
-          {status.detail}
-        </span>
-      )}
-    </div>
-  );
-}
-
 interface SwipeableCartRowProps {
   item: CartItem;
   isOpen: boolean;
@@ -354,43 +293,40 @@ function SwipeableCartRow({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               {partNo && (
-                <p className="inline-flex items-center rounded-md border border-[var(--border-opaque)] bg-[var(--bg-tertiary)] px-2 py-1 font-mono text-[13px] font-semibold tracking-[0.04em] text-[var(--content-primary)]">
+                <p className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-1 font-mono text-[11px] font-semibold tracking-[0.04em] text-[var(--content-secondary)]">
                   {partNo}
                 </p>
               )}
             </div>
             <div className="shrink-0 text-right">
-              <p className="font-mono text-[18px] font-semibold leading-none text-[var(--content-primary)]">
+              <p className="font-mono text-[15px] font-semibold leading-none text-[var(--content-primary)]">
                 {formatCurrency(price)}
               </p>
-              {hasSpecialRate && (
-                <div className="mt-1.5 flex items-center justify-end gap-2">
-                  <SpecialRateChip />
-                  <p className="font-mono text-[11px] text-[var(--content-tertiary)] line-through">
-                    {formatCurrency(cartItem.item.sales_price)}
-                  </p>
-                </div>
-              )}
             </div>
           </div>
 
-          <p className="mt-2 text-[15px] font-semibold leading-5 text-[var(--content-primary)] whitespace-normal break-words">
+          <p className="mt-2 text-[15px] font-semibold leading-[1.35] text-[var(--content-primary)] whitespace-normal break-words line-clamp-2">
             {cartItem.item.name}
           </p>
 
-          <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            <StockStatus stockQty={cartItem.item.stock_qty} />
-            <span className="text-[11px] font-medium text-[var(--content-tertiary)]">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
               {cartItem.qty} in order
             </span>
+            {hasSpecialRate && <SpecialRateChip />}
+            {hasSpecialRate && (
+              <span className="font-mono text-[10px] text-[var(--content-tertiary)] line-through">
+                {formatCurrency(cartItem.item.sales_price)}
+              </span>
+            )}
           </div>
 
-          <div className="mt-3 flex items-end justify-between gap-3">
+          <div className="mt-3.5 flex items-end justify-between gap-3">
             <div className="min-w-0">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
                 Line total
               </p>
-              <p className="mt-1 font-mono text-sm font-semibold text-[var(--content-secondary)]">
+              <p className="mt-1 font-mono text-[15px] font-semibold text-[var(--content-secondary)]">
                 {formatCurrency(lineTotal)}
               </p>
             </div>
