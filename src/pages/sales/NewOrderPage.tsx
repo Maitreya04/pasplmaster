@@ -670,6 +670,7 @@ interface ItemRowProps {
   totalInOrderQty: number;
   price: number;
   hasSpecialLine: boolean;
+  justAdded: boolean;
 }
 
 function SpecialRateChip() {
@@ -718,6 +719,7 @@ const ItemRow = memo(function ItemRow({
   totalInOrderQty,
   price,
   hasSpecialLine,
+  justAdded,
 }: ItemRowProps) {
   const { item, matchedField } = result;
   const isPendingAdd = pendingAddItemId === item.id;
@@ -796,7 +798,7 @@ const ItemRow = memo(function ItemRow({
                         e.stopPropagation();
                         onRemovePendingAdd();
                       }}
-                      className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--content-tertiary)] hover:bg-[var(--bg-tertiary)]"
+                      className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] hover:opacity-90"
                       aria-label={`Cancel adding ${item.name}`}
                     >
                       <Trash size={18} />
@@ -841,6 +843,12 @@ const ItemRow = memo(function ItemRow({
                     {totalInOrderQty} in order
                   </span>
                 )}
+                {justAdded && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-positive-subtle)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-positive)]">
+                    <Check size={12} weight="bold" />
+                    Added
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -851,10 +859,14 @@ const ItemRow = memo(function ItemRow({
                 e.stopPropagation();
                 onStartAdd(item);
               }}
-              className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--bg-accent)] text-[var(--content-on-color)] shadow-sm transition-transform hover:opacity-95 active:scale-95"
+              className={`flex h-11 w-11 items-center justify-center rounded-2xl shadow-sm transition-all duration-200 hover:opacity-95 active:scale-95 ${
+                justAdded
+                  ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
+                  : 'bg-[var(--bg-accent)] text-[var(--content-on-color)]'
+              }`}
               aria-label="Add to cart"
             >
-              <Plus size={20} weight="bold" />
+              {justAdded ? <Check size={18} weight="bold" /> : <Plus size={20} weight="bold" />}
             </button>
           </div>
         </div>
@@ -888,6 +900,7 @@ function ResultSection({
   getTotalInOrderQty,
   getPrice,
   hasSpecialLine,
+  isJustAdded,
 }: {
   label: string;
   results: SearchResult[];
@@ -901,6 +914,7 @@ function ResultSection({
   getTotalInOrderQty: (id: number) => number;
   getPrice: (item: Item) => number;
   hasSpecialLine: (id: number) => boolean;
+  isJustAdded: (id: number) => boolean;
 }) {
   if (!results.length) return null;
   return (
@@ -922,6 +936,7 @@ function ResultSection({
             totalInOrderQty={getTotalInOrderQty(r.item.id)}
             price={getPrice(r.item)}
             hasSpecialLine={hasSpecialLine(r.item.id)}
+            justAdded={isJustAdded(r.item.id)}
             onStartAdd={onStartAdd}
           />
         ))}
@@ -953,8 +968,12 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [rateQty, setRateQty] = useState(1);
   const [rateValue, setRateValue] = useState('');
   const [pendingAddItemId, setPendingAddItemId] = useState<number | null>(null);
+  const [recentlyAddedItemId, setRecentlyAddedItemId] = useState<number | null>(null);
+  const [cartPulse, setCartPulse] = useState(false);
   const [moreVisible, setMoreVisible] = useState(INITIAL_MORE_VISIBLE);
   const searchRef = useRef<HTMLDivElement | null>(null);
+  const addedFeedbackTimeoutRef = useRef<number | null>(null);
+  const cartPulseTimeoutRef = useRef<number | null>(null);
 
   const focusSearchInput = (delayMs = 0) => {
     window.setTimeout(() => {
@@ -994,6 +1013,17 @@ export default function NewOrderPage(): React.JSX.Element | null {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMoreVisible(INITIAL_MORE_VISIBLE);
   }, [deferredQuery]);
+
+  useEffect(() => {
+    return () => {
+      if (addedFeedbackTimeoutRef.current !== null) {
+        window.clearTimeout(addedFeedbackTimeoutRef.current);
+      }
+      if (cartPulseTimeoutRef.current !== null) {
+        window.clearTimeout(cartPulseTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Build the search index ONCE from all items — brand/group filtering is done inside searchItems()
   const searchIndex = useMemo(() => buildSearchIndex(items), [items]);
@@ -1081,6 +1111,24 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const getTotalInOrderQty = (id: number) => cartQtyByItem.get(id) ?? 0;
   const getPrice = (item: Item) => item.sales_price;
   const hasSpecialLine = (id: number) => specialLineItemIds.has(id);
+  const isJustAdded = (id: number) => recentlyAddedItemId === id;
+
+  const showAddedFeedback = (itemId: number) => {
+    setRecentlyAddedItemId(itemId);
+    setCartPulse(true);
+    if (addedFeedbackTimeoutRef.current !== null) {
+      window.clearTimeout(addedFeedbackTimeoutRef.current);
+    }
+    if (cartPulseTimeoutRef.current !== null) {
+      window.clearTimeout(cartPulseTimeoutRef.current);
+    }
+    addedFeedbackTimeoutRef.current = window.setTimeout(() => {
+      setRecentlyAddedItemId(null);
+    }, 1200);
+    cartPulseTimeoutRef.current = window.setTimeout(() => {
+      setCartPulse(false);
+    }, 450);
+  };
 
   const handleQueryChange = (value: string) => {
     if (value.trim()) {
@@ -1096,13 +1144,11 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const handleConfirmAdd = (item: Item, qty: number) => {
     addItem(item, qty);
     setPendingAddItemId(null);
-    setQuery('');
-    focusSearchInput(60);
+    showAddedFeedback(item.id);
   };
 
   const handleCancelAdd = () => {
     setPendingAddItemId(null);
-    focusSearchInput(60);
   };
 
   const handleConfirmSpecialRateAdd = (item: Item, qty: number) => {
@@ -1114,7 +1160,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
 
   const handleRemovePendingAdd = () => {
     setPendingAddItemId(null);
-    focusSearchInput(60);
   };
 
   const handleRateSave = () => {
@@ -1122,9 +1167,9 @@ export default function NewOrderPage(): React.JSX.Element | null {
     const n = parseFloat(rateValue.replace(/,/g, ''));
     if (isNaN(n) || n < 0) return;
     addItem(rateItem, rateQty, n);
+    showAddedFeedback(rateItem.id);
     setRateItem(null);
     setRateValue('');
-    setQuery('');
     focusSearchInput(60);
   };
 
@@ -1137,9 +1182,13 @@ export default function NewOrderPage(): React.JSX.Element | null {
             totalCount > 0 ? (
               <button
                 onClick={() => navigate('/sales/cart')}
-                className="flex items-center gap-1.5 min-h-12 min-w-12 px-2 rounded-lg text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]"
+                className={`relative flex items-center gap-1.5 min-h-12 min-w-12 px-2 rounded-lg transition-all ${
+                  cartPulse
+                    ? 'scale-[1.04] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+                    : 'text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'
+                }`}
               >
-                <ShoppingCart size={22} weight="regular" />
+                <ShoppingCart size={22} weight={totalCount > 0 ? 'fill' : 'regular'} />
                 <span className="font-mono text-sm font-semibold">{totalCount}</span>
               </button>
             ) : null
@@ -1275,6 +1324,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 getTotalInOrderQty={getTotalInOrderQty}
                 getPrice={getPrice}
                 hasSpecialLine={hasSpecialLine}
+                isJustAdded={isJustAdded}
               />
               <ResultSection
                 label={bestMatches.length ? 'More results' : 'Results'}
@@ -1289,6 +1339,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 getTotalInOrderQty={getTotalInOrderQty}
                 getPrice={getPrice}
                 hasSpecialLine={hasSpecialLine}
+                isJustAdded={isJustAdded}
               />
               {hasMoreResults && (
                 <button
