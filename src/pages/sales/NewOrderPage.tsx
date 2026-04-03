@@ -1,4 +1,14 @@
-import { useState, useMemo, useDeferredValue, useRef, useEffect, memo, useCallback, type ReactNode } from 'react';
+import {
+  useState,
+  useMemo,
+  useDeferredValue,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  memo,
+  useCallback,
+  type ReactNode,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash, CurrencyInr } from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
@@ -706,6 +716,172 @@ function AliasCode({
   );
 }
 
+/** Only mounts while this row is in “pending add” mode so qty state always starts at 1 (no setState in an effect). */
+const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
+  item,
+  query,
+  matchedField,
+  productCodeValue,
+  hasProductCode,
+  price,
+  totalInOrderQty,
+  hasSpecialLine,
+  onConfirmAdd,
+  onConfirmSpecialRateAdd,
+  onRemovePendingAdd,
+  onCancelAdd,
+}: {
+  item: Item;
+  query: string;
+  matchedField: MatchedField;
+  productCodeValue: string;
+  hasProductCode: boolean;
+  price: number;
+  totalInOrderQty: number;
+  hasSpecialLine: boolean;
+  onConfirmAdd: (item: Item, qty: number) => void;
+  onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
+  onRemovePendingAdd: () => void;
+  onCancelAdd: () => void;
+}) {
+  const qtyInputRef = useRef<HTMLInputElement | null>(null);
+  const [draftQtyInput, setDraftQtyInput] = useState('1');
+
+  const getDraftQty = useCallback(() => {
+    const parsed = parseInt(draftQtyInput.trim(), 10);
+    if (!Number.isFinite(parsed) || parsed < 1) return 1;
+    return parsed;
+  }, [draftQtyInput]);
+
+  useLayoutEffect(() => {
+    qtyInputRef.current?.focus();
+    qtyInputRef.current?.select();
+  }, [item.id]);
+
+  const handleConfirmQty = useCallback(() => {
+    onConfirmAdd(item, getDraftQty());
+  }, [getDraftQty, item, onConfirmAdd]);
+
+  const handleSpecialRate = useCallback(() => {
+    onConfirmSpecialRateAdd(item, getDraftQty());
+  }, [getDraftQty, item, onConfirmSpecialRateAdd]);
+
+  return (
+    <div className="min-w-0">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2">
+          <AliasCode
+            value={productCodeValue}
+            query={query}
+            matchedField={matchedField}
+            placeholder={!hasProductCode}
+          />
+          {hasSpecialLine && <SpecialRateChip />}
+        </div>
+        <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
+          {formatCurrency(price)}
+        </p>
+      </div>
+
+      <p className="mt-2.5 max-w-[calc(100%-12px)] text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
+        {highlightText(item.name, query)}
+      </p>
+
+      {totalInOrderQty > 0 && (
+        <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
+          {totalInOrderQty > 0 && (
+            <span className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
+              {totalInOrderQty} in order
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className="mt-3 grid grid-rows-[1fr] opacity-100 translate-y-0 transition-[grid-template-rows,opacity,transform,margin-top,padding-top] duration-200 ease-out">
+        <div className="overflow-hidden">
+          <div className="border-t border-[var(--border-subtle)] pt-3">
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSpecialRate();
+                }}
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-0 text-[13px] font-semibold text-[var(--content-accent)]"
+                aria-label={`${hasSpecialLine ? 'Edit' : 'Set'} special rate for ${item.name}`}
+              >
+                <CurrencyInr size={14} weight="bold" />
+                {hasSpecialLine ? 'Edit rate' : 'Special rate'}
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemovePendingAdd();
+                  }}
+                  className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] hover:opacity-90"
+                  aria-label={`Remove pending add for ${item.name}`}
+                >
+                  <Trash size={18} />
+                </button>
+
+                <input
+                  ref={qtyInputRef}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={draftQtyInput}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setDraftQtyInput(e.target.value.replace(/[^\d]/g, ''))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleConfirmQty();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onCancelAdd();
+                    }
+                  }}
+                  aria-label="Quantity"
+                  className="h-11 w-14 rounded-[14px] border border-[var(--bg-accent)] bg-[var(--bg-secondary)] text-center font-mono text-[18px] font-semibold text-[var(--content-primary)] outline-none focus:ring-1 focus:ring-[var(--bg-accent)]"
+                />
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCancelAdd();
+                  }}
+                  className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--bg-tertiary)] text-[var(--content-secondary)] hover:opacity-90"
+                  aria-label={`Cancel adding ${item.name}`}
+                >
+                  <span className="text-[18px] font-medium leading-none">×</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleConfirmQty();
+                  }}
+                  className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--bg-accent)] text-[var(--content-on-color)] hover:opacity-90"
+                  aria-label={`Add ${item.name}`}
+                >
+                  <Check size={18} weight="bold" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const ItemRow = memo(function ItemRow({
   result,
   query,
@@ -725,31 +901,6 @@ const ItemRow = memo(function ItemRow({
   const productCode = (item.alias1 ?? item.alias ?? '').toString().trim();
   const productCodeValue = productCode || '—';
   const showQtyEditor = isPendingAdd;
-  const qtyInputRef = useRef<HTMLInputElement | null>(null);
-  const [draftQtyInput, setDraftQtyInput] = useState('1');
-
-  const getDraftQty = useCallback(() => {
-    const parsed = parseInt(draftQtyInput.trim(), 10);
-    if (!Number.isFinite(parsed) || parsed < 1) return 1;
-    return parsed;
-  }, [draftQtyInput]);
-
-  useEffect(() => {
-    if (!showQtyEditor) return;
-    setDraftQtyInput('1');
-    requestAnimationFrame(() => {
-      qtyInputRef.current?.focus();
-      qtyInputRef.current?.select();
-    });
-  }, [showQtyEditor, item.id]);
-
-  const handleConfirmQty = useCallback(() => {
-    onConfirmAdd(item, getDraftQty());
-  }, [getDraftQty, item, onConfirmAdd]);
-
-  const handleSpecialRate = useCallback(() => {
-    onConfirmSpecialRateAdd(item, getDraftQty());
-  }, [getDraftQty, item, onConfirmSpecialRateAdd]);
 
   return (
     <li
@@ -765,122 +916,20 @@ const ItemRow = memo(function ItemRow({
       }}
     >
       {showQtyEditor ? (
-        <div className="min-w-0">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2">
-              <AliasCode
-                value={productCodeValue}
-                query={query}
-                matchedField={matchedField}
-                placeholder={!productCode}
-              />
-              {hasSpecialLine && <SpecialRateChip />}
-            </div>
-            <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
-              {formatCurrency(price)}
-            </p>
-          </div>
-
-          <p className="mt-2.5 max-w-[calc(100%-12px)] text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
-            {highlightText(item.name, query)}
-          </p>
-
-          {totalInOrderQty > 0 && (
-            <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
-              {totalInOrderQty > 0 && (
-                <span className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
-                  {totalInOrderQty} in order
-                </span>
-              )}
-            </div>
-          )}
-
-          <div
-            className={`grid transition-[grid-template-rows,opacity,transform,margin-top,padding-top] duration-200 ease-out ${
-              showQtyEditor ? 'mt-3 grid-rows-[1fr] opacity-100 translate-y-0' : 'mt-0 grid-rows-[0fr] opacity-0 -translate-y-1'
-            }`}
-          >
-            <div className="overflow-hidden">
-              <div className="border-t border-[var(--border-subtle)] pt-3">
-                <div className="flex items-center justify-between gap-3">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleSpecialRate();
-                    }}
-                    className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-0 text-[13px] font-semibold text-[var(--content-accent)]"
-                    aria-label={`${hasSpecialLine ? 'Edit' : 'Set'} special rate for ${item.name}`}
-                  >
-                    <CurrencyInr size={14} weight="bold" />
-                    {hasSpecialLine ? 'Edit rate' : 'Special rate'}
-                  </button>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemovePendingAdd();
-                      }}
-                      className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] hover:opacity-90"
-                      aria-label={`Remove pending add for ${item.name}`}
-                    >
-                      <Trash size={18} />
-                    </button>
-
-                    <input
-                      ref={qtyInputRef}
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      value={draftQtyInput}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => setDraftQtyInput(e.target.value.replace(/[^\d]/g, ''))}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleConfirmQty();
-                        } else if (e.key === 'Escape') {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          onCancelAdd();
-                        }
-                      }}
-                      aria-label="Quantity"
-                      className="h-11 w-14 rounded-[14px] border border-[var(--bg-accent)] bg-[var(--bg-secondary)] text-center font-mono text-[18px] font-semibold text-[var(--content-primary)] outline-none focus:ring-1 focus:ring-[var(--bg-accent)]"
-                    />
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onCancelAdd();
-                      }}
-                      className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--bg-tertiary)] text-[var(--content-secondary)] hover:opacity-90"
-                      aria-label={`Cancel adding ${item.name}`}
-                    >
-                      <span className="text-[18px] font-medium leading-none">×</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleConfirmQty();
-                      }}
-                      className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--bg-accent)] text-[var(--content-on-color)] hover:opacity-90"
-                      aria-label={`Add ${item.name}`}
-                    >
-                      <Check size={18} weight="bold" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ItemRowPendingAddContent
+          item={item}
+          query={query}
+          matchedField={matchedField}
+          productCodeValue={productCodeValue}
+          hasProductCode={!!productCode}
+          price={price}
+          totalInOrderQty={totalInOrderQty}
+          hasSpecialLine={hasSpecialLine}
+          onConfirmAdd={onConfirmAdd}
+          onConfirmSpecialRateAdd={onConfirmSpecialRateAdd}
+          onRemovePendingAdd={onRemovePendingAdd}
+          onCancelAdd={onCancelAdd}
+        />
       ) : (
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_84px] grid-rows-[auto_auto] gap-x-3 gap-y-2">
           <div className="min-w-0 flex flex-wrap items-start gap-2">

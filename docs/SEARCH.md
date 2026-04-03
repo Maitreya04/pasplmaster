@@ -6,9 +6,9 @@ This document describes the **current** implementation: the **`SearchIndex`** (`
 
 ## 1. Big picture
 
-1. **Items load** → `buildSearchIndex(items)` runs once and builds hash maps + inverted lists (exact keys, words, prefixes, trigrams, brand/parent groups).
+1. **Items load** → `buildSearchIndex(items)` runs once and builds hash maps + inverted lists (exact keys, words, `firstCharToKeys` for fuzzy key lookup, prefixes, trigrams, brand/parent groups), plus per-item **`fullTextLower`** (concatenated searchable text).
 2. **User types** → the query is **normalized** (lowercase, shorthand expansion, optional model-code variants).
-3. **`searchItems(query, index, brandFilter, groupFilter, detectedBrand?)`** runs a **layered cascade** (exact → keywords → prefix → discovery → fuzzy/phonetic), then merges in a **union-token** pass for sparse sales shorthand, then applies **bonuses**, then **sorts** and **slices** to `MAX_RESULTS`.
+3. **`searchItems(query, index, brandFilter, groupFilter, detectedBrand?)`** runs **(A)** fast **exact / normalized / code-like** lookups (`collectFastPathResults`), **(B)** the **primary pasplv1-style path** (`v1UnionSearch`: union of word postings + fuzzy index-key fallback, per-token scoring, full-catalog fallback when the union is empty), then **`mergeResultsByMaxScore`**, then **`applyRankingBoosts`**, then **sort** and **slice** to `MAX_RESULTS`.
 4. **UI** (`New Order`) uses **immediate** `query` for narrow chips and **`useDeferredValue`** for the heavy search so typing stays responsive.
 
 ---
@@ -22,6 +22,7 @@ For each item, a **`PrepItem`** stores:
 - Lowercase strings: `nameLower`, `aliasLower`, `alias1Lower`
 - **Stripped** (no spaces/punctuation): `nameNorm`, `aliasNorm`, `alias1Norm` via `strip()`
 - **`nameWords`** (split words)
+- **`fullTextLower`**: concatenated lowercase text from name, aliases, `parent_group`, `main_group`, `item_category` (for substring scoring, pasplv1-style).
 - **`allWords`**: tokens from name, aliases, `parent_group`, `main_group`, `item_category`, plus small expansions for model codes (e.g. `dio` + `05` → `dio05`)
 - **`allPhonetics`**: Soundex codes for words with length ≥ 4
 
@@ -32,6 +33,7 @@ For each item, a **`PrepItem`** stores:
 | `byName`, `byAlias`, `byAlias1` | Exact string → list of item indices |
 | `byNormAlias`, `byNormAlias1` | Stripped alias → indices |
 | `wordToItems` | Word (length ≥ 2) → **set** of item indices |
+| `firstCharToKeys` | First character of each index key (len ≥ 3) → list of keys (for fuzzy index-key fallback) |
 | `prefixToItems` | Prefixes **3–10 chars** from name/alias/alias1 (raw + norm); word-boundary keys use `w:` + prefix |
 | `trigramToItems` | 3-char substrings of `nameNorm` and `alias1Norm` |
 | `brandGroups` / `parentGroups` | `main_group` / `parent_group` → item indices |
@@ -50,7 +52,7 @@ The index is **memoized** on the same `items` array reference (see `_ref` / `_id
 - Tokens with **both letters and digits** may get extra variants (base + numeric forms) for model-style codes.
 - **Deduplicated** tokens are joined with spaces; this string is what most layers use as **`q`**.
 
-**`detectCodeLike(q)`** (exported): true for long numeric codes, codes with separators, short alphanumeric **letter+digit** patterns, etc. **Code-like** queries **skip** the union-token merge and fuzzy path in ways described below.
+**`detectCodeLike(q)`** (exported): true for long numeric codes, codes with separators, short alphanumeric **letter+digit** patterns, etc. Used to enable **raw / OEM-prefixed** alias and prefix lookups in the fast path (`collectFastPathResults`); the **union** scoring path still runs for all queries.
 
 ---
 
@@ -65,11 +67,11 @@ The index is **memoized** on the same `items` array reference (see `_ref` / `_id
 ## 5. `searchItems()` pipeline (runtime)
 
 **File:** `src/lib/search/itemSearch.ts`  
-**Constants:** `POOL_LIMIT = 320` (candidate cap during cascade), `MAX_RESULTS = 72` (final slice), `STRONG_THRESHOLD = 72` (used elsewhere).
+**Constants:** `POOL_LIMIT = 320` (candidate cap for fast-path collection), `MAX_RESULTS = 72` (final slice), `STRONG_THRESHOLD = 72` (used elsewhere).
 
-Results accumulate in **`results`** with a **`seen`** set per **`item.id`**. Order of **layers** matters; **first** win per item is kept by **seen**, except the **union-token merge** later can **raise** scores via **`mergeResultsByMaxScore`**.
+There is **no** cascade “first-match-wins” `seen` set. Fast path and union path are **merged by max score** per `item.id`.
 
-### Phase 1 — Exact lookups (O(1) maps)
+### Phase A — Fast path (`collectFastPathResults`)
 
 | Layer | Condition | Score | Field |
 |-------|-----------|-------|--------|
@@ -77,53 +79,21 @@ Results accumulate in **`results`** with a **`seen`** set per **`item.id`**. Ord
 | `exact-alias` | `q` matches `byAlias` / `byAlias1` | 100 | alias / alias1 |
 | `normalized` | stripped `q` matches `byNormAlias` / `byNormAlias1` | 95 | alias / alias1 |
 
-### Phase 1.5 — Code-like helpers (only when `detectCodeLike`)
+**When `detectCodeLike`:** uses **raw** stripped query for norm/prefix lookups; **OEM brand prefix** resolution (`tidck`, `inel`, …) prepended to short codes; prefix hits via `prefixToItems` with scores **90 / 88 / 85** as implemented.
 
-- Uses **raw** stripped query for norm/prefix lookups (so expansion does not break codes).
-- Prefix hits via `prefixToItems` for alias/name with scores **90 / 85** depending on field.
-- **Brand prefix resolution**: short codes without spaces try known prefixes (`tidck`, `inel`, …) prepended to the raw token for exact + prefix matches.
-
-### Phase 2 — Keywords + prefix + discovery
-
-**Keyword posting lists** (`wordToItems` for each word in `qWords`):
-
-- **Full intersect** (every word has a non-empty posting list): **intersect** all lists (smallest first), optional intersect with `filterSet`. Score **`KEYWORD_FULL_INTERSECT_SCORE` (92)**, **`matchType: 'keywords'`**.
-- **Partial** (≥ 2 words, pool not full): items that **count** in at least **60%** of word postings get a **score proportional** to count (up to **80**), **`matchType: 'partial'`**.
-
-**Prefix (`qNorm` length ≥ 3):** `prefixToItems.get(qNorm)` — verify alias/alias1/name start with `q` or `qNorm`; scores **88** (alias) / **85** (name).
-
-**Word-prefix:** first word `qFirst` ≥ 3 chars → `prefixToItems.get('w:' + qFirst)` → score **75**, **`word-prefix`**.
-
-**Brand / parent discovery** (non-code, pool not full): if `main_group` / `parent_group` **word** starts with `qFirst`, add items at **55** / **50** (keyword-style).
-
-### Phase 3 — Fuzzy + phonetic (non-code only)
-
-Runs only if **`results.length < FUZZY_PHASE_MAX_PRIOR_RESULTS` (100)**.
-
-- **Trigram** lists from `qNorm` are **intersected** (up to 4 lists) to get a small candidate set.
-- If query too short for trigrams, **all** indices are candidates (fallback).
-- **Fuzzy:** `tokenFuzzyMatches` — substring in word set or Levenshtein **similarity ≥ 0.8** for tokens length ≥ 3. Multi-word: **all** tokens must fuzzy-match. Score **30**.
-- **Phonetic:** Soundex on query words length ≥ 4 must all match `allPhonetics`. Score **25**.
-
-### Phase 4 — Union-token pass (sales shorthand)
-
-**When:** not code-like, **multi-word** (`qWords.length >= 2`).
-
-**`pasplv1UnionTokenScore`:**
+### Phase B — Primary pasplv1 path (`v1UnionSearch`)
 
 1. **Significant tokens** = words with length ≥ 2.
 2. **Union** of `wordToItems.get(w)` for each token (any item that appears for **any** token).
-3. Cap union size at **`MAX_UNION_SCORE_INDICES` (9000)** (sorted by index, truncate).
-4. For each candidate, **`scorePrepItemBySalesTokens`** adds per-token points: exact word in `allWords` (+100), substring in a **search blob** (name+alias+groups+category) (+62), fuzzy (+58), phonetic (+55), + **+140** if **all** tokens matched.
-5. **Merge** with cascade results: **`mergeResultsByMaxScore`** keeps the **higher score** per `item.id`.
+3. **Fuzzy index-key fallback** (pasplv1): for tokens with no posting list, scan **`firstCharToKeys`** for keys with same first letter, length within 2, Levenshtein **similarity ≥ 0.8**, and add their postings.
+4. If the union is still **empty**, score the **filtered full catalog** (capped at **`MAX_UNION_SCORE_INDICES` (9000)**).
+5. Otherwise cap union size at **9000** (sorted by index, truncate).
+6. **`scorePrepItemBySalesTokens`:** per token **+100** (word in `allWords`), else **+60** substring on **`fullTextLower`** / stripped norms, else **+60** fuzzy (`tokenFuzzyMatches`), else **+55** Soundex (length ≥ 4) → + **+150** if **all** tokens matched.
 
-This fixes queries where **no** row contains **all** tokens (empty keyword intersection) but many rows match **several** tokens strongly.
+### Phase C — Merge and boosts
 
-### Phase 5 — Post-processing (all surviving results)
-
-1. **Multi-word overlap bonus:** for each result with score &lt; 100, add up to `min(overlap * 2, wordCount * 2)` where overlap counts **tokens** in `allWords` or substring in name/alias (length ≥ 3).
-2. **`applyAllTokensMatchedBonus`:** if **all** tokens (length ≥ 2) are satisfied via `allWords` or substring in name/aliases → **+52**.
-3. **`applyRankingBoosts`:**  
+1. **`mergeResultsByMaxScore(fast, union)`** — higher score per `item.id` wins.
+2. **`applyRankingBoosts`:**  
    - `detectedBrand` match → **+20** on `main_group`  
    - `parent_group` token overlap with query (noise guard if too many groups) → **+15**
 

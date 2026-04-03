@@ -153,8 +153,7 @@ export default function QueuePage(): React.JSX.Element | null {
     claimMutation.mutate(claimTargetId);
   }, [
     autoClaimOrderId,
-    claimMutation.isPending,
-    claimMutation.mutate,
+    claimMutation,
     claimOrderIdParam,
     clearNotificationIntent,
     myActive,

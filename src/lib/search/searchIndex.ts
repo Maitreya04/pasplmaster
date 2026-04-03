@@ -21,6 +21,8 @@ export interface PrepItem {
   aliasNorm: string;   // strip(aliasLower)
   alias1Norm: string;  // strip(alias1Lower)
   nameWords: string[];
+  /** Concatenated searchable text (pasplv1 buildProductText) for substring includes. */
+  fullTextLower: string;
   /** All tokens from name, alias, alias1, parent_group, main_group (pasplv1-style) */
   allWords: Set<string>;
   allPhonetics: Set<string>;
@@ -46,6 +48,9 @@ export interface SearchIndex {
 
   // Layer 2: Inverted word index — word → set of item indices
   wordToItems: Map<string, Set<number>>;
+
+  /** first character of index key → keys (len ≥ 3) for fuzzy index-key fallback (pasplv1). */
+  firstCharToKeys: Map<string, string[]>;
 
   // Layer 3: Prefix index — all prefixes (3-10 chars) of nameLower, aliasLower, alias1Lower, nameNorm, aliasNorm, alias1Norm
   prefixToItems: Map<string, Set<number>>;
@@ -198,6 +203,19 @@ export function buildSearchIndex(items: Item[]): SearchIndex {
       }
     }
 
+    const fullTextLower = [
+      nameLower,
+      aliasLower,
+      alias1Lower,
+      it.parent_group ?? '',
+      it.main_group ?? '',
+      it.item_category ?? '',
+    ]
+      .join(' ')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+
     all[i] = {
       item: it,
       nameLower,
@@ -207,6 +225,7 @@ export function buildSearchIndex(items: Item[]): SearchIndex {
       aliasNorm,
       alias1Norm,
       nameWords,
+      fullTextLower,
       allWords,
       allPhonetics,
     };
@@ -267,11 +286,24 @@ export function buildSearchIndex(items: Item[]): SearchIndex {
     }
   }
 
+  const firstCharToKeys = new Map<string, string[]>();
+  for (const key of wordToItems.keys()) {
+    if (key.length < 3) continue;
+    const ch = key[0];
+    let arr = firstCharToKeys.get(ch);
+    if (!arr) {
+      arr = [];
+      firstCharToKeys.set(ch, arr);
+    }
+    arr.push(key);
+  }
+
   _idx = {
     all,
     idToIndex,
     byName, byAlias, byAlias1, byNormAlias, byNormAlias1,
     wordToItems,
+    firstCharToKeys,
     prefixToItems,
     trigramToItems,
     brandGroups,

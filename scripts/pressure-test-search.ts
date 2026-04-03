@@ -25,6 +25,21 @@ const PRESSURE_TEST_QUERIES = [
   'Disk pas tvs raider front',
   'Rear shocker passion pro red',
   'Self relay passion pro varroc',
+  // v1-parity / real-world tolerance
+  'actva brake',
+  'puslar disc',
+  'break shoe',
+  'BRAKE shoe shine',
+  'brake SHOE',
+  'brk shn sp',
+  'clth plt spld',
+  'k39',
+  'dk39',
+  '51122',
+  'actva',
+  'splndr',
+  'pu1sar',
+  '8rake',
 ];
 
 function parseCSV(filePath: string): Item[] {
