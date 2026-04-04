@@ -516,6 +516,8 @@ export default function CartPage(): React.JSX.Element | null {
     mutationFn: async () => {
       if (!customer || !userName) throw new Error('Customer and salesperson required');
 
+      const submittedAt = new Date();
+
       const linesForMessage = items.map((ci) => {
         const { ship, po } = splitCartLine(ci.item, ci.qty);
         return {
@@ -524,11 +526,6 @@ export default function CartPage(): React.JSX.Element | null {
           qtyShip: ship,
           qtyPo: po,
         };
-      });
-      const dateLabel = new Date().toLocaleDateString('en-IN', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
       });
 
       const { data: order, error: orderError } = await supabase
@@ -553,11 +550,15 @@ export default function CartPage(): React.JSX.Element | null {
       if (!order) throw new Error('Order insert failed');
 
       const orderNumber = order.order_number;
+      const envBiz = import.meta.env.VITE_BUSINESS_DISPLAY_NAME;
+      const businessName =
+        typeof envBiz === 'string' && envBiz.trim() !== '' ? envBiz.trim() : undefined;
+
       const shareTextFinal = buildOrderCustomerMessage({
         customerName: customer.name,
-        orderNumber,
-        dateLabel,
+        date: submittedAt,
         lines: linesForMessage,
+        businessName,
       });
 
       const orderItems = items.map((ci) => {
@@ -629,7 +630,7 @@ export default function CartPage(): React.JSX.Element | null {
               {submitSuccess.orderNumber}
             </p>
             <p className="text-sm text-[var(--content-tertiary)] max-w-md mb-4">
-              Share the summary below with your customer (quantities as of order date).
+              Share the summary below with your customer (billed vs pending as of submit time).
             </p>
           </div>
 

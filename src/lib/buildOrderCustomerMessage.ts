@@ -3,9 +3,56 @@ export type OrderCustomerShareLine = {
   qtyRequested: number;
   qtyShip: number;
   qtyPo: number;
+  /** If set, listed under *Pending* (e.g. cannot source). */
+  qtyUnavailable?: number;
 };
 
 const MAX_MESSAGE_CHARS = 3800;
+
+const DEFAULT_BUSINESS_NAME = 'Pathak Auto Sales';
+
+/** WhatsApp: *bold* */
+function waBold(label: string): string {
+  return `*${label}*`;
+}
+
+/** WhatsApp: _italic_ */
+function waItalic(text: string): string {
+  return `_${text}_`;
+}
+
+/** e.g. 4th Apr 2026 — readable in customer copy / WhatsApp */
+export function formatCustomerShareDate(d: Date): string {
+  const day = d.getDate();
+  const month = d.toLocaleDateString('en-IN', { month: 'short' });
+  const year = d.getFullYear();
+  return `${ordinalDay(day)} ${month} ${year}`;
+}
+
+function ordinalDay(n: number): string {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
+}
+
+/** One line: bullet, name, bold qty (WhatsApp-friendly). */
+function formatItemLine(productName: string, qty: number): string {
+  return `• ${productName}: *${qty}*`;
+}
+
+function appendBlock(out: string[], heading: string, bullets: string[]): void {
+  if (bullets.length === 0) return;
+  out.push(waBold(heading), ...bullets, '');
+}
 
 /** Digits only for wa.me (no +). */
 export function digitsOnlyMobile(m: string | null | undefined): string {
@@ -15,36 +62,52 @@ export function digitsOnlyMobile(m: string | null | undefined): string {
 
 export function buildOrderCustomerMessage(params: {
   customerName: string;
-  orderNumber: string;
-  /** Human-readable date, e.g. locale date string */
-  dateLabel: string;
+  /** Snapshot time for “as of” copy (captured when submit starts). */
+  date: Date;
   lines: OrderCustomerShareLine[];
+  /** Shown after "Thank you." — omit to use default or `VITE_BUSINESS_DISPLAY_NAME` from caller */
+  businessName?: string;
 }): string {
-  const { customerName, orderNumber, dateLabel, lines } = params;
+  const { customerName, date, lines, businessName } = params;
+  const signatureName = (businessName?.trim() || DEFAULT_BUSINESS_NAME).trim();
+  const dateStr = formatCustomerShareDate(date);
 
-  let body = `Hi ${customerName},\n\n`;
-  body += `Order ${orderNumber} — quantities as of ${dateLabel}.\n\n`;
+  const chunks: string[] = [];
+
+  chunks.push(`Hi ${customerName},`, '');
+  chunks.push(`${waBold('Order update:')} billed items as of ${waItalic(dateStr)}.`, '');
 
   if (lines.length === 0) {
-    body += '(No line items.)';
-    return body.length > MAX_MESSAGE_CHARS ? body.slice(0, MAX_MESSAGE_CHARS) + '…' : body;
+    chunks.push('(No line items.)', '', 'Thank you.', `— ${signatureName}`);
+    return finalizeMessage(chunks);
   }
 
-  body += 'Items:\n';
+  const billed: string[] = [];
+  const pending: string[] = [];
+
   for (const line of lines) {
-    const parts: string[] = [];
-    if (line.qtyShip > 0) parts.push(`${line.qtyShip} shipping now`);
-    if (line.qtyPo > 0) parts.push(`${line.qtyPo} on back-order / PO`);
-    const detail = parts.length > 0 ? parts.join(', ') : 'see warehouse';
-    body += `• ${line.name}: requested ${line.qtyRequested} — ${detail}\n`;
+    if (line.qtyShip > 0) billed.push(formatItemLine(line.name, line.qtyShip));
+    if (line.qtyPo > 0) pending.push(formatItemLine(line.name, line.qtyPo));
+    const u = line.qtyUnavailable ?? 0;
+    if (u > 0) pending.push(formatItemLine(line.name, u));
   }
 
-  body += '\nThank you.';
+  appendBlock(chunks, 'Billed:', billed);
+  appendBlock(chunks, 'Pending:', pending);
 
-  if (body.length > MAX_MESSAGE_CHARS) {
-    return body.slice(0, MAX_MESSAGE_CHARS) + '…';
+  if (billed.length === 0 && pending.length === 0) {
+    chunks.push('(No quantities to report.)');
   }
-  return body;
+
+  chunks.push('Thank you.', `— ${signatureName}`);
+
+  return finalizeMessage(chunks);
+}
+
+function finalizeMessage(chunks: string[]): string {
+  const body = chunks.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd();
+  if (body.length <= MAX_MESSAGE_CHARS) return body;
+  return `${body.slice(0, MAX_MESSAGE_CHARS - 1)}…`;
 }
 
 export function whatsappShareUrl(phoneDigits: string, text: string): string {
