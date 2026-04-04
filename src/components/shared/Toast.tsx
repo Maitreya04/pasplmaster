@@ -6,6 +6,7 @@ const dotColorMap: Record<ToastItem['type'], string> = {
   success: 'bg-[var(--bg-positive)]',
   error: 'bg-[var(--bg-negative)]',
   info: 'bg-[var(--bg-accent)]',
+  warning: 'bg-[var(--bg-warning)]',
 };
 
 interface ToastNotificationProps {

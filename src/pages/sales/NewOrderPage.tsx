@@ -14,6 +14,7 @@ import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash, CurrencyInr
 import { useQuery } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
+import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { useCustomers } from '../../hooks/useCustomers';
 import { usePendingItems } from '../../hooks/usePendingItems';
@@ -36,6 +37,13 @@ import {
   NumberStepper,
 } from '../../components/shared';
 import type { Item, Customer } from '../../types';
+import {
+  formatStockQty,
+  getStockTier,
+  stockPrimaryLabel,
+  stockAfterOrderLine,
+  type StockTier,
+} from '../../lib/stockDisplay';
 
 /** First paint of "More results" before expanding; search still returns up to MAX_RESULTS. */
 const INITIAL_MORE_VISIBLE = 36;
@@ -673,7 +681,6 @@ interface ItemRowProps {
   onStartAdd: (item: Item) => void;
   onConfirmAdd: (item: Item, qty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
-  onRemovePendingAdd: () => void;
   onCancelAdd: () => void;
   pendingAddItemId: number | null;
   totalInOrderQty: number;
@@ -682,9 +689,10 @@ interface ItemRowProps {
   justAdded: boolean;
 }
 
+/** Same block size as `AliasCode` (px-3 py-1.5, 12px semibold) so SKU + special rate read as one chip row. */
 function SpecialRateChip() {
   return (
-    <span className="inline-flex items-center rounded-full bg-[var(--bg-accent-subtle)] px-2.5 py-1 text-[10px] font-medium leading-none text-[var(--content-accent)]">
+    <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--bg-accent-subtle)] px-3 py-1.5 text-[12px] font-semibold leading-none text-[var(--content-accent)]">
       Special rate
     </span>
   );
@@ -716,6 +724,188 @@ function AliasCode({
   );
 }
 
+/** Same geometry as `StatusBadge`: `w-1.5 h-1.5` + solid fills (see StatusBadge.tsx). */
+function StockStatusDot({ tier }: { tier: StockTier }) {
+  const dotClass =
+    tier === 'ok'
+      ? 'bg-[var(--content-positive)]'
+      : tier === 'low'
+        ? 'bg-[var(--content-warning)]'
+        : tier === 'out'
+          ? 'bg-[var(--bg-negative)]'
+          : 'bg-[var(--content-quaternary)]';
+
+  return <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden />;
+}
+
+/** Single-line stock while editing qty: avoids duplicating “X in stock” + a separate red warning. */
+function PendingItemStockLine({
+  stockQty,
+  totalInOrderQty,
+  draftQty,
+}: {
+  stockQty: number | null | undefined;
+  totalInOrderQty: number;
+  draftQty: number;
+}) {
+  const tier = getStockTier(stockQty);
+  const primary = stockPrimaryLabel(stockQty, tier);
+  const primaryTextClass =
+    tier === 'ok'
+      ? 'text-[#047857]'
+      : tier === 'low'
+        ? 'text-[#b45309]'
+        : tier === 'out'
+          ? 'text-[#b91c1c]'
+          : 'text-[var(--content-tertiary)]';
+
+  if (tier === 'unknown' || stockQty == null || !Number.isFinite(Number(stockQty))) {
+    return (
+      <p className="flex min-w-0 items-center gap-1.5 text-[12px] font-semibold leading-snug">
+        <StockStatusDot tier={tier} />
+        <span className={`min-w-0 ${primaryTextClass}`}>{primary}</span>
+      </p>
+    );
+  }
+
+  if (tier === 'out') {
+    const combined = totalInOrderQty + draftQty;
+    const body = (
+      <>
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--bg-warning)]" aria-hidden />
+        <span className="min-w-0 text-[var(--content-warning)]">
+          Out of stock
+          {combined > 0 && (
+            <span className="font-semibold">
+              {' '}
+              · {formatStockQty(draftQty)} in this add{totalInOrderQty > 0 ? ` · ${formatStockQty(totalInOrderQty)} already in cart` : ''} → PO at checkout
+            </span>
+          )}
+        </span>
+      </>
+    );
+    return (
+      <div
+        className="rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5"
+        role="status"
+      >
+        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] font-semibold leading-snug">
+          {body}
+        </p>
+      </div>
+    );
+  }
+
+  const S = Number(stockQty);
+  const combined = totalInOrderQty + draftQty;
+  const overBy = combined > S ? combined - S : 0;
+
+  const body = (
+    <>
+      {overBy > 0 ? (
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--bg-warning)]" aria-hidden />
+      ) : (
+        <StockStatusDot tier={tier} />
+      )}
+      <span
+        className={
+          overBy > 0
+            ? 'min-w-0 text-[var(--content-warning)]'
+            : `min-w-0 ${primaryTextClass}`
+        }
+      >
+        {formatStockQty(S)} in stock
+        {totalInOrderQty > 0 && (
+          <span
+            className={
+              overBy > 0
+                ? 'font-medium text-[color-mix(in_srgb,var(--content-warning)_82%,var(--content-secondary))]'
+                : 'font-medium text-[var(--content-secondary)]'
+            }
+          >
+            {' '}
+            · {formatStockQty(totalInOrderQty)} in cart
+          </span>
+        )}
+        {overBy > 0 && (
+          <span className="font-semibold">
+            {' '}
+            · Short by {formatStockQty(overBy)}, request PO at checkout
+          </span>
+        )}
+      </span>
+    </>
+  );
+
+  if (overBy > 0) {
+    return (
+      <div
+        className="rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5"
+        role="status"
+      >
+        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] font-semibold leading-snug">
+          {body}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] font-semibold leading-snug">
+      {body}
+    </p>
+  );
+}
+
+function ItemStockBlock({
+  stockQty,
+  totalInOrderQty,
+}: {
+  stockQty: number | null | undefined;
+  totalInOrderQty: number;
+}) {
+  const tier = getStockTier(stockQty);
+  const primary = stockPrimaryLabel(stockQty, tier);
+  const secondary =
+    tier !== 'unknown' && tier !== 'out' && stockQty != null && Number.isFinite(Number(stockQty))
+      ? stockAfterOrderLine(Number(stockQty), totalInOrderQty, tier)
+      : null;
+
+  const primaryTextClass =
+    tier === 'ok'
+      ? 'text-[#047857]'
+      : tier === 'low'
+        ? 'text-[#b45309]'
+        : tier === 'out'
+          ? 'text-[#b91c1c]'
+          : 'text-[var(--content-tertiary)]';
+
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <p className="flex min-w-0 items-center gap-1.5 text-[12px] font-semibold leading-none">
+        <StockStatusDot tier={tier} />
+        <span className={`min-w-0 ${primaryTextClass}`}>{primary}</span>
+      </p>
+      {secondary &&
+        (secondary.variant === 'shortfall' ? (
+          <div className="mt-1 rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5">
+            <p className="text-[12px] font-semibold leading-snug text-[var(--content-warning)]">{secondary.text}</p>
+          </div>
+        ) : (
+          <p
+            className={`pl-3 text-[11px] font-medium leading-[1.35] ${
+              secondary.tone === 'negative'
+                ? 'text-[#b91c1c]'
+                : 'text-[var(--content-secondary)]'
+            }`}
+          >
+            {secondary.text}
+          </p>
+        ))}
+    </div>
+  );
+}
+
 /** Only mounts while this row is in “pending add” mode so qty state always starts at 1 (no setState in an effect). */
 const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   item,
@@ -728,7 +918,6 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   hasSpecialLine,
   onConfirmAdd,
   onConfirmSpecialRateAdd,
-  onRemovePendingAdd,
   onCancelAdd,
 }: {
   item: Item;
@@ -741,7 +930,6 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   hasSpecialLine: boolean;
   onConfirmAdd: (item: Item, qty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
-  onRemovePendingAdd: () => void;
   onCancelAdd: () => void;
 }) {
   const qtyInputRef = useRef<HTMLInputElement | null>(null);
@@ -766,38 +954,36 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
     onConfirmSpecialRateAdd(item, getDraftQty());
   }, [getDraftQty, item, onConfirmSpecialRateAdd]);
 
+  const draftQty = getDraftQty();
+
   return (
     <div className="min-w-0">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2">
-          <AliasCode
-            value={productCodeValue}
-            query={query}
-            matchedField={matchedField}
-            placeholder={!hasProductCode}
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0 flex flex-1 flex-col gap-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <AliasCode
+              value={productCodeValue}
+              query={query}
+              matchedField={matchedField}
+              placeholder={!hasProductCode}
+            />
+            {hasSpecialLine && <SpecialRateChip />}
+          </div>
+          <p className="text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
+            {highlightText(item.name, query)}
+          </p>
+          <PendingItemStockLine
+            stockQty={item.stock_qty}
+            totalInOrderQty={totalInOrderQty}
+            draftQty={draftQty}
           />
-          {hasSpecialLine && <SpecialRateChip />}
         </div>
         <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
           {formatCurrency(price)}
         </p>
       </div>
 
-      <p className="mt-2.5 max-w-[calc(100%-12px)] text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
-        {highlightText(item.name, query)}
-      </p>
-
-      {totalInOrderQty > 0 && (
-        <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
-          {totalInOrderQty > 0 && (
-            <span className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
-              {totalInOrderQty} in order
-            </span>
-          )}
-        </div>
-      )}
-
-      <div className="mt-3 grid grid-rows-[1fr] opacity-100 translate-y-0 transition-[grid-template-rows,opacity,transform,margin-top,padding-top] duration-200 ease-out">
+      <div className="mt-2.5 grid grid-rows-[1fr] opacity-100 translate-y-0 transition-[grid-template-rows,opacity,transform,margin-top,padding-top] duration-200 ease-out">
         <div className="overflow-hidden">
           <div className="border-t border-[var(--border-subtle)] pt-3">
             <div className="flex items-center justify-between gap-3">
@@ -819,10 +1005,10 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onRemovePendingAdd();
+                    onCancelAdd();
                   }}
                   className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] hover:opacity-90"
-                  aria-label={`Remove pending add for ${item.name}`}
+                  aria-label={`Cancel adding ${item.name}`}
                 >
                   <Trash size={18} />
                 </button>
@@ -854,18 +1040,6 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onCancelAdd();
-                  }}
-                  className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--bg-tertiary)] text-[var(--content-secondary)] hover:opacity-90"
-                  aria-label={`Cancel adding ${item.name}`}
-                >
-                  <span className="text-[18px] font-medium leading-none">×</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
                     handleConfirmQty();
                   }}
                   className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--bg-accent)] text-[var(--content-on-color)] hover:opacity-90"
@@ -888,7 +1062,6 @@ const ItemRow = memo(function ItemRow({
   onStartAdd,
   onConfirmAdd,
   onConfirmSpecialRateAdd,
-  onRemovePendingAdd,
   onCancelAdd,
   pendingAddItemId,
   totalInOrderQty,
@@ -901,13 +1074,16 @@ const ItemRow = memo(function ItemRow({
   const productCode = (item.alias1 ?? item.alias ?? '').toString().trim();
   const productCodeValue = productCode || '—';
   const showQtyEditor = isPendingAdd;
+  const isOutOfStock = getStockTier(item.stock_qty) === 'out';
 
   return (
     <li
-      className={`overflow-hidden rounded-2xl border bg-[var(--bg-secondary)] px-3 py-3 cursor-pointer transition-[min-height,border-color,box-shadow] duration-200 ease-out ${
+      className={`overflow-hidden rounded-2xl border bg-[var(--bg-secondary)] px-3 py-2.5 transition-[border-color,box-shadow] duration-200 ease-out cursor-pointer ${
         showQtyEditor
-          ? 'min-h-[140px] border-[var(--bg-accent)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--bg-accent)_12%,transparent)]'
-          : 'min-h-[104px] border-[var(--border-subtle)]'
+          ? 'border-[var(--bg-accent)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--bg-accent)_12%,transparent)]'
+          : isOutOfStock
+            ? 'border-[color-mix(in_srgb,var(--border-warning)_45%,var(--border-subtle))]'
+            : 'border-[var(--border-subtle)]'
       }`}
       onClick={() => {
         if (!isPendingAdd) {
@@ -927,58 +1103,55 @@ const ItemRow = memo(function ItemRow({
           hasSpecialLine={hasSpecialLine}
           onConfirmAdd={onConfirmAdd}
           onConfirmSpecialRateAdd={onConfirmSpecialRateAdd}
-          onRemovePendingAdd={onRemovePendingAdd}
           onCancelAdd={onCancelAdd}
         />
       ) : (
-        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_84px] grid-rows-[auto_auto] gap-x-3 gap-y-2">
-          <div className="min-w-0 flex flex-wrap items-start gap-2">
-            <AliasCode
-              value={productCodeValue}
-              query={query}
-              matchedField={matchedField}
-              placeholder={!productCode}
-            />
-            {hasSpecialLine && <SpecialRateChip />}
-          </div>
-          <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
-            {formatCurrency(price)}
-          </p>
+        <div className="flex min-w-0 items-center gap-x-3">
+          <div className="min-w-0 flex flex-1 flex-col gap-1.5">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <AliasCode
+                value={productCodeValue}
+                query={query}
+                matchedField={matchedField}
+                placeholder={!productCode}
+              />
+              {hasSpecialLine && <SpecialRateChip />}
+            </div>
 
-          <div className="min-w-0 pr-1">
             <p className="text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
               {highlightText(item.name, query)}
             </p>
 
-            {totalInOrderQty > 0 && (
-              <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-2">
-                {totalInOrderQty > 0 && (
-                  <span className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
-                    {totalInOrderQty} in order
-                  </span>
-                )}
-                {justAdded && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-positive-subtle)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-positive)]">
-                    <Check size={12} weight="bold" />
-                    Added
-                  </span>
-                )}
+            <ItemStockBlock stockQty={item.stock_qty} totalInOrderQty={totalInOrderQty} />
+
+            {justAdded && (
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-positive-subtle)] px-3 py-1.5 text-[12px] font-semibold leading-none text-[var(--content-positive)]">
+                  <Check size={12} weight="bold" />
+                  Added
+                </span>
               </div>
             )}
           </div>
 
-          <div className="flex items-center justify-end self-center">
+          <div className="flex shrink-0 flex-col items-end justify-center gap-2 self-stretch">
+            <p className="text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
+              {formatCurrency(price)}
+            </p>
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onStartAdd(item);
               }}
-              className={`flex h-11 w-11 items-center justify-center rounded-2xl shadow-sm transition-all duration-200 hover:opacity-95 active:scale-95 ${
-                justAdded
-                  ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
-                  : 'bg-[var(--bg-accent)] text-[var(--content-on-color)]'
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-sm transition-all duration-200 active:scale-95 ${
+                isOutOfStock
+                  ? 'bg-[var(--bg-warning)] text-[var(--content-on-color)] hover:opacity-95'
+                  : justAdded
+                    ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] hover:opacity-95'
+                    : 'bg-[var(--bg-accent)] text-[var(--content-on-color)] hover:opacity-95'
               }`}
-              aria-label="Add to cart"
+              aria-label={isOutOfStock ? 'Add to purchase order' : 'Add to cart'}
             >
               {justAdded ? <Check size={18} weight="bold" /> : <Plus size={20} weight="bold" />}
             </button>
@@ -990,11 +1163,13 @@ const ItemRow = memo(function ItemRow({
 }, (prevProps, nextProps) => {
   return (
     prevProps.result.item.id === nextProps.result.item.id &&
+    prevProps.result.item.stock_qty === nextProps.result.item.stock_qty &&
     prevProps.query === nextProps.query &&
     prevProps.pendingAddItemId === nextProps.pendingAddItemId &&
     prevProps.totalInOrderQty === nextProps.totalInOrderQty &&
     prevProps.price === nextProps.price &&
-    prevProps.hasSpecialLine === nextProps.hasSpecialLine
+    prevProps.hasSpecialLine === nextProps.hasSpecialLine &&
+    prevProps.justAdded === nextProps.justAdded
   );
 });
 
@@ -1008,7 +1183,6 @@ function ResultSection({
   onStartAdd,
   onConfirmAdd,
   onConfirmSpecialRateAdd,
-  onRemovePendingAdd,
   onCancelAdd,
   pendingAddItemId,
   getTotalInOrderQty,
@@ -1022,7 +1196,6 @@ function ResultSection({
   onStartAdd: (item: Item) => void;
   onConfirmAdd: (item: Item, qty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
-  onRemovePendingAdd: () => void;
   onCancelAdd: () => void;
   pendingAddItemId: number | null;
   getTotalInOrderQty: (id: number) => number;
@@ -1045,7 +1218,6 @@ function ResultSection({
             pendingAddItemId={pendingAddItemId}
             onConfirmAdd={onConfirmAdd}
             onConfirmSpecialRateAdd={onConfirmSpecialRateAdd}
-            onRemovePendingAdd={onRemovePendingAdd}
             onCancelAdd={onCancelAdd}
             totalInOrderQty={getTotalInOrderQty(r.item.id)}
             price={getPrice(r.item)}
@@ -1064,6 +1236,7 @@ function ResultSection({
 // ---------------------------------------------------------------------------
 export default function NewOrderPage(): React.JSX.Element | null {
   const navigate = useNavigate();
+  const toast = useToast();
   const { data: items = [], isLoading: itemsLoading } = useItems();
   const {
     items: cartItems,
@@ -1214,6 +1387,33 @@ export default function NewOrderPage(): React.JSX.Element | null {
     return totals;
   }, [cartItems]);
 
+  const notifyIfCartExceedsStock = useCallback(
+    (item: Item, qtyAdded: number) => {
+      if (qtyAdded < 1) return;
+      const prevQty = cartQtyByItem.get(item.id) ?? 0;
+      const newTotal = prevQty + qtyAdded;
+      const raw = item.stock_qty;
+      const tier = getStockTier(raw);
+      const openCart = {
+        label: 'Open cart',
+        onClick: () => navigate('/sales/cart'),
+      };
+
+      if (tier === 'out') {
+        toast.warning(`Out of stock — ${formatStockQty(qtyAdded)} in this add goes to purchase requests at checkout.`, {
+          action: openCart,
+        });
+        return;
+      }
+      if (tier === 'unknown' || !Number.isFinite(Number(raw))) return;
+      const stock = Number(raw);
+      if (newTotal <= stock) return;
+      const overBy = newTotal - stock;
+      toast.warning(`Short by ${formatStockQty(overBy)}, request PO at checkout.`, { action: openCart });
+    },
+    [cartQtyByItem, navigate, toast],
+  );
+
   const specialLineItemIds = useMemo(() => {
     const ids = new Set<number>();
     for (const line of cartItems) {
@@ -1270,6 +1470,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   };
 
   const handleConfirmAdd = (item: Item, qty: number) => {
+    notifyIfCartExceedsStock(item, qty);
     addItem(item, qty);
     setPendingAddItemId(null);
     showAddedFeedback(item.id);
@@ -1286,14 +1487,11 @@ export default function NewOrderPage(): React.JSX.Element | null {
     setRateValue('');
   };
 
-  const handleRemovePendingAdd = () => {
-    setPendingAddItemId(null);
-  };
-
   const handleRateSave = () => {
     if (!rateItem) return;
     const n = parseFloat(rateValue.replace(/,/g, ''));
     if (isNaN(n) || n < 0) return;
+    notifyIfCartExceedsStock(rateItem, rateQty);
     addItem(rateItem, rateQty, n);
     showAddedFeedback(rateItem.id);
     setRateItem(null);
@@ -1446,7 +1644,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 onStartAdd={handleStartAdd}
                 onConfirmAdd={handleConfirmAdd}
                 onConfirmSpecialRateAdd={handleConfirmSpecialRateAdd}
-                onRemovePendingAdd={handleRemovePendingAdd}
                 onCancelAdd={handleCancelAdd}
                 pendingAddItemId={pendingAddItemId}
                 getTotalInOrderQty={getTotalInOrderQty}
@@ -1461,7 +1658,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 onStartAdd={handleStartAdd}
                 onConfirmAdd={handleConfirmAdd}
                 onConfirmSpecialRateAdd={handleConfirmSpecialRateAdd}
-                onRemovePendingAdd={handleRemovePendingAdd}
                 onCancelAdd={handleCancelAdd}
                 pendingAddItemId={pendingAddItemId}
                 getTotalInOrderQty={getTotalInOrderQty}

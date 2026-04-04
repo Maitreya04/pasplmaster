@@ -1,8 +1,17 @@
-import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MagnifyingGlass, CheckCircle, Plus, CurrencyInr, Trash } from '@phosphor-icons/react';
+import {
+  MagnifyingGlass,
+  CheckCircle,
+  Plus,
+  CurrencyInr,
+  Trash,
+  Copy,
+  WhatsappLogo,
+} from '@phosphor-icons/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCart } from '../../context/CartContext';
+import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { useCustomers } from '../../hooks/useCustomers';
 import { useTransports } from '../../hooks/useTransports';
@@ -17,6 +26,12 @@ import {
 import type { Customer, CartItem } from '../../types';
 
 import { formatCurrencyRaw as formatCurrency } from '../../utils/formatters';
+import { splitCartLine } from '../../lib/cartSupply';
+import {
+  buildOrderCustomerMessage,
+  digitsOnlyMobile,
+  whatsappShareUrl,
+} from '../../lib/buildOrderCustomerMessage';
 
 // ---------------------------------------------------------------------------
 // SearchableCustomerDropdown
@@ -140,33 +155,35 @@ const SWIPE_PREVIEW_OFFSET = 36;
 
 function SpecialRateChip() {
   return (
-    <span className="inline-flex items-center rounded-full bg-[var(--bg-accent-subtle)] px-2.5 py-1 text-[10px] font-medium leading-none text-[var(--content-accent)]">
+    <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--bg-accent-subtle)] px-3 py-1.5 text-[12px] font-semibold leading-none text-[var(--content-accent)]">
       Special rate
     </span>
   );
 }
 
-interface SwipeableCartRowProps {
+// ---------------------------------------------------------------------------
+// BillingItemCard — shows items that ship from stock. Qty is read-only
+// (determined by stock). Swipe for rate / delete.
+// ---------------------------------------------------------------------------
+interface BillingItemCardProps {
   item: CartItem;
+  shipQty: number;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  onUpdateQty: (lineId: string, qty: number) => void;
-  onRemove: (lineId: string) => void;
   onRatePress: (item: CartItem) => void;
   onDeletePress: (item: CartItem) => void;
   previewOnMount?: boolean;
 }
 
-function SwipeableCartRow({
+const BillingItemCard = memo(function BillingItemCard({
   item: cartItem,
+  shipQty,
   isOpen,
   onOpenChange,
-  onUpdateQty,
-  onRemove,
   onRatePress,
   onDeletePress,
   previewOnMount = false,
-}: SwipeableCartRowProps) {
+}: BillingItemCardProps) {
   const [offset, setOffset] = useState(isOpen ? SWIPE_ACTION_WIDTH : 0);
   const [isDragging, setIsDragging] = useState(false);
   const [previewOffset, setPreviewOffset] = useState(0);
@@ -252,7 +269,7 @@ function SwipeableCartRow({
   const price = cartItem.specialRate ?? cartItem.item.sales_price;
   const partNo = cartItem.item.alias1 ?? cartItem.item.alias;
   const hasSpecialRate = cartItem.specialRate !== null;
-  const lineTotal = price * cartItem.qty;
+  const lineTotal = price * shipQty;
 
   return (
     <li className="relative overflow-hidden rounded-2xl">
@@ -294,7 +311,7 @@ function SwipeableCartRow({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               {partNo && (
-                <p className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-1 font-mono text-[11px] font-semibold tracking-[0.04em] text-[var(--content-secondary)]">
+                <p className="inline-flex max-w-full items-center truncate rounded-full bg-[var(--bg-tertiary)] px-3 py-1.5 font-mono text-[12px] font-semibold tracking-[0.04em] text-[var(--content-primary)]">
                   {partNo}
                 </p>
               )}
@@ -311,9 +328,6 @@ function SwipeableCartRow({
           </p>
 
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
-              {cartItem.qty} in order
-            </span>
             {hasSpecialRate && <SpecialRateChip />}
             {hasSpecialRate && (
               <span className="font-mono text-[10px] text-[var(--content-tertiary)] line-through">
@@ -331,23 +345,69 @@ function SwipeableCartRow({
                 {formatCurrency(lineTotal)}
               </p>
             </div>
-            <div className="shrink-0">
-              <NumberStepper
-                value={cartItem.qty}
-                onChange={(q) => onUpdateQty(cartItem.lineId, q)}
-                min={1}
-                presets={[]}
-                variant="compact"
-                showRemoveAtMin
-                onRemove={() => onRemove(cartItem.lineId)}
-              />
+            <div className="shrink-0 flex flex-col items-end">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-[var(--content-tertiary)] mb-1">
+                Qty
+              </p>
+              <p className="font-mono text-xl font-bold text-[var(--content-primary)] tabular-nums">
+                {shipQty}
+              </p>
             </div>
           </div>
         </div>
       </div>
     </li>
   );
-}
+});
+
+// ---------------------------------------------------------------------------
+// PurchaseOrderCard — editable stepper for PO qty. For PO-only items, also
+// serves as the only card (with delete).
+// ---------------------------------------------------------------------------
+const PurchaseOrderCard = memo(function PurchaseOrderCard({
+  cartItem,
+  poQty,
+  shipQty,
+  onChangePoQty,
+  onRemoveLine,
+}: {
+  cartItem: CartItem;
+  poQty: number;
+  shipQty: number;
+  onChangePoQty: (lineId: string, newPoQty: number) => void;
+  onRemoveLine: (lineId: string) => void;
+}) {
+  const partNo = cartItem.item.alias1 ?? cartItem.item.alias;
+  const fullyPo = shipQty === 0;
+
+  return (
+    <li className="rounded-2xl border border-[color-mix(in_srgb,var(--border-warning)_42%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-4 py-3.5">
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          {partNo && (
+            <span className="inline-flex max-w-full shrink-0 items-center truncate rounded-full border border-[color-mix(in_srgb,var(--content-primary)_12%,var(--border-subtle))] bg-[var(--bg-secondary)] px-3 py-1 font-mono text-[11px] font-semibold tracking-[0.04em] text-[var(--content-primary)]">
+              {partNo}
+            </span>
+          )}
+          <p className="mt-1.5 text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
+            {cartItem.item.name}
+          </p>
+        </div>
+        <div className="shrink-0">
+          <NumberStepper
+            value={poQty}
+            onChange={(q) => onChangePoQty(cartItem.lineId, q)}
+            min={fullyPo ? 1 : 0}
+            presets={[]}
+            variant="compact"
+            showRemoveAtMin={fullyPo}
+            onRemove={fullyPo ? () => onRemoveLine(cartItem.lineId) : undefined}
+          />
+        </div>
+      </div>
+    </li>
+  );
+});
 
 // ---------------------------------------------------------------------------
 // CartPage
@@ -361,8 +421,6 @@ export default function CartPage(): React.JSX.Element | null {
     removeItem,
     setSpecialRate,
     clearCart,
-    totalCount,
-    totalValue,
     selectedCustomer: customer,
     setSelectedCustomer: setCustomer,
     selectedTransport: transport,
@@ -372,10 +430,15 @@ export default function CartPage(): React.JSX.Element | null {
     notes,
     setNotes,
   } = useCart();
+  const toast = useToast();
   const { userName } = useAuth();
   const { data: transports = [] } = useTransports();
 
-  const [submittedOrderNumber, setSubmittedOrderNumber] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState<{
+    orderNumber: string;
+    shareText: string;
+    whatsappDigits: string;
+  } | null>(null);
   const [showItemBreakdown, setShowItemBreakdown] = useState(false);
   const [openActionsItemId, setOpenActionsItemId] = useState<string | null>(null);
   const [rateItemId, setRateItemId] = useState<string | null>(null);
@@ -385,27 +448,88 @@ export default function CartPage(): React.JSX.Element | null {
   const rateCartItem = rateItemId !== null ? items.find((ci) => ci.lineId === rateItemId) ?? null : null;
   const deleteCartItem = deleteItemId !== null ? items.find((ci) => ci.lineId === deleteItemId) ?? null : null;
 
-  const openRateSheet = (cartItem: CartItem) => {
+  /** Single pass over lines: splits, billing/PO lists, totals (one stock calc per line). */
+  const {
+    billingSplits,
+    poSplits,
+    billingCount,
+    billingTotal,
+    poPiecesTotal,
+  } = useMemo(() => {
+    const billingSplits: { ci: CartItem; ship: number; po: number }[] = [];
+    const poSplits: { ci: CartItem; ship: number; po: number }[] = [];
+    let billingCount = 0;
+    let billingTotal = 0;
+    let poPiecesTotal = 0;
+    for (const ci of items) {
+      const { ship, po } = splitCartLine(ci.item, ci.qty);
+      if (ship > 0) billingSplits.push({ ci, ship, po });
+      if (po > 0) poSplits.push({ ci, ship, po });
+      billingCount += ship;
+      billingTotal += (ci.specialRate ?? ci.item.sales_price) * ship;
+      poPiecesTotal += po;
+    }
+    return {
+      billingSplits,
+      poSplits,
+      billingCount,
+      billingTotal,
+      poPiecesTotal,
+    };
+  }, [items]);
+
+  /** When PO stepper changes, adjust total qty; ship from stock stays implied by item + stock. */
+  const handlePoQtyChange = useCallback(
+    (lineId: string, newPoQty: number) => {
+      const ci = items.find((c) => c.lineId === lineId);
+      if (!ci) return;
+      const { ship } = splitCartLine(ci.item, ci.qty);
+      const newTotal = ship + Math.max(0, newPoQty);
+      if (newTotal < 1) {
+        removeItem(lineId);
+      } else {
+        updateQty(lineId, newTotal);
+      }
+    },
+    [items, updateQty, removeItem],
+  );
+
+  const openRateSheet = useCallback((cartItem: CartItem) => {
     setOpenActionsItemId(null);
     setRateItemId(cartItem.lineId);
     setRateValue(cartItem.specialRate !== null ? String(cartItem.specialRate) : '');
-  };
+  }, []);
 
-  const handleSaveRate = () => {
+  const handleSaveRate = useCallback(() => {
     if (!rateCartItem) return;
     const parsed = parseFloat(rateValue.replace(/,/g, ''));
     setSpecialRate(rateCartItem.lineId, Number.isNaN(parsed) || parsed < 0 ? null : parsed);
     setRateItemId(null);
-  };
+  }, [rateCartItem, rateValue, setSpecialRate]);
 
-  const openDeleteSheet = (cartItem: CartItem) => {
+  const openDeleteSheet = useCallback((cartItem: CartItem) => {
     setOpenActionsItemId(null);
     setDeleteItemId(cartItem.lineId);
-  };
+  }, []);
 
   const submitMutation = useMutation({
     mutationFn: async () => {
       if (!customer || !userName) throw new Error('Customer and salesperson required');
+
+      const linesForMessage = items.map((ci) => {
+        const { ship, po } = splitCartLine(ci.item, ci.qty);
+        return {
+          name: ci.item.name,
+          qtyRequested: ci.qty,
+          qtyShip: ship,
+          qtyPo: po,
+        };
+      });
+      const dateLabel = new Date().toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
 
       const { data: order, error: orderError } = await supabase
         .from('orders')
@@ -419,8 +543,8 @@ export default function CartPage(): React.JSX.Element | null {
           workflow_status: 'submitted',
           priority,
           notes: notes.trim() || null,
-          item_count: totalCount,
-          total_value: totalValue,
+          item_count: billingCount,
+          total_value: billingTotal,
         })
         .select('id, order_number')
         .single();
@@ -428,8 +552,17 @@ export default function CartPage(): React.JSX.Element | null {
       if (orderError) throw orderError;
       if (!order) throw new Error('Order insert failed');
 
+      const orderNumber = order.order_number;
+      const shareTextFinal = buildOrderCustomerMessage({
+        customerName: customer.name,
+        orderNumber,
+        dateLabel,
+        lines: linesForMessage,
+      });
+
       const orderItems = items.map((ci) => {
         const price = ci.specialRate ?? ci.item.sales_price;
+        const { ship, po } = splitCartLine(ci.item, ci.qty);
         return {
           order_id: order.id,
           item_id: ci.item.id,
@@ -437,6 +570,9 @@ export default function CartPage(): React.JSX.Element | null {
           item_alias: ci.item.alias,
           rack_no: ci.item.rack_no,
           qty_requested: ci.qty,
+          qty_shippable: ship,
+          qty_po: po,
+          qty_approved: ship,
           price_quoted: price,
           price_system: ci.item.sales_price,
           state: 'pending',
@@ -449,11 +585,15 @@ export default function CartPage(): React.JSX.Element | null {
 
       if (itemsError) throw itemsError;
 
-      return order.order_number;
+      return {
+        orderNumber,
+        shareText: shareTextFinal,
+        whatsappDigits: digitsOnlyMobile(customer.mobile),
+      };
     },
-    onSuccess: (orderNumber) => {
+    onSuccess: (payload) => {
       clearCart();
-      setSubmittedOrderNumber(orderNumber);
+      setSubmitSuccess(payload);
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
   });
@@ -461,25 +601,88 @@ export default function CartPage(): React.JSX.Element | null {
   const handleSubmit = () => submitMutation.mutate();
 
   // Success screen
-  if (submittedOrderNumber) {
+  if (submitSuccess) {
+    const waDigits = submitSuccess.whatsappDigits;
+    const canWhatsApp = waDigits.length >= 10;
+    const waUrl = canWhatsApp
+      ? whatsappShareUrl(waDigits, submitSuccess.shareText)
+      : null;
+
     return (
       <div className="min-h-screen flex flex-col">
-        <PageHeader title="Order Submitted" onBack={() => navigate('/sales')} />
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <div className="w-20 h-20 rounded-full bg-[var(--bg-positive-subtle)] flex items-center justify-center mb-6">
-            <CheckCircle size={40} weight="fill" className="text-[var(--content-positive)]" />
+        <PageHeader
+          title="Order Submitted"
+          onBack={() => {
+            setSubmitSuccess(null);
+            navigate('/sales');
+          }}
+        />
+        <div className="flex-1 flex flex-col p-6 pb-10">
+          <div className="flex flex-col items-center text-center shrink-0">
+            <div className="w-20 h-20 rounded-full bg-[var(--bg-positive-subtle)] flex items-center justify-center mb-6">
+              <CheckCircle size={40} weight="fill" className="text-[var(--content-positive)]" />
+            </div>
+            <h2 className="text-2xl font-bold text-[var(--content-primary)] mb-2">
+              Order Submitted
+            </h2>
+            <p className="text-3xl font-bold font-mono text-[var(--content-accent)] mb-4">
+              {submitSuccess.orderNumber}
+            </p>
+            <p className="text-sm text-[var(--content-tertiary)] max-w-md mb-4">
+              Share the summary below with your customer (quantities as of order date).
+            </p>
           </div>
-          <h2 className="text-2xl font-bold text-[var(--content-primary)] mb-2">
-            Order Submitted
-          </h2>
-          <p className="text-3xl font-bold font-mono text-[var(--content-accent)] mb-6">
-            {submittedOrderNumber}
-          </p>
-          <div className="w-full max-w-sm space-y-3">
+
+          <div className="w-full max-w-lg mx-auto flex-1 min-h-0 flex flex-col gap-3">
+            <pre className="text-left text-[13px] leading-relaxed text-[var(--content-secondary)] whitespace-pre-wrap break-words rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 max-h-[40vh] overflow-y-auto">
+              {submitSuccess.shareText}
+            </pre>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <BigButton
+                variant="secondary"
+                className="flex-1"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(submitSuccess.shareText);
+                    toast.success('Summary copied');
+                  } catch {
+                    toast.error('Could not copy');
+                  }
+                }}
+              >
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Copy size={20} weight="bold" />
+                  Copy summary
+                </span>
+              </BigButton>
+              {waUrl ? (
+                <a
+                  href={waUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 min-h-14 flex items-center justify-center gap-2 rounded-2xl font-semibold bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border border-[var(--border-subtle)]"
+                >
+                  <WhatsappLogo size={22} weight="fill" />
+                  WhatsApp
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  className="flex-1 min-h-14 rounded-2xl font-medium text-[var(--content-tertiary)] bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] opacity-70 cursor-not-allowed px-4"
+                  title="Add a mobile number on the customer record to enable WhatsApp."
+                >
+                  WhatsApp (add mobile)
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="w-full max-w-sm mx-auto space-y-3 mt-6">
             <BigButton
               variant="primary"
               onClick={() => {
-                setSubmittedOrderNumber(null);
+                setSubmitSuccess(null);
                 navigate('/sales/new');
               }}
             >
@@ -488,7 +691,7 @@ export default function CartPage(): React.JSX.Element | null {
             <BigButton
               variant="secondary"
               onClick={() => {
-                setSubmittedOrderNumber(null);
+                setSubmitSuccess(null);
                 navigate('/sales/orders');
               }}
             >
@@ -519,34 +722,64 @@ export default function CartPage(): React.JSX.Element | null {
           </div>
         ) : (
           <>
-            {/* Item list */}
-            <section>
-              <div className="mb-3 flex items-center justify-between gap-3 px-1">
-                <h2 className="text-base font-semibold text-[var(--content-primary)]">
-                  Items
-                </h2>
-                <p className="text-sm text-[var(--content-tertiary)]">
-                  {items.length} line{items.length !== 1 ? 's' : ''}
-                </p>
-              </div>
-              <ul className="space-y-2">
-                {items.map((ci) => {
-                  return (
-                    <SwipeableCartRow
-                      key={ci.lineId}
-                      item={ci}
-                      isOpen={openActionsItemId === ci.lineId}
-                      onOpenChange={(open) => setOpenActionsItemId(open ? ci.lineId : null)}
-                      onUpdateQty={updateQty}
-                      onRemove={removeItem}
+            {/* Billing items — what ships from stock */}
+            {billingSplits.length > 0 && (
+              <section>
+                <div className="mb-3 flex items-center justify-between gap-3 px-1">
+                  <h2 className="text-base font-semibold text-[var(--content-primary)]">
+                    Items
+                  </h2>
+                  <p className="text-sm text-[var(--content-tertiary)]">
+                    {billingSplits.length} line{billingSplits.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <ul className="space-y-2">
+                  {billingSplits.map((row) => (
+                    <BillingItemCard
+                      key={row.ci.lineId}
+                      item={row.ci}
+                      shipQty={row.ship}
+                      isOpen={openActionsItemId === row.ci.lineId}
+                      onOpenChange={(open) => setOpenActionsItemId(open ? row.ci.lineId : null)}
                       onRatePress={openRateSheet}
                       onDeletePress={openDeleteSheet}
-                      previewOnMount={ci === items[0]}
+                      previewOnMount={row === billingSplits[0]}
                     />
-                  );
-                })}
-              </ul>
-            </section>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {/* Purchase order — editable qty */}
+            {poSplits.length > 0 && (
+              <section>
+                <div className="mb-3 flex items-center justify-between gap-3 px-1">
+                  <h2 className="text-base font-semibold text-[var(--content-warning)]">Purchase order</h2>
+                  <p className="text-sm text-[var(--content-tertiary)]">
+                    {poSplits.length} line{poSplits.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <ul className="space-y-2">
+                  {poSplits.map((row) => (
+                    <PurchaseOrderCard
+                      key={row.ci.lineId}
+                      cartItem={row.ci}
+                      poQty={row.po}
+                      shipQty={row.ship}
+                      onChangePoQty={handlePoQtyChange}
+                      onRemoveLine={removeItem}
+                    />
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {/* Empty state: all items are PO-only */}
+            {billingSplits.length === 0 && poSplits.length > 0 && (
+              <p className="px-1 text-sm text-[var(--content-tertiary)]">
+                No items in stock for immediate billing.
+              </p>
+            )}
 
             <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-5">
               <h2 className="text-base font-semibold text-[var(--content-primary)]">
@@ -648,15 +881,23 @@ export default function CartPage(): React.JSX.Element | null {
             <div className="space-y-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
               <div className="flex justify-between items-baseline text-sm text-[var(--content-secondary)]">
                 <div>
-                  <span>Items</span>
+                  <span>Billing</span>
                   <span className="ml-1 text-[var(--content-tertiary)]">
-                    ({totalCount} pcs)
+                    ({billingCount} pcs)
                   </span>
                 </div>
                 <span className="font-mono text-[var(--content-primary)]">
-                  {formatCurrency(totalValue)}
+                  {formatCurrency(billingTotal)}
                 </span>
               </div>
+              {poSplits.length > 0 && (
+                <div className="flex justify-between items-baseline text-sm text-[var(--content-secondary)]">
+                  <span>Purchase order</span>
+                  <span className="text-xs text-[var(--content-warning)]">
+                    {poPiecesTotal} pcs
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between items-baseline text-sm text-[var(--content-secondary)]">
                 <div>
                   <span>Transport</span>
@@ -671,7 +912,7 @@ export default function CartPage(): React.JSX.Element | null {
               <div className="border-t border-[var(--border-subtle)] pt-3 mt-2 flex justify-between text-base font-semibold text-[var(--content-primary)]">
                 <span>Grand Total</span>
                 <span className="font-mono">
-                  {formatCurrency(totalValue)}
+                  {formatCurrency(billingTotal)}
                 </span>
               </div>
               <button
@@ -686,9 +927,10 @@ export default function CartPage(): React.JSX.Element | null {
               </button>
               {showItemBreakdown && (
                 <div className="mt-1 pt-2 border-t border-dashed border-[var(--border-subtle)] space-y-1.5">
-                  {items.map((ci) => {
+                  {billingSplits.map((row) => {
+                    const { ci, ship } = row;
                     const price = ci.specialRate ?? ci.item.sales_price;
-                    const lineTotal = price * ci.qty;
+                    const lineTotal = price * ship;
                     const partNo = ci.item.alias1 ?? ci.item.alias;
                     return (
                       <div key={ci.lineId} className="flex justify-between gap-3 text-xs mt-1 text-[var(--content-secondary)]">
@@ -709,7 +951,7 @@ export default function CartPage(): React.JSX.Element | null {
                         </div>
                         <div className="text-right font-mono">
                           <p>
-                            {formatCurrency(price)} × {ci.qty}
+                            {formatCurrency(price)} × {ship}
                           </p>
                           <p className="font-semibold text-[var(--content-primary)]">
                             = {formatCurrency(lineTotal)}
@@ -733,10 +975,10 @@ export default function CartPage(): React.JSX.Element | null {
           <div className="mx-auto max-w-screen-sm rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
             <div className="mb-3 flex items-center justify-between gap-3">
               <p className="text-sm font-medium text-[var(--content-secondary)]">
-                Grand total
+                Billing total
               </p>
               <p className="font-mono text-lg font-semibold text-[var(--content-primary)]">
-                {formatCurrency(totalValue)}
+                {formatCurrency(billingTotal)}
               </p>
             </div>
             <div className="grid grid-cols-[auto_1fr] gap-2">

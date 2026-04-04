@@ -18,7 +18,6 @@ interface CartContextValue {
   clearCart: () => void;
   totalCount: number;
   totalValue: number;
-  // Form state (persists across CartPage ↔ NewOrderPage navigation)
   selectedCustomer: Customer | null;
   setSelectedCustomer: (c: Customer | null) => void;
   selectedTransport: Transport | null;
@@ -50,17 +49,13 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
   const updateQty = useCallback((lineId: string, qty: number) => {
     setItems((prev) => {
       if (qty < 1) return prev.filter((c) => c.lineId !== lineId);
-      return prev.map((c) =>
-        c.lineId === lineId ? { ...c, qty } : c,
-      );
+      return prev.map((c) => (c.lineId === lineId ? { ...c, qty } : c));
     });
   }, []);
 
   const setSpecialRate = useCallback((lineId: string, rate: number | null) => {
     setItems((prev) =>
-      prev.map((c) =>
-        c.lineId === lineId ? { ...c, specialRate: rate } : c,
-      ),
+      prev.map((c) => (c.lineId === lineId ? { ...c, specialRate: rate } : c)),
     );
   }, []);
 

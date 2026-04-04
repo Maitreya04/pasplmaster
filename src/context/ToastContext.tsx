@@ -15,7 +15,7 @@ export interface ToastAction {
 
 export interface ToastItem {
   id: string;
-  type: 'success' | 'error' | 'info';
+  type: 'success' | 'error' | 'info' | 'warning';
   message: string;
   action?: ToastAction;
 }
@@ -23,7 +23,8 @@ export interface ToastItem {
 interface ToastAPI {
   success: (message: string, options?: { action?: ToastAction }) => void;
   error: (message: string) => void;
-  info: (message: string) => void;
+  info: (message: string, options?: { action?: ToastAction }) => void;
+  warning: (message: string, options?: { action?: ToastAction }) => void;
 }
 
 const ToastContext = createContext<ToastAPI | null>(null);
@@ -49,7 +50,8 @@ export function ToastProvider({ children }: { children: ReactNode }): React.JSX.
       const id = String(++counterRef.current);
       const item: ToastItem = { id, type, message, action: options?.action };
       setToasts((prev) => [...prev, item]);
-      const t = setTimeout(() => dismiss(id), AUTO_DISMISS_MS);
+      const ms = options?.action ? 6000 : AUTO_DISMISS_MS;
+      const t = setTimeout(() => dismiss(id), ms);
       timeoutRefs.current.set(id, t);
     },
     [dismiss],
@@ -61,7 +63,14 @@ export function ToastProvider({ children }: { children: ReactNode }): React.JSX.
       [show],
     ),
     error: useCallback((msg: string) => show('error', msg), [show]),
-    info: useCallback((msg: string) => show('info', msg), [show]),
+    info: useCallback(
+      (msg: string, options?: { action?: ToastAction }) => show('info', msg, options),
+      [show],
+    ),
+    warning: useCallback(
+      (msg: string, options?: { action?: ToastAction }) => show('warning', msg, options),
+      [show],
+    ),
   };
 
   return (

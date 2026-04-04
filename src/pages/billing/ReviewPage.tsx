@@ -58,10 +58,18 @@ export default function ReviewPage(): React.JSX.Element | null {
     if (order?.items) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setItems(
-        order.items.map((i) => ({
-          ...i,
-          qty_approved: i.qty_approved ?? i.qty_requested,
-        }))
+        order.items.map((i) => {
+          let approved =
+            i.qty_approved ?? i.qty_shippable ?? i.qty_requested;
+          if (i.qty_shippable != null) {
+            const floor = i.qty_shippable === 0 ? 0 : 1;
+            approved = Math.min(
+              i.qty_shippable,
+              Math.max(floor, approved),
+            );
+          }
+          return { ...i, qty_approved: approved };
+        }),
       );
       setRemovedIds(new Set());
       setPendingIds(
@@ -146,9 +154,15 @@ export default function ReviewPage(): React.JSX.Element | null {
 
   const updateQty = useCallback((itemId: number, qty: number) => {
     setItems((prev) =>
-      prev.map((i) =>
-        i.id === itemId ? { ...i, qty_approved: Math.max(1, qty) } : i
-      )
+      prev.map((i) => {
+        if (i.id !== itemId) return i;
+        const floor = i.qty_shippable === 0 ? 0 : 1;
+        let next = Math.max(floor, qty);
+        if (i.qty_shippable != null) {
+          next = Math.min(i.qty_shippable, next);
+        }
+        return { ...i, qty_approved: next };
+      }),
     );
   }, []);
 
@@ -510,6 +524,11 @@ export default function ReviewPage(): React.JSX.Element | null {
                   const price = item.price_quoted ?? item.price_system ?? 0;
                   const lineTotal = item.qty_approved * price;
                   const isPending = pendingIds.has(item.id);
+                  const shipCap = item.qty_shippable;
+                  const poGap = item.qty_po ?? 0;
+                  const showSplitLine =
+                    poGap > 0 ||
+                    (shipCap != null && shipCap < item.qty_requested);
                   return (
                   <Card
                     key={item.id}
@@ -525,6 +544,13 @@ export default function ReviewPage(): React.JSX.Element | null {
                           Requested: {item.qty_requested} · Unit: ₹
                           {price.toLocaleString('en-IN')}
                         </p>
+                        {showSplitLine && (
+                          <p className="text-xs text-[var(--content-tertiary)] mt-1">
+                            {shipCap != null && shipCap > 0 ? `Bill now: ${shipCap}` : ''}
+                            {shipCap != null && shipCap > 0 && poGap > 0 ? ' · ' : ''}
+                            {poGap > 0 ? `PO: ${poGap}` : ''}
+                          </p>
+                        )}
                         {item.state === 'flagged' && (
                           <div className="mt-2 space-y-1 text-xs">
                             <div className="flex flex-wrap gap-2">
@@ -597,7 +623,8 @@ export default function ReviewPage(): React.JSX.Element | null {
                         <NumberStepper
                           value={item.qty_approved}
                           onChange={(q) => updateQty(item.id, q)}
-                          min={1}
+                          min={item.qty_shippable === 0 ? 0 : 1}
+                          max={item.qty_shippable != null ? item.qty_shippable : undefined}
                           presets={[]}
                         />
                         <span className="font-mono font-semibold text-[var(--content-primary)] min-w-[88px] text-base lg:text-lg">

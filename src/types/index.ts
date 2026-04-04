@@ -78,6 +78,10 @@ export interface OrderItem {
   item_alias: string | null;
   rack_no: string | null;
   qty_requested: number;
+  /** Units to pick from on-hand stock (≤ qty_requested). Omitted on legacy rows. */
+  qty_shippable?: number;
+  /** PO / back-order qty. Omitted on legacy rows. */
+  qty_po?: number;
   qty_approved: number | null;
   price_quoted: number | null;
   price_system: number | null;

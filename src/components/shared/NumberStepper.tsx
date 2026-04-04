@@ -34,24 +34,38 @@ export function NumberStepper({
 
   const decrement = () => onChange(clamp(value - 1));
   const increment = () => onChange(clamp(value + 1));
-  const shouldShowRemove = showRemoveAtMin && value <= min;
+  const atMin = value <= min;
+  const removeAtMin = showRemoveAtMin && onRemove && atMin;
 
-  const leadingButton = shouldShowRemove ? (
+  const minusIconSize = variant === 'compact' ? 16 : 20;
+  const trashIconSize = variant === 'compact' ? 16 : 18;
+
+  const leadingButton = removeAtMin ? (
     <button
-      onClick={() => onRemove?.()}
+      type="button"
+      onClick={() => onRemove()}
       className="min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] hover:opacity-90 active:opacity-80 transition-opacity duration-150"
       aria-label="Remove item"
     >
-      <Trash size={variant === 'compact' ? 16 : 18} weight="regular" />
+      <Trash size={trashIconSize} weight="regular" />
+    </button>
+  ) : atMin ? (
+    <button
+      type="button"
+      disabled
+      className="min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] opacity-30 cursor-not-allowed"
+      aria-label="Minimum quantity"
+    >
+      <Trash size={trashIconSize} weight="regular" />
     </button>
   ) : (
     <button
+      type="button"
       onClick={decrement}
-      disabled={value <= min}
-      className="min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] hover:opacity-90 active:opacity-80 transition-opacity duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
+      className="min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] hover:opacity-90 active:opacity-80 transition-opacity duration-150"
       aria-label="Decrease quantity"
     >
-      <Minus size={variant === 'compact' ? 16 : 20} weight="regular" />
+      <Minus size={minusIconSize} weight="regular" />
     </button>
   );
 

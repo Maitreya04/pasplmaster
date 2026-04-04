@@ -26,6 +26,7 @@ import { FLAG_REASONS, type FlagReason } from '../../utils/constants';
 import { PickCompleteScreen } from './PickCompleteScreen';
 import { imageToBase64 } from '../../lib/ocr/geminiOCR';
 import { verifyWithAI } from '../../lib/ocr/pickVerifier';
+import { pickQuantityTarget } from '../../lib/cartSupply';
 
 
 interface ItemMeta {
@@ -281,7 +282,7 @@ export default function PickPage(): React.JSX.Element | null {
       if (reason === 'Out of Stock') {
         const target = order.items.find((oi) => oi.id === itemId);
         if (target) {
-          const qtyPending = target.qty_approved ?? target.qty_requested;
+          const qtyPending = pickQuantityTarget(target);
           if (qtyPending > 0) {
             // Avoid duplicate pending rows for same order+item while status is pending
             const { data: existing, error: existingError } = await supabase
@@ -665,7 +666,7 @@ export default function PickPage(): React.JSX.Element | null {
                     {oi.item_name}
                   </span>
                   <span className="text-xs text-[var(--content-tertiary)] tabular-nums shrink-0">
-                    Qty {oi.qty_approved ?? oi.qty_requested}
+                    Qty {pickQuantityTarget(oi)}
                   </span>
                   {oi.rack_no && (
                     <span className="text-xs text-[var(--content-quaternary)] font-mono shrink-0">
@@ -898,7 +899,7 @@ function PickItemCard({
           )}
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <span className="text-xs font-semibold text-[var(--content-secondary)] bg-[var(--bg-tertiary)] px-2 py-0.5 rounded-md">
-              0 / {oi.qty_approved ?? oi.qty_requested} Picked
+              0 / {pickQuantityTarget(oi)} Picked
             </span>
             {item.uiState === 'flagged' && (
               <div className="flex flex-wrap gap-1">
