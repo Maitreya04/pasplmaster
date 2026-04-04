@@ -7,13 +7,14 @@ import {
   CurrencyInr,
   Trash,
   Copy,
-  WhatsappLogo,
+  Check,
 } from '@phosphor-icons/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCart } from '../../context/CartContext';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { useCustomers } from '../../hooks/useCustomers';
+import { ITEMS_QUERY_KEY } from '../../hooks/useItems';
 import { useTransports } from '../../hooks/useTransports';
 import { supabase } from '../../lib/supabase/client';
 import {
@@ -29,8 +30,24 @@ import { formatCurrencyRaw as formatCurrency } from '../../utils/formatters';
 import { splitCartLine } from '../../lib/cartSupply';
 import {
   buildOrderCustomerMessage,
+  type OrderCustomerShareLine,
   whatsappPrefilledUrl,
 } from '../../lib/buildOrderCustomerMessage';
+
+function submitSalesOrderErrorMessage(code: string | undefined, detail?: string): string {
+  switch (code) {
+    case 'no_lines':
+      return 'Add at least one line item before submitting.';
+    case 'invalid_customer':
+      return 'Choose a customer before submitting.';
+    case 'unknown_item':
+      return 'An item in your cart was not found. Refresh the catalog and try again.';
+    case 'submit_failed':
+      return detail?.trim() || 'Order could not be submitted. Please try again.';
+    default:
+      return detail?.trim() || 'Order could not be submitted.';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // SearchableCustomerDropdown
@@ -437,6 +454,8 @@ export default function CartPage(): React.JSX.Element | null {
     orderNumber: string;
     shareText: string;
   } | null>(null);
+  const [summaryCopied, setSummaryCopied] = useState(false);
+  const summaryCopyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showItemBreakdown, setShowItemBreakdown] = useState(false);
   const [openActionsItemId, setOpenActionsItemId] = useState<string | null>(null);
   const [rateItemId, setRateItemId] = useState<string | null>(null);
@@ -516,41 +535,61 @@ export default function CartPage(): React.JSX.Element | null {
 
       const submittedAt = new Date();
 
-      const linesForMessage = items.map((ci) => {
-        const { ship, po } = splitCartLine(ci.item, ci.qty);
-        return {
-          name: ci.item.name,
-          qtyRequested: ci.qty,
-          qtyShip: ship,
-          qtyPo: po,
-        };
+      const payload = {
+        customer_id: customer.id,
+        customer_name: customer.name,
+        customer_city: customer.city ?? null,
+        transport_id: transport?.id ?? null,
+        transport_name: transport?.name ?? null,
+        salesperson_name: userName,
+        priority,
+        notes: notes.trim() || null,
+        lines: items.map((ci) => ({
+          item_id: ci.item.id,
+          qty_requested: ci.qty,
+          price_quoted: ci.specialRate ?? ci.item.sales_price,
+          price_system: ci.item.sales_price,
+        })),
+      };
+
+      const { data: rpcData, error: rpcError } = await supabase.rpc('submit_sales_order', {
+        p_payload: payload,
       });
 
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .insert({
-          customer_id: customer.id,
-          customer_name: customer.name,
-          customer_city: customer.city ?? null,
-          transport_id: transport?.id ?? null,
-          transport_name: transport?.name ?? null,
-          salesperson_name: userName,
-          workflow_status: 'submitted',
-          priority,
-          notes: notes.trim() || null,
-          item_count: billingCount,
-          total_value: billingTotal,
-        })
-        .select('id, order_number')
-        .single();
+      if (rpcError) throw rpcError;
 
-      if (orderError) throw orderError;
-      if (!order) throw new Error('Order insert failed');
+      const result = rpcData as {
+        success?: boolean;
+        error?: string;
+        detail?: string;
+        order_number?: string;
+        lines?: Array<{
+          name: string;
+          qty_requested: number;
+          qty_ship: number;
+          qty_po: number;
+        }>;
+      };
 
-      const orderNumber = order.order_number;
+      if (!result?.success) {
+        throw new Error(
+          submitSalesOrderErrorMessage(result?.error, result?.detail),
+        );
+      }
+
+      const orderNumber = result.order_number;
+      if (!orderNumber) throw new Error('Order submit returned no order number');
+
       const envBiz = import.meta.env.VITE_BUSINESS_DISPLAY_NAME;
       const businessName =
         typeof envBiz === 'string' && envBiz.trim() !== '' ? envBiz.trim() : undefined;
+
+      const linesForMessage: OrderCustomerShareLine[] = (result.lines ?? []).map((row) => ({
+        name: row.name,
+        qtyRequested: row.qty_requested,
+        qtyShip: row.qty_ship,
+        qtyPo: row.qty_po,
+      }));
 
       const shareTextFinal = buildOrderCustomerMessage({
         customerName: customer.name,
@@ -558,55 +597,6 @@ export default function CartPage(): React.JSX.Element | null {
         lines: linesForMessage,
         businessName,
       });
-
-      const orderItems = items.map((ci) => {
-        const price = ci.specialRate ?? ci.item.sales_price;
-        const { ship, po } = splitCartLine(ci.item, ci.qty);
-        return {
-          order_id: order.id,
-          item_id: ci.item.id,
-          item_name: ci.item.name,
-          item_alias: ci.item.alias,
-          rack_no: ci.item.rack_no,
-          qty_requested: ci.qty,
-          qty_shippable: ship,
-          qty_po: po,
-          qty_approved: ship,
-          price_quoted: price,
-          price_system: ci.item.sales_price,
-          state: 'pending',
-        };
-      });
-
-      const { error: itemsError } = await supabase
-        .from('order_items')
-        .insert(orderItems);
-
-      if (itemsError) throw itemsError;
-
-      const pendingRows = items
-        .map((ci) => {
-          const { po } = splitCartLine(ci.item, ci.qty);
-          if (po <= 0) return null;
-          return {
-            order_id: order.id,
-            order_number: orderNumber,
-            customer_id: customer.id,
-            customer_name: customer.name,
-            item_id: ci.item.id,
-            item_name: ci.item.name,
-            qty_pending: po,
-            source: 'sales' as const,
-            created_by: userName,
-            note: 'Purchase order qty from sales checkout',
-          };
-        })
-        .filter((row): row is NonNullable<typeof row> => row !== null);
-
-      if (pendingRows.length > 0) {
-        const { error: pendingError } = await supabase.from('pending_items').insert(pendingRows);
-        if (pendingError) throw pendingError;
-      }
 
       return {
         orderNumber,
@@ -619,10 +609,51 @@ export default function CartPage(): React.JSX.Element | null {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['pending-items'] });
       queryClient.invalidateQueries({ queryKey: ['open-po-demand-lines'] });
+      queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
+    },
+    onError: (e) => {
+      const msg =
+        e instanceof Error
+          ? e.message
+          : typeof e === 'object' && e !== null && 'message' in e
+            ? String((e as { message: unknown }).message)
+            : 'Failed to submit order';
+      toast.error(msg);
     },
   });
 
   const handleSubmit = () => submitMutation.mutate();
+
+  useEffect(() => {
+    setSummaryCopied(false);
+    if (summaryCopyTimeoutRef.current) {
+      clearTimeout(summaryCopyTimeoutRef.current);
+      summaryCopyTimeoutRef.current = null;
+    }
+  }, [submitSuccess?.orderNumber]);
+
+  useEffect(() => {
+    return () => {
+      if (summaryCopyTimeoutRef.current) {
+        clearTimeout(summaryCopyTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const copySummaryToClipboard = useCallback(async () => {
+    if (!submitSuccess) return;
+    try {
+      await navigator.clipboard.writeText(submitSuccess.shareText);
+      setSummaryCopied(true);
+      if (summaryCopyTimeoutRef.current) clearTimeout(summaryCopyTimeoutRef.current);
+      summaryCopyTimeoutRef.current = setTimeout(() => {
+        setSummaryCopied(false);
+        summaryCopyTimeoutRef.current = null;
+      }, 2000);
+    } catch {
+      toast.error('Could not copy');
+    }
+  }, [submitSuccess, toast]);
 
   // Success screen
   if (submitSuccess) {
@@ -655,37 +686,37 @@ export default function CartPage(): React.JSX.Element | null {
           </div>
 
           <div className="w-full max-w-lg mx-auto flex-1 min-h-0 flex flex-col gap-3">
-            <pre className="text-left text-[13px] leading-relaxed text-[var(--content-secondary)] whitespace-pre-wrap break-words rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 max-h-[40vh] overflow-y-auto">
-              {submitSuccess.shareText}
-            </pre>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <BigButton
-                variant="secondary"
-                className="flex-1"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(submitSuccess.shareText);
-                    toast.success('Summary copied');
-                  } catch {
-                    toast.error('Could not copy');
-                  }
-                }}
+            <div className="relative max-h-[40vh] min-h-0 flex flex-col rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
+              <button
+                type="button"
+                onClick={() => void copySummaryToClipboard()}
+                aria-label={summaryCopied ? 'Copied to clipboard' : 'Copy summary to clipboard'}
+                className="absolute top-2 right-2 z-10 inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] active:bg-[var(--bg-tertiary)] transition-colors"
               >
-                <span className="inline-flex items-center justify-center gap-2">
-                  <Copy size={20} weight="bold" />
-                  Copy summary
-                </span>
-              </BigButton>
-              <a
-                href={waUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 min-h-14 flex items-center justify-center gap-2 rounded-2xl font-semibold bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border border-[var(--border-subtle)]"
-              >
-                <WhatsappLogo size={22} weight="fill" />
-                WhatsApp
-              </a>
+                {summaryCopied ? (
+                  <>
+                    <Check size={16} weight="bold" className="text-[var(--content-positive)]" />
+                    <span className="text-[var(--content-positive)]">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy size={16} weight="bold" />
+                    <span>Copy</span>
+                  </>
+                )}
+              </button>
+              <pre className="text-left text-[13px] leading-relaxed text-[var(--content-secondary)] whitespace-pre-wrap break-words pt-11 pr-3 pb-4 pl-4 overflow-y-auto min-h-0 flex-1">
+                {submitSuccess.shareText}
+              </pre>
             </div>
+            <a
+              href={waUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full min-h-14 flex items-center justify-center rounded-2xl font-semibold bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border border-[var(--border-subtle)] hover:opacity-95 transition-opacity"
+            >
+              WhatsApp
+            </a>
           </div>
 
           <div className="w-full max-w-sm mx-auto space-y-3 mt-6">

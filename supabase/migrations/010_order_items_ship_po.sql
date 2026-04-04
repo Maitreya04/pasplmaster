@@ -13,10 +13,22 @@ ALTER TABLE order_items
   ALTER COLUMN qty_shippable SET NOT NULL,
   ALTER COLUMN qty_po SET NOT NULL;
 
-ALTER TABLE order_items
-  ADD CONSTRAINT order_items_ship_po_reasonable CHECK (
-    qty_shippable >= 0
-    AND qty_po >= 0
-    AND qty_shippable <= qty_requested
-    AND (qty_shippable + qty_po) >= qty_requested
-  );
+-- Safe to re-run: constraint may already exist from a prior apply.
+DO $c$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'order_items_ship_po_reasonable'
+      AND conrelid = 'public.order_items'::regclass
+  ) THEN
+    ALTER TABLE order_items
+      ADD CONSTRAINT order_items_ship_po_reasonable CHECK (
+        qty_shippable >= 0
+        AND qty_po >= 0
+        AND qty_shippable <= qty_requested
+        AND (qty_shippable + qty_po) >= qty_requested
+      );
+  END IF;
+END;
+$c$;

@@ -16,17 +16,24 @@ export default defineConfig({
     }),
   ],
   build: {
-    target: ['es2019', 'safari13'],
+    // Let @vitejs/plugin-legacy own modern vs legacy targets (avoids override warning).
     chunkSizeWarningLimit: 1500,
+    reportCompressedSize: false,
+    cssMinify: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom'],
-          router: ['react-router-dom'],
-          query: ['@tanstack/react-query'],
-          supabase: ['@supabase/supabase-js'],
+        // Function form: avoids empty `react` chunks when legacy splits the graph differently
+        // than static `manualChunks` entries.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('react-router')) return 'router';
+          if (id.includes('@tanstack/react-query')) return 'query';
+          if (id.includes('@supabase')) return 'supabase';
         },
       },
     },
+  },
+  esbuild: {
+    legalComments: 'none',
   },
 });
