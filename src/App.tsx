@@ -25,6 +25,7 @@ const PickPage = lazy(() => import('./pages/picking/PickPage'));
 const AdminPage = lazy(() => import('./pages/admin/AdminPage'));
 const AdminPasscodePage = lazy(() => import('./pages/admin/AdminPasscodePage'));
 const UploadPage = lazy(() => import('./pages/admin/UploadPage'));
+const SupplyDemandPage = lazy(() => import('./pages/admin/SupplyDemandPage'));
 
 const ROLE_HOME: Record<string, string> = {
   sales: '/sales',
@@ -150,6 +151,16 @@ export default function App(): React.JSX.Element | null {
             <RequireRole>
               <RequireAdminUnlock>
                 <UploadPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/supply"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <SupplyDemandPage />
               </RequireAdminUnlock>
             </RequireRole>
           }

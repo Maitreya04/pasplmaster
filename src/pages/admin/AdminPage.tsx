@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Upload, SignOut } from '@phosphor-icons/react';
+import { Upload, SignOut, ChartBar } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 
 export default function AdminPage(): React.JSX.Element | null {
@@ -23,18 +23,37 @@ export default function AdminPage(): React.JSX.Element | null {
           </button>
         </div>
 
-        <button
-          onClick={() => navigate('/admin/upload')}
-          className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-        >
-          <div className="w-12 h-12 rounded-xl bg-[var(--bg-tertiary)] flex items-center justify-center">
-            <Upload size={22} weight="regular" className="text-[var(--content-secondary)]" />
-          </div>
-          <div className="text-left">
-            <p className="font-semibold text-[var(--content-primary)]">Upload Data</p>
-            <p className="text-sm text-[var(--content-tertiary)]">Import items, stock & customers</p>
-          </div>
-        </button>
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => navigate('/admin/supply')}
+            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
+          >
+            <div className="w-12 h-12 rounded-xl bg-[var(--bg-accent-subtle)] flex items-center justify-center">
+              <ChartBar size={22} weight="regular" className="text-[var(--content-accent)]" />
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-[var(--content-primary)]">Supply cockpit</p>
+              <p className="text-sm text-[var(--content-tertiary)]">
+                PO demand rollups & pending queue
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/admin/upload')}
+            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+          >
+            <div className="w-12 h-12 rounded-xl bg-[var(--bg-tertiary)] flex items-center justify-center">
+              <Upload size={22} weight="regular" className="text-[var(--content-secondary)]" />
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-[var(--content-primary)]">Upload Data</p>
+              <p className="text-sm text-[var(--content-tertiary)]">Import items, stock & customers</p>
+            </div>
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -103,7 +103,7 @@ export interface PendingItem {
   item_id: number | null;
   item_name: string;
   qty_pending: number;
-  source: 'billing' | 'picking';
+  source: 'billing' | 'picking' | 'sales';
   created_by: string | null;
   created_at: string;
   note: string | null;

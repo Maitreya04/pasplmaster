@@ -291,6 +291,7 @@ export default function PickPage(): React.JSX.Element | null {
               .eq('order_id', order.id)
               .eq('item_id', target.item_id)
               .eq('status', 'pending')
+              .eq('source', 'picking')
               .limit(1)
               .maybeSingle();
             if (!existingError && !existing) {

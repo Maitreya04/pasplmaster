@@ -187,7 +187,20 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   }, []);
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, role, userName, userId, adminUnlocked, login, unlockAdmin, selectRole, logout, switchRole }}>
+    <AuthContext.Provider
+      value={{
+        isAuthenticated,
+        role,
+        userName,
+        userId,
+        adminUnlocked,
+        login,
+        unlockAdmin,
+        selectRole,
+        logout,
+        switchRole,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

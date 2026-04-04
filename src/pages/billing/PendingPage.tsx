@@ -53,7 +53,11 @@ function PendingCard({ item }: { item: PendingItem }) {
           </div>
           <div className="shrink-0 text-right">
             <p className="text-xs text-[var(--content-tertiary)] mb-1">
-              {item.source === 'billing' ? 'From billing' : 'From picking'}
+              {item.source === 'billing'
+                ? 'From billing'
+                : item.source === 'picking'
+                  ? 'From picking'
+                  : 'From sales (PO)'}
             </p>
             {item.created_by && (
               <p className="text-xs text-[var(--content-tertiary)] mt-0.5">

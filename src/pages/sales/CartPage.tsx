@@ -584,6 +584,30 @@ export default function CartPage(): React.JSX.Element | null {
 
       if (itemsError) throw itemsError;
 
+      const pendingRows = items
+        .map((ci) => {
+          const { po } = splitCartLine(ci.item, ci.qty);
+          if (po <= 0) return null;
+          return {
+            order_id: order.id,
+            order_number: orderNumber,
+            customer_id: customer.id,
+            customer_name: customer.name,
+            item_id: ci.item.id,
+            item_name: ci.item.name,
+            qty_pending: po,
+            source: 'sales' as const,
+            created_by: userName,
+            note: 'Purchase order qty from sales checkout',
+          };
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null);
+
+      if (pendingRows.length > 0) {
+        const { error: pendingError } = await supabase.from('pending_items').insert(pendingRows);
+        if (pendingError) throw pendingError;
+      }
+
       return {
         orderNumber,
         shareText: shareTextFinal,
@@ -593,6 +617,8 @@ export default function CartPage(): React.JSX.Element | null {
       clearCart();
       setSubmitSuccess(payload);
       queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['pending-items'] });
+      queryClient.invalidateQueries({ queryKey: ['open-po-demand-lines'] });
     },
   });
 
