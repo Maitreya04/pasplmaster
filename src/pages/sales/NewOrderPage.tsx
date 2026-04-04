@@ -14,7 +14,6 @@ import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash, CurrencyInr
 import { useQuery } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
-import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { useCustomers } from '../../hooks/useCustomers';
 import { usePendingItems } from '../../hooks/usePendingItems';
@@ -1236,7 +1235,6 @@ function ResultSection({
 // ---------------------------------------------------------------------------
 export default function NewOrderPage(): React.JSX.Element | null {
   const navigate = useNavigate();
-  const toast = useToast();
   const { data: items = [], isLoading: itemsLoading } = useItems();
   const {
     items: cartItems,
@@ -1387,33 +1385,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
     return totals;
   }, [cartItems]);
 
-  const notifyIfCartExceedsStock = useCallback(
-    (item: Item, qtyAdded: number) => {
-      if (qtyAdded < 1) return;
-      const prevQty = cartQtyByItem.get(item.id) ?? 0;
-      const newTotal = prevQty + qtyAdded;
-      const raw = item.stock_qty;
-      const tier = getStockTier(raw);
-      const openCart = {
-        label: 'Open cart',
-        onClick: () => navigate('/sales/cart'),
-      };
-
-      if (tier === 'out') {
-        toast.warning(`Out of stock — ${formatStockQty(qtyAdded)} in this add goes to purchase requests at checkout.`, {
-          action: openCart,
-        });
-        return;
-      }
-      if (tier === 'unknown' || !Number.isFinite(Number(raw))) return;
-      const stock = Number(raw);
-      if (newTotal <= stock) return;
-      const overBy = newTotal - stock;
-      toast.warning(`Short by ${formatStockQty(overBy)}, request PO at checkout.`, { action: openCart });
-    },
-    [cartQtyByItem, navigate, toast],
-  );
-
   const specialLineItemIds = useMemo(() => {
     const ids = new Set<number>();
     for (const line of cartItems) {
@@ -1470,7 +1441,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
   };
 
   const handleConfirmAdd = (item: Item, qty: number) => {
-    notifyIfCartExceedsStock(item, qty);
     addItem(item, qty);
     setPendingAddItemId(null);
     showAddedFeedback(item.id);
@@ -1491,7 +1461,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
     if (!rateItem) return;
     const n = parseFloat(rateValue.replace(/,/g, ''));
     if (isNaN(n) || n < 0) return;
-    notifyIfCartExceedsStock(rateItem, rateQty);
     addItem(rateItem, rateQty, n);
     showAddedFeedback(rateItem.id);
     setRateItem(null);

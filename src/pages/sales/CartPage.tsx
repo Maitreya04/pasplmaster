@@ -29,8 +29,7 @@ import { formatCurrencyRaw as formatCurrency } from '../../utils/formatters';
 import { splitCartLine } from '../../lib/cartSupply';
 import {
   buildOrderCustomerMessage,
-  digitsOnlyMobile,
-  whatsappShareUrl,
+  whatsappPrefilledUrl,
 } from '../../lib/buildOrderCustomerMessage';
 
 // ---------------------------------------------------------------------------
@@ -437,7 +436,6 @@ export default function CartPage(): React.JSX.Element | null {
   const [submitSuccess, setSubmitSuccess] = useState<{
     orderNumber: string;
     shareText: string;
-    whatsappDigits: string;
   } | null>(null);
   const [showItemBreakdown, setShowItemBreakdown] = useState(false);
   const [openActionsItemId, setOpenActionsItemId] = useState<string | null>(null);
@@ -589,7 +587,6 @@ export default function CartPage(): React.JSX.Element | null {
       return {
         orderNumber,
         shareText: shareTextFinal,
-        whatsappDigits: digitsOnlyMobile(customer.mobile),
       };
     },
     onSuccess: (payload) => {
@@ -603,11 +600,7 @@ export default function CartPage(): React.JSX.Element | null {
 
   // Success screen
   if (submitSuccess) {
-    const waDigits = submitSuccess.whatsappDigits;
-    const canWhatsApp = waDigits.length >= 10;
-    const waUrl = canWhatsApp
-      ? whatsappShareUrl(waDigits, submitSuccess.shareText)
-      : null;
+    const waUrl = whatsappPrefilledUrl(submitSuccess.shareText);
 
     return (
       <div className="min-h-screen flex flex-col">
@@ -630,7 +623,8 @@ export default function CartPage(): React.JSX.Element | null {
               {submitSuccess.orderNumber}
             </p>
             <p className="text-sm text-[var(--content-tertiary)] max-w-md mb-4">
-              Share the summary below with your customer (billed vs pending as of submit time).
+              Share the summary below with your customer (billed vs pending as of submit time). WhatsApp
+              opens with the text ready — choose the party in WhatsApp and send.
             </p>
           </div>
 
@@ -656,26 +650,15 @@ export default function CartPage(): React.JSX.Element | null {
                   Copy summary
                 </span>
               </BigButton>
-              {waUrl ? (
-                <a
-                  href={waUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 min-h-14 flex items-center justify-center gap-2 rounded-2xl font-semibold bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border border-[var(--border-subtle)]"
-                >
-                  <WhatsappLogo size={22} weight="fill" />
-                  WhatsApp
-                </a>
-              ) : (
-                <button
-                  type="button"
-                  disabled
-                  className="flex-1 min-h-14 rounded-2xl font-medium text-[var(--content-tertiary)] bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] opacity-70 cursor-not-allowed px-4"
-                  title="Add a mobile number on the customer record to enable WhatsApp."
-                >
-                  WhatsApp (add mobile)
-                </button>
-              )}
+              <a
+                href={waUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 min-h-14 flex items-center justify-center gap-2 rounded-2xl font-semibold bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border border-[var(--border-subtle)]"
+              >
+                <WhatsappLogo size={22} weight="fill" />
+                WhatsApp
+              </a>
             </div>
           </div>
 

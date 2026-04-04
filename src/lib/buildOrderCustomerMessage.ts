@@ -44,9 +44,9 @@ function ordinalDay(n: number): string {
   }
 }
 
-/** One line: bullet, name, bold qty (WhatsApp-friendly). */
+/** One line: bullet, name, literal "qty" then bold number (WhatsApp-friendly). */
 function formatItemLine(productName: string, qty: number): string {
-  return `• ${productName}: *${qty}*`;
+  return `• ${productName}: qty *${qty}*`;
 }
 
 function appendBlock(out: string[], heading: string, bullets: string[]): void {
@@ -110,6 +110,16 @@ function finalizeMessage(chunks: string[]): string {
   return `${body.slice(0, MAX_MESSAGE_CHARS - 1)}…`;
 }
 
+/**
+ * Opens WhatsApp (app or web) with the message prefilled. No phone in the URL — the user picks
+ * the customer chat (search party) and sends. Best default for counter staff.
+ */
+export function whatsappPrefilledUrl(text: string): string {
+  const q = encodeURIComponent(text);
+  return `https://wa.me/?text=${q}`;
+}
+
+/** Opens WhatsApp directly to one number (digits only, country code, no +). */
 export function whatsappShareUrl(phoneDigits: string, text: string): string {
   const q = encodeURIComponent(text);
   return `https://wa.me/${phoneDigits}?text=${q}`;
