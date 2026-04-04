@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase/client';
+import { clearCartDraft } from '../lib/cartDraftStorage';
 
 type Role = 'sales' | 'billing' | 'picking' | 'admin' | null;
 
@@ -174,6 +175,12 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   }, []);
 
   const logout = useCallback(() => {
+    const draftName = safeLocalStorageGet(LS_KEYS.userName);
+    const draftIdStr = safeLocalStorageGet(LS_KEYS.userId);
+    const parsedId = draftIdStr ? parseInt(draftIdStr, 10) : NaN;
+    const draftUserId = Number.isNaN(parsedId) ? null : parsedId;
+    clearCartDraft(draftName, draftUserId);
+
     setIsAuthenticated(false);
     setRole(null);
     setUserName(null);

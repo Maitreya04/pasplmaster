@@ -5,9 +5,18 @@ import {
   useCallback,
   useMemo,
   useRef,
+  useEffect,
+  useLayoutEffect,
   type ReactNode,
 } from 'react';
 import type { CartItem as CartItemType, Customer, Item, Transport } from '../types';
+import { useAuth } from './AuthContext';
+import {
+  readCartDraft,
+  writeCartDraft,
+  clearCartDraft,
+  type CartDraftPayload,
+} from '../lib/cartDraftStorage';
 
 interface CartContextValue {
   items: CartItemType[];
@@ -30,13 +39,17 @@ interface CartContextValue {
 
 const CartContext = createContext<CartContextValue | null>(null);
 
+const DRAFT_SAVE_DEBOUNCE_MS = 500;
+
 export function CartProvider({ children }: { children: ReactNode }): React.JSX.Element | null {
+  const { userName, userId } = useAuth();
   const [items, setItems] = useState<CartItemType[]>([]);
   const nextLineIdRef = useRef(1);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedTransport, setSelectedTransport] = useState<Transport | null>(null);
   const [priority, setPriority] = useState<'normal' | 'urgent'>('normal');
   const [notes, setNotes] = useState('');
+  const [draftHydrated, setDraftHydrated] = useState(false);
 
   const addItem = useCallback(
     (item: Item, qty: number, specialRate: number | null = null) => {
@@ -64,12 +77,63 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
   }, []);
 
   const clearCart = useCallback(() => {
+    clearCartDraft(userName, userId);
     setItems([]);
+    nextLineIdRef.current = 1;
     setSelectedCustomer(null);
     setSelectedTransport(null);
     setPriority('normal');
     setNotes('');
-  }, []);
+  }, [userName, userId]);
+
+  useLayoutEffect(() => {
+    setDraftHydrated(false);
+    const draft = readCartDraft(userName, userId);
+    if (draft) {
+      setItems(draft.items);
+      nextLineIdRef.current = draft.nextLineId;
+      setSelectedCustomer(draft.selectedCustomer);
+      setSelectedTransport(draft.selectedTransport);
+      setPriority(draft.priority);
+      setNotes(draft.notes);
+    } else {
+      setItems([]);
+      nextLineIdRef.current = 1;
+      setSelectedCustomer(null);
+      setSelectedTransport(null);
+      setPriority('normal');
+      setNotes('');
+    }
+    setDraftHydrated(true);
+  }, [userName, userId]);
+
+  useEffect(() => {
+    if (!draftHydrated) return;
+
+    const payload: CartDraftPayload = {
+      items,
+      nextLineId: nextLineIdRef.current,
+      selectedCustomer,
+      selectedTransport,
+      priority,
+      notes,
+    };
+
+    const t = window.setTimeout(() => {
+      writeCartDraft(userName, userId, payload);
+    }, DRAFT_SAVE_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(t);
+  }, [
+    draftHydrated,
+    userName,
+    userId,
+    items,
+    selectedCustomer,
+    selectedTransport,
+    priority,
+    notes,
+  ]);
 
   const { totalCount, totalValue } = useMemo(() => {
     let count = 0;
