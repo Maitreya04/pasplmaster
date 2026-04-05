@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
 import { Check, X } from '@phosphor-icons/react';
+import { appHaptics } from '../../lib/haptics';
 
 export interface InlineQtyEditorProps {
   value: number;
@@ -60,6 +61,7 @@ export function InlineQtyEditor({
   const startEditing = useCallback(() => {
     committedByButtonRef.current = false;
     setInputValue(String(value));
+    appHaptics.selection();
     setOpen(true);
     if (!isControlled) setInternalOpen(true);
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -92,6 +94,7 @@ export function InlineQtyEditor({
   }, [inputValue, allowZero, clamp, cancel, setOpen, isControlled]);
 
   const confirm = useCallback(() => {
+    appHaptics.success();
     commitValue(onConfirm);
   }, [commitValue, onConfirm]);
 
@@ -196,6 +199,7 @@ export function InlineQtyEditor({
           type="button"
           onClick={(e) => {
             e.preventDefault();
+            appHaptics.impactLight();
             commitValue(secondaryAction.onAction);
           }}
           className={`

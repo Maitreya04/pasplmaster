@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from 'react';
 import { ToastContainer } from '../components/shared/Toast.tsx';
+import { appHaptics } from '../lib/haptics';
 
 export interface ToastAction {
   label: string;
@@ -47,6 +48,10 @@ export function ToastProvider({ children }: { children: ReactNode }): React.JSX.
 
   const show = useCallback(
     (type: ToastItem['type'], message: string, options?: { action?: ToastAction }) => {
+      if (type === 'success') appHaptics.success();
+      if (type === 'warning') appHaptics.warning();
+      if (type === 'error') appHaptics.error();
+
       const id = String(++counterRef.current);
       const item: ToastItem = { id, type, message, action: options?.action };
       setToasts((prev) => [...prev, item]);

@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { Minus, Plus, Trash } from '@phosphor-icons/react';
 import { InlineQtyEditor } from './InlineQtyEditor';
+import { appHaptics } from '../../lib/haptics';
 
 interface NumberStepperProps {
   value: number;
@@ -32,8 +33,14 @@ export function NumberStepper({
     [min, max],
   );
 
-  const decrement = () => onChange(clamp(value - 1));
-  const increment = () => onChange(clamp(value + 1));
+  const decrement = () => {
+    appHaptics.impactLight();
+    onChange(clamp(value - 1));
+  };
+  const increment = () => {
+    appHaptics.impactLight();
+    onChange(clamp(value + 1));
+  };
   const atMin = value <= min;
   const removeAtMin = showRemoveAtMin && onRemove && atMin;
 
@@ -43,7 +50,10 @@ export function NumberStepper({
   const leadingButton = removeAtMin ? (
     <button
       type="button"
-      onClick={() => onRemove()}
+      onClick={() => {
+        appHaptics.warning();
+        onRemove();
+      }}
       className="min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] hover:opacity-90 active:opacity-80 transition-opacity duration-150"
       aria-label="Remove item"
     >
@@ -129,7 +139,10 @@ export function NumberStepper({
         {presets.map((preset) => (
           <button
             key={preset}
-            onClick={() => onChange(clamp(preset))}
+            onClick={() => {
+              appHaptics.selection();
+              onChange(clamp(preset));
+            }}
             data-inverse-primary={value === preset ? '' : undefined}
             className={`
               px-3 min-h-11 h-11 rounded-lg text-sm font-medium font-mono

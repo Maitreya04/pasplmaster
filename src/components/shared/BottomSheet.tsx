@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef, useCallback } from 'react';
 import { X } from '@phosphor-icons/react';
+import { appHaptics } from '../../lib/haptics';
 
 interface BottomSheetProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
   const sheetRef = useRef<HTMLDivElement>(null);
   const dragStartY = useRef<number | null>(null);
   const currentTranslate = useRef(0);
+  const wasOpenRef = useRef(isOpen);
 
   useEffect(() => {
     if (isOpen) {
@@ -24,6 +26,18 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
       document.body.style.overflow = '';
     };
   }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      appHaptics.selection();
+    }
+    wasOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  const handleClose = useCallback(() => {
+    appHaptics.selection();
+    onClose();
+  }, [onClose]);
 
   // On mobile Safari/Chrome, fixed bottom sheets don't automatically move with
   // the on‑screen keyboard because the layout viewport height doesn't change.
@@ -115,12 +129,12 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
   const handleTouchEnd = useCallback(() => {
     if (!sheetRef.current) return;
     if (currentTranslate.current > 100) {
-      onClose();
+      handleClose();
     }
     sheetRef.current.style.transform = '';
     dragStartY.current = null;
     currentTranslate.current = 0;
-  }, [onClose]);
+  }, [handleClose]);
 
   if (!isOpen) return null;
 
@@ -128,7 +142,7 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
     <div ref={containerRef} className="fixed inset-0 z-[60] flex items-end">
       <div
         className="absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-md transition-opacity duration-300"
-        onClick={onClose}
+        onClick={handleClose}
         aria-hidden="true"
       />
 
@@ -147,7 +161,7 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
           <div className="flex items-center justify-between px-5 pb-4">
             <h2 className="text-lg font-semibold text-[var(--content-primary)]">{title}</h2>
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="p-2 min-h-11 min-w-11 flex items-center justify-center -mr-2 rounded-lg text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors duration-150"
               aria-label="Close"
             >

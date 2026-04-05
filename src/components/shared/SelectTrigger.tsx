@@ -1,5 +1,6 @@
 import { type ReactNode, forwardRef } from 'react';
 import { CaretDown } from '@phosphor-icons/react';
+import { appHaptics } from '../../lib/haptics';
 
 type SelectTriggerSize = 'md' | 'lg';
 
@@ -37,7 +38,10 @@ export const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
       <button
         ref={ref}
         type="button"
-        onClick={onClick}
+        onClick={() => {
+          appHaptics.selection();
+          onClick?.();
+        }}
         className={`
           w-full flex items-center justify-between gap-2
           bg-[var(--bg-tertiary)] text-left

@@ -1,4 +1,5 @@
 import { X } from '@phosphor-icons/react';
+import { appHaptics } from '../../lib/haptics';
 
 interface FilterChipProps {
   label: string;
@@ -20,7 +21,10 @@ export function FilterChip({
 }: FilterChipProps): React.JSX.Element | null {
   return (
     <button
-      onClick={onClick}
+      onClick={() => {
+        appHaptics.selection();
+        onClick();
+      }}
       className={`
         inline-flex items-center gap-1.5
         h-8 px-3 rounded-full text-sm font-medium
@@ -45,12 +49,14 @@ export function FilterChip({
             tabIndex={0}
             onClick={(e) => {
               e.stopPropagation();
+              appHaptics.selection();
               onRemove();
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 e.stopPropagation();
+                appHaptics.selection();
                 onRemove();
               }
             }}

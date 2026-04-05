@@ -27,6 +27,7 @@ import { PickCompleteScreen } from './PickCompleteScreen';
 import { imageToBase64 } from '../../lib/ocr/geminiOCR';
 import { verifyWithAI } from '../../lib/ocr/pickVerifier';
 import { pickQuantityTarget } from '../../lib/cartSupply';
+import { appHaptics } from '../../lib/haptics';
 
 
 interface ItemMeta {
@@ -382,7 +383,7 @@ export default function PickPage(): React.JSX.Element | null {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
-      navigator.vibrate?.([50, 30, 50, 30, 100]);
+      appHaptics.success();
       setShowComplete(true);
     },
     onError: () => {
@@ -469,7 +470,7 @@ export default function PickPage(): React.JSX.Element | null {
 
   const handlePick = useCallback(
     (itemId: number) => {
-      navigator.vibrate?.(50);
+      appHaptics.impactLight();
       pickItemMutation.mutate(itemId);
     },
     [pickItemMutation],
@@ -1060,7 +1061,7 @@ function PickItemCard({
 
             <button
               onClick={() => {
-                navigator.vibrate?.([30, 50, 30]);
+                appHaptics.warning();
                 onFlag();
               }}
               className="
