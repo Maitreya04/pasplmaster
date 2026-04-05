@@ -7,6 +7,9 @@ import {
   useLayoutEffect,
   memo,
   useCallback,
+  type TouchEvent as ReactTouchEvent,
+  type UIEvent as ReactUIEvent,
+  type WheelEvent as ReactWheelEvent,
   type ReactNode,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -1257,14 +1260,15 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [cartPulse, setCartPulse] = useState(false);
   const [moreVisible, setMoreVisible] = useState(INITIAL_MORE_VISIBLE);
   const searchRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const touchScrollStartYRef = useRef<number | null>(null);
   const addedFeedbackTimeoutRef = useRef<number | null>(null);
   const cartPulseTimeoutRef = useRef<number | null>(null);
 
   const focusSearchInput = (delayMs = 0) => {
     window.setTimeout(() => {
       requestAnimationFrame(() => {
-        const input = searchRef.current?.querySelector('input:not([type="hidden"])') as HTMLInputElement | null;
-        input?.focus();
+        searchInputRef.current?.focus();
       });
     }, delayMs);
   };
@@ -1309,6 +1313,48 @@ export default function NewOrderPage(): React.JSX.Element | null {
       }
     };
   }, []);
+
+  useEffect(() => {
+    const dismissSearchKeyboard = () => {
+      if (document.activeElement === searchInputRef.current) {
+        searchInputRef.current?.blur();
+      }
+    };
+
+    document.addEventListener('scroll', dismissSearchKeyboard, { passive: true, capture: true });
+
+    return () => {
+      document.removeEventListener('scroll', dismissSearchKeyboard, true);
+    };
+  }, []);
+
+  const dismissSearchKeyboard = useCallback(() => {
+    if (document.activeElement === searchInputRef.current) {
+      searchInputRef.current?.blur();
+    }
+  }, []);
+
+  const handleScrollTouchStartCapture = useCallback((e: ReactTouchEvent<HTMLDivElement>) => {
+    touchScrollStartYRef.current = e.touches[0]?.clientY ?? null;
+  }, []);
+
+  const handleScrollTouchMoveCapture = useCallback((e: ReactTouchEvent<HTMLDivElement>) => {
+    const startY = touchScrollStartYRef.current;
+    const currentY = e.touches[0]?.clientY;
+    if (startY === null || currentY === undefined) return;
+    if (Math.abs(currentY - startY) >= 6) {
+      dismissSearchKeyboard();
+      touchScrollStartYRef.current = currentY;
+    }
+  }, [dismissSearchKeyboard]);
+
+  const handleScrollCapture = useCallback((_e: ReactUIEvent<HTMLDivElement>) => {
+    dismissSearchKeyboard();
+  }, [dismissSearchKeyboard]);
+
+  const handleWheelCapture = useCallback((_e: ReactWheelEvent<HTMLDivElement>) => {
+    dismissSearchKeyboard();
+  }, [dismissSearchKeyboard]);
 
   // Build the search index ONCE from all items — brand/group filtering is done inside searchItems()
   const searchIndex = useMemo(() => buildSearchIndex(items), [items]);
@@ -1491,7 +1537,13 @@ export default function NewOrderPage(): React.JSX.Element | null {
         />
       )}
 
-      <div className="px-4 pb-4">
+      <div
+        className="px-4 pb-4"
+        onTouchStartCapture={handleScrollTouchStartCapture}
+        onTouchMoveCapture={handleScrollTouchMoveCapture}
+        onScrollCapture={handleScrollCapture}
+        onWheelCapture={handleWheelCapture}
+      >
         {/* Sticky search + filters */}
         <div
           ref={searchRef}
@@ -1508,6 +1560,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 loading={itemsLoading}
                 autoFocus
                 debounceMs={0}
+                inputRef={searchInputRef}
               />
             </div>
             <button

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode, type RefObject } from 'react';
 import { MagnifyingGlass, X, SpinnerGap } from '@phosphor-icons/react';
 
 interface SearchInputProps {
@@ -12,6 +12,7 @@ interface SearchInputProps {
   debounceMs?: number;
   /** Renders inside the bar on the left (e.g. scope pill "All brands ▾"). Bar becomes flex; input gets rounded-r only. */
   leftContent?: ReactNode;
+  inputRef?: RefObject<HTMLInputElement | null>;
 }
 
 export function SearchInput({
@@ -24,9 +25,11 @@ export function SearchInput({
   autoFocus = true,
   debounceMs = 150,
   leftContent,
+  inputRef: externalInputRef,
 }: SearchInputProps): React.JSX.Element | null {
   const [localValue, setLocalValue] = useState(value);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const internalInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = externalInputRef ?? internalInputRef;
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
@@ -61,6 +64,12 @@ export function SearchInput({
     debouncedOnChange(v);
   };
 
+  const handleSelectAll = (e: React.MouseEvent<HTMLInputElement>) => {
+    if (e.detail >= 2) {
+      e.currentTarget.select();
+    }
+  };
+
   const handleClear = () => {
     setLocalValue('');
     onChange('');
@@ -79,6 +88,8 @@ export function SearchInput({
         type="text"
         value={localValue}
         onChange={handleChange}
+        onClick={handleSelectAll}
+        onDoubleClick={e => e.currentTarget.select()}
         onFocus={onFocus}
         onBlur={onBlur}
         placeholder={placeholder}
@@ -94,11 +105,12 @@ export function SearchInput({
         )}
         {!loading && localValue && (
           <button
+            type="button"
             onClick={handleClear}
-            className="p-1 min-w-11 min-h-11 flex items-center justify-center rounded-full hover:bg-[var(--bg-elevated)]"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--content-secondary)_62%,white)] text-[var(--content-on-color)] shadow-sm transition-colors hover:bg-[color-mix(in_srgb,var(--content-secondary)_74%,white)] active:scale-95"
             aria-label="Clear search"
           >
-            <X size={16} weight="regular" className="text-[var(--content-tertiary)]" />
+            <X size={16} weight="bold" />
           </button>
         )}
       </div>
