@@ -20,17 +20,14 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
   return (
     <nav
       className="
-        fixed left-3 right-3 z-50
-        flex items-stretch
-        rounded-[26px] border border-[color:color-mix(in_srgb,var(--border-opaque)_58%,white)]
-        bg-[color:color-mix(in_srgb,var(--bg-secondary)_88%,white)]
-        px-2 py-1 shadow-[0_8px_24px_rgba(15,23,42,0.06),0_1px_4px_rgba(15,23,42,0.05)]
-        backdrop-blur-[18px] supports-[backdrop-filter]:bg-[color:color-mix(in_srgb,var(--bg-secondary)_80%,transparent)]
+        fixed bottom-0 left-0 right-0 z-50
+        flex items-stretch border-t border-[var(--border-opaque)]
+        bg-[color:color-mix(in_srgb,var(--bg-secondary)_94%,var(--bg-primary))]
+        px-3 pt-1 shadow-[0_-1px_0_rgba(15,23,42,0.02)]
       "
       style={{
-        bottom: 'max(env(safe-area-inset-bottom, 0px), 8px)',
-        minHeight: '58px',
-        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 6px)',
+        minHeight: '64px',
+        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 8px)',
       }}
     >
       {items.map((item) => {
@@ -49,8 +46,8 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
               if (!isActive) appHaptics.selection();
             }}
             className={`
-              flex min-h-[48px] min-w-0 flex-1 items-center justify-center rounded-[18px]
-              px-2 py-2 no-underline transition-transform duration-150 ease-out active:scale-[0.985]
+              flex min-h-[52px] min-w-0 flex-1 items-center justify-center rounded-[16px]
+              px-2 py-1.5 no-underline transition-transform duration-150 ease-out active:scale-[0.985]
               ${isActive ? 'text-[var(--role-primary)]' : 'text-[var(--content-tertiary)]'}
             `}
             aria-current={isActive ? 'page' : undefined}

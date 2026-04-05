@@ -14,7 +14,7 @@ export default function PickingLayout(): React.JSX.Element | null {
 
   return (
     <div className="role-picking min-h-screen bg-[var(--bg-primary)] relative">
-      <div className={isPickPage ? '' : 'pb-32'}>
+      <div className={isPickPage ? '' : 'pb-24'}>
         <Outlet />
       </div>
       {!isPickPage && <BottomNav items={NAV_ITEMS} />}
