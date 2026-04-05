@@ -8,7 +8,12 @@ import { prefetchItems } from '../../hooks/useItems';
 
 const NAV_ITEMS = [
   { icon: House, label: 'Home', path: '/sales' },
-  { icon: PlusCircle, label: 'New Order', path: '/sales/new' },
+  {
+    icon: PlusCircle,
+    label: 'New Order',
+    path: '/sales/new',
+    match: (pathname: string) => pathname === '/sales/new' || pathname === '/sales/cart',
+  },
   { icon: ListBullets, label: 'My Orders', path: '/sales/orders' },
 ];
 
@@ -18,7 +23,7 @@ export default function SalesLayout(): React.JSX.Element | null {
   return (
     <CartProvider>
       <div className="role-sales min-h-screen bg-[var(--bg-primary)] relative">
-        <div className="pb-[5.5rem]">
+        <div className="pb-[8rem]">
           <Outlet />
         </div>
         <BottomNav items={NAV_ITEMS} />

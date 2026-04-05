@@ -10,7 +10,14 @@ import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
 
 const NAV_ITEMS = [
   { icon: SquaresFour, label: 'Dashboard', path: '/billing' },
-  { icon: ClipboardText, label: 'Needs Review', path: '/billing/needs-review' },
+  {
+    icon: ClipboardText,
+    label: 'Needs Review',
+    path: '/billing/needs-review',
+    match: (pathname: string) => (
+      pathname === '/billing/needs-review' || pathname.startsWith('/billing/review/')
+    ),
+  },
   { icon: HourglassHigh, label: 'Pending', path: '/billing/pending' },
   { icon: ClockCounterClockwise, label: 'History', path: '/billing/history' },
 ];
@@ -47,7 +54,7 @@ export default function BillingLayout(): React.JSX.Element | null {
         </aside>
 
         {/* Content */}
-        <main className="flex-1 pb-[5.5rem] lg:pb-0">
+        <main className="flex-1 pb-[8rem] lg:pb-0">
           <Outlet />
         </main>
       </div>
