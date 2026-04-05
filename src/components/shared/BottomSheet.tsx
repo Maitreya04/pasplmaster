@@ -5,22 +5,10 @@ interface BottomSheetProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
-  /** Default: start. Use center for filter-style sheets (title centered, actions on the right). */
-  titleAlign?: 'start' | 'center';
-  headerAction?: ReactNode;
-  footer?: ReactNode;
   children: ReactNode;
 }
 
-export function BottomSheet({
-  isOpen,
-  onClose,
-  title,
-  titleAlign = 'start',
-  headerAction,
-  footer,
-  children,
-}: BottomSheetProps): React.JSX.Element | null {
+export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetProps): React.JSX.Element | null {
   const containerRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const dragStartY = useRef<number | null>(null);
@@ -155,36 +143,16 @@ export function BottomSheet({
           <div className="w-10 h-1 rounded-full bg-[var(--border-subtle)]" />
         </div>
 
-        {title && titleAlign === 'center' && (
-          <div className="relative flex min-h-11 items-center justify-center px-5 pb-4">
-            <h2 className="type-heading-m max-w-[70%] text-center text-[var(--content-primary)]">
-              {title}
-            </h2>
-            <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-1">
-              {headerAction}
-              <button
-                onClick={onClose}
-                className="flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors duration-[var(--transition-ui)]"
-                aria-label="Close"
-              >
-                <X size={20} weight="regular" />
-              </button>
-            </div>
-          </div>
-        )}
-        {title && titleAlign === 'start' && (
+        {title && (
           <div className="flex items-center justify-between px-5 pb-4">
-            <h2 className="type-heading-m text-[var(--content-primary)]">{title}</h2>
-            <div className="flex items-center gap-2">
-              {headerAction}
-              <button
-                onClick={onClose}
-                className="-mr-2 flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors duration-[var(--transition-ui)]"
-                aria-label="Close"
-              >
-                <X size={20} weight="regular" />
-              </button>
-            </div>
+            <h2 className="text-lg font-semibold text-[var(--content-primary)]">{title}</h2>
+            <button
+              onClick={onClose}
+              className="p-2 min-h-11 min-w-11 flex items-center justify-center -mr-2 rounded-lg text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors duration-150"
+              aria-label="Close"
+            >
+              <X size={20} weight="regular" />
+            </button>
           </div>
         )}
 
@@ -194,14 +162,6 @@ export function BottomSheet({
         >
           {children}
         </div>
-        {footer && (
-          <div
-            className="border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]/95 px-5 pt-3 pb-4 backdrop-blur-xl"
-            style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)' }}
-          >
-            {footer}
-          </div>
-        )}
       </div>
     </div>
   );

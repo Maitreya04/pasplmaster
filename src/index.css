@@ -151,11 +151,6 @@
   --role-primary: var(--core-primary);
   --role-primary-subtle: #eff6ff;
   --role-content: #1d4ed8;
-
-  /* Motion + shared surfaces */
-  --transition-ui: 150ms ease;
-  /* Card radius tier — use with Card component and .ds-card (see DESIGN SYSTEM UTILITIES header) */
-  --radius-card: 1rem;
 }
 
 /* ─── Role accent overrides ─── */
@@ -185,159 +180,6 @@
   --role-primary: var(--gray-6);
   --role-primary-subtle: color-mix(in srgb, var(--gray-6) 8%, transparent);
   --role-content: var(--gray-8);
-}
-
-/* ─── Product typography scale (semantic roles, Base-style naming) ───
-   Use .type-* classes for composed size + line-height + weight, or Tailwind
-   text-* utilities from @theme (e.g. text-heading-m). Pair with --content-* for color.
-   Headings use 700; UI labels / row titles use 600. */
-:root {
-  --type-display-size: 1.875rem;
-  --type-display-lh: 2.125rem;
-  --type-display-weight: 700;
-
-  --type-heading-l-size: 1.375rem;
-  --type-heading-l-lh: 1.75rem;
-  --type-heading-l-weight: 700;
-
-  --type-heading-m-size: 1.125rem;
-  --type-heading-m-lh: 1.5rem;
-  --type-heading-m-weight: 700;
-
-  --type-heading-s-size: 1rem;
-  --type-heading-s-lh: 1.5rem;
-  --type-heading-s-weight: 600;
-
-  --type-body-size: 1rem;
-  --type-body-lh: 1.5rem;
-  --type-body-weight: 400;
-
-  --type-body-strong-weight: 600;
-
-  --type-body-sm-size: 0.875rem;
-  --type-body-sm-lh: 1.45rem;
-  --type-body-sm-weight: 400;
-
-  --type-body-sm-strong-weight: 600;
-
-  --type-label-size: 1rem;
-  --type-label-lh: 1.5rem;
-  --type-label-weight: 600;
-
-  --type-caption-size: 0.75rem;
-  --type-caption-lh: 1.35rem;
-  --type-caption-weight: 400;
-
-  --type-caption-strong-weight: 600;
-
-  --type-overline-size: 0.6875rem;
-  --type-overline-lh: 1.25rem;
-  --type-overline-weight: 600;
-  --type-overline-tracking: 0.07em;
-
-  --type-micro-size: 0.6875rem;
-  --type-micro-lh: 1rem;
-  --type-micro-weight: 700;
-}
-
-.type-display {
-  font-size: var(--type-display-size);
-  line-height: var(--type-display-lh);
-  font-weight: var(--type-display-weight);
-  letter-spacing: -0.02em;
-}
-
-.type-heading-l {
-  font-size: var(--type-heading-l-size);
-  line-height: var(--type-heading-l-lh);
-  font-weight: var(--type-heading-l-weight);
-  letter-spacing: -0.015em;
-}
-
-.type-heading-m {
-  font-size: var(--type-heading-m-size);
-  line-height: var(--type-heading-m-lh);
-  font-weight: var(--type-heading-m-weight);
-  letter-spacing: -0.01em;
-}
-
-.type-heading-s {
-  font-size: var(--type-heading-s-size);
-  line-height: var(--type-heading-s-lh);
-  font-weight: var(--type-heading-s-weight);
-}
-
-.type-body {
-  font-size: var(--type-body-size);
-  line-height: var(--type-body-lh);
-  font-weight: var(--type-body-weight);
-}
-
-.type-body-strong {
-  font-size: var(--type-body-size);
-  line-height: var(--type-body-lh);
-  font-weight: var(--type-body-strong-weight);
-}
-
-.type-body-sm {
-  font-size: var(--type-body-sm-size);
-  line-height: var(--type-body-sm-lh);
-  font-weight: var(--type-body-sm-weight);
-}
-
-.type-body-sm-strong {
-  font-size: var(--type-body-sm-size);
-  line-height: var(--type-body-sm-lh);
-  font-weight: var(--type-body-sm-strong-weight);
-}
-
-.type-label {
-  font-size: var(--type-label-size);
-  line-height: var(--type-label-lh);
-  font-weight: var(--type-label-weight);
-}
-
-.type-caption {
-  font-size: var(--type-caption-size);
-  line-height: var(--type-caption-lh);
-  font-weight: var(--type-caption-weight);
-}
-
-.type-caption-strong {
-  font-size: var(--type-caption-size);
-  line-height: var(--type-caption-lh);
-  font-weight: var(--type-caption-strong-weight);
-}
-
-.type-overline {
-  font-size: var(--type-overline-size);
-  line-height: var(--type-overline-lh);
-  font-weight: var(--type-overline-weight);
-  letter-spacing: var(--type-overline-tracking);
-  text-transform: uppercase;
-}
-
-.type-micro {
-  font-size: var(--type-micro-size);
-  line-height: var(--type-micro-lh);
-  font-weight: var(--type-micro-weight);
-}
-
-@theme inline {
-  --text-display: var(--type-display-size);
-  --text-display--line-height: var(--type-display-lh);
-  --text-heading-l: var(--type-heading-l-size);
-  --text-heading-l--line-height: var(--type-heading-l-lh);
-  --text-heading-m: var(--type-heading-m-size);
-  --text-heading-m--line-height: var(--type-heading-m-lh);
-  --text-heading-s: var(--type-heading-s-size);
-  --text-heading-s--line-height: var(--type-heading-s-lh);
-  --text-body-sm: var(--type-body-sm-size);
-  --text-body-sm--line-height: var(--type-body-sm-lh);
-  --text-caption: var(--type-caption-size);
-  --text-caption--line-height: var(--type-caption-lh);
-  --text-overline: var(--type-overline-size);
-  --text-overline--line-height: var(--type-overline-lh);
 }
 
 body {
@@ -430,7 +272,6 @@ select {
 
 /* ═══════════════════════════════════════════════════════════════
    DESIGN SYSTEM UTILITIES
-   Surface radius: --radius-card (1rem) is the default for Card.tsx and .ds-card.
    ═══════════════════════════════════════════════════════════════ */
 
 /* ─── Spacing Scale (4pt base grid) ───
@@ -487,7 +328,7 @@ select {
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
   box-shadow: var(--shadow-card);
-  border-radius: var(--radius-card);
+  border-radius: 1rem;
   transition: box-shadow 150ms ease, border-color 150ms ease;
 }
 

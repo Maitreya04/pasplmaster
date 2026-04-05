@@ -61,15 +61,3 @@ export function formatOverdueDate(dateStr: string): string {
     month: 'short',
   });
 }
-
-/** If the label is all-caps (e.g. data entry), show title case for lists and filters. */
-export function formatBrandLabel(name: string): string {
-  const t = name.trim();
-  if (t.length < 2) return t;
-  if (t !== t.toUpperCase() || !/[A-Z]/.test(t)) return t;
-  return t
-    .toLowerCase()
-    .split(/\s+/)
-    .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
-    .join(' ');
-}
