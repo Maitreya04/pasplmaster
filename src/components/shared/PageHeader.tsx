@@ -33,7 +33,7 @@ export function PageHeader({ title, onBack, action }: PageHeaderProps): React.JS
         )}
       </div>
 
-      <h1 className="text-lg font-semibold text-[var(--content-primary)] truncate text-center flex-1">
+      <h1 className="type-heading-m text-[var(--content-primary)] truncate text-center flex-1">
         {title}
       </h1>
 

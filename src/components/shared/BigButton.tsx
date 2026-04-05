@@ -10,7 +10,7 @@ interface BigButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const baseStyles =
-  'w-full flex items-center justify-center gap-2 font-semibold text-base transition-opacity duration-150 disabled:cursor-not-allowed disabled:opacity-40';
+  'type-label w-full flex items-center justify-center gap-2 transition-opacity duration-150 disabled:cursor-not-allowed disabled:opacity-40';
 
 function getVariantStyles(variant: Variant): string {
   switch (variant) {

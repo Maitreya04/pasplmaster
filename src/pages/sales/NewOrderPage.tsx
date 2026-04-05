@@ -10,7 +10,16 @@ import {
   type ReactNode,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash, CurrencyInr } from '@phosphor-icons/react';
+import {
+  Plus,
+  ShoppingCart,
+  CaretRight,
+  CaretLeft,
+  Check,
+  FunnelSimple,
+  Trash,
+  CurrencyInr,
+} from '@phosphor-icons/react';
 import { useQuery } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
@@ -26,7 +35,7 @@ import {
 import type { SearchResult, MatchedField } from '../../lib/search/itemSearch';
 import { buildNarrowIndex, buildNarrowSuggestions } from '../../lib/search/narrowSuggestions';
 import { buildSearchIndex } from '../../lib/search/searchIndex';
-import { formatCurrency, formatShortDate } from '../../utils/formatters';
+import { formatBrandLabel, formatCurrency, formatShortDate } from '../../utils/formatters';
 import { supabase } from '../../lib/supabase/client';
 import {
   PageHeader,
@@ -34,6 +43,7 @@ import {
   BottomSheet,
   Skeleton,
   NumberStepper,
+  FilterChip,
 } from '../../components/shared';
 import type { Item, Customer } from '../../types';
 import {
@@ -47,10 +57,24 @@ import {
 /** First paint of "More results" before expanding; search still returns up to MAX_RESULTS. */
 const INITIAL_MORE_VISIBLE = 36;
 const MORE_RESULTS_PAGE = 36;
+const RECENT_SEARCHES_KEY = 'paspl_sales_recent_searches';
+const MAX_RECENT_SEARCHES = 6;
+const MAX_POPULAR_QUICK_FILTERS = 8;
+/** Set to true to restore funnel, chips, filter sheet, and popular category shortcuts. */
+const SHOW_SEARCH_FILTERS = false;
 
 interface BrandOption {
   name: string;
   count: number;
+}
+
+type SortMode = 'relevance' | 'price-asc' | 'price-desc' | 'name-asc';
+
+interface SearchFilterDraft {
+  brand: string | null;
+  group: string | null;
+  sort: SortMode;
+  inStockOnly: boolean;
 }
 
 interface TopCustomer {
@@ -72,22 +96,24 @@ interface TrendingRow {
   total_order_count: number | null;
 }
 
-function BrandFilterSheetContent({
+function SearchFilterSheetContent({
   brands,
-  selectedBrand,
   groups,
-  selectedGroup,
-  onSelect,
-  onSelectGroup,
+  draft,
+  onDraftChange,
 }: {
   brands: BrandOption[];
-  selectedBrand: string | null;
   groups: BrandOption[];
-  selectedGroup: string | null;
-  onSelect: (brand: string | null) => void;
-  onSelectGroup: (group: string | null) => void;
+  draft: SearchFilterDraft;
+  onDraftChange: (next: SearchFilterDraft) => void;
 }) {
   const [search, setSearch] = useState('');
+  const sortOptions: { value: SortMode; label: string; helper: string }[] = [
+    { value: 'relevance', label: 'Best match', helper: 'Smart ranking for typed queries' },
+    { value: 'price-asc', label: 'Price: Low to High', helper: 'Surface lower-price items first' },
+    { value: 'price-desc', label: 'Price: High to Low', helper: 'See premium items first' },
+    { value: 'name-asc', label: 'Name A-Z', helper: 'Helpful for browsing within a filter' },
+  ];
 
   const filtered = useMemo(
     () =>
@@ -98,61 +124,143 @@ function BrandFilterSheetContent({
   );
 
   return (
-    <div className="space-y-4">
-      <input
-        type="text"
-        placeholder="Search brands…"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        className="w-full h-10 px-3 rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] text-sm placeholder:text-[var(--content-quaternary)] border-none outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
-      />
-      <div className="max-h-[50vh] overflow-y-auto -mx-2">
-        <button
-          onClick={() => onSelect(null)}
-          className="w-full px-2 py-2 flex items-center justify-between text-sm text-left hover:bg-[var(--bg-tertiary)] rounded-lg text-[var(--content-primary)]"
-        >
-          <span>All brands</span>
-          <span
-            className={`w-2.5 h-2.5 rounded-full border ${
-              selectedBrand === null
-                ? 'bg-[var(--bg-accent)] border-[var(--bg-accent)]'
-                : 'border-[var(--border-subtle)]'
-            }`}
-          />
-        </button>
-        {filtered.map(brand => (
-          <button
-            key={brand.name}
-            onClick={() => onSelect(brand.name)}
-            className="w-full px-2 py-2 flex items-center justify-between text-sm text-left hover:bg-[var(--bg-tertiary)] rounded-lg text-[var(--content-primary)]"
-          >
-            <span>{brand.name}</span>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-xs text-[var(--content-quaternary)]">
-                {brand.count}
-              </span>
-              <span
-                className={`w-2.5 h-2.5 rounded-full border ${
-                  selectedBrand === brand.name
-                    ? 'bg-[var(--bg-accent)] border-[var(--bg-accent)]'
-                    : 'border-[var(--border-subtle)]'
+    <div className="space-y-6">
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="type-heading-m text-[var(--content-primary)]">Sort</h3>
+          <p className="type-caption text-[var(--content-tertiary)]">Applied after search ranking</p>
+        </div>
+        <div className="space-y-2">
+          {sortOptions.map((option) => {
+            const selected = draft.sort === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => onDraftChange({ ...draft, sort: option.value })}
+                className={`w-full rounded-2xl border px-4 py-3 text-left transition-colors ${
+                  selected
+                    ? 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--bg-primary)]'
                 }`}
-              />
-            </div>
-          </button>
-        ))}
-      </div>
-      {selectedBrand && (
-        <div className="space-y-2 border-t border-[var(--border-subtle)] pt-4">
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="type-body-sm-strong text-[var(--content-primary)]">{option.label}</p>
+                    <p className="type-caption text-[var(--content-tertiary)]">{option.helper}</p>
+                  </div>
+                  <span
+                    className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-full border ${
+                      selected
+                        ? 'border-[var(--bg-accent)] text-[var(--bg-accent)]'
+                        : 'border-[var(--border-opaque)] text-transparent'
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <Check size={12} weight="bold" />
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h3 className="type-heading-m text-[var(--content-primary)]">Filter</h3>
+        <button
+          type="button"
+          onClick={() => onDraftChange({ ...draft, inStockOnly: !draft.inStockOnly })}
+          className={`w-full rounded-2xl border px-4 py-3 text-left transition-colors ${
+            draft.inStockOnly
+              ? 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)]'
+              : 'border-[var(--border-subtle)] bg-[var(--bg-primary)]'
+          }`}
+        >
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--content-tertiary)]">
-              Sub-category
-            </p>
-            {selectedGroup && (
+            <div>
+              <p className="type-body-sm-strong text-[var(--content-primary)]">In stock only</p>
+              <p className="type-caption text-[var(--content-tertiary)]">Hide items with zero available stock</p>
+            </div>
+            <span
+              className={`flex h-5 w-5 items-center justify-center rounded-md border ${
+                draft.inStockOnly
+                  ? 'border-[var(--bg-accent)] bg-[var(--bg-accent)] text-[var(--content-on-color)]'
+                  : 'border-[var(--border-opaque)] text-transparent'
+              }`}
+              aria-hidden="true"
+            >
+              <Check size={12} weight="bold" />
+            </span>
+          </div>
+        </button>
+      </section>
+
+      <section className="space-y-3">
+        <h3 className="type-heading-m text-[var(--content-primary)]">Brand</h3>
+        <input
+          type="text"
+          placeholder="Search brands…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="type-body-sm w-full h-11 rounded-xl border-none bg-[var(--bg-tertiary)] px-3 text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
+        />
+        <div className="max-h-[34vh] overflow-y-auto -mx-1 pr-1 space-y-1">
+          <button
+            type="button"
+            onClick={() => onDraftChange({ ...draft, brand: null, group: null })}
+            className="type-body-sm flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-[var(--content-primary)] hover:bg-[var(--bg-tertiary)]"
+          >
+            <span>All brands</span>
+            <span
+              className={`w-5 h-5 rounded-full border flex items-center justify-center ${
+                draft.brand === null
+                  ? 'border-[var(--bg-accent)] text-[var(--bg-accent)]'
+                  : 'border-[var(--border-opaque)] text-transparent'
+              }`}
+              aria-hidden="true"
+            >
+              <Check size={12} weight="bold" />
+            </span>
+          </button>
+          {filtered.map((brand) => {
+            const selected = draft.brand === brand.name;
+            return (
+              <button
+                key={brand.name}
+                type="button"
+                onClick={() => onDraftChange({ ...draft, brand: brand.name, group: null })}
+                className="type-body-sm flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-[var(--content-primary)] hover:bg-[var(--bg-tertiary)]"
+              >
+                <span>{formatBrandLabel(brand.name)}</span>
+                <div className="flex items-center gap-2">
+                  <span className="type-caption font-mono text-[var(--content-quaternary)]">{brand.count}</span>
+                  <span
+                    className={`w-5 h-5 rounded-full border flex items-center justify-center ${
+                      selected
+                        ? 'border-[var(--bg-accent)] text-[var(--bg-accent)]'
+                        : 'border-[var(--border-opaque)] text-transparent'
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <Check size={12} weight="bold" />
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {draft.brand && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="type-heading-m text-[var(--content-primary)]">Sub-category</h3>
+            {draft.group && (
               <button
                 type="button"
-                onClick={() => onSelectGroup(null)}
-                className="text-xs font-medium text-[var(--bg-accent)]"
+                onClick={() => onDraftChange({ ...draft, group: null })}
+                className="type-body-sm font-medium text-[var(--bg-accent)]"
               >
                 Clear
               </button>
@@ -160,17 +268,20 @@ function BrandFilterSheetContent({
           </div>
           <div className="flex flex-wrap gap-2">
             {groups.length === 0 ? (
-              <p className="text-sm text-[var(--content-tertiary)]">
-                No sub-categories for this brand
-              </p>
+              <p className="type-body-sm text-[var(--content-tertiary)]">No sub-categories for this brand</p>
             ) : (
               groups.map((group) => (
                 <button
                   key={group.name}
                   type="button"
-                  onClick={() => onSelectGroup(selectedGroup === group.name ? null : group.name)}
-                  className={`h-10 rounded-full px-3 text-sm font-medium transition-colors ${
-                    selectedGroup === group.name
+                  onClick={() =>
+                    onDraftChange({
+                      ...draft,
+                      group: draft.group === group.name ? null : group.name,
+                    })
+                  }
+                  className={`type-body-sm h-10 rounded-full px-3 font-medium transition-colors ${
+                    draft.group === group.name
                       ? 'bg-[var(--bg-accent)] text-[var(--content-on-color)]'
                       : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
                   }`}
@@ -180,8 +291,72 @@ function BrandFilterSheetContent({
               ))
             )}
           </div>
-        </div>
+        </section>
       )}
+    </div>
+  );
+}
+
+function SearchDiscoveryPanel({
+  recentSearches,
+  popularSearches,
+  onSearchPick,
+  onPopularFilterPick,
+  onClearHistory,
+}: {
+  recentSearches: string[];
+  popularSearches: string[];
+  onSearchPick: (value: string) => void;
+  onPopularFilterPick: (value: string) => void;
+  onClearHistory: () => void;
+}) {
+  return (
+    <div className="space-y-6 pt-3">
+      {recentSearches.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="type-heading-l text-[var(--content-primary)]">Recent searches</h2>
+            <button
+              type="button"
+              onClick={onClearHistory}
+              className="type-body-sm font-medium text-[var(--content-secondary)]"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {recentSearches.map((term) => (
+              <button
+                key={term}
+                type="button"
+                onClick={() => onSearchPick(term)}
+                className="type-body-sm rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 font-medium text-[var(--content-secondary)] shadow-sm"
+              >
+                {term}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="type-heading-l text-[var(--content-primary)]">Popular categories</h2>
+          <p className="type-body-sm text-[var(--content-tertiary)]">Quick ways to jump into browsing without typing</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {popularSearches.map((term) => (
+            <button
+              key={term}
+              type="button"
+              onClick={() => onPopularFilterPick(term)}
+              className="type-body-sm rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 font-medium text-[var(--content-primary)] shadow-sm"
+            >
+              {formatBrandLabel(term)}
+            </button>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -377,7 +552,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
       <div className="space-y-6 pt-4">
         {trendingItems.length > 0 && (
           <section className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+            <h3 className="type-overline text-[var(--content-tertiary)]">
               Trending
             </h3>
             <div className="space-y-2">
@@ -387,16 +562,16 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                   className="flex items-center justify-between gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)]"
                 >
                   <div className="min-w-0">
-                    <p className="font-semibold text-[var(--content-primary)] truncate">
+                    <p className="type-body-strong truncate text-[var(--content-primary)]">
                       {item.name}
                     </p>
-                    <p className="text-xs text-[var(--content-tertiary)]">
+                    <p className="type-caption text-[var(--content-tertiary)]">
                       Ordered {totalOrderCount} times
                     </p>
                   </div>
                   <button
                     type="button"
-                    className="shrink-0 px-3 h-9 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)] text-sm font-semibold active:scale-95"
+                    className="type-body-sm-strong h-9 shrink-0 rounded-full bg-[var(--bg-accent)] px-3 text-[var(--content-on-color)] active:scale-95"
                     onClick={() => onQuickReorderApply(null, [{ item, qty: 1 }])}
                   >
                     Quick add
@@ -414,7 +589,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
     <div className="space-y-6 pt-4">
       {/* Section 1 — Your Customers */}
       <section className="space-y-3">
-        <h3 className="mt-1 text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+        <h3 className="type-overline mt-1 text-[var(--content-tertiary)]">
           Your Customers
         </h3>
         <div className="flex gap-3 overflow-x-auto pb-1 pt-1 scrollbar-none">
@@ -435,13 +610,13 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                     : 'bg-[var(--bg-secondary)] border border-[var(--border-subtle)]'
                 }`}
               >
-                <p className="font-semibold text-[var(--content-primary)] line-clamp-2 leading-snug">
+                <p className="type-body-strong line-clamp-2 leading-snug text-[var(--content-primary)]">
                   {c.customer_name}
                 </p>
-                <p className="text-xs text-[var(--content-secondary)]">
+                <p className="type-caption text-[var(--content-secondary)]">
                   {c.order_count} order{c.order_count === 1 ? '' : 's'}
                 </p>
-                <p className="text-xs text-[var(--content-tertiary)] mt-1">
+                <p className="type-caption mt-1 text-[var(--content-tertiary)]">
                   Last order {formatShortDate(c.last_order_date)}
                 </p>
               </button>
@@ -454,10 +629,10 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
       {activeCustomer && pendingSuggestions.length > 0 && (
         <section className="space-y-3">
           <div className="flex items-baseline justify-between gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+            <h3 className="type-overline text-[var(--content-tertiary)]">
               Pending from last orders
             </h3>
-            <p className="text-xs text-[var(--content-tertiary)] mt-1">
+            <p className="type-caption mt-1 text-[var(--content-tertiary)]">
               Items that were out of stock earlier
             </p>
           </div>
@@ -472,15 +647,15 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                 className="w-full px-3 py-3 rounded-xl bg-[var(--bg-secondary)] flex items-center justify-between gap-3 text-left active:scale-95"
               >
                 <div className="min-w-0">
-                  <p className="font-semibold text-sm text-[var(--content-primary)] truncate">
+                  <p className="type-body-sm-strong truncate text-[var(--content-primary)]">
                     {row.item.name}
                   </p>
-                  <p className="text-xs text-[var(--content-tertiary)] mt-1">
+                  <p className="type-caption mt-1 text-[var(--content-tertiary)]">
                     Pending last time:{' '}
-                    <span className="font-mono font-semibold">{row.qty}</span> pcs
+                    <span className="type-caption-strong font-mono">{row.qty}</span> pcs
                   </p>
                 </div>
-                <span className="text-xs font-semibold text-[var(--bg-accent)]">
+                <span className="type-caption-strong text-[var(--bg-accent)]">
                   Add now
                 </span>
               </button>
@@ -493,22 +668,22 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
       {activeCustomerName && (
         <section className="space-y-3">
           <div className="flex items-baseline justify-between gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+            <h3 className="type-overline text-[var(--content-tertiary)]">
               Quick Reorder: {activeCustomerName}
             </h3>
             {quickReorderItems.length > 0 && (
-              <p className="text-xs text-[var(--content-tertiary)] mt-1">
+              <p className="type-caption mt-1 text-[var(--content-tertiary)]">
                 Based on past orders
               </p>
             )}
           </div>
 
           {customerTopItemsLoading && (
-            <p className="text-xs text-[var(--content-tertiary)]">Loading suggestions…</p>
+            <p className="type-caption text-[var(--content-tertiary)]">Loading suggestions…</p>
           )}
 
           {!customerTopItemsLoading && quickReorderItems.length === 0 && (
-            <p className="text-xs text-[var(--content-tertiary)]">
+            <p className="type-caption text-[var(--content-tertiary)]">
               No history yet. Use search above to add items.
             </p>
           )}
@@ -536,10 +711,10 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                     </div>
                   </div>
                   <div className="flex-1 min-w-0 space-y-1">
-                    <p className="font-semibold text-sm text-[var(--content-primary)] whitespace-normal break-words line-clamp-2 leading-snug">
+                    <p className="type-body-sm-strong whitespace-normal break-words line-clamp-2 leading-snug text-[var(--content-primary)]">
                       {row.item.name}
                     </p>
-                    <p className="text-xs text-[var(--content-tertiary)] mt-1">
+                    <p className="type-caption mt-1 text-[var(--content-tertiary)]">
                       Ordered {row.orderCount} time{row.orderCount === 1 ? '' : 's'}, usually{' '}
                       {row.mostCommonQty && row.mostCommonQty > 0
                         ? Number(row.mostCommonQty)
@@ -579,7 +754,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
             <button
               type="button"
               disabled={quickReorderItems.filter((r) => r.checked && r.suggestedQty > 0).length === 0}
-              className="h-11 rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] font-semibold text-sm flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+              className="type-body-sm-strong flex h-11 items-center justify-center gap-1.5 rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] disabled:cursor-not-allowed disabled:opacity-50 active:scale-95"
               onClick={() => {
                 const entries = quickReorderItems
                   .filter((r) => r.checked && r.suggestedQty > 0)
@@ -593,7 +768,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
             </button>
             <button
               type="button"
-              className={`h-11 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-secondary)] text-sm font-semibold flex items-center justify-center gap-1.5 active:scale-95 ${
+              className={`type-body-sm-strong flex h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-secondary)] active:scale-95 ${
                 quickReorderItems.length < 3 ? 'border-[var(--content-accent)]' : ''
               }`}
               onClick={scrollToSearch}
@@ -607,7 +782,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
       {/* Section 4 — Trending */}
       {trendingItems.length > 0 && (
         <section className="space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+          <h3 className="type-overline text-[var(--content-tertiary)]">
             Trending
           </h3>
           <div className="space-y-2">
@@ -617,16 +792,16 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                 className="flex items-center justify-between gap-3 px-3 py-3 rounded-xl bg-[var(--bg-secondary)]"
               >
                 <div className="min-w-0">
-                  <p className="font-semibold text-[var(--content-primary)] truncate">
+                  <p className="type-body-strong truncate text-[var(--content-primary)]">
                     {item.name}
                   </p>
-                  <p className="text-xs text-[var(--content-tertiary)]">
+                  <p className="type-caption text-[var(--content-tertiary)]">
                     Ordered {totalOrderCount} times
                   </p>
                 </div>
                 <button
                   type="button"
-                  className="shrink-0 px-3 h-9 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)] text-sm font-semibold active:scale-95"
+                  className="type-body-sm-strong h-9 shrink-0 rounded-full bg-[var(--bg-accent)] px-3 text-[var(--content-on-color)] active:scale-95"
                   onClick={() => onQuickReorderApply(null, [{ item, qty: 1 }])}
                 >
                   Quick add
@@ -691,7 +866,7 @@ interface ItemRowProps {
 /** Same block size as `AliasCode` (px-3 py-1.5, 12px semibold) so SKU + special rate read as one chip row. */
 function SpecialRateChip() {
   return (
-    <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--bg-accent-subtle)] px-3 py-1.5 text-[12px] font-semibold leading-none text-[var(--content-accent)]">
+    <span className="type-caption-strong inline-flex shrink-0 items-center leading-none rounded-full bg-[var(--bg-accent-subtle)] px-3 py-1.5 text-[var(--content-accent)]">
       Special rate
     </span>
   );
@@ -711,7 +886,7 @@ function AliasCode({
   const isMatched = matchedField === 'alias1' || matchedField === 'alias' || matchedField === 'name+alias';
   return (
     <span
-      className={`inline-flex max-w-full items-center rounded-full px-3 py-1.5 font-mono text-[12px] font-semibold tracking-[0.04em] shrink-0 truncate ${
+      className={`type-caption-strong inline-flex max-w-full shrink-0 items-center rounded-full px-3 py-1.5 font-mono tracking-[0.04em] truncate ${
         placeholder
           ? 'bg-[var(--bg-tertiary)] text-[var(--content-quaternary)]'
           : 'bg-[var(--bg-tertiary)] text-[var(--content-primary)]'
@@ -760,7 +935,7 @@ function PendingItemStockLine({
 
   if (tier === 'unknown' || stockQty == null || !Number.isFinite(Number(stockQty))) {
     return (
-      <p className="flex min-w-0 items-center gap-1.5 text-[12px] font-semibold leading-snug">
+      <p className="type-caption-strong flex min-w-0 items-center gap-1.5 leading-snug">
         <StockStatusDot tier={tier} />
         <span className={`min-w-0 ${primaryTextClass}`}>{primary}</span>
       </p>
@@ -788,7 +963,7 @@ function PendingItemStockLine({
         className="rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5"
         role="status"
       >
-        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] font-semibold leading-snug">
+        <p className="type-caption-strong flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 leading-snug">
           {body}
         </p>
       </div>
@@ -842,7 +1017,7 @@ function PendingItemStockLine({
         className="rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5"
         role="status"
       >
-        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] font-semibold leading-snug">
+        <p className="type-caption-strong flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 leading-snug">
           {body}
         </p>
       </div>
@@ -850,7 +1025,7 @@ function PendingItemStockLine({
   }
 
   return (
-    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] font-semibold leading-snug">
+    <p className="type-caption-strong flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 leading-snug">
       {body}
     </p>
   );
@@ -881,18 +1056,18 @@ function ItemStockBlock({
 
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
-      <p className="flex min-w-0 items-center gap-1.5 text-[12px] font-semibold leading-none">
+      <p className="type-caption-strong flex min-w-0 items-center gap-1.5 leading-none">
         <StockStatusDot tier={tier} />
         <span className={`min-w-0 ${primaryTextClass}`}>{primary}</span>
       </p>
       {secondary &&
         (secondary.variant === 'shortfall' ? (
           <div className="mt-1 rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5">
-            <p className="text-[12px] font-semibold leading-snug text-[var(--content-warning)]">{secondary.text}</p>
+            <p className="type-caption-strong leading-snug text-[var(--content-warning)]">{secondary.text}</p>
           </div>
         ) : (
           <p
-            className={`pl-3 text-[11px] font-medium leading-[1.35] ${
+            className={`type-caption pl-3 font-medium leading-[1.35] ${
               secondary.tone === 'negative'
                 ? 'text-[#b91c1c]'
                 : 'text-[var(--content-secondary)]'
@@ -968,7 +1143,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
             />
             {hasSpecialLine && <SpecialRateChip />}
           </div>
-          <p className="text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
+          <p className="type-body-sm-strong line-clamp-2 break-words leading-[1.35] text-[var(--content-primary)]">
             {highlightText(item.name, query)}
           </p>
           <PendingItemStockLine
@@ -977,7 +1152,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
             draftQty={draftQty}
           />
         </div>
-        <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
+        <p className="type-caption shrink-0 pt-0.5 text-right font-mono leading-none text-[var(--content-tertiary)]">
           {formatCurrency(price)}
         </p>
       </div>
@@ -992,7 +1167,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
                   e.stopPropagation();
                   handleSpecialRate();
                 }}
-                className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-0 text-[13px] font-semibold text-[var(--content-accent)]"
+                className="type-body-sm-strong inline-flex min-h-9 items-center gap-1.5 rounded-full px-0 text-[var(--content-accent)]"
                 aria-label={`${hasSpecialLine ? 'Edit' : 'Set'} special rate for ${item.name}`}
               >
                 <CurrencyInr size={14} weight="bold" />
@@ -1032,7 +1207,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
                     }
                   }}
                   aria-label="Quantity"
-                  className="h-11 w-14 rounded-[14px] border border-[var(--bg-accent)] bg-[var(--bg-secondary)] text-center font-mono text-[18px] font-semibold text-[var(--content-primary)] outline-none focus:ring-1 focus:ring-[var(--bg-accent)]"
+                  className="type-heading-m h-11 w-14 rounded-[14px] border border-[var(--bg-accent)] bg-[var(--bg-secondary)] text-center font-mono text-[var(--content-primary)] outline-none focus:ring-1 focus:ring-[var(--bg-accent)]"
                 />
 
                 <button
@@ -1117,7 +1292,7 @@ const ItemRow = memo(function ItemRow({
               {hasSpecialLine && <SpecialRateChip />}
             </div>
 
-            <p className="text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
+            <p className="type-body-sm-strong line-clamp-2 break-words leading-[1.35] text-[var(--content-primary)]">
               {highlightText(item.name, query)}
             </p>
 
@@ -1125,7 +1300,7 @@ const ItemRow = memo(function ItemRow({
 
             {justAdded && (
               <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-positive-subtle)] px-3 py-1.5 text-[12px] font-semibold leading-none text-[var(--content-positive)]">
+                <span className="type-caption-strong inline-flex items-center gap-1 rounded-full bg-[var(--bg-positive-subtle)] px-3 py-1.5 leading-none text-[var(--content-positive)]">
                   <Check size={12} weight="bold" />
                   Added
                 </span>
@@ -1134,7 +1309,7 @@ const ItemRow = memo(function ItemRow({
           </div>
 
           <div className="flex shrink-0 flex-col items-end justify-center gap-2 self-stretch">
-            <p className="text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
+            <p className="type-caption text-right font-mono leading-none text-[var(--content-tertiary)]">
               {formatCurrency(price)}
             </p>
             <button
@@ -1205,7 +1380,7 @@ function ResultSection({
   if (!results.length) return null;
   return (
     <div className="space-y-2">
-      <p className="px-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+      <p className="type-overline px-0.5 text-[var(--content-tertiary)]">
         {label}
       </p>
       <ul className="space-y-2">
@@ -1235,6 +1410,7 @@ function ResultSection({
 // ---------------------------------------------------------------------------
 export default function NewOrderPage(): React.JSX.Element | null {
   const navigate = useNavigate();
+  const { userName } = useAuth();
   const { data: items = [], isLoading: itemsLoading } = useItems();
   const {
     items: cartItems,
@@ -1247,6 +1423,8 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [query, setQuery] = useState('');
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<SortMode>('relevance');
+  const [inStockOnly, setInStockOnly] = useState(false);
   const [isBrandSheetOpen, setIsBrandSheetOpen] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [rateItem, setRateItem] = useState<Item | null>(null);
@@ -1256,6 +1434,13 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [recentlyAddedItemId, setRecentlyAddedItemId] = useState<number | null>(null);
   const [cartPulse, setCartPulse] = useState(false);
   const [moreVisible, setMoreVisible] = useState(INITIAL_MORE_VISIBLE);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [draftFilters, setDraftFilters] = useState<SearchFilterDraft>({
+    brand: null,
+    group: null,
+    sort: 'relevance',
+    inStockOnly: false,
+  });
   const searchRef = useRef<HTMLDivElement | null>(null);
   const addedFeedbackTimeoutRef = useRef<number | null>(null);
   const cartPulseTimeoutRef = useRef<number | null>(null);
@@ -1277,22 +1462,54 @@ export default function NewOrderPage(): React.JSX.Element | null {
       .map(([name, count]) => ({ name, count }));
   }, [narrowIndex]);
 
-  const subGroupsForBrand = useMemo(() => {
-    if (!selectedBrand) return [];
-    const gmap = narrowIndex.countsByBrandGroup.get(selectedBrand);
+  const draftSubGroupsForBrand = useMemo(() => {
+    if (!draftFilters.brand) return [];
+    const gmap = narrowIndex.countsByBrandGroup.get(draftFilters.brand);
     if (!gmap) return [];
     return [...gmap.entries()]
       .sort((a, b) => b[1] - a[1])
       .map(([name, count]) => ({ name, count }));
-  }, [narrowIndex, selectedBrand]);
+  }, [draftFilters.brand, narrowIndex]);
 
   const effectiveQuery = query.trim();
   const isCodeMode = detectCodeLike(effectiveQuery);
   const deferredQuery = useDeferredValue(effectiveQuery);
   const isStale = deferredQuery !== effectiveQuery;
-  const isSearchMode = isSearchFocused || effectiveQuery.length > 0;
-  const activeFilterCount = (selectedBrand ? 1 : 0) + (selectedGroup ? 1 : 0);
-  const activeFilterSummary = [selectedBrand, selectedGroup].filter(Boolean).join(' · ');
+  const sortLabel = useMemo(() => {
+    switch (sortMode) {
+      case 'price-asc':
+        return 'Price: Low to High';
+      case 'price-desc':
+        return 'Price: High to Low';
+      case 'name-asc':
+        return 'Name A-Z';
+      default:
+        return 'Best match';
+    }
+  }, [sortMode]);
+  const activeFilterCount =
+    (selectedBrand ? 1 : 0) +
+    (selectedGroup ? 1 : 0) +
+    (inStockOnly ? 1 : 0) +
+    (sortMode !== 'relevance' ? 1 : 0);
+  const draftFilterCount =
+    (draftFilters.brand ? 1 : 0) +
+    (draftFilters.group ? 1 : 0) +
+    (draftFilters.inStockOnly ? 1 : 0) +
+    (draftFilters.sort !== 'relevance' ? 1 : 0);
+  const activeFilterSummary = [
+    selectedBrand ? formatBrandLabel(selectedBrand) : null,
+    selectedGroup,
+    inStockOnly ? 'In stock' : null,
+    sortMode !== 'relevance' ? sortLabel : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const isSearchMode = isSearchFocused || effectiveQuery.length > 0 || activeFilterCount > 0;
+  const popularQuickFilters = useMemo(
+    () => brandOptions.slice(0, MAX_POPULAR_QUICK_FILTERS).map((brand) => brand.name),
+    [brandOptions],
+  );
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -1310,10 +1527,47 @@ export default function NewOrderPage(): React.JSX.Element | null {
     };
   }, []);
 
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(`${RECENT_SEARCHES_KEY}:${userName ?? 'guest'}`);
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as unknown;
+      if (Array.isArray(parsed)) {
+        setRecentSearches(parsed.filter((value): value is string => typeof value === 'string'));
+      }
+    } catch {
+      setRecentSearches([]);
+    }
+  }, [userName]);
+
+  useEffect(() => {
+    if (!deferredQuery || deferredQuery.length < 2) return;
+    setRecentSearches((current) => {
+      const next = [deferredQuery, ...current.filter((entry) => entry !== deferredQuery)].slice(0, MAX_RECENT_SEARCHES);
+      try {
+        window.localStorage.setItem(`${RECENT_SEARCHES_KEY}:${userName ?? 'guest'}`, JSON.stringify(next));
+      } catch {
+        // Ignore storage failures and keep in-memory history.
+      }
+      return next;
+    });
+  }, [deferredQuery, userName]);
+
+  useEffect(() => {
+    if (!isBrandSheetOpen) {
+      setDraftFilters({
+        brand: selectedBrand,
+        group: selectedGroup,
+        sort: sortMode,
+        inStockOnly,
+      });
+    }
+  }, [isBrandSheetOpen, selectedBrand, selectedGroup, sortMode, inStockOnly]);
+
   // Build the search index ONCE from all items — brand/group filtering is done inside searchItems()
   const searchIndex = useMemo(() => buildSearchIndex(items), [items]);
 
-  const searchResults = useMemo(() => {
+  const rawSearchResults = useMemo(() => {
     let results: SearchResult[] = [];
     if (deferredQuery) {
       // Align boosts with deferred results (same heuristic as detectedBrand, but on deferredQuery)
@@ -1364,10 +1618,32 @@ export default function NewOrderPage(): React.JSX.Element | null {
     return results;
   }, [deferredQuery, searchIndex, selectedBrand, selectedGroup, narrowIndex]);
 
+  const searchResults = useMemo(() => {
+    let results = rawSearchResults;
+
+    if (inStockOnly) {
+      results = results.filter((result) => result.item.stock_qty > 0);
+    }
+
+    if (sortMode === 'relevance') {
+      return results;
+    }
+
+    return [...results].sort((left, right) => {
+      if (sortMode === 'price-asc') {
+        return left.item.sales_price - right.item.sales_price;
+      }
+      if (sortMode === 'price-desc') {
+        return right.item.sales_price - left.item.sales_price;
+      }
+      return left.item.name.localeCompare(right.item.name);
+    });
+  }, [rawSearchResults, inStockOnly, sortMode]);
+
   // When browsing a brand with no query there's no meaningful "best match" split
   const bestMatches = useMemo(
-    () => (deferredQuery ? searchResults.slice(0, 3).filter(r => r.score >= 80) : []),
-    [searchResults, deferredQuery],
+    () => (deferredQuery && sortMode === 'relevance' ? searchResults.slice(0, 3).filter(r => r.score >= 80) : []),
+    [searchResults, deferredQuery, sortMode],
   );
   const bestMatchIds = useMemo(() => new Set(bestMatches.map(r => r.item.id)), [bestMatches]);
   const moreResults = useMemo(
@@ -1433,6 +1709,47 @@ export default function NewOrderPage(): React.JSX.Element | null {
     setQuery(value);
   };
 
+  const clearAllFilters = useCallback(() => {
+    setSelectedBrand(null);
+    setSelectedGroup(null);
+    setSortMode('relevance');
+    setInStockOnly(false);
+  }, []);
+
+  const handleBackFromSearch = useCallback(() => {
+    clearAddedFeedback();
+    setIsBrandSheetOpen(false);
+    if (effectiveQuery) {
+      setQuery('');
+    }
+    setIsSearchFocused(false);
+    const input = searchRef.current?.querySelector('input:not([type="hidden"])') as HTMLInputElement | null;
+    input?.blur();
+  }, [clearAddedFeedback, effectiveQuery]);
+
+  const applyDraftFilters = useCallback(() => {
+    setSelectedBrand(draftFilters.brand);
+    setSelectedGroup(draftFilters.group);
+    setSortMode(draftFilters.sort);
+    setInStockOnly(draftFilters.inStockOnly);
+    setIsBrandSheetOpen(false);
+  }, [draftFilters]);
+
+  const clearRecentSearches = useCallback(() => {
+    setRecentSearches([]);
+    try {
+      window.localStorage.removeItem(`${RECENT_SEARCHES_KEY}:${userName ?? 'guest'}`);
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [userName]);
+
+  const handlePopularFilterPick = useCallback((brand: string) => {
+    setSelectedBrand(brand);
+    setSelectedGroup(null);
+    setIsSearchFocused(false);
+  }, []);
+
   const handleStartAdd = (item: Item) => {
     if (recentlyAddedItemId === item.id) {
       clearAddedFeedback();
@@ -1470,26 +1787,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {!isSearchMode && (
-        <PageHeader
-          title="New Order"
-          action={
-            totalCount > 0 ? (
-              <button
-                onClick={() => navigate('/sales/cart')}
-                className={`relative flex items-center gap-1.5 min-h-12 min-w-12 px-2 rounded-lg transition-all ${
-                  cartPulse
-                    ? 'scale-[1.04] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
-                    : 'text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'
-                }`}
-              >
-                <ShoppingCart size={22} weight={totalCount > 0 ? 'fill' : 'regular'} />
-                <span className="font-mono text-sm font-semibold">{totalCount}</span>
-              </button>
-            ) : null
-          }
-        />
-      )}
+      {!isSearchMode && <PageHeader title="New Order" />}
 
       <div className="px-4 pb-4">
         {/* Sticky search + filters */}
@@ -1498,6 +1796,16 @@ export default function NewOrderPage(): React.JSX.Element | null {
           className={`sticky z-30 -mx-4 px-4 ${isSearchMode ? 'top-0 pt-2' : 'top-11 pt-1.5'} pb-2 space-y-1.5 bg-[var(--bg-primary)] border-b border-[var(--border-subtle)]`}
         >
           <div className="flex items-center gap-2">
+            {isSearchMode && (
+              <button
+                type="button"
+                onClick={handleBackFromSearch}
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-secondary)] shadow-sm"
+                aria-label="Exit search"
+              >
+                <CaretLeft size={22} weight="bold" />
+              </button>
+            )}
             <div className="flex-1 min-w-0">
               <SearchInput
                 placeholder="Search parts, name or code…"
@@ -1512,38 +1820,85 @@ export default function NewOrderPage(): React.JSX.Element | null {
             </div>
             <button
               type="button"
-              onClick={() => setIsBrandSheetOpen(true)}
-              className={`relative h-12 min-w-12 px-3 rounded-xl border transition-colors ${
-                activeFilterCount > 0
-                  ? 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
-                  : 'border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-secondary)]'
+              onClick={() => navigate('/sales/cart')}
+              className={`relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full border shadow-sm transition-all ${
+                cartPulse
+                  ? 'scale-[1.04] border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-secondary)]'
               }`}
-              aria-label={activeFilterCount > 0 ? `Filters active: ${activeFilterCount}` : 'Open filters'}
+              aria-label={totalCount > 0 ? `Open cart with ${totalCount} items` : 'Open cart'}
             >
-              <FunnelSimple size={18} weight="bold" />
-              {activeFilterCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)] text-[11px] font-bold flex items-center justify-center">
-                  {activeFilterCount}
+              <ShoppingCart size={20} weight={totalCount > 0 ? 'fill' : 'regular'} />
+              {totalCount > 0 && (
+                <span className="type-micro absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#d92d20] px-1 text-white">
+                  {totalCount}
                 </span>
               )}
             </button>
           </div>
-          {activeFilterSummary && (
-            <div className="flex items-center justify-between gap-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-3 py-2">
-              <p className="text-sm text-[var(--content-secondary)] truncate">
-                Filtered by <span className="text-[var(--content-primary)] font-medium">{activeFilterSummary}</span>
-              </p>
-              <button
-                type="button"
-                onClick={() => {
+          <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <button
+              type="button"
+              onClick={() => setIsBrandSheetOpen(true)}
+              className={`relative flex h-11 min-w-11 shrink-0 items-center justify-center rounded-full border px-3 shadow-sm transition-colors ${
+                activeFilterCount > 0
+                  ? 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-secondary)]'
+              }`}
+              aria-label={activeFilterCount > 0 ? `Open filters. ${activeFilterCount} active.` : 'Open filters'}
+            >
+              <FunnelSimple size={18} weight="bold" />
+              {activeFilterCount > 0 && (
+                <span className="type-micro absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--bg-accent)] px-1 text-[var(--content-on-color)]">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+            <FilterChip label="All" selected={activeFilterCount === 0} onClick={clearAllFilters} />
+            {selectedBrand && (
+              <FilterChip
+                label={formatBrandLabel(selectedBrand)}
+                selected
+                removable
+                onClick={() => setIsBrandSheetOpen(true)}
+                onRemove={() => {
                   setSelectedBrand(null);
                   setSelectedGroup(null);
                 }}
-                className="text-sm font-medium text-[var(--bg-accent)] shrink-0"
-              >
-                Clear
-              </button>
-            </div>
+              />
+            )}
+            {selectedGroup && (
+              <FilterChip
+                label={selectedGroup}
+                selected
+                removable
+                onClick={() => setIsBrandSheetOpen(true)}
+                onRemove={() => setSelectedGroup(null)}
+              />
+            )}
+            {inStockOnly && (
+              <FilterChip
+                label="In stock"
+                selected
+                removable
+                onClick={() => setIsBrandSheetOpen(true)}
+                onRemove={() => setInStockOnly(false)}
+              />
+            )}
+            {sortMode !== 'relevance' && (
+              <FilterChip
+                label={sortLabel}
+                selected
+                removable
+                onClick={() => setIsBrandSheetOpen(true)}
+                onRemove={() => setSortMode('relevance')}
+              />
+            )}
+          </div>
+          {activeFilterSummary && (
+            <p className="type-body-sm px-1 text-[var(--content-tertiary)]">
+              Showing results for <span className="font-medium text-[var(--content-primary)]">{activeFilterSummary}</span>
+            </p>
           )}
         </div>
 
@@ -1553,6 +1908,14 @@ export default function NewOrderPage(): React.JSX.Element | null {
         >
           {itemsLoading ? (
             <Skeleton variant="list" count={1} lines={6} />
+          ) : isSearchMode && !effectiveQuery && !selectedBrand ? (
+            <SearchDiscoveryPanel
+              recentSearches={recentSearches}
+              popularSearches={popularQuickFilters}
+              onSearchPick={handleQueryChange}
+              onPopularFilterPick={handlePopularFilterPick}
+              onClearHistory={clearRecentSearches}
+            />
           ) : !effectiveQuery && !selectedBrand ? (
             <SmartLanding
               items={items}
@@ -1576,29 +1939,26 @@ export default function NewOrderPage(): React.JSX.Element | null {
             />
           ) : searchResults.length === 0 && !isStale && effectiveQuery ? (
             <div className="pt-6 text-center space-y-4">
-              <p className="font-semibold text-[var(--content-primary)]">No results</p>
-              <p className="text-sm text-[var(--content-tertiary)]">
+              <p className="type-body-strong text-[var(--content-primary)]">No results</p>
+              <p className="type-body-sm text-[var(--content-tertiary)]">
                 {selectedBrand
-                  ? `No "${effectiveQuery}" in ${selectedBrand}`
+                  ? `No "${effectiveQuery}" in ${formatBrandLabel(selectedBrand)}`
                   : isCodeMode
                     ? 'Code not found — check the number and try again'
-                    : 'Try a shorter name or use a part code'}
+                  : 'Try a shorter name or use a part code'}
               </p>
               <div className="flex items-center justify-center gap-4">
-                {selectedBrand && (
+                {activeFilterCount > 0 && (
                   <button
-                    onClick={() => {
-                      setSelectedBrand(null);
-                      setSelectedGroup(null);
-                    }}
-                    className="text-sm text-[var(--bg-accent)] underline"
+                    onClick={clearAllFilters}
+                    className="type-body-sm text-[var(--bg-accent)] underline"
                   >
-                    Search all groups
+                    Clear filters
                   </button>
                 )}
                 <button
                   onClick={() => setIsBrandSheetOpen(true)}
-                  className="text-sm text-[var(--bg-accent)] underline"
+                  className="type-body-sm text-[var(--bg-accent)] underline"
                 >
                   Open filters
                 </button>
@@ -1607,7 +1967,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
           ) : (
             <>
               <ResultSection
-                label="Best match"
+                label={sortMode === 'relevance' ? 'Best match' : 'Results'}
                 results={bestMatches}
                 query={effectiveQuery}
                 onStartAdd={handleStartAdd}
@@ -1640,7 +2000,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
                   onClick={() =>
                     setMoreVisible(v => Math.min(v + MORE_RESULTS_PAGE, moreResults.length))
                   }
-                  className="w-full py-3 rounded-xl text-sm font-semibold text-[var(--bg-accent)] bg-[var(--bg-secondary)] border border-[var(--border-subtle)] hover:bg-[var(--bg-tertiary)] active:scale-[0.99]"
+                  className="type-body-sm-strong w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] py-3 text-[var(--bg-accent)] hover:bg-[var(--bg-tertiary)] active:scale-[0.99]"
                 >
                   Show more ({moreResults.length - moreDisplayed.length} left)
                 </button>
@@ -1657,16 +2017,16 @@ export default function NewOrderPage(): React.JSX.Element | null {
           style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}
         >
           <div>
-            <p className="font-semibold text-[var(--content-primary)]">
+            <p className="type-body-strong text-[var(--content-primary)]">
               {cartItems.length} item{cartItems.length !== 1 ? 's' : ''} · {totalCount} pcs
             </p>
-            <p className="font-mono text-lg font-bold text-[var(--content-primary)]">
+            <p className="type-heading-m font-mono font-bold text-[var(--content-primary)]">
               {formatCurrency(totalValue)}
             </p>
           </div>
           <button
             onClick={() => navigate('/sales/cart')}
-            className="flex items-center gap-1.5 min-h-12 px-4 rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] font-semibold hover:opacity-90 active:scale-95"
+            className="type-label flex min-h-12 items-center gap-1.5 rounded-xl bg-[var(--bg-accent)] px-4 text-[var(--content-on-color)] hover:opacity-90 active:scale-95"
           >
             View Cart
             <CaretRight size={20} weight="bold" />
@@ -1685,7 +2045,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
       >
         {rateItem && (
           <div className="space-y-4">
-            <p className="text-sm text-[var(--content-tertiary)]">
+            <p className="type-body-sm text-[var(--content-tertiary)]">
               Qty: <span className="font-mono">{rateQty}</span> · Default: {formatCurrency(rateItem.sales_price)}
             </p>
             <input
@@ -1703,13 +2063,13 @@ export default function NewOrderPage(): React.JSX.Element | null {
                   setRateItem(null);
                   focusSearchInput(60);
                 }}
-                className="flex-1 h-12 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-secondary)] font-semibold hover:opacity-90"
+                className="type-label flex h-12 flex-1 items-center justify-center rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-secondary)] hover:opacity-90"
               >
                 Cancel
               </button>
               <button
                 onClick={handleRateSave}
-                className="flex-1 h-12 rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] font-semibold hover:opacity-90 active:scale-95"
+                className="type-label flex h-12 flex-1 items-center justify-center rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] hover:opacity-90 active:scale-95"
               >
                 Save
               </button>
@@ -1723,37 +2083,41 @@ export default function NewOrderPage(): React.JSX.Element | null {
         isOpen={isBrandSheetOpen}
         onClose={() => setIsBrandSheetOpen(false)}
         title="Filters"
+        titleAlign="center"
+        headerAction={
+          draftFilterCount > 0 ? (
+            <button
+              type="button"
+              onClick={() =>
+                setDraftFilters({
+                  brand: null,
+                  group: null,
+                  sort: 'relevance',
+                  inStockOnly: false,
+                })
+              }
+              className="type-body-sm rounded-full bg-[var(--bg-tertiary)] px-3 py-2 font-medium text-[var(--bg-accent)]"
+            >
+              Reset
+            </button>
+          ) : undefined
+        }
+        footer={
+          <button
+            type="button"
+            onClick={applyDraftFilters}
+            className="type-label flex h-12 w-full items-center justify-center rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)] shadow-lg hover:opacity-95 active:scale-[0.99]"
+          >
+            Apply {draftFilterCount > 0 ? `(${draftFilterCount})` : ''}
+          </button>
+        }
       >
-        <BrandFilterSheetContent
+        <SearchFilterSheetContent
           brands={brandOptions}
-          selectedBrand={selectedBrand}
-          groups={subGroupsForBrand}
-          selectedGroup={selectedGroup}
-          onSelect={brand => {
-            setSelectedBrand(brand);
-            setSelectedGroup(null);
-          }}
-          onSelectGroup={setSelectedGroup}
+          groups={draftSubGroupsForBrand}
+          draft={draftFilters}
+          onDraftChange={setDraftFilters}
         />
-        <div className="mt-4 flex gap-3">
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedBrand(null);
-              setSelectedGroup(null);
-            }}
-            className="flex-1 h-12 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-secondary)] font-semibold"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsBrandSheetOpen(false)}
-            className="flex-1 h-12 rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] font-semibold"
-          >
-            Done
-          </button>
-        </div>
       </BottomSheet>
     </div>
   );
