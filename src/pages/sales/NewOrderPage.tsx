@@ -652,7 +652,6 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                 onChange={(event) => setCustomerQuery(event.target.value)}
                 placeholder="Search by customer name or city…"
                 className="w-full min-h-14 rounded-2xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] pl-10 pr-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
-                autoFocus
               />
             </div>
 

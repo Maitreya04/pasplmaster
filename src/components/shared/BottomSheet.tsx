@@ -157,16 +157,23 @@ export function BottomSheet({
       <div
         ref={sheetRef}
         className={`relative z-10 w-full max-h-[85vh] bg-[var(--bg-secondary)]/95 backdrop-blur-xl rounded-t-2xl flex flex-col shadow-2xl ring-1 ring-white/10 animate-slide-up ${sheetClassName}`}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
       >
-        <div className="flex justify-center mt-3 mb-2">
+        <div
+          className="flex justify-center mt-3 mb-2"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
           <div className="w-10 h-1 rounded-full bg-[var(--border-subtle)]" />
         </div>
 
         {title && (
-          <div className="flex items-center justify-between px-5 pb-4">
+          <div
+            className="flex items-center justify-between px-5 pb-4"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
             <h2 className="text-lg font-semibold text-[var(--content-primary)]">{title}</h2>
             <button
               onClick={handleClose}

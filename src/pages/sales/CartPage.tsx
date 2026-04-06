@@ -219,6 +219,7 @@ function SearchableCustomerDropdown({
           isOpen={open}
           onClose={closeSheet}
           title={mode === 'create' ? 'Add customer' : 'Customers'}
+          sheetClassName={mode === 'search' ? 'max-h-[62vh]' : ''}
         >
           {mode === 'search' ? (
             <div className="space-y-4">
@@ -233,7 +234,6 @@ function SearchableCustomerDropdown({
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search by customer name or city…"
                   className="w-full min-h-14 rounded-2xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] pl-10 pr-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
-                  autoFocus
                 />
               </div>
 
