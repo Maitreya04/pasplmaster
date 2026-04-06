@@ -94,7 +94,7 @@ export function InlineQtyEditor({
   }, [inputValue, allowZero, clamp, cancel, setOpen, isControlled]);
 
   const confirm = useCallback(() => {
-    appHaptics.success();
+    appHaptics.impactMedium();
     commitValue(onConfirm);
   }, [commitValue, onConfirm]);
 
@@ -199,7 +199,7 @@ export function InlineQtyEditor({
           type="button"
           onClick={(e) => {
             e.preventDefault();
-            appHaptics.impactLight();
+            appHaptics.impactMedium();
             commitValue(secondaryAction.onAction);
           }}
           className={`

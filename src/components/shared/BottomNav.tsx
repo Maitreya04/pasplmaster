@@ -59,7 +59,7 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
 
               setOptimisticPath(item.path);
               item.preload?.();
-              appHaptics.selection();
+              appHaptics.impactLight();
             }}
             onMouseEnter={() => { item.preload?.(); }}
             onFocus={() => { item.preload?.(); }}

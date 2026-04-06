@@ -88,8 +88,10 @@ export function BottomSheet({
 
   // When an input inside the sheet receives focus (especially on mobile),
   // scroll it into view so it doesn't get covered by the on‑screen keyboard.
+  // With keyboardBehavior "static" the overlay stays pinned; this only nudges
+  // the sheet's own scroll region, not the visual viewport resize used by "adjust".
   useEffect(() => {
-    if (keyboardBehavior === 'static') return;
+    if (!isOpen) return;
     const sheetEl = sheetRef.current;
     if (!sheetEl) return;
 
@@ -123,7 +125,7 @@ export function BottomSheet({
     return () => {
       sheetEl.removeEventListener('focusin', handleFocusIn);
     };
-  }, [keyboardBehavior]);
+  }, [isOpen]);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     dragStartY.current = e.touches[0].clientY;
@@ -190,7 +192,7 @@ export function BottomSheet({
         )}
 
         <div
-          className={`overflow-y-auto overscroll-contain px-5 pb-5 ${contentClassName}`}
+          className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 ${contentClassName}`}
           style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 20px)' }}
         >
           {children}

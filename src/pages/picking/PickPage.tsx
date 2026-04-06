@@ -392,6 +392,7 @@ export default function PickPage(): React.JSX.Element | null {
   });
 
   const openLiveScan = useCallback((orderItem: OrderItem) => {
+    appHaptics.impactLight();
     setLiveScanTarget(orderItem);
     if (fileInputRef.current) {
       fileInputRef.current.click();
@@ -470,7 +471,7 @@ export default function PickPage(): React.JSX.Element | null {
 
   const handlePick = useCallback(
     (itemId: number) => {
-      appHaptics.impactLight();
+      appHaptics.impactMedium();
       pickItemMutation.mutate(itemId);
     },
     [pickItemMutation],
@@ -478,6 +479,7 @@ export default function PickPage(): React.JSX.Element | null {
 
   const handleOverride = useCallback(
     (itemId: number) => {
+      appHaptics.impactMedium();
       updateLocalItem(itemId, { uiState: 'overridden' });
       pickItemMutation.mutate(itemId);
     },
@@ -499,6 +501,7 @@ export default function PickPage(): React.JSX.Element | null {
         toast.error('Please enter a valid box price');
         return;
       }
+      appHaptics.impactMedium();
       flagItemMutation.mutate({
         itemId: flagTarget,
         reason: flagReason,
@@ -508,6 +511,7 @@ export default function PickPage(): React.JSX.Element | null {
       return;
     }
 
+    appHaptics.impactMedium();
     flagItemMutation.mutate({
       itemId: flagTarget,
       reason: flagReason,
@@ -687,7 +691,10 @@ export default function PickPage(): React.JSX.Element | null {
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-[var(--bg-primary)] border-t border-[var(--border-subtle)]">
           <BigButton
             variant="primary"
-            onClick={() => completeMutation.mutate()}
+            onClick={() => {
+              appHaptics.impactMedium();
+              completeMutation.mutate();
+            }}
             loading={completeMutation.isPending}
             className={
               hasFlagged

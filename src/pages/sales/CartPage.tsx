@@ -30,6 +30,7 @@ import type { Customer, CartItem } from '../../types';
 
 import { formatCurrencyRaw as formatCurrency } from '../../utils/formatters';
 import { splitCartLine } from '../../lib/cartSupply';
+import { appHaptics } from '../../lib/haptics';
 import {
   buildOrderCustomerMessage,
   type OrderCustomerShareLine,
@@ -219,9 +220,9 @@ function SearchableCustomerDropdown({
           isOpen={open}
           onClose={closeSheet}
           title={mode === 'create' ? 'Add customer' : 'Customers'}
-          sheetClassName={mode === 'search' ? 'h-[62vh] max-h-[62vh]' : ''}
+          sheetClassName="h-[62vh] max-h-[62vh]"
           contentClassName={mode === 'search' ? '!px-0 !pb-0' : ''}
-          keyboardBehavior={mode === 'search' ? 'static' : 'adjust'}
+          keyboardBehavior="static"
         >
           {mode === 'search' ? (
             <div className="flex h-full min-h-0 flex-col">
@@ -376,7 +377,6 @@ function SearchableCustomerDropdown({
                     onChange={(e) => setDraftName(e.target.value)}
                     placeholder="Party name"
                     className="w-full min-h-14 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
-                    autoFocus
                   />
                 </div>
 
@@ -564,7 +564,7 @@ const BillingItemCard = memo(function BillingItemCard({
         <button
           type="button"
           onClick={() => onRatePress(cartItem)}
-          className="flex w-20 flex-col items-center justify-center gap-1 border-l border-[color:color-mix(in_srgb,var(--role-primary)_18%,var(--border-subtle))] bg-[color:color-mix(in_srgb,var(--role-primary)_12%,white)] text-[var(--role-content)]"
+          className="flex w-20 flex-col items-center justify-center gap-1 border-l border-[color:color-mix(in_srgb,var(--role-primary)_22%,var(--border-subtle))] bg-[var(--role-primary-subtle)] text-[var(--role-content)]"
           aria-label={`Set special rate for ${cartItem.item.name}`}
         >
           <CurrencyInr size={20} weight="bold" />
@@ -573,7 +573,7 @@ const BillingItemCard = memo(function BillingItemCard({
         <button
           type="button"
           onClick={() => onDeletePress(cartItem)}
-          className="flex w-20 flex-col items-center justify-center gap-1 border-l border-[color:color-mix(in_srgb,var(--bg-negative)_20%,var(--border-subtle))] bg-[color:color-mix(in_srgb,var(--bg-negative)_10%,white)] text-[var(--red-8)]"
+          className="flex w-20 flex-col items-center justify-center gap-1 border-l border-[color:color-mix(in_srgb,var(--bg-negative)_28%,var(--border-subtle))] bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]"
           aria-label={`Delete ${cartItem.item.name}`}
         >
           <Trash size={20} weight="bold" />
@@ -698,6 +698,9 @@ const PurchaseOrderCard = memo(function PurchaseOrderCard({
 // ---------------------------------------------------------------------------
 export default function CartPage(): React.JSX.Element | null {
   const navigate = useNavigate();
+  const goToNewOrderWithSearchFocus = useCallback(() => {
+    navigate('/sales/new', { state: { focusSearch: true } });
+  }, [navigate]);
   const queryClient = useQueryClient();
   const {
     items,
@@ -802,6 +805,7 @@ export default function CartPage(): React.JSX.Element | null {
 
   const handleSaveRate = useCallback(() => {
     if (!rateCartItem) return;
+    appHaptics.impactMedium();
     const parsed = parseFloat(rateValue.replace(/,/g, ''));
     setSpecialRate(rateCartItem.lineId, Number.isNaN(parsed) || parsed < 0 ? null : parsed);
     setRateItemId(null);
@@ -905,7 +909,10 @@ export default function CartPage(): React.JSX.Element | null {
     },
   });
 
-  const handleSubmit = () => submitMutation.mutate();
+  const handleSubmit = () => {
+    appHaptics.impactMedium();
+    submitMutation.mutate();
+  };
 
   useEffect(() => {
     setSummaryCopied(false);
@@ -1040,7 +1047,7 @@ export default function CartPage(): React.JSX.Element | null {
             <p className="text-[var(--content-tertiary)] mb-4">
               Cart is empty. Add items from New Order.
             </p>
-            <BigButton variant="secondary" onClick={() => navigate('/sales/new')}>
+            <BigButton variant="secondary" onClick={goToNewOrderWithSearchFocus}>
               Add Items
             </BigButton>
           </div>
@@ -1080,7 +1087,7 @@ export default function CartPage(): React.JSX.Element | null {
                 </ul>
                 <button
                   type="button"
-                  onClick={() => navigate('/sales/new')}
+                  onClick={goToNewOrderWithSearchFocus}
                   className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-[color:color-mix(in_srgb,var(--role-primary)_18%,var(--border-subtle))] bg-[color:color-mix(in_srgb,var(--role-primary)_5%,white)] px-4 py-3 text-sm font-semibold text-[var(--role-content)] transition-colors hover:bg-[color:color-mix(in_srgb,var(--role-primary)_8%,white)]"
                 >
                   <Plus size={18} weight="bold" />
@@ -1328,7 +1335,7 @@ export default function CartPage(): React.JSX.Element | null {
             <div className="grid grid-cols-[auto_1fr] gap-2">
               <button
                 type="button"
-                onClick={() => navigate('/sales/new')}
+                onClick={goToNewOrderWithSearchFocus}
                 className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 font-semibold text-[var(--content-primary)] transition-colors hover:bg-[var(--bg-tertiary)]"
               >
                 <Plus size={18} weight="bold" />
@@ -1406,6 +1413,7 @@ export default function CartPage(): React.JSX.Element | null {
               </button>
               <button
                 onClick={() => {
+                  appHaptics.impactHeavy();
                   removeItem(deleteCartItem.lineId);
                   setDeleteItemId(null);
                 }}

@@ -12,11 +12,12 @@ import {
   type WheelEvent as ReactWheelEvent,
   type ReactNode,
 } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash, CurrencyInr, MagnifyingGlass, MapPin, Phone, CaretLeft } from '@phosphor-icons/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
+import { appHaptics } from '../../lib/haptics';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useCustomers } from '../../hooks/useCustomers';
@@ -611,9 +612,9 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
       <BottomSheet
         isOpen={customerSheetOpen}
         onClose={closeCustomerSheet}
-        sheetClassName={customerSheetMode === 'search' ? 'h-[62vh] max-h-[62vh]' : ''}
+        sheetClassName="h-[62vh] max-h-[62vh]"
         contentClassName={customerSheetMode === 'search' ? '!px-0 !pb-0' : ''}
-        keyboardBehavior={customerSheetMode === 'search' ? 'static' : 'adjust'}
+        keyboardBehavior="static"
       >
         {customerSheetMode === 'search' ? (
           <div className="flex h-full min-h-0 flex-col">
@@ -759,7 +760,6 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                   onChange={(event) => setDraftName(event.target.value)}
                   placeholder="Party name"
                   className="w-full min-h-14 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
-                  autoFocus
                 />
               </div>
               <div>
@@ -1600,6 +1600,11 @@ function ResultSection({
 // ---------------------------------------------------------------------------
 export default function NewOrderPage(): React.JSX.Element | null {
   const navigate = useNavigate();
+  const location = useLocation();
+  const goToCart = useCallback(() => {
+    appHaptics.impactMedium();
+    navigate('/sales/cart');
+  }, [navigate]);
   const { data: items = [], isLoading: itemsLoading } = useItems();
   const {
     items: cartItems,
@@ -1630,7 +1635,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const focusSearchInput = (delayMs = 0) => {
     window.setTimeout(() => {
       requestAnimationFrame(() => {
-        searchInputRef.current?.focus();
+        searchInputRef.current?.focus({ preventScroll: true });
       });
     }, delayMs);
   };
@@ -1664,6 +1669,24 @@ export default function NewOrderPage(): React.JSX.Element | null {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMoreVisible(INITIAL_MORE_VISIBLE);
   }, [deferredQuery]);
+
+  useEffect(() => {
+    const wantFocus = (location.state as { focusSearch?: boolean } | null | undefined)?.focusSearch;
+    if (!wantFocus) return;
+
+    setIsSearchFocused(true);
+
+    const focusTimer = window.setTimeout(() => {
+      requestAnimationFrame(() => {
+        searchInputRef.current?.focus({ preventScroll: true });
+      });
+      window.setTimeout(() => {
+        navigate('.', { replace: true, state: {} });
+      }, 0);
+    }, 120);
+
+    return () => window.clearTimeout(focusTimer);
+  }, [location.key, navigate]);
 
   useEffect(() => {
     return () => {
@@ -1842,6 +1865,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   };
 
   const handleStartAdd = (item: Item) => {
+    appHaptics.impactLight();
     if (recentlyAddedItemId === item.id) {
       clearAddedFeedback();
     }
@@ -1849,6 +1873,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   };
 
   const handleConfirmAdd = (item: Item, qty: number) => {
+    appHaptics.impactMedium();
     addItem(item, qty);
     setPendingAddItemId(null);
     showAddedFeedback(item.id);
@@ -1869,6 +1894,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
     if (!rateItem) return;
     const n = parseFloat(rateValue.replace(/,/g, ''));
     if (isNaN(n) || n < 0) return;
+    appHaptics.impactMedium();
     addItem(rateItem, rateQty, n);
     showAddedFeedback(rateItem.id);
     setRateItem(null);
@@ -1884,7 +1910,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
           action={
             totalCount > 0 ? (
               <button
-                onClick={() => navigate('/sales/cart')}
+                onClick={goToCart}
                 className={`relative flex items-center gap-1.5 min-h-12 min-w-12 px-2 rounded-lg transition-all ${
                   cartPulse
                     ? 'scale-[1.04] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
@@ -1981,7 +2007,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 for (const entry of entries) {
                   addItem(entry.item, entry.qty);
                 }
-                navigate('/sales/cart');
+                goToCart();
               }}
               scrollToSearch={() => {
                 if (searchRef.current) {
@@ -2080,7 +2106,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
             </p>
           </div>
           <button
-            onClick={() => navigate('/sales/cart')}
+            onClick={goToCart}
             className="flex items-center gap-1.5 min-h-12 px-4 rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)] font-semibold hover:opacity-90 active:scale-95"
           >
             View Cart

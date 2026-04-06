@@ -10,6 +10,25 @@
  * | Impact (physical)   | Button tap, stepper tick, confirm tap         | `impactLight` … `Heavy` — match weight to action significance |
  * | Notification        | Task outcome: saved, warning, failed          | `success/warning/error()` |
  *
+ * ### Light vs medium vs heavy (impact only)
+ *
+ * **Light** — small, reversible, or high-frequency physical controls: tab change, open sheet/cart,
+ * stepper ±1, starting an inline edit, picking a line item, tapping a secondary control.
+ *
+ * **Medium** — primary “do it” controls: main CTA (e.g. Save, Place order, Submit) when the action
+ * is important but not destructive; confirming a modal’s default action.
+ *
+ * **Heavy** — rare emphasis: destructive action **committed** (delete sent, void order), hard boundary
+ * (“cannot proceed”), or a major milestone after a long flow **if** you want tactile emphasis beyond
+ * `success()` (avoid stacking both unless intentional).
+ *
+ * **Selection** — value changed without a “big button” metaphor: filters, chips, dropdown choice,
+ * segmented control, sheet open/close paired with UI (often softer than impact).
+ *
+ * **Notification** (`success` / `warning` / `error`) — **outcome** of a task, not tap weight.
+ * Use for completed mutations, toasts, verification mismatch, API failure. Do not use impact-heavy
+ * for every error if `error()` already runs.
+ *
  * Rules: always pair with visible (or audible) feedback; use sparingly; never rely on haptics alone.
  * Prefer `selection` for discrete value/UI changes; reserve `success|warning|error` for completed flows
  * or global toasts so you do not double-fire notification haptics on the same user-visible outcome.
