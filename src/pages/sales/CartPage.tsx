@@ -8,7 +8,6 @@ import {
   Trash,
   Copy,
   Check,
-  UserPlus,
   MapPin,
   Phone,
 } from '@phosphor-icons/react';
@@ -214,26 +213,6 @@ function SearchableCustomerDropdown({
           </>
         )}
       </SelectTrigger>
-
-      <button
-        type="button"
-        onClick={() => openSheet('search')}
-        className="w-full rounded-2xl border border-[color-mix(in_srgb,var(--bg-accent)_18%,var(--border-subtle))] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--bg-accent)_10%,white),color-mix(in_srgb,var(--bg-accent)_5%,white))] px-4 py-3 text-left shadow-[0_10px_24px_rgba(37,99,235,0.08)] transition-transform duration-150 hover:-translate-y-[1px]"
-      >
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--bg-accent)] text-[var(--content-on-color)] shadow-sm">
-            <UserPlus size={20} weight="bold" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[15px] font-semibold text-[var(--content-accent)]">
-              Add customer
-            </p>
-            <p className="mt-1 text-sm leading-5 text-[color-mix(in_srgb,var(--content-accent)_74%,var(--content-primary))]">
-              Search existing customers fast, or create a new one without leaving the order.
-            </p>
-          </div>
-        </div>
-      </button>
 
       {open && (
         <BottomSheet
@@ -459,14 +438,17 @@ function SpecialRateChip() {
 }
 
 // ---------------------------------------------------------------------------
-// BillingItemCard — shows items that ship from stock. Qty is read-only
-// (determined by stock). Swipe for rate / delete.
+// BillingItemCard — shows items that ship from stock. Qty remains editable,
+// while any PO remainder on the same line is preserved in the split cart.
+// Swipe for rate / delete.
 // ---------------------------------------------------------------------------
 interface BillingItemCardProps {
   item: CartItem;
   shipQty: number;
+  poQty: number;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
+  onChangeShipQty: (lineId: string, newShipQty: number) => void;
   onRatePress: (item: CartItem) => void;
   onDeletePress: (item: CartItem) => void;
   previewOnMount?: boolean;
@@ -475,8 +457,10 @@ interface BillingItemCardProps {
 const BillingItemCard = memo(function BillingItemCard({
   item: cartItem,
   shipQty,
+  poQty,
   isOpen,
   onOpenChange,
+  onChangeShipQty,
   onRatePress,
   onDeletePress,
   previewOnMount = false,
@@ -569,12 +553,12 @@ const BillingItemCard = memo(function BillingItemCard({
   const lineTotal = price * shipQty;
 
   return (
-    <li className="relative overflow-hidden rounded-2xl">
+    <li className="relative overflow-hidden">
       <div className="absolute inset-y-0 right-0 flex">
         <button
           type="button"
           onClick={() => onRatePress(cartItem)}
-          className="flex w-20 flex-col items-center justify-center gap-1 bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]"
+          className="flex w-20 flex-col items-center justify-center gap-1 border-l border-[color:color-mix(in_srgb,var(--role-primary)_18%,var(--border-subtle))] bg-[color:color-mix(in_srgb,var(--role-primary)_12%,white)] text-[var(--role-content)]"
           aria-label={`Set special rate for ${cartItem.item.name}`}
         >
           <CurrencyInr size={20} weight="bold" />
@@ -583,7 +567,7 @@ const BillingItemCard = memo(function BillingItemCard({
         <button
           type="button"
           onClick={() => onDeletePress(cartItem)}
-          className="flex w-20 flex-col items-center justify-center gap-1 bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]"
+          className="flex w-20 flex-col items-center justify-center gap-1 border-l border-[color:color-mix(in_srgb,var(--bg-negative)_20%,var(--border-subtle))] bg-[color:color-mix(in_srgb,var(--bg-negative)_10%,white)] text-[var(--red-8)]"
           aria-label={`Delete ${cartItem.item.name}`}
         >
           <Trash size={20} weight="bold" />
@@ -592,7 +576,7 @@ const BillingItemCard = memo(function BillingItemCard({
       </div>
 
       <div
-        className={`relative rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 ${isDragging ? '' : 'transition-transform duration-180 ease-out'}`}
+        className={`relative bg-[var(--bg-secondary)] px-4 py-4 ${isDragging ? '' : 'transition-transform duration-180 ease-out'} ${isOpen || isDragging ? 'z-10 shadow-[0_8px_20px_rgba(15,23,42,0.06)]' : ''}`}
         style={{ transform: `translate3d(-${isDragging ? offset : (isOpen ? SWIPE_ACTION_WIDTH : previewOffset)}px, 0, 0)` }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -605,50 +589,47 @@ const BillingItemCard = memo(function BillingItemCard({
         }}
       >
         <div className="min-w-0">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
+          <div className="flex items-start gap-4">
+            <div className="min-w-0 flex-1">
               {partNo && (
-                <p className="inline-flex max-w-full items-center truncate rounded-full bg-[var(--bg-tertiary)] px-3 py-1.5 font-mono text-[12px] font-semibold tracking-[0.04em] text-[var(--content-primary)]">
+                <p className="inline-flex max-w-full items-center truncate rounded-full border border-[var(--border-faint)] bg-[color:color-mix(in_srgb,var(--bg-tertiary)_72%,white)] px-3 py-1.5 font-mono text-[11px] font-semibold tracking-[0.04em] text-[var(--content-secondary)]">
                   {partNo}
                 </p>
               )}
-            </div>
-            <div className="shrink-0 text-right">
-              <p className="font-mono text-[15px] font-semibold leading-none text-[var(--content-primary)]">
-                {formatCurrency(price)}
+              <p className="mt-2.5 text-[16px] font-semibold leading-[1.35] text-[var(--content-primary)] whitespace-normal break-words line-clamp-2">
+                {cartItem.item.name}
               </p>
-            </div>
-          </div>
 
-          <p className="mt-2 text-[15px] font-semibold leading-[1.35] text-[var(--content-primary)] whitespace-normal break-words line-clamp-2">
-            {cartItem.item.name}
-          </p>
-
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            {hasSpecialRate && <SpecialRateChip />}
-            {hasSpecialRate && (
-              <span className="font-mono text-[10px] text-[var(--content-tertiary)] line-through">
-                {formatCurrency(cartItem.item.sales_price)}
-              </span>
-            )}
-          </div>
-
-          <div className="mt-3.5 flex items-end justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
-                Line total
-              </p>
-              <p className="mt-1 font-mono text-[15px] font-semibold text-[var(--content-secondary)]">
-                {formatCurrency(lineTotal)}
-              </p>
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                {hasSpecialRate && <SpecialRateChip />}
+                {hasSpecialRate && (
+                  <span className="font-mono text-[10px] text-[var(--content-tertiary)] line-through">
+                    {formatCurrency(cartItem.item.sales_price)}
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="shrink-0 flex flex-col items-end">
-              <p className="text-[10px] font-medium uppercase tracking-wider text-[var(--content-tertiary)] mb-1">
-                Qty
-              </p>
-              <p className="font-mono text-xl font-bold text-[var(--content-primary)] tabular-nums">
-                {shipQty}
-              </p>
+
+            <div className="shrink-0 flex min-w-[142px] flex-col items-end gap-3.5 pl-4">
+              <div className="text-right">
+                <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+                  Total
+                </p>
+                <p className="mt-1 font-mono text-[16px] font-semibold leading-none text-[var(--content-primary)]">
+                  {formatCurrency(lineTotal)}
+                </p>
+              </div>
+              <div className="flex w-full justify-end">
+                <NumberStepper
+                  value={shipQty}
+                  onChange={(newShipQty) => onChangeShipQty(cartItem.lineId, newShipQty)}
+                  min={poQty > 0 ? 0 : 1}
+                  presets={[]}
+                  variant="compact"
+                  showRemoveAtMin={poQty === 0}
+                  onRemove={poQty === 0 ? () => onDeletePress(cartItem) : undefined}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -783,6 +764,21 @@ export default function CartPage(): React.JSX.Element | null {
       if (!ci) return;
       const { ship } = splitCartLine(ci.item, ci.qty);
       const newTotal = ship + Math.max(0, newPoQty);
+      if (newTotal < 1) {
+        removeItem(lineId);
+      } else {
+        updateQty(lineId, newTotal);
+      }
+    },
+    [items, updateQty, removeItem],
+  );
+
+  const handleShipQtyChange = useCallback(
+    (lineId: string, newShipQty: number) => {
+      const ci = items.find((c) => c.lineId === lineId);
+      if (!ci) return;
+      const { po } = splitCartLine(ci.item, ci.qty);
+      const newTotal = Math.max(0, newShipQty) + po;
       if (newTotal < 1) {
         removeItem(lineId);
       } else {
@@ -1047,36 +1043,56 @@ export default function CartPage(): React.JSX.Element | null {
             {/* Billing items — what ships from stock */}
             {billingSplits.length > 0 && (
               <section>
-                <div className="mb-3 flex items-center justify-between gap-3 px-1">
-                  <h2 className="text-base font-semibold text-[var(--content-primary)]">
-                    Items
-                  </h2>
+                <div className="mb-3.5 flex items-end justify-between gap-3 px-1">
+                  <div>
+                    <h2 className="text-base font-semibold text-[var(--content-primary)]">
+                      Ready to bill
+                    </h2>
+                    <p className="mt-0.5 text-sm text-[var(--content-tertiary)]">
+                      In stock and included in this bill now
+                    </p>
+                  </div>
                   <p className="text-sm text-[var(--content-tertiary)]">
                     {billingSplits.length} line{billingSplits.length !== 1 ? 's' : ''}
                   </p>
                 </div>
-                <ul className="space-y-2">
+                <ul className="overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] divide-y divide-[var(--border-subtle)]">
                   {billingSplits.map((row) => (
                     <BillingItemCard
                       key={row.ci.lineId}
                       item={row.ci}
                       shipQty={row.ship}
+                      poQty={row.po}
                       isOpen={openActionsItemId === row.ci.lineId}
                       onOpenChange={(open) => setOpenActionsItemId(open ? row.ci.lineId : null)}
+                      onChangeShipQty={handleShipQtyChange}
                       onRatePress={openRateSheet}
                       onDeletePress={openDeleteSheet}
                       previewOnMount={row === billingSplits[0]}
                     />
                   ))}
                 </ul>
+                <button
+                  type="button"
+                  onClick={() => navigate('/sales/new')}
+                  className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-[color:color-mix(in_srgb,var(--role-primary)_18%,var(--border-subtle))] bg-[color:color-mix(in_srgb,var(--role-primary)_5%,white)] px-4 py-3 text-sm font-semibold text-[var(--role-content)] transition-colors hover:bg-[color:color-mix(in_srgb,var(--role-primary)_8%,white)]"
+                >
+                  <Plus size={18} weight="bold" />
+                  <span>Add items</span>
+                </button>
               </section>
             )}
 
             {/* Purchase order — editable qty */}
             {poSplits.length > 0 && (
               <section>
-                <div className="mb-3 flex items-center justify-between gap-3 px-1">
-                  <h2 className="text-base font-semibold text-[var(--content-warning)]">Purchase order</h2>
+                <div className="mb-3.5 flex items-end justify-between gap-3 px-1">
+                  <div>
+                    <h2 className="text-base font-semibold text-[var(--content-warning)]">Purchase order</h2>
+                    <p className="mt-0.5 text-sm text-[var(--content-tertiary)]">
+                      Not in stock and needs procurement
+                    </p>
+                  </div>
                   <p className="text-sm text-[var(--content-tertiary)]">
                     {poSplits.length} line{poSplits.length !== 1 ? 's' : ''}
                   </p>
