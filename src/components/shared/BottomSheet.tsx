@@ -7,9 +7,18 @@ interface BottomSheetProps {
   onClose: () => void;
   title?: string;
   children: ReactNode;
+  sheetClassName?: string;
+  contentClassName?: string;
 }
 
-export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetProps): React.JSX.Element | null {
+export function BottomSheet({
+  isOpen,
+  onClose,
+  title,
+  children,
+  sheetClassName = '',
+  contentClassName = '',
+}: BottomSheetProps): React.JSX.Element | null {
   const containerRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const dragStartY = useRef<number | null>(null);
@@ -148,7 +157,7 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
 
       <div
         ref={sheetRef}
-        className="relative z-10 w-full max-h-[85vh] bg-[var(--bg-secondary)]/95 backdrop-blur-xl rounded-t-2xl flex flex-col shadow-2xl ring-1 ring-white/10 animate-slide-up"
+        className={`relative z-10 w-full max-h-[85vh] bg-[var(--bg-secondary)]/95 backdrop-blur-xl rounded-t-2xl flex flex-col shadow-2xl ring-1 ring-white/10 animate-slide-up ${sheetClassName}`}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -171,7 +180,7 @@ export function BottomSheet({ isOpen, onClose, title, children }: BottomSheetPro
         )}
 
         <div
-          className="overflow-y-auto overscroll-contain px-5 pb-5"
+          className={`overflow-y-auto overscroll-contain px-5 pb-5 ${contentClassName}`}
           style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 20px)' }}
         >
           {children}

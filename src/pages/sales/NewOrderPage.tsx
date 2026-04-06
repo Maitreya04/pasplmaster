@@ -567,6 +567,10 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
               <p className="font-semibold text-[var(--content-accent)] line-clamp-2 leading-snug">
                 Select customer
               </p>
+              <div className="mt-2 flex items-center justify-between gap-2 text-xs text-[var(--content-tertiary)]">
+                <span>Recent + new</span>
+                <CaretRight size={16} className="shrink-0 text-[var(--content-quaternary)]" />
+              </div>
             </div>
           </button>
           {customerRail.map((c) => {
@@ -607,6 +611,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
       <BottomSheet
         isOpen={customerSheetOpen}
         onClose={closeCustomerSheet}
+        sheetClassName={customerSheetMode === 'search' ? 'max-h-[62vh]' : ''}
       >
         {customerSheetMode === 'search' ? (
           <div className="space-y-4">
