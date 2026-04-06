@@ -7,19 +7,26 @@ import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
 import { CartProvider } from '../../context/CartContext';
 import { prefetchItems } from '../../hooks/useItems';
 
+const preloadSalesHome = () => import('./SalesHome');
+const preloadNewOrder = () => import('./NewOrderPage');
+const preloadCart = () => import('./CartPage');
+const preloadMyOrders = () => import('./MyOrdersPage');
+
 const NAV_ITEMS: BottomNavItem[] = [
-  { icon: House, label: 'Home', path: '/sales' },
+  { icon: House, label: 'Home', path: '/sales', preload: preloadSalesHome },
   {
     icon: PlusCircle,
     label: 'New Order',
     path: '/sales/new',
     match: (pathname: string) => pathname === '/sales/new' || pathname === '/sales/cart',
+    preload: () => Promise.all([preloadNewOrder(), preloadCart()]),
   },
   {
     icon: ListBullets,
     label: 'My Orders',
     path: '/sales/orders',
     activeWeight: 'bold',
+    preload: preloadMyOrders,
   },
 ];
 

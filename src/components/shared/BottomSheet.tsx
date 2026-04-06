@@ -105,7 +105,7 @@ export function BottomSheet({
       window.setTimeout(() => {
         try {
           target.scrollIntoView({
-            block: 'center',
+            block: 'nearest',
             behavior: 'smooth',
           });
         } catch {

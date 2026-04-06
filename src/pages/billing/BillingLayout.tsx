@@ -6,10 +6,16 @@ import {
   HourglassHigh,
 } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
+import type { BottomNavItem } from '../../components/shared/BottomNav';
 import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
 
-const NAV_ITEMS = [
-  { icon: SquaresFour, label: 'Dashboard', path: '/billing' },
+const preloadDashboard = () => import('./DashboardPage');
+const preloadNeedsReview = () => import('./NeedsReviewPage');
+const preloadPending = () => import('./PendingPage');
+const preloadHistory = () => import('./HistoryPage');
+
+const NAV_ITEMS: BottomNavItem[] = [
+  { icon: SquaresFour, label: 'Dashboard', path: '/billing', preload: preloadDashboard },
   {
     icon: ClipboardText,
     label: 'Needs Review',
@@ -17,9 +23,10 @@ const NAV_ITEMS = [
     match: (pathname: string) => (
       pathname === '/billing/needs-review' || pathname.startsWith('/billing/review/')
     ),
+    preload: preloadNeedsReview,
   },
-  { icon: HourglassHigh, label: 'Pending', path: '/billing/pending' },
-  { icon: ClockCounterClockwise, label: 'History', path: '/billing/history' },
+  { icon: HourglassHigh, label: 'Pending', path: '/billing/pending', preload: preloadPending },
+  { icon: ClockCounterClockwise, label: 'History', path: '/billing/history', preload: preloadHistory },
 ];
 
 export default function BillingLayout(): React.JSX.Element | null {

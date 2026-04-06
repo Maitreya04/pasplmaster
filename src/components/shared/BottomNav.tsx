@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { Icon } from '@phosphor-icons/react';
 import { Link, useLocation } from 'react-router-dom';
 import { appHaptics } from '../../lib/haptics';
@@ -10,6 +11,7 @@ export interface BottomNavItem {
   match?: (pathname: string, search: string) => boolean;
   activeWeight?: IconWeight;
   inactiveWeight?: IconWeight;
+  preload?: () => Promise<unknown>;
 }
 
 interface BottomNavProps {
@@ -19,6 +21,11 @@ interface BottomNavProps {
 export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
   const location = useLocation();
   const currentFull = location.pathname + location.search;
+  const [optimisticPath, setOptimisticPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOptimisticPath(null);
+  }, [currentFull]);
 
   return (
     <nav
@@ -34,11 +41,12 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
       }}
     >
       {items.map((item) => {
-        const isActive = item.match
+        const matchesLocation = item.match
           ? item.match(location.pathname, location.search)
           : item.path.includes('?')
             ? currentFull === item.path
             : location.pathname === item.path;
+        const isActive = optimisticPath ? item.path === optimisticPath : matchesLocation;
         const IconCmp = item.icon;
         const iconWeight = isActive ? (item.activeWeight ?? 'fill') : (item.inactiveWeight ?? 'regular');
 
@@ -46,9 +54,15 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
           <Link
             key={item.path}
             to={item.path}
-            onClick={() => {
-              if (!isActive) appHaptics.selection();
+            onPointerDown={() => {
+              if (matchesLocation) return;
+
+              setOptimisticPath(item.path);
+              item.preload?.();
+              appHaptics.selection();
             }}
+            onMouseEnter={() => { item.preload?.(); }}
+            onFocus={() => { item.preload?.(); }}
             className={`
               flex min-h-[52px] min-w-0 flex-1 items-center justify-center rounded-[16px]
               px-2 py-1.5 no-underline transition-transform duration-150 ease-out active:scale-[0.985]

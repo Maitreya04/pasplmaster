@@ -612,50 +612,54 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
         isOpen={customerSheetOpen}
         onClose={closeCustomerSheet}
         sheetClassName={customerSheetMode === 'search' ? 'max-h-[62vh]' : ''}
+        contentClassName={customerSheetMode === 'search' ? '!px-0 !pb-0' : ''}
       >
         {customerSheetMode === 'search' ? (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={closeCustomerSheet}
-                className="inline-flex min-h-11 items-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 text-sm font-semibold text-[var(--content-primary)]"
-              >
-                Cancel
-              </button>
-              <h2 className="text-lg font-semibold text-[var(--content-primary)]">Customers</h2>
-              <button
-                type="button"
-                onClick={() => {
-                  setDraftName(customerQuery.trim());
-                  setDraftCity('');
-                  setDraftMobile('');
-                  setDraftGstin('');
-                  setDraftAddress('');
-                  setCustomerSheetMode('create');
-                }}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-primary)]"
-                aria-label="Add customer"
-              >
-                <Plus size={22} weight="regular" />
-              </button>
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="shrink-0 space-y-4 px-5 pb-4">
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={closeCustomerSheet}
+                  className="inline-flex min-h-11 items-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 text-sm font-semibold text-[var(--content-primary)]"
+                >
+                  Cancel
+                </button>
+                <h2 className="text-lg font-semibold text-[var(--content-primary)]">Customers</h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraftName(customerQuery.trim());
+                    setDraftCity('');
+                    setDraftMobile('');
+                    setDraftGstin('');
+                    setDraftAddress('');
+                    setCustomerSheetMode('create');
+                  }}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-primary)]"
+                  aria-label="Add customer"
+                >
+                  <Plus size={22} weight="regular" />
+                </button>
+              </div>
+
+              <div className="relative">
+                <MagnifyingGlass
+                  size={18}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--content-tertiary)]"
+                />
+                <input
+                  type="text"
+                  value={customerQuery}
+                  onChange={(event) => setCustomerQuery(event.target.value)}
+                  placeholder="Search by customer name or city…"
+                  className="w-full min-h-14 rounded-2xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] pl-10 pr-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+                />
+              </div>
             </div>
 
-            <div className="relative">
-              <MagnifyingGlass
-                size={18}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--content-tertiary)]"
-              />
-              <input
-                type="text"
-                value={customerQuery}
-                onChange={(event) => setCustomerQuery(event.target.value)}
-                placeholder="Search by customer name or city…"
-                className="w-full min-h-14 rounded-2xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] pl-10 pr-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
-              />
-            </div>
-
-            <div className="space-y-2">
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
+              <div className="space-y-2">
               <div className="flex items-center justify-between px-1">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
                   {customerQuery.trim() ? 'Matches' : 'Customers'}
@@ -711,9 +715,10 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                         <Check size={16} weight="bold" className="shrink-0 text-[var(--content-accent)]" />
                       )}
                     </div>
-                  </button>
-                ))
-              )}
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         ) : (

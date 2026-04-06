@@ -220,60 +220,64 @@ function SearchableCustomerDropdown({
           onClose={closeSheet}
           title={mode === 'create' ? 'Add customer' : 'Customers'}
           sheetClassName={mode === 'search' ? 'max-h-[62vh]' : ''}
+          contentClassName={mode === 'search' ? '!px-0 !pb-0' : ''}
         >
           {mode === 'search' ? (
-            <div className="space-y-4">
-              <div className="relative">
-                <MagnifyingGlass
-                  size={18}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--content-tertiary)]"
-                />
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search by customer name or city…"
-                  className="w-full min-h-14 rounded-2xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] pl-10 pr-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
-                />
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="shrink-0 space-y-4 px-5 pb-4">
+                <div className="relative">
+                  <MagnifyingGlass
+                    size={18}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--content-tertiary)]"
+                  />
+                  <input
+                    type="text"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search by customer name or city…"
+                    className="w-full min-h-14 rounded-2xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] pl-10 pr-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => startCreateMode(query)}
+                  className="w-full rounded-2xl border border-[color-mix(in_srgb,var(--bg-accent)_22%,var(--border-subtle))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--bg-accent)_9%,white),color-mix(in_srgb,var(--bg-accent)_4%,white))] px-4 py-3.5 text-left"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)]">
+                      <Plus size={18} weight="bold" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-[var(--content-accent)]">
+                        {query.trim() && !hasExactMatch ? `Add "${query.trim()}"` : 'Add new customer'}
+                      </p>
+                      <p className="mt-0.5 text-sm text-[color-mix(in_srgb,var(--content-accent)_74%,var(--content-primary))]">
+                        Quick create with name, city, and phone.
+                      </p>
+                    </div>
+                  </div>
+                </button>
+
+                {value && (
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+                      Selected
+                    </p>
+                    <p className="mt-1 text-[15px] font-semibold text-[var(--content-primary)]">
+                      {value.name}
+                      {value.city && (
+                        <span className="ml-1 font-normal text-[var(--content-tertiary)]">
+                          · {value.city}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                )}
               </div>
 
-              <button
-                type="button"
-                onClick={() => startCreateMode(query)}
-                className="w-full rounded-2xl border border-[color-mix(in_srgb,var(--bg-accent)_22%,var(--border-subtle))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--bg-accent)_9%,white),color-mix(in_srgb,var(--bg-accent)_4%,white))] px-4 py-3.5 text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)]">
-                    <Plus size={18} weight="bold" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-[var(--content-accent)]">
-                      {query.trim() && !hasExactMatch ? `Add "${query.trim()}"` : 'Add new customer'}
-                    </p>
-                    <p className="mt-0.5 text-sm text-[color-mix(in_srgb,var(--content-accent)_74%,var(--content-primary))]">
-                      Quick create with name, city, and phone.
-                    </p>
-                  </div>
-                </div>
-              </button>
-
-              {value && (
-                <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
-                    Selected
-                  </p>
-                  <p className="mt-1 text-[15px] font-semibold text-[var(--content-primary)]">
-                    {value.name}
-                    {value.city && (
-                      <span className="ml-1 font-normal text-[var(--content-tertiary)]">
-                        · {value.city}
-                      </span>
-                    )}
-                  </p>
-                </div>
-              )}
-
-              <div className="space-y-2">
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
+                <div className="space-y-2">
                 <div className="flex items-center justify-between px-1">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
                     {query.trim() ? 'Matches' : 'Customers'}
@@ -340,6 +344,7 @@ function SearchableCustomerDropdown({
                     </button>
                   ))
                 )}
+                </div>
               </div>
             </div>
           ) : (

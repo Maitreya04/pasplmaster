@@ -106,6 +106,8 @@ export function SearchInput({
         {!loading && localValue && (
           <button
             type="button"
+            onMouseDown={e => e.preventDefault()}
+            onTouchStart={e => e.preventDefault()}
             onClick={handleClear}
             className="flex h-7 w-7 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--border-opaque)_72%,white)] text-[var(--content-secondary)] transition-colors hover:bg-[color-mix(in_srgb,var(--border-opaque)_88%,white)] active:scale-95"
             aria-label="Clear search"
