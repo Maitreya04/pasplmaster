@@ -219,8 +219,9 @@ function SearchableCustomerDropdown({
           isOpen={open}
           onClose={closeSheet}
           title={mode === 'create' ? 'Add customer' : 'Customers'}
-          sheetClassName={mode === 'search' ? 'max-h-[62vh]' : ''}
+          sheetClassName={mode === 'search' ? 'h-[62vh] max-h-[62vh]' : ''}
           contentClassName={mode === 'search' ? '!px-0 !pb-0' : ''}
+          keyboardBehavior={mode === 'search' ? 'static' : 'adjust'}
         >
           {mode === 'search' ? (
             <div className="flex h-full min-h-0 flex-col">

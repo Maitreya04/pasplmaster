@@ -611,8 +611,9 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
       <BottomSheet
         isOpen={customerSheetOpen}
         onClose={closeCustomerSheet}
-        sheetClassName={customerSheetMode === 'search' ? 'max-h-[62vh]' : ''}
+        sheetClassName={customerSheetMode === 'search' ? 'h-[62vh] max-h-[62vh]' : ''}
         contentClassName={customerSheetMode === 'search' ? '!px-0 !pb-0' : ''}
+        keyboardBehavior={customerSheetMode === 'search' ? 'static' : 'adjust'}
       >
         {customerSheetMode === 'search' ? (
           <div className="flex h-full min-h-0 flex-col">

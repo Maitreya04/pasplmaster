@@ -9,6 +9,7 @@ interface BottomSheetProps {
   children: ReactNode;
   sheetClassName?: string;
   contentClassName?: string;
+  keyboardBehavior?: 'adjust' | 'static';
 }
 
 export function BottomSheet({
@@ -18,6 +19,7 @@ export function BottomSheet({
   children,
   sheetClassName = '',
   contentClassName = '',
+  keyboardBehavior = 'adjust',
 }: BottomSheetProps): React.JSX.Element | null {
   const containerRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -54,6 +56,7 @@ export function BottomSheet({
   // whole overlay upward, which can push the sheet header/search off-screen.
   useEffect(() => {
     if (!isOpen) return;
+    if (keyboardBehavior === 'static') return;
     if (typeof window === 'undefined' || !window.visualViewport) return;
 
     const container = containerRef.current;
@@ -81,11 +84,12 @@ export function BottomSheet({
         container.style.bottom = '';
       }
     };
-  }, [isOpen]);
+  }, [isOpen, keyboardBehavior]);
 
   // When an input inside the sheet receives focus (especially on mobile),
   // scroll it into view so it doesn't get covered by the on‑screen keyboard.
   useEffect(() => {
+    if (keyboardBehavior === 'static') return;
     const sheetEl = sheetRef.current;
     if (!sheetEl) return;
 
@@ -119,7 +123,7 @@ export function BottomSheet({
     return () => {
       sheetEl.removeEventListener('focusin', handleFocusIn);
     };
-  }, []);
+  }, [keyboardBehavior]);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     dragStartY.current = e.touches[0].clientY;
