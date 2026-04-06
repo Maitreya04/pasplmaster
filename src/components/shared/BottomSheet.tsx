@@ -49,9 +49,9 @@ export function BottomSheet({
   }, [onClose]);
 
   // On mobile Safari/Chrome, fixed bottom sheets don't automatically move with
-  // the on‑screen keyboard because the layout viewport height doesn't change.
-  // Tie the container to the visual viewport so the whole sheet lifts above
-  // the keyboard instead of being covered by it.
+  // the on-screen keyboard because the layout viewport height doesn't change.
+  // Size the sheet container to the visual viewport instead of translating the
+  // whole overlay upward, which can push the sheet header/search off-screen.
   useEffect(() => {
     if (!isOpen) return;
     if (typeof window === 'undefined' || !window.visualViewport) return;
@@ -63,12 +63,9 @@ export function BottomSheet({
 
     const syncWithViewport = () => {
       if (!viewport || !containerRef.current) return;
-      const heightDiff = window.innerHeight - viewport.height - viewport.offsetTop;
-      if (heightDiff > 0) {
-        containerRef.current.style.transform = `translateY(-${heightDiff}px)`;
-      } else {
-        containerRef.current.style.transform = '';
-      }
+      containerRef.current.style.top = `${viewport.offsetTop}px`;
+      containerRef.current.style.height = `${viewport.height}px`;
+      containerRef.current.style.bottom = 'auto';
     };
 
     syncWithViewport();
@@ -79,7 +76,9 @@ export function BottomSheet({
       viewport.removeEventListener('resize', syncWithViewport);
       viewport.removeEventListener('scroll', syncWithViewport);
       if (container) {
-        container.style.transform = '';
+        container.style.top = '';
+        container.style.height = '';
+        container.style.bottom = '';
       }
     };
   }, [isOpen]);
