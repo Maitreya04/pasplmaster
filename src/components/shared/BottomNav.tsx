@@ -1,12 +1,15 @@
 import type { Icon } from '@phosphor-icons/react';
 import { Link, useLocation } from 'react-router-dom';
 import { appHaptics } from '../../lib/haptics';
+import type { IconWeight } from '@phosphor-icons/react';
 
 export interface BottomNavItem {
   icon: Icon;
   label: string;
   path: string;
   match?: (pathname: string, search: string) => boolean;
+  activeWeight?: IconWeight;
+  inactiveWeight?: IconWeight;
 }
 
 interface BottomNavProps {
@@ -37,6 +40,7 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
             ? currentFull === item.path
             : location.pathname === item.path;
         const IconCmp = item.icon;
+        const iconWeight = isActive ? (item.activeWeight ?? 'fill') : (item.inactiveWeight ?? 'regular');
 
         return (
           <Link
@@ -55,7 +59,7 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
             <span className="flex min-w-0 flex-col items-center justify-center gap-1">
               <IconCmp
                 size={21}
-                weight={isActive ? 'fill' : 'regular'}
+                weight={iconWeight}
                 className="transition-colors duration-150 ease-out"
               />
               <span

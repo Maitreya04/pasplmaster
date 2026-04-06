@@ -107,10 +107,10 @@ export function SearchInput({
           <button
             type="button"
             onClick={handleClear}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--content-secondary)_62%,white)] text-[var(--content-on-color)] shadow-sm transition-colors hover:bg-[color-mix(in_srgb,var(--content-secondary)_74%,white)] active:scale-95"
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--border-opaque)_72%,white)] text-[var(--content-secondary)] transition-colors hover:bg-[color-mix(in_srgb,var(--border-opaque)_88%,white)] active:scale-95"
             aria-label="Clear search"
           >
-            <X size={16} weight="bold" />
+            <X size={14} weight="regular" />
           </button>
         )}
       </div>

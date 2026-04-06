@@ -13,11 +13,12 @@ import {
   type ReactNode,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash, CurrencyInr } from '@phosphor-icons/react';
-import { useQuery } from '@tanstack/react-query';
+import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash, CurrencyInr, MagnifyingGlass, MapPin, Phone, CaretLeft } from '@phosphor-icons/react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { useCustomers } from '../../hooks/useCustomers';
 import { usePendingItems } from '../../hooks/usePendingItems';
 import {
@@ -204,9 +205,25 @@ interface SmartLandingProps {
   scrollToSearch: () => void;
 }
 
+type CustomerSheetMode = 'search' | 'create';
+
+function normalizeCustomerText(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSearch }: SmartLandingProps) {
   const { userName } = useAuth();
   const { data: customers = [] } = useCustomers();
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const [customerSheetOpen, setCustomerSheetOpen] = useState(false);
+  const [customerSheetMode, setCustomerSheetMode] = useState<CustomerSheetMode>('search');
+  const [customerQuery, setCustomerQuery] = useState('');
+  const [draftName, setDraftName] = useState('');
+  const [draftCity, setDraftCity] = useState('');
+  const [draftMobile, setDraftMobile] = useState('');
+  const [draftGstin, setDraftGstin] = useState('');
+  const [draftAddress, setDraftAddress] = useState('');
 
   const { data: topCustomers = EMPTY_TOP_CUSTOMERS, isLoading: topCustomersLoading } = useQuery<TopCustomer[]>({
     queryKey: ['salesperson_top_customers', userName],
@@ -342,6 +359,21 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
 
   const activeCustomer = activeCustomerName ? nameToCustomer.get(activeCustomerName) ?? null : null;
 
+  const customerRail = useMemo(() => {
+    if (!activeCustomerName) return topCustomers;
+    const alreadyVisible = topCustomers.some((customer) => customer.customer_name === activeCustomerName);
+    if (alreadyVisible) return topCustomers;
+
+    return [
+      {
+        customer_name: activeCustomerName,
+        order_count: 0,
+        last_order_date: null,
+      },
+      ...topCustomers,
+    ];
+  }, [activeCustomerName, topCustomers]);
+
   const { data: pendingItemsForCustomer = [] } = usePendingItems({
     status: 'pending',
     customerId: activeCustomer?.id,
@@ -373,6 +405,106 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
       ),
     );
   };
+
+  const openCustomerSheet = useCallback((mode: CustomerSheetMode = 'search') => {
+    setCustomerSheetOpen(true);
+    setCustomerSheetMode(mode);
+    if (mode === 'search') {
+      setCustomerQuery('');
+    } else {
+      setDraftName(customerQuery.trim());
+      setDraftCity('');
+      setDraftMobile('');
+    }
+  }, [customerQuery]);
+
+  const closeCustomerSheet = useCallback(() => {
+    setCustomerSheetOpen(false);
+    setCustomerSheetMode('search');
+    setCustomerQuery('');
+    setDraftName('');
+    setDraftCity('');
+    setDraftMobile('');
+    setDraftGstin('');
+    setDraftAddress('');
+  }, []);
+
+  const filteredCustomers = useMemo(() => {
+    const q = customerQuery.trim().toLowerCase();
+    if (!q) return customers.slice(0, 20);
+    return customers
+      .map((customer) => {
+        const name = customer.name.toLowerCase();
+        const city = customer.city?.toLowerCase() ?? '';
+        let score = Number.POSITIVE_INFINITY;
+        if (name === q) score = 0;
+        else if (name.startsWith(q)) score = 1;
+        else if (name.split(/\s+/).some((part) => part.startsWith(q))) score = 2;
+        else if (city.startsWith(q)) score = 3;
+        else if (name.includes(q)) score = 4;
+        else if (city.includes(q)) score = 5;
+        return { customer, score };
+      })
+      .filter((entry) => Number.isFinite(entry.score))
+      .sort((a, b) => a.score - b.score || a.customer.name.localeCompare(b.customer.name))
+      .slice(0, 20)
+      .map((entry) => entry.customer);
+  }, [customerQuery, customers]);
+
+  const selectCustomer = useCallback((customer: Customer | null) => {
+    setActiveCustomerName(customer?.name ?? null);
+    onCustomerSelect(customer);
+  }, [onCustomerSelect]);
+
+  const createCustomerMutation = useMutation({
+    mutationFn: async () => {
+      const name = draftName.trim().replace(/\s+/g, ' ');
+      const city = draftCity.trim().replace(/\s+/g, ' ');
+      const mobile = draftMobile.trim().replace(/\s+/g, ' ');
+      const gstin = draftGstin.trim().replace(/\s+/g, ' ');
+      const address = draftAddress.trim().replace(/\s+/g, ' ');
+
+      if (!name) throw new Error('Enter a customer name.');
+
+      const existingCustomer = customers.find(
+        (customer) => normalizeCustomerText(customer.name) === normalizeCustomerText(name),
+      );
+      if (existingCustomer) return existingCustomer;
+
+      const { data, error } = await supabase
+        .from('customers')
+        .insert({
+          name,
+          city: city || null,
+          mobile: mobile || null,
+          gstin: gstin || null,
+          address: address || null,
+          is_active: true,
+        })
+        .select('*')
+        .single();
+
+      if (error) throw error;
+      return data as Customer;
+    },
+    onSuccess: (customer) => {
+      queryClient.setQueryData<Customer[]>(['customers'], (prev = []) => {
+        if (prev.some((entry) => entry.id === customer.id)) return prev;
+        return [...prev, customer];
+      });
+      void queryClient.invalidateQueries({ queryKey: ['customers'] });
+      void queryClient.invalidateQueries({ queryKey: ['salesperson_top_customers', userName] });
+      selectCustomer(customer);
+      closeCustomerSheet();
+
+      const reusedExisting = customers.some((entry) => entry.id === customer.id);
+      if (reusedExisting) toast.info(`Selected ${customer.name}.`);
+      else toast.success(`${customer.name} added.`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Could not add customer right now.');
+    },
+  });
 
   if (!hasSmartData) {
     // New salesperson with no data — just show Trending section below search
@@ -417,20 +549,35 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
     <div className="space-y-6 pt-4">
       {/* Section 1 — Your Customers */}
       <section className="space-y-3">
-        <h3 className="mt-1 text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-          Your Customers
-        </h3>
+        <div className="mt-1 flex items-center justify-between gap-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+            Your Customers
+          </h3>
+        </div>
         <div className="flex gap-3 overflow-x-auto pb-1 pt-1 scrollbar-none">
-          {topCustomers.map((c) => {
+          <button
+            type="button"
+            onClick={() => openCustomerSheet('search')}
+            className="min-w-44 max-w-56 px-3 py-3 rounded-lg text-left flex flex-col justify-between bg-[var(--bg-secondary)] border border-[var(--border-subtle)]"
+          >
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--bg-tertiary)] text-[var(--content-accent)]">
+              <Plus size={16} weight="bold" />
+            </div>
+            <div className="pt-6">
+              <p className="font-semibold text-[var(--content-accent)] line-clamp-2 leading-snug">
+                Select customer
+              </p>
+            </div>
+          </button>
+          {customerRail.map((c) => {
             const isActive = c.customer_name === activeCustomerName;
             return (
               <button
                 key={c.customer_name}
                 type="button"
                 onClick={() => {
-                  setActiveCustomerName(c.customer_name);
                   const customer = nameToCustomer.get(c.customer_name) ?? null;
-                  onCustomerSelect(customer);
+                  selectCustomer(customer);
                 }}
                 className={`min-w-44 max-w-56 px-3 py-3 rounded-lg text-left flex flex-col justify-between gap-1.5 ${
                   isActive
@@ -442,16 +589,221 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                   {c.customer_name}
                 </p>
                 <p className="text-xs text-[var(--content-secondary)]">
-                  {c.order_count} order{c.order_count === 1 ? '' : 's'}
+                  {c.order_count > 0
+                    ? `${c.order_count} order${c.order_count === 1 ? '' : 's'}`
+                    : isActive
+                      ? 'Selected customer'
+                      : 'Customer'}
                 </p>
                 <p className="text-xs text-[var(--content-tertiary)] mt-1">
-                  Last order {formatShortDate(c.last_order_date)}
+                  {c.last_order_date ? `Last order ${formatShortDate(c.last_order_date)}` : isActive ? 'Ready for reorder' : 'No recent orders'}
                 </p>
               </button>
             );
           })}
         </div>
       </section>
+
+      <BottomSheet
+        isOpen={customerSheetOpen}
+        onClose={closeCustomerSheet}
+      >
+        {customerSheetMode === 'search' ? (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={closeCustomerSheet}
+                className="inline-flex min-h-11 items-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 text-sm font-semibold text-[var(--content-primary)]"
+              >
+                Cancel
+              </button>
+              <h2 className="text-lg font-semibold text-[var(--content-primary)]">Customers</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setDraftName(customerQuery.trim());
+                  setDraftCity('');
+                  setDraftMobile('');
+                  setDraftGstin('');
+                  setDraftAddress('');
+                  setCustomerSheetMode('create');
+                }}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-primary)]"
+                aria-label="Add customer"
+              >
+                <Plus size={22} weight="regular" />
+              </button>
+            </div>
+
+            <div className="relative">
+              <MagnifyingGlass
+                size={18}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--content-tertiary)]"
+              />
+              <input
+                type="text"
+                value={customerQuery}
+                onChange={(event) => setCustomerQuery(event.target.value)}
+                placeholder="Search by customer name or city…"
+                className="w-full min-h-14 rounded-2xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] pl-10 pr-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between px-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+                  {customerQuery.trim() ? 'Matches' : 'Customers'}
+                </p>
+                {filteredCustomers.length > 0 && (
+                  <p className="text-xs text-[var(--content-tertiary)]">{filteredCustomers.length} shown</p>
+                )}
+              </div>
+
+              {filteredCustomers.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-[var(--border-opaque)] bg-[var(--bg-secondary)] p-5 text-center">
+                  <p className="text-sm font-semibold text-[var(--content-primary)]">No customers found</p>
+                  <p className="mt-1 text-sm text-[var(--content-tertiary)]">
+                    Create a new customer and continue ordering.
+                  </p>
+                </div>
+              ) : (
+                filteredCustomers.map((customer) => (
+                  <button
+                    key={customer.id}
+                    type="button"
+                    onClick={() => {
+                      selectCustomer(customer);
+                      closeCustomerSheet();
+                    }}
+                    className={`w-full rounded-2xl border px-4 py-3 text-left transition-colors ${
+                      activeCustomerName === customer.name
+                        ? 'border-[color-mix(in_srgb,var(--bg-accent)_34%,var(--border-subtle))] bg-[color-mix(in_srgb,var(--bg-accent)_8%,white)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)]'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-[15px] font-semibold text-[var(--content-primary)]">
+                          {customer.name}
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--content-tertiary)]">
+                          {customer.city && (
+                            <span className="inline-flex items-center gap-1">
+                              <MapPin size={14} />
+                              {customer.city}
+                            </span>
+                          )}
+                          {customer.mobile && (
+                            <span className="inline-flex items-center gap-1">
+                              <Phone size={14} />
+                              {customer.mobile}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {activeCustomerName === customer.name && (
+                        <Check size={16} weight="bold" className="shrink-0 text-[var(--content-accent)]" />
+                      )}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        ) : (
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              createCustomerMutation.mutate();
+            }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setCustomerSheetMode('search')}
+                className="inline-flex min-h-11 items-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 text-sm font-semibold text-[var(--content-primary)]"
+              >
+                <CaretLeft size={18} weight="bold" />
+              </button>
+              <h2 className="text-lg font-semibold text-[var(--content-primary)]">Add Customer</h2>
+              <button
+                type="submit"
+                disabled={createCustomerMutation.isPending}
+                className="inline-flex min-h-11 items-center rounded-full bg-[var(--bg-accent)] px-4 text-sm font-semibold text-[var(--content-on-color)] disabled:opacity-60"
+              >
+                {createCustomerMutation.isPending ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[var(--content-secondary)]">
+                  Business name
+                </label>
+                <input
+                  type="text"
+                  value={draftName}
+                  onChange={(event) => setDraftName(event.target.value)}
+                  placeholder="Party name"
+                  className="w-full min-h-14 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[var(--content-secondary)]">
+                  Location
+                </label>
+                <input
+                  type="text"
+                  value={draftCity}
+                  onChange={(event) => setDraftCity(event.target.value)}
+                  placeholder="Optional"
+                  className="w-full min-h-14 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[var(--content-secondary)]">
+                  Phone
+                </label>
+                <input
+                  type="tel"
+                  value={draftMobile}
+                  onChange={(event) => setDraftMobile(event.target.value)}
+                  placeholder="Optional"
+                  className="w-full min-h-14 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[var(--content-secondary)]">
+                  GST number
+                </label>
+                <input
+                  type="text"
+                  value={draftGstin}
+                  onChange={(event) => setDraftGstin(event.target.value)}
+                  placeholder="Optional"
+                  className="w-full min-h-14 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-[var(--content-secondary)]">
+                  Address
+                </label>
+                <textarea
+                  value={draftAddress}
+                  onChange={(event) => setDraftAddress(event.target.value)}
+                  placeholder="Optional"
+                  rows={3}
+                  className="w-full resize-none rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+                />
+              </div>
+            </div>
+          </form>
+        )}
+      </BottomSheet>
 
       {/* Section 2 — Pending from last orders */}
       {activeCustomer && pendingSuggestions.length > 0 && (
