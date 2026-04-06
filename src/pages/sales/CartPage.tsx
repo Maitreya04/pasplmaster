@@ -645,48 +645,159 @@ const BillingItemCard = memo(function BillingItemCard({
 });
 
 // ---------------------------------------------------------------------------
-// PurchaseOrderCard — editable stepper for PO qty. For PO-only items, also
-// serves as the only card (with delete).
+// PurchaseOrderCard — editable stepper for PO qty. Swipe for rate / delete
+// (same pattern as billed lines). For PO-only items, stepper still offers
+// remove at min qty.
 // ---------------------------------------------------------------------------
+interface PurchaseOrderCardProps {
+  cartItem: CartItem;
+  poQty: number;
+  shipQty: number;
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  onChangePoQty: (lineId: string, newPoQty: number) => void;
+  onRatePress: (item: CartItem) => void;
+  onDeletePress: (item: CartItem) => void;
+}
+
 const PurchaseOrderCard = memo(function PurchaseOrderCard({
   cartItem,
   poQty,
   shipQty,
+  isOpen,
+  onOpenChange,
   onChangePoQty,
-  onRemoveLine,
-}: {
-  cartItem: CartItem;
-  poQty: number;
-  shipQty: number;
-  onChangePoQty: (lineId: string, newPoQty: number) => void;
-  onRemoveLine: (lineId: string) => void;
-}) {
+  onRatePress,
+  onDeletePress,
+}: PurchaseOrderCardProps) {
+  const [offset, setOffset] = useState(isOpen ? SWIPE_ACTION_WIDTH : 0);
+  const [isDragging, setIsDragging] = useState(false);
+  const startXRef = useRef<number | null>(null);
+  const startYRef = useRef<number | null>(null);
+  const baseOffsetRef = useRef(0);
+  const isHorizontalGestureRef = useRef(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setOffset(0);
+    }
+  }, [isOpen]);
+
+  const closeActions = useCallback(() => {
+    setOffset(0);
+    onOpenChange(false);
+  }, [onOpenChange]);
+
+  const handleTouchStart = (event: React.TouchEvent) => {
+    const touch = event.touches[0];
+    startXRef.current = touch.clientX;
+    startYRef.current = touch.clientY;
+    baseOffsetRef.current = isOpen ? SWIPE_ACTION_WIDTH : 0;
+    isHorizontalGestureRef.current = false;
+    setIsDragging(true);
+  };
+
+  const handleTouchMove = (event: React.TouchEvent) => {
+    if (startXRef.current === null || startYRef.current === null) return;
+
+    const touch = event.touches[0];
+    const deltaX = startXRef.current - touch.clientX;
+    const deltaY = Math.abs(startYRef.current - touch.clientY);
+
+    if (!isHorizontalGestureRef.current) {
+      if (Math.abs(deltaX) < 4) return;
+      if (Math.abs(deltaX) <= deltaY) {
+        setIsDragging(false);
+        return;
+      }
+      isHorizontalGestureRef.current = true;
+    }
+
+    const nextOffset = Math.min(
+      SWIPE_ACTION_WIDTH,
+      Math.max(0, baseOffsetRef.current + (deltaX * 1.15)),
+    );
+    setOffset(nextOffset);
+    event.preventDefault();
+  };
+
+  const handleTouchEnd = () => {
+    if (isHorizontalGestureRef.current) {
+      if (offset >= SWIPE_OPEN_THRESHOLD) {
+        setOffset(SWIPE_ACTION_WIDTH);
+        onOpenChange(true);
+      } else {
+        closeActions();
+      }
+    }
+
+    setIsDragging(false);
+    startXRef.current = null;
+    startYRef.current = null;
+    isHorizontalGestureRef.current = false;
+  };
+
   const partNo = cartItem.item.alias1 ?? cartItem.item.alias;
   const fullyPo = shipQty === 0;
 
   return (
-    <li className="rounded-2xl border border-[color-mix(in_srgb,var(--border-warning)_42%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-4 py-3.5">
-      <div className="flex items-center gap-3">
-        <div className="flex-1 min-w-0">
-          {partNo && (
-            <span className="inline-flex max-w-full shrink-0 items-center truncate rounded-full border border-[color-mix(in_srgb,var(--content-primary)_12%,var(--border-subtle))] bg-[var(--bg-secondary)] px-3 py-1 font-mono text-[11px] font-semibold tracking-[0.04em] text-[var(--content-primary)]">
-              {partNo}
-            </span>
-          )}
-          <p className="mt-1.5 text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
-            {cartItem.item.name}
-          </p>
-        </div>
-        <div className="shrink-0">
-          <NumberStepper
-            value={poQty}
-            onChange={(q) => onChangePoQty(cartItem.lineId, q)}
-            min={fullyPo ? 1 : 0}
-            presets={[]}
-            variant="compact"
-            showRemoveAtMin={fullyPo}
-            onRemove={fullyPo ? () => onRemoveLine(cartItem.lineId) : undefined}
-          />
+    <li className="relative overflow-hidden rounded-2xl">
+      <div className="absolute inset-y-0 right-0 flex">
+        <button
+          type="button"
+          onClick={() => onRatePress(cartItem)}
+          className="flex w-20 flex-col items-center justify-center gap-1 border-l border-[color-mix(in_srgb,var(--role-primary)_22%,var(--border-subtle))] bg-[var(--role-primary-subtle)] text-[var(--role-content)]"
+          aria-label={`Set special rate for ${cartItem.item.name}`}
+        >
+          <CurrencyInr size={20} weight="bold" />
+          <span className="text-xs font-semibold">Rate</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onDeletePress(cartItem)}
+          className="flex w-20 flex-col items-center justify-center gap-1 border-l border-[color-mix(in_srgb,var(--bg-negative)_28%,var(--border-subtle))] bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]"
+          aria-label={`Delete ${cartItem.item.name}`}
+        >
+          <Trash size={20} weight="bold" />
+          <span className="text-xs font-semibold">Delete</span>
+        </button>
+      </div>
+
+      <div
+        className={`relative rounded-2xl border border-[color-mix(in_srgb,var(--border-warning)_42%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-4 py-3.5 ${isDragging ? '' : 'transition-transform duration-180 ease-out'} ${isOpen || isDragging ? 'z-10 shadow-[0_8px_20px_rgba(15,23,42,0.06)]' : ''}`}
+        style={{ transform: `translate3d(-${isDragging ? offset : (isOpen ? SWIPE_ACTION_WIDTH : 0)}px, 0, 0)` }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        onClick={() => {
+          if (isOpen && !isDragging) {
+            closeActions();
+          }
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            {partNo && (
+              <span className="inline-flex max-w-full shrink-0 items-center truncate rounded-full border border-[color-mix(in_srgb,var(--content-primary)_12%,var(--border-subtle))] bg-[var(--bg-secondary)] px-3 py-1 font-mono text-[11px] font-semibold tracking-[0.04em] text-[var(--content-primary)]">
+                {partNo}
+              </span>
+            )}
+            <p className="mt-1.5 text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
+              {cartItem.item.name}
+            </p>
+          </div>
+          <div className="shrink-0">
+            <NumberStepper
+              value={poQty}
+              onChange={(q) => onChangePoQty(cartItem.lineId, q)}
+              min={fullyPo ? 1 : 0}
+              presets={[]}
+              variant="compact"
+              showRemoveAtMin={fullyPo}
+              onRemove={fullyPo ? () => onDeletePress(cartItem) : undefined}
+            />
+          </div>
         </div>
       </div>
     </li>
@@ -729,6 +840,7 @@ export default function CartPage(): React.JSX.Element | null {
   const summaryCopyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showItemBreakdown, setShowItemBreakdown] = useState(false);
   const [openActionsItemId, setOpenActionsItemId] = useState<string | null>(null);
+  const [openPoActionsItemId, setOpenPoActionsItemId] = useState<string | null>(null);
   const [rateItemId, setRateItemId] = useState<string | null>(null);
   const [rateValue, setRateValue] = useState('');
   const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
@@ -799,6 +911,7 @@ export default function CartPage(): React.JSX.Element | null {
 
   const openRateSheet = useCallback((cartItem: CartItem) => {
     setOpenActionsItemId(null);
+    setOpenPoActionsItemId(null);
     setRateItemId(cartItem.lineId);
     setRateValue(cartItem.specialRate !== null ? String(cartItem.specialRate) : '');
   }, []);
@@ -813,6 +926,7 @@ export default function CartPage(): React.JSX.Element | null {
 
   const openDeleteSheet = useCallback((cartItem: CartItem) => {
     setOpenActionsItemId(null);
+    setOpenPoActionsItemId(null);
     setDeleteItemId(cartItem.lineId);
   }, []);
 
@@ -1077,7 +1191,10 @@ export default function CartPage(): React.JSX.Element | null {
                       shipQty={row.ship}
                       poQty={row.po}
                       isOpen={openActionsItemId === row.ci.lineId}
-                      onOpenChange={(open) => setOpenActionsItemId(open ? row.ci.lineId : null)}
+                      onOpenChange={(open) => {
+                        if (open) setOpenPoActionsItemId(null);
+                        setOpenActionsItemId(open ? row.ci.lineId : null);
+                      }}
                       onChangeShipQty={handleShipQtyChange}
                       onRatePress={openRateSheet}
                       onDeletePress={openDeleteSheet}
@@ -1117,8 +1234,14 @@ export default function CartPage(): React.JSX.Element | null {
                       cartItem={row.ci}
                       poQty={row.po}
                       shipQty={row.ship}
+                      isOpen={openPoActionsItemId === row.ci.lineId}
+                      onOpenChange={(open) => {
+                        if (open) setOpenActionsItemId(null);
+                        setOpenPoActionsItemId(open ? row.ci.lineId : null);
+                      }}
                       onChangePoQty={handlePoQtyChange}
-                      onRemoveLine={removeItem}
+                      onRatePress={openRateSheet}
+                      onDeletePress={openDeleteSheet}
                     />
                   ))}
                 </ul>
@@ -1332,24 +1455,14 @@ export default function CartPage(): React.JSX.Element | null {
                 {formatCurrency(billingTotal)}
               </p>
             </div>
-            <div className="grid grid-cols-[auto_1fr] gap-2">
-              <button
-                type="button"
-                onClick={goToNewOrderWithSearchFocus}
-                className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 font-semibold text-[var(--content-primary)] transition-colors hover:bg-[var(--bg-tertiary)]"
-              >
-                <Plus size={18} weight="bold" />
-                Add items
-              </button>
-              <BigButton
-                variant="primary"
-                onClick={handleSubmit}
-                loading={submitMutation.isPending}
-                disabled={!customer}
-              >
-                Submit Order
-              </BigButton>
-            </div>
+            <BigButton
+              variant="primary"
+              onClick={handleSubmit}
+              loading={submitMutation.isPending}
+              disabled={!customer}
+            >
+              Submit Order
+            </BigButton>
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import type { Icon } from '@phosphor-icons/react';
 import { Link, useLocation } from 'react-router-dom';
 import { appHaptics } from '../../lib/haptics';
@@ -16,6 +16,76 @@ export interface BottomNavItem {
 
 interface BottomNavProps {
   items: BottomNavItem[];
+}
+
+function BottomNavLink({
+  item,
+  willNavigate,
+  isActive,
+  iconWeight,
+  onNavigateIntent,
+}: {
+  item: BottomNavItem;
+  willNavigate: boolean;
+  isActive: boolean;
+  iconWeight: IconWeight;
+  onNavigateIntent: () => void;
+}): React.JSX.Element {
+  const IconCmp = item.icon;
+  const hapticFromTouch = useRef(false);
+
+  const runIntent = useCallback(() => {
+    onNavigateIntent();
+    item.preload?.();
+    appHaptics.impactMedium();
+  }, [item, onNavigateIntent]);
+
+  return (
+    <Link
+      to={item.path}
+      onTouchEnd={() => {
+        if (!willNavigate) return;
+        hapticFromTouch.current = true;
+        runIntent();
+        window.setTimeout(() => {
+          hapticFromTouch.current = false;
+        }, 400);
+      }}
+      onClick={() => {
+        if (!willNavigate) return;
+        if (hapticFromTouch.current) return;
+        runIntent();
+      }}
+      onMouseEnter={() => {
+        item.preload?.();
+      }}
+      onFocus={() => {
+        item.preload?.();
+      }}
+      className={`
+        flex min-h-[52px] min-w-0 flex-1 items-center justify-center rounded-[16px]
+        px-2 py-1.5 no-underline transition-transform duration-150 ease-out active:scale-[0.985]
+        ${isActive ? 'text-[var(--role-primary)]' : 'text-[var(--content-tertiary)]'}
+      `}
+      aria-current={isActive ? 'page' : undefined}
+    >
+      <span className="flex min-w-0 flex-col items-center justify-center gap-1">
+        <IconCmp
+          size={21}
+          weight={iconWeight}
+          className="transition-colors duration-150 ease-out"
+        />
+        <span
+          className={`
+            truncate text-[10.5px] leading-[1.05] tracking-[-0.01em] transition-colors duration-150 ease-out
+            ${isActive ? 'font-semibold' : 'font-medium'}
+          `}
+        >
+          {item.label}
+        </span>
+      </span>
+    </Link>
+  );
 }
 
 export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
@@ -47,45 +117,26 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
             ? currentFull === item.path
             : location.pathname === item.path;
         const isActive = optimisticPath ? item.path === optimisticPath : matchesLocation;
-        const IconCmp = item.icon;
         const iconWeight = isActive ? (item.activeWeight ?? 'fill') : (item.inactiveWeight ?? 'regular');
 
-        return (
-          <Link
-            key={item.path}
-            to={item.path}
-            onPointerDown={() => {
-              if (matchesLocation) return;
+        // Gate haptics on real navigation, not tab highlight. E.g. New Order tab stays active on
+        // /sales/cart but Link still goes to /sales/new — we should buzz. onClick is used instead of
+        // pointerdown for reliable iOS Safari feedback on <a href>.
+        const willNavigate = item.path.includes('?')
+          ? currentFull !== item.path
+          : location.pathname !== item.path;
 
+        return (
+          <BottomNavLink
+            key={item.path}
+            item={item}
+            willNavigate={willNavigate}
+            isActive={isActive}
+            iconWeight={iconWeight}
+            onNavigateIntent={() => {
               setOptimisticPath(item.path);
-              item.preload?.();
-              appHaptics.impactLight();
             }}
-            onMouseEnter={() => { item.preload?.(); }}
-            onFocus={() => { item.preload?.(); }}
-            className={`
-              flex min-h-[52px] min-w-0 flex-1 items-center justify-center rounded-[16px]
-              px-2 py-1.5 no-underline transition-transform duration-150 ease-out active:scale-[0.985]
-              ${isActive ? 'text-[var(--role-primary)]' : 'text-[var(--content-tertiary)]'}
-            `}
-            aria-current={isActive ? 'page' : undefined}
-          >
-            <span className="flex min-w-0 flex-col items-center justify-center gap-1">
-              <IconCmp
-                size={21}
-                weight={iconWeight}
-                className="transition-colors duration-150 ease-out"
-              />
-              <span
-                className={`
-                  truncate text-[10.5px] leading-[1.05] tracking-[-0.01em] transition-colors duration-150 ease-out
-                  ${isActive ? 'font-semibold' : 'font-medium'}
-                `}
-              >
-                {item.label}
-              </span>
-            </span>
-          </Link>
+          />
         );
       })}
     </nav>
