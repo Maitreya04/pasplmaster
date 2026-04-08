@@ -16,6 +16,11 @@
 
 **Scale:** ~12,500 SKUs, ~3,200 customers, ~200-250 orders/day, ₹20 lakh daily sales
 
+Related implementation notes:
+
+- Busy/local ERP integration blueprint: [docs/BUSY_DB_INTEGRATION.md](/Users/maitreya/pasplmaster/docs/BUSY_DB_INTEGRATION.md)
+- Engineering strategy summary: [docs/ENGINEERING_STRATEGY_SUMMARY.md](/Users/maitreya/pasplmaster/docs/ENGINEERING_STRATEGY_SUMMARY.md)
+
 ---
 
 ## 2. Tech Stack

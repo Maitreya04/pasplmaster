@@ -1,0 +1,375 @@
+# Busy Database Integration Blueprint
+
+This document describes how to integrate PASPL Master with the Busy database running on a local server so the app can:
+
+- read near-live stock
+- read customer and item master data
+- write sales orders from the app into Busy
+- keep billing/picking workflow responsive
+- scale safely as order volume grows
+
+## 1. What The Codebase Does Today
+
+The current app is a browser-first Vite SPA deployed on Vercel and talks directly to Supabase from the client.
+
+Relevant paths:
+
+- [src/lib/supabase/client.ts](/Users/maitreya/pasplmaster/src/lib/supabase/client.ts)
+- [src/hooks/useItems.ts](/Users/maitreya/pasplmaster/src/hooks/useItems.ts#L1)
+- [src/hooks/useOrders.ts](/Users/maitreya/pasplmaster/src/hooks/useOrders.ts#L1)
+- [src/pages/sales/CartPage.tsx](/Users/maitreya/pasplmaster/src/pages/sales/CartPage.tsx#L939)
+- [supabase/migrations/011_submit_sales_order_rpc.sql](/Users/maitreya/pasplmaster/supabase/migrations/011_submit_sales_order_rpc.sql)
+
+Important observations:
+
+- The browser currently submits orders by calling `submit_sales_order` directly in Supabase.
+- The browser reads item stock from the `items.stock_qty` column.
+- The browser fetches the full active item catalog in batches and keeps it cached.
+- Orders already use Supabase Realtime to refresh UI state.
+
+This is a good base, but it is not the right place to connect directly to Busy.
+
+## 2. Senior-Level Integration Principle
+
+Do not connect the frontend browser app directly to the Busy database.
+
+Instead, use this architecture:
+
+```mermaid
+flowchart LR
+  A["Sales / Billing / Picking App (Vercel SPA)"] --> B["Supabase API + Postgres"]
+  B --> C["Integration Service near Busy server"]
+  C --> D["Busy DB / Busy app on local server"]
+  D --> C
+  C --> B
+```
+
+Why:
+
+- Busy is on a local server, so internet-facing browser clients should not connect to it.
+- Busy credentials and write access must stay server-side.
+- You need retry logic, audit logs, conflict handling, and idempotency.
+- If Busy is slow or offline, your app should still work and queue writes safely.
+
+## 3. Recommended Source Of Truth Model
+
+Use a split-responsibility model:
+
+- Supabase is the app-facing operational store.
+- Busy remains the ERP/accounting master system.
+- The integration service synchronizes data between them.
+
+Recommended ownership:
+
+- `items`, `customers`, transport/master data:
+  Busy -> integration service -> Supabase
+- live or near-live stock snapshots:
+  Busy -> integration service -> Supabase
+- app orders:
+  app -> Supabase -> outbox -> integration service -> Busy
+- Busy confirmation / ERP document number / sync status:
+  Busy -> integration service -> Supabase
+
+This lets the app stay fast while still respecting Busy as the business system.
+
+## 4. Target Write Path For Orders
+
+Today the app does:
+
+1. browser calls `submit_sales_order`
+2. Supabase inserts order and decrements stock
+
+Recommended next version:
+
+1. browser submits order into Supabase
+2. Supabase creates:
+   - `orders`
+   - `order_items`
+   - `erp_order_outbox`
+3. integration service reads unsent outbox rows
+4. integration service writes order into Busy
+5. integration service marks row as `synced`, `failed`, or `retrying`
+6. UI shows sync state on the order
+
+Recommended statuses:
+
+- `draft`
+- `submitted`
+- `erp_queued`
+- `erp_synced`
+- `erp_failed`
+
+Recommended outbox fields:
+
+- `id`
+- `order_id`
+- `idempotency_key`
+- `payload`
+- `status`
+- `attempt_count`
+- `last_error`
+- `next_retry_at`
+- `busy_order_ref`
+- `created_at`
+- `updated_at`
+
+Why this matters:
+
+- avoids duplicate orders in Busy
+- supports retries when local server is offline
+- gives visibility when an order failed after app submit
+
+## 5. Target Read Path For Stock
+
+For stock, do not query Busy from the client at search time.
+
+Use a replicated stock model:
+
+1. integration service polls Busy stock deltas every 15 to 60 seconds
+2. writes normalized stock snapshot into Supabase
+3. app reads stock from Supabase
+4. app uses Realtime or selective invalidation for hot screens
+
+If you need tighter freshness, add:
+
+- `last_stock_sync_at` on each item
+- a lightweight `inventory_version` counter
+- a `stock_events` table for changed SKUs only
+
+This keeps search fast and avoids hammering Busy.
+
+## 6. Minimum Backend You Should Add
+
+This repo currently has no dedicated backend service outside Supabase, so the senior approach is to add one.
+
+Recommended deployment location:
+
+- same machine as Busy server, or
+- same LAN as Busy server with private DB access
+
+Recommended responsibilities:
+
+- read Busy items/customers/stock
+- write sales orders to Busy
+- maintain checkpoints for incremental sync
+- retry failures with backoff
+- expose health metrics
+
+Suggested implementation options:
+
+- Node.js worker with cron or queue processing
+- Supabase Edge Functions can help for orchestration, but not if Busy is only reachable on the LAN
+- best practical setup: small Node service on the local server side
+
+Suggested folder if you want to build it in this repo later:
+
+- `server/busy-sync/`
+
+## 7. Database Objects To Add In Supabase
+
+Add integration tables instead of mixing sync metadata into business rows only.
+
+Recommended new tables:
+
+- `erp_order_outbox`
+- `erp_sync_checkpoints`
+- `erp_sync_failures`
+- `inventory_sync_runs`
+- `customer_sync_runs`
+- `item_sync_runs`
+
+Recommended columns on existing rows:
+
+- `orders.erp_sync_status`
+- `orders.erp_synced_at`
+- `orders.erp_reference_no`
+- `orders.erp_last_error`
+- `items.stock_last_synced_at`
+- `items.stock_source`
+
+Recommended indexes:
+
+- `erp_order_outbox(status, next_retry_at)`
+- `orders(erp_sync_status, created_at desc)`
+- `items(updated_at desc)`
+- `items(stock_last_synced_at desc)`
+
+## 8. Anti-Corruption Layer For Busy
+
+Do not spread Busy-specific field names through the frontend.
+
+Create a translation layer in the integration service:
+
+- Busy item code -> app item id / alias / searchable fields
+- Busy party ledger -> customer row
+- Busy sales voucher schema -> normalized app order payload
+
+This keeps PASPL Master clean even if Busy data is messy or changes format.
+
+Recommended rule:
+
+- frontend knows app models
+- sync service knows both app models and Busy models
+
+## 9. Performance Priorities
+
+### 9.1 Biggest current frontend hotspot
+
+[src/hooks/useItems.ts](/Users/maitreya/pasplmaster/src/hooks/useItems.ts#L10) loads the full active catalog in 1000-row batches into the browser.
+
+That is workable at your current size, but it will become expensive as stock fields, search metadata, and devices grow.
+
+Recommended improvement path:
+
+1. keep current preload for short term
+2. add a server-side search RPC for item lookup
+3. return only the first page of best matches
+4. keep client-side cache for recently used items and top sellers
+
+Good hybrid strategy:
+
+- preload top 500 to 1500 frequently ordered items
+- search the long tail on demand
+- sync stock deltas only for changed items
+
+### 9.2 Avoid over-broadcasting realtime
+
+[src/hooks/useOrders.ts](/Users/maitreya/pasplmaster/src/hooks/useOrders.ts#L96) invalidates the whole orders query tree on every order or claim change.
+
+That is fine now, but later you should:
+
+- subscribe by workflow or by date window where possible
+- update specific query keys instead of invalidating everything
+- use lighter list projections for dashboard screens
+
+### 9.3 Protect stock correctness
+
+Current order submit already uses row locks in Postgres via `FOR UPDATE`, which is good.
+
+Once Busy is introduced, also decide how reservation works:
+
+- reserve stock in Supabase immediately for app UX
+- then push order to Busy
+- if Busy rejects or changes quantities, raise an exception workflow instead of silently mutating
+
+Do not let both systems decrement stock independently without reconciliation rules.
+
+## 10. Recommended Integration Flows
+
+### 10.1 Item and customer sync
+
+```mermaid
+sequenceDiagram
+  participant Busy as Busy DB
+  participant Sync as Integration Service
+  participant SB as Supabase
+
+  Busy->>Sync: changed items/customers since checkpoint
+  Sync->>Sync: normalize and validate
+  Sync->>SB: upsert items/customers
+  Sync->>SB: save new checkpoint and sync run log
+```
+
+### 10.2 Sales order write
+
+```mermaid
+sequenceDiagram
+  participant App as Browser App
+  participant SB as Supabase
+  participant Outbox as Outbox Worker
+  participant Busy as Busy DB
+
+  App->>SB: submit order
+  SB->>SB: create order + outbox row in one transaction
+  Outbox->>SB: fetch queued rows
+  Outbox->>Busy: create sales order
+  Busy-->>Outbox: success or failure
+  Outbox->>SB: update sync status and ERP reference
+```
+
+## 11. Failure Handling Rules
+
+Treat failures as a first-class feature, not an edge case.
+
+You need:
+
+- idempotency key per order submit
+- retry with exponential backoff
+- dead-letter visibility after repeated failure
+- operator dashboard for failed syncs
+- manual requeue action
+- full payload audit log
+
+Examples:
+
+- Busy server offline
+- duplicate voucher number
+- customer missing in Busy
+- item code mismatch
+- stock changed between sync windows
+
+## 12. Security Rules
+
+Never expose Busy credentials to the browser.
+
+Required controls:
+
+- integration service uses server-only secrets
+- app users never connect directly to Busy
+- service-to-service auth between local sync service and Supabase
+- write operations logged with actor, payload hash, and timestamp
+
+## 13. Practical Rollout Plan
+
+### Phase 1: Stabilize current app boundary
+
+- keep Supabase as the only thing the frontend talks to
+- add `erp_sync_status` fields on orders
+- add outbox tables
+- add admin screen for sync visibility
+
+### Phase 2: Build local integration service
+
+- read Busy item/customer/stock deltas
+- push app orders from outbox into Busy
+- update Supabase with sync results
+
+### Phase 3: Performance upgrades
+
+- move item search to RPC/server-side search
+- send only changed stock rows, not full refreshes
+- create smaller read models for dashboards
+
+### Phase 4: Reconciliation and trust
+
+- nightly reconciliation job between Busy and Supabase
+- detect stock mismatch, missing orders, pricing mismatch
+- produce exception reports for staff
+
+## 14. Concrete Changes I Would Make Next In This Repo
+
+If I were implementing this as the senior engineer on the project, I would do these next:
+
+1. Add Supabase schema for ERP sync state and outbox.
+2. Change sales submit so it records ERP sync status explicitly.
+3. Add admin UI for `queued`, `failed`, and `synced` ERP orders.
+4. Add a local sync worker beside the Busy server.
+5. Replace full-catalog browser loading with hybrid search before the item table grows much larger.
+
+## 15. Final Recommendation
+
+The safest and most scalable design is:
+
+- frontend app <-> Supabase only
+- local integration service <-> Busy only
+- order writes use an outbox
+- stock reads use replicated snapshots plus incremental sync
+- reconciliation catches drift
+
+That gives you:
+
+- fast UI
+- safe writes
+- recoverability when Busy is offline
+- much better visibility for operations
+- room to grow without rewriting the frontend later

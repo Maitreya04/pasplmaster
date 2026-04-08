@@ -238,7 +238,7 @@ const SPECS: Record<string, string> = {
   stndrd: 'standard',
   dlx: 'deluxe',
   dlux: 'deluxe',
-  spl: 'splendor',
+  spl: 'special',
   hh: 'hero honda',
   spr: 'super',
   supr: 'super',

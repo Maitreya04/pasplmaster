@@ -1,7 +1,7 @@
 import type { Item } from '../../types';
 import { EXPAND_MAP } from './abbreviations';
 import type { SearchIndex, PrepItem } from './searchIndex';
-import { strip, soundex, toTokens } from './searchIndex';
+import { strip, soundex } from './searchIndex';
 
 export type MatchLayer =
   | 'exact-name'
@@ -26,15 +26,9 @@ export interface SearchResult {
   matchedField: MatchedField;
 }
 
-/** Visible cap (~2 scrolls). Ranking logic is unchanged aside from final slice. */
-export const MAX_RESULTS = 72;
-/** For future strong / “also relevant” UI split (tune with pressure tests). */
-export const STRONG_THRESHOLD = 72;
+/** Visible cap — mirrors pasplv1 (50 results in a flat list). */
+export const MAX_RESULTS = 50;
 
-const DETECTED_BRAND_BOOST = 20;
-const PARENT_GROUP_TOKEN_BOOST = 15;
-/** If more distinct parent_groups match query tokens, skip group boost (noise guard). */
-const MAX_PARENT_GROUPS_FOR_TOKEN_BOOST = 8;
 
 /**
  * Cap for fast O(1) map collection from prefix/code paths (safety).
@@ -58,7 +52,7 @@ const SHORTHAND_MAP: Record<string, string> = {
   rr: 'rear',
   fr: 'front',
   dlx: 'deluxe',
-  spl: 'splendor',
+  // spl handled by abbreviations.ts (maps to 'splendor' for vehicles context)
   std: 'standard',
   hh: 'hero honda',
   // pas -> passion removed: "disk pas" means "disk pad", not "disk passion"
@@ -67,10 +61,6 @@ const SHORTHAND_MAP: Record<string, string> = {
   shocker: 'shock',
   sup: 'suspension',
 };
-
-/** OEM chain kits: boost TIDC when user says chain + kit + a vehicle line */
-const CHAIN_KIT_VEHICLE_HINT =
-  /\b(activa|splendor|discover|pulsar|shine|passion|platina|glamour|maestro|jupiter|apache|unicorn|wego|ct\s*100|ct100|c100|honda|hero|bajaj|yamaha|disc)\b/i;
 
 /**
  * Expands a single token using shorthand and abbreviation/misspelling maps (pasplv1-style).
@@ -137,10 +127,6 @@ export function normalizeQuery(q: string): string {
     }
 
     pushExpandedModelCodeVariants(t, et, expanded);
-  }
-
-  if (/\bchain\b/.test(s) && /\bkit\b/.test(s) && CHAIN_KIT_VEHICLE_HINT.test(s)) {
-    expanded.push('tidc');
   }
 
   return Array.from(new Set(expanded)).join(' ');
@@ -303,53 +289,6 @@ function getFilteredSet(
 
 function passesFilter(i: number, filterSet: Set<number> | null): boolean {
   return filterSet === null || filterSet.has(i);
-}
-
-// ---------------------------------------------------------------------------
-// Soft ranking boosts (after merge, before final sort)
-// ---------------------------------------------------------------------------
-
-/** parent_group keys whose tokens overlap normalized query tokens (exact token match). */
-function parentGroupKeysMatchingQueryTokens(idx: SearchIndex, qWords: string[]): Set<string> {
-  const qset = new Set(qWords.filter(w => w.length >= 2));
-  if (qset.size === 0) return new Set();
-
-  const matched = new Set<string>();
-  for (const g of idx.parentGroups.keys()) {
-    const gt = toTokens(g);
-    for (const t of gt) {
-      if (qset.has(t)) {
-        matched.add(g);
-        break;
-      }
-    }
-  }
-  if (matched.size > MAX_PARENT_GROUPS_FOR_TOKEN_BOOST) return new Set();
-  return matched;
-}
-
-/**
- * Lifts items for auto-detected brand (+20) and query-aligned subcategory (+15).
- * Sheet-driven brandFilter / groupFilter still hard-limit via passesFilter earlier.
- */
-function applyRankingBoosts(
-  results: SearchResult[],
-  idx: SearchIndex,
-  qWords: string[],
-  detectedBrand: string | null | undefined,
-): void {
-  const parentKeys = parentGroupKeysMatchingQueryTokens(idx, qWords);
-  const brandKey = detectedBrand?.trim() || null;
-
-  for (const r of results) {
-    if (brandKey && r.item.main_group === brandKey) {
-      r.score += DETECTED_BRAND_BOOST;
-    }
-    const pg = r.item.parent_group;
-    if (pg && parentKeys.has(pg)) {
-      r.score += PARENT_GROUP_TOKEN_BOOST;
-    }
-  }
 }
 
 function sortSearchResultsDesc(a: SearchResult, b: SearchResult): number {
@@ -647,8 +586,6 @@ export function searchItems(
   idx: SearchIndex,
   brandFilter?: string | null,
   groupFilter?: string | null,
-  /** From NewOrderPage when heuristic is confident; +20 when item.main_group matches. */
-  detectedBrand?: string | null,
 ): SearchResult[] {
   const raw = query;
   const q = normalizeQuery(query);
@@ -664,7 +601,6 @@ export function searchItems(
   const unionResults = v1UnionSearch(idx, qWords, filterSet, all);
 
   const merged = mergeResultsByMaxScore(fastResults, unionResults);
-  applyRankingBoosts(merged, idx, qWords, detectedBrand);
 
   return merged.sort(sortSearchResultsDesc).slice(0, MAX_RESULTS);
 }

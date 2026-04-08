@@ -8,7 +8,7 @@ This document describes the **current** implementation: the **`SearchIndex`** (`
 
 1. **Items load** → `buildSearchIndex(items)` runs once and builds hash maps + inverted lists (exact keys, words, `firstCharToKeys` for fuzzy key lookup, prefixes, trigrams, brand/parent groups), plus per-item **`fullTextLower`** (concatenated searchable text).
 2. **User types** → the query is **normalized** (lowercase, shorthand expansion, optional model-code variants).
-3. **`searchItems(query, index, brandFilter, groupFilter, detectedBrand?)`** runs **(A)** fast **exact / normalized / code-like** lookups (`collectFastPathResults`), **(B)** the **primary pasplv1-style path** (`v1UnionSearch`: union of word postings + fuzzy index-key fallback, per-token scoring, full-catalog fallback when the union is empty), then **`mergeResultsByMaxScore`**, then **`applyRankingBoosts`**, then **sort** and **slice** to `MAX_RESULTS`.
+3. **`searchItems(query, index, brandFilter, groupFilter)`** runs **(A)** fast **exact / normalized / code-like** lookups (`collectFastPathResults`), **(B)** the **primary pasplv1-style path** (`v1UnionSearch`: union of word postings + fuzzy index-key fallback, per-token scoring, full-catalog fallback when the union is empty), then **`mergeResultsByMaxScore`**, then **sort** and **slice** to `MAX_RESULTS`.
 4. **UI** (`New Order`) uses **immediate** `query` for narrow chips and **`useDeferredValue`** for the heavy search so typing stays responsive.
 
 ---
@@ -60,16 +60,16 @@ The index is **memoized** on the same `items` array reference (see `_ref` / `_id
 
 **`getFilteredSet()`** intersects `brandGroups.get(brandFilter)` and `parentGroups.get(groupFilter)` when set. Every layer checks **`passesFilter(index, filterSet)`** so filters are **hard** constraints.
 
-**`detectedBrand`** (optional, from UI): **not** a filter; it is used only in **`applyRankingBoosts()`** (+20 when `item.main_group` matches).
+No soft ranking boosts are applied — scoring is purely token-based (matching pasplv1 behavior).
 
 ---
 
 ## 5. `searchItems()` pipeline (runtime)
 
-**File:** `src/lib/search/itemSearch.ts`  
-**Constants:** `POOL_LIMIT = 320` (candidate cap for fast-path collection), `MAX_RESULTS = 72` (final slice), `STRONG_THRESHOLD = 72` (used elsewhere).
+**File:** `src/lib/search/itemSearch.ts`
+**Constants:** `POOL_LIMIT = 320` (candidate cap for fast-path collection), `MAX_RESULTS = 50` (final slice, matching pasplv1).
 
-There is **no** cascade “first-match-wins” `seen` set. Fast path and union path are **merged by max score** per `item.id`.
+There is **no** cascade "first-match-wins" `seen` set. Fast path and union path are **merged by max score** per `item.id`.
 
 ### Phase A — Fast path (`collectFastPathResults`)
 
@@ -90,12 +90,9 @@ There is **no** cascade “first-match-wins” `seen` set. Fast path and union p
 5. Otherwise cap union size at **9000** (sorted by index, truncate).
 6. **`scorePrepItemBySalesTokens`:** per token **+100** (word in `allWords`), else **+60** substring on **`fullTextLower`** / stripped norms, else **+60** fuzzy (`tokenFuzzyMatches`), else **+55** Soundex (length ≥ 4) → + **+150** if **all** tokens matched.
 
-### Phase C — Merge and boosts
+### Phase C — Merge
 
 1. **`mergeResultsByMaxScore(fast, union)`** — higher score per `item.id` wins.
-2. **`applyRankingBoosts`:**  
-   - `detectedBrand` match → **+20** on `main_group`  
-   - `parent_group` token overlap with query (noise guard if too many groups) → **+15**
 
 **Final:** sort by **score desc**, then **name**; **`slice(0, MAX_RESULTS)`**.
 
@@ -108,8 +105,6 @@ There is **no** cascade “first-match-wins” `seen` set. Fast path and union p
 - **`buildNarrowIndex(items)`** precomputes counts and `itemsByBrand`, `itemsByParentGroup`, `countsByBrandGroup`, etc.
 - **`buildNarrowSuggestions(index, rawQuery, activeBrand, activeGroup)`** uses **`normalizeQuery`** and the **last token** (length ≥ 2) to suggest brands/groups whose **words** **prefix-match** that token, plus **focused-brand** behavior (same as before) to enrich group chips.
 
-**New Order** may **hide** generic narrow chips when **search** is already strong (`STRONG_THRESHOLD`, min result count, etc.) while still showing brand/subcategory chips when a brand is selected or detected.
-
 ---
 
 ## 7. New Order page wiring
@@ -118,15 +113,14 @@ There is **no** cascade “first-match-wins” `seen` set. Fast path and union p
 
 - **`buildSearchIndex(items)`** once per items array.
 - **`SearchInput`** uses **`debounceMs={0}`** so **parent state** updates every keystroke; **`useDeferredValue(effectiveQuery)`** drives **`searchItems`** so expensive work can **lag** slightly behind typing.
-- **Detected brand** for search boosts uses the same **`buildNarrowSuggestions`** heuristic as on the deferred query (single dominant brand chip).
-- **Results:** “Best match” = top **3** of `searchResults` with score ≥ **80**; “More results” = **remaining** ids (no duplicate rows). **Show more** reveals **more** rows in chunks (`INITIAL_MORE_VISIBLE` / `MORE_RESULTS_PAGE`).
+- **Results:** flat list of all `searchResults` (up to 50, matching pasplv1). No "Best match" / "More results" split.
 - **Highlighting** in the list uses **`normalizeQuery`** plus **raw** tokens for display (see `highlightText` in the same file).
 
 ---
 
 ## 8. Related docs
 
-- `docs/PASPLV1_SEARCH_LEARNINGS.md` — historical parity notes with pasplv1  
-- `docs/PRESSURE_TEST_SEARCH.md` — load / stress tests for search  
+- `docs/PASPLV1_SEARCH_LEARNINGS.md` — historical parity notes with pasplv1
+- `docs/PRESSURE_TEST_SEARCH.md` — load / stress tests for search
 
 If behavior changes, update the **constants** and **layer comments** in `itemSearch.ts` (`searchIndex.ts` header comment block) and this file.

@@ -29,7 +29,7 @@ import {
   MAX_RESULTS,
 } from '../../lib/search/itemSearch';
 import type { SearchResult, MatchedField } from '../../lib/search/itemSearch';
-import { buildNarrowIndex, buildNarrowSuggestions } from '../../lib/search/narrowSuggestions';
+import { buildNarrowIndex } from '../../lib/search/narrowSuggestions';
 import { buildSearchIndex } from '../../lib/search/searchIndex';
 import { formatCurrency, formatShortDate } from '../../utils/formatters';
 import { supabase } from '../../lib/supabase/client';
@@ -50,8 +50,6 @@ import {
 } from '../../lib/stockDisplay';
 
 /** First paint of "More results" before expanding; search still returns up to MAX_RESULTS. */
-const INITIAL_MORE_VISIBLE = 36;
-const MORE_RESULTS_PAGE = 36;
 
 interface BrandOption {
   name: string;
@@ -1625,7 +1623,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [pendingAddItemId, setPendingAddItemId] = useState<number | null>(null);
   const [recentlyAddedItemId, setRecentlyAddedItemId] = useState<number | null>(null);
   const [cartPulse, setCartPulse] = useState(false);
-  const [moreVisible, setMoreVisible] = useState(INITIAL_MORE_VISIBLE);
   const searchRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const touchScrollStartYRef = useRef<number | null>(null);
@@ -1664,11 +1661,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const isSearchMode = isSearchFocused || effectiveQuery.length > 0;
   const activeFilterCount = (selectedBrand ? 1 : 0) + (selectedGroup ? 1 : 0);
   const activeFilterSummary = [selectedBrand, selectedGroup].filter(Boolean).join(' · ');
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMoreVisible(INITIAL_MORE_VISIBLE);
-  }, [deferredQuery]);
 
   useEffect(() => {
     const wantFocus = (location.state as { focusSearch?: boolean } | null | undefined)?.focusSearch;
@@ -1747,28 +1739,11 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const searchResults = useMemo(() => {
     let results: SearchResult[] = [];
     if (deferredQuery) {
-      // Align boosts with deferred results (same heuristic as detectedBrand, but on deferredQuery)
-      let detectedForSearch: string | null = null;
-      if (!selectedBrand) {
-        const narrowForDeferred = buildNarrowSuggestions(
-          narrowIndex,
-          deferredQuery,
-          selectedBrand,
-          selectedGroup,
-        );
-        const brands = narrowForDeferred.filter(s => s.type === 'brand');
-        if (brands.length === 1) {
-          detectedForSearch = brands[0].value;
-        } else if (brands.length >= 2 && brands[0].count > brands[1].count * 3) {
-          detectedForSearch = brands[0].value;
-        }
-      }
       results = searchItems(
         deferredQuery,
         searchIndex,
         selectedBrand,
         selectedGroup,
-        detectedForSearch,
       );
     } else if (selectedBrand) {
       const brandSet = searchIndex.brandGroups.get(selectedBrand);
@@ -1793,20 +1768,8 @@ export default function NewOrderPage(): React.JSX.Element | null {
       }
     }
     return results;
-  }, [deferredQuery, searchIndex, selectedBrand, selectedGroup, narrowIndex]);
+  }, [deferredQuery, searchIndex, selectedBrand, selectedGroup]);
 
-  // When browsing a brand with no query there's no meaningful "best match" split
-  const bestMatches = useMemo(
-    () => (deferredQuery ? searchResults.slice(0, 3).filter(r => r.score >= 80) : []),
-    [searchResults, deferredQuery],
-  );
-  const bestMatchIds = useMemo(() => new Set(bestMatches.map(r => r.item.id)), [bestMatches]);
-  const moreResults = useMemo(
-    () => searchResults.filter(r => !bestMatchIds.has(r.item.id)),
-    [searchResults, bestMatchIds],
-  );
-  const moreDisplayed = useMemo(() => moreResults.slice(0, moreVisible), [moreResults, moreVisible]);
-  const hasMoreResults = moreResults.length > moreDisplayed.length;
 
   const cartQtyByItem = useMemo(() => {
     const totals = new Map<number, number>();
@@ -2046,47 +2009,20 @@ export default function NewOrderPage(): React.JSX.Element | null {
               </div>
             </div>
           ) : (
-            <>
-              <ResultSection
-                label="Best match"
-                results={bestMatches}
-                query={effectiveQuery}
-                onStartAdd={handleStartAdd}
-                onConfirmAdd={handleConfirmAdd}
-                onConfirmSpecialRateAdd={handleConfirmSpecialRateAdd}
-                onCancelAdd={handleCancelAdd}
-                pendingAddItemId={pendingAddItemId}
-                getTotalInOrderQty={getTotalInOrderQty}
-                getPrice={getPrice}
-                hasSpecialLine={hasSpecialLine}
-                isJustAdded={isJustAdded}
-              />
-              <ResultSection
-                label={bestMatches.length ? 'More results' : 'Results'}
-                results={moreDisplayed}
-                query={effectiveQuery}
-                onStartAdd={handleStartAdd}
-                onConfirmAdd={handleConfirmAdd}
-                onConfirmSpecialRateAdd={handleConfirmSpecialRateAdd}
-                onCancelAdd={handleCancelAdd}
-                pendingAddItemId={pendingAddItemId}
-                getTotalInOrderQty={getTotalInOrderQty}
-                getPrice={getPrice}
-                hasSpecialLine={hasSpecialLine}
-                isJustAdded={isJustAdded}
-              />
-              {hasMoreResults && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setMoreVisible(v => Math.min(v + MORE_RESULTS_PAGE, moreResults.length))
-                  }
-                  className="w-full py-3 rounded-xl text-sm font-semibold text-[var(--bg-accent)] bg-[var(--bg-secondary)] border border-[var(--border-subtle)] hover:bg-[var(--bg-tertiary)] active:scale-[0.99]"
-                >
-                  Show more ({moreResults.length - moreDisplayed.length} left)
-                </button>
-              )}
-            </>
+            <ResultSection
+              label="Results"
+              results={searchResults}
+              query={effectiveQuery}
+              onStartAdd={handleStartAdd}
+              onConfirmAdd={handleConfirmAdd}
+              onConfirmSpecialRateAdd={handleConfirmSpecialRateAdd}
+              onCancelAdd={handleCancelAdd}
+              pendingAddItemId={pendingAddItemId}
+              getTotalInOrderQty={getTotalInOrderQty}
+              getPrice={getPrice}
+              hasSpecialLine={hasSpecialLine}
+              isJustAdded={isJustAdded}
+            />
           )}
         </div>
       </div>
