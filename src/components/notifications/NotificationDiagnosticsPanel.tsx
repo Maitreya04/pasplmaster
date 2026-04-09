@@ -25,7 +25,10 @@ export function NotificationDiagnosticsPanel(): React.JSX.Element {
         <div>
           <p className="font-semibold text-[var(--content-primary)]">Notification diagnostics</p>
           <p className="text-xs text-[var(--content-tertiary)] mt-0.5">
-            Run checks for in-app inbox + edge function reachability (read-only).
+            Run checks for in-app inbox + edge function reachability (read-only). On{' '}
+            <strong className="text-[var(--content-secondary)]">Admin</strong>, userId is usually empty —
+            switch to <strong className="text-[var(--content-secondary)]">Sales</strong> and pick your name
+            to test the bell.
           </p>
         </div>
         <button

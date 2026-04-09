@@ -15,6 +15,19 @@ function fnErrorStatus(err: unknown): number | null {
   return null;
 }
 
+function formatFnError(err: unknown): string {
+  if (err == null) return '';
+  if (typeof err === 'object' && err !== null) {
+    const e = err as Record<string, unknown>;
+    const parts: string[] = [];
+    if (typeof e.message === 'string') parts.push(e.message);
+    if (e.context != null) parts.push(JSON.stringify(e.context));
+    if (e.cause != null) parts.push(String(e.cause));
+    if (parts.length > 0) return parts.join(' ');
+  }
+  return String(err);
+}
+
 /**
  * Read-only checks you can run from the app (anon key) to see why in-app notifications fail.
  */
@@ -25,21 +38,26 @@ export async function runNotificationDiagnostics(opts: {
 }): Promise<NotificationDiagnosticCheck[]> {
   const checks: NotificationDiagnosticCheck[] = [];
 
+  const isAdminNoPersona = opts.role === 'admin';
   checks.push({
     id: 'auth_user_id',
-    ok: opts.userId != null,
+    ok: opts.userId != null || isAdminNoPersona,
     label: 'Session users.id',
     detail:
       opts.userId != null
         ? `userId=${opts.userId} (inbox queries use this)`
-        : 'userId is null — the bell cannot load rows. Open Role select and pick your name again (name must match users.full_name for your role).',
+        : isAdminNoPersona
+          ? 'N/A while on Admin — there is no `users.id` for this screen. Use Switch Role → Sales (or Billing/Picking), pick your name, then run checks again to test the notification bell.'
+          : 'userId is null — the bell cannot load rows. Open Role select and pick your name (must match users.full_name for your role).',
   });
 
   checks.push({
     id: 'auth_name_role',
-    ok: !!(opts.userName && opts.role),
+    ok: !!(opts.userName && opts.role) || isAdminNoPersona,
     label: 'Name & role',
-    detail: `${opts.role ?? '—'} / ${opts.userName ?? '—'}`,
+    detail: isAdminNoPersona
+      ? `admin — ${opts.userName ?? '(no name — expected on Admin)'}`
+      : `${opts.role ?? '—'} / ${opts.userName ?? '—'}`,
   });
 
   const probe = await supabase.from('user_notifications').select('id').limit(1);
@@ -79,7 +97,7 @@ export async function runNotificationDiagnostics(opts: {
   });
 
   const status = fnErr ? fnErrorStatus(fnErr) : null;
-  const msg = fnErr && typeof fnErr === 'object' && 'message' in fnErr ? String((fnErr as { message: string }).message) : '';
+  const msg = formatFnError(fnErr);
 
   if (fnErr == null) {
     checks.push({
@@ -94,22 +112,34 @@ export async function runNotificationDiagnostics(opts: {
       ok: false,
       label: 'Edge function send-internal-notification',
       detail:
-        'Not deployed or wrong name (HTTP 404). Run: supabase functions deploy send-internal-notification',
+        'Not deployed or wrong name (HTTP 404). In Supabase Dashboard → Edge Functions, confirm `send-internal-notification` exists. Deploy: `supabase functions deploy send-internal-notification`',
     });
-  } else if (status === 400 || /non-2xx|400|Unknown|Invalid/i.test(msg)) {
+  } else if (
+    status === 400 ||
+    /non-2xx|400|Unknown|Invalid|unknown or missing eventtype/i.test(msg)
+  ) {
     checks.push({
       id: 'edge_function',
       ok: true,
       label: 'Edge function send-internal-notification',
       detail:
-        'Responds (expected 400 for dummy payload). Billing “Copy & approve” can reach the function if deploy + secrets are set.',
+        'Reachable (expected error for test payload). Billing “Copy & approve” can call this function. Ensure VAPID secrets are set on the function for push.',
+    });
+  } else if (/failed to send|failed to fetch|network|load failed|could not connect/i.test(msg)) {
+    checks.push({
+      id: 'edge_function',
+      ok: false,
+      label: 'Edge function send-internal-notification',
+      detail: `${msg}\n\nUsually: function not deployed to this Supabase project, wrong VITE_SUPABASE_URL in the hosted build, ad-blocker/VPN, or device offline. Compare Dashboard project URL with your .env.`,
     });
   } else {
     checks.push({
       id: 'edge_function',
       ok: false,
       label: 'Edge function send-internal-notification',
-      detail: msg || 'Invoke failed — check Dashboard → Edge Functions → Logs.',
+      detail:
+        msg ||
+        'Invoke failed — open Supabase → Edge Functions → send-internal-notification → Logs.',
     });
   }
 
