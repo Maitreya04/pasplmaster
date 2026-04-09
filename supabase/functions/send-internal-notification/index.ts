@@ -446,7 +446,7 @@ serve(async (req) => {
         return json(400, { error: 'Invalid order_update_for_sales payload' });
       }
 
-      const title = `Order update: ${payload.orderNumber}`;
+      const title = `Order update · ${payload.customerName}`;
       const body = payload.messageBody.trim();
 
       const salesIds = await resolveSalesUserIds(admin, payload.salespersonName);

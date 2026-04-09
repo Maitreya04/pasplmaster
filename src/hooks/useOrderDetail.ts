@@ -78,7 +78,12 @@ export function useOrderDetail(orderId: number | null) {
 
       const items = mapOrderItemsWithCatalog(rawItems as OrderItemRow[] | null);
 
-      return { ...order, items } as OrderWithItems;
+      return {
+        ...order,
+        items,
+        /** Busy “items” = invoice lines; prefer live row count over denormalized column. */
+        item_count: items.length,
+      } as OrderWithItems;
     },
     enabled: orderId !== null,
     staleTime: 0,

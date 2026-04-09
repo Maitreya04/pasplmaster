@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { Bell, CaretRight, Warning } from '@phosphor-icons/react';
+import { Bell, Warning, X, ArrowSquareOut } from '@phosphor-icons/react';
+import { appHaptics } from '../../lib/haptics';
 import { useUserNotifications } from '../../hooks/useUserNotifications';
 import type { UserNotification } from '../../types';
 
@@ -44,7 +46,6 @@ function deepLinkFromPayload(n: UserNotification): string | null {
     return `/picking?claimOrderId=${n.order_id}`;
   }
   if (n.type === 'item_flagged_by_picker' && n.order_id) {
-    // If edge function didn't provide a deep link, prefer Sales list on sales-facing notifications.
     return '/sales/orders';
   }
   if (n.type === 'order_update_for_sales') {
@@ -65,20 +66,71 @@ function timeShort(iso: string): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
+function formatFullTimestamp(iso: string): string {
+  return new Date(iso).toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function isSameCalendarDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function dayHeading(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  if (isSameCalendarDay(d, now)) return 'Today';
+  const y = new Date(now);
+  y.setDate(y.getDate() - 1);
+  if (isSameCalendarDay(d, y)) return 'Yesterday';
+  return d.toLocaleDateString('en-IN', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' as const } : {}),
+  });
+}
+
+function notificationTypeLabel(type: string): string {
+  switch (type) {
+    case 'order_ready_to_pick':
+      return 'Ready to pick';
+    case 'item_flagged_by_picker':
+      return 'Picker flag';
+    case 'order_update_for_sales':
+      return 'Order update';
+    default:
+      return type.replace(/_/g, ' ');
+  }
+}
+
+/** Prefer party name for sales order updates (matches edge function; fixes older rows with order # in title). */
+function notificationDisplayTitle(n: UserNotification): string {
+  if (n.type === 'order_update_for_sales') {
+    const name = typeof n.payload?.customerName === 'string' ? n.payload.customerName.trim() : '';
+    if (name) return `Order update · ${name}`;
+  }
+  return n.title;
+}
+
 interface NotificationBellProps {
   userId: number | null;
   role?: AppRole | null;
 }
-
-const POPOVER_MAX_WIDTH_REM = 22;
-const VIEWPORT_MARGIN_PX = 8;
 
 export function NotificationBell({ userId, role = null }: NotificationBellProps): React.JSX.Element {
   const navigate = useNavigate();
   const { items, loading, fetchError, markRead, markAllRead } = useUserNotifications(userId);
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [popoverBox, setPopoverBox] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const filteredItems = useMemo(() => items.filter((n) => matchesRole(n, role)), [items, role]);
   const unreadCount = useMemo(
@@ -86,45 +138,35 @@ export function NotificationBell({ userId, role = null }: NotificationBellProps)
     [filteredItems],
   );
 
-  const layoutPopover = useCallback(() => {
-    const root = panelRef.current;
-    if (!root || !open) return;
-    const rect = root.getBoundingClientRect();
-    const remPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-    const width = Math.min(
-      window.innerWidth - 2 * VIEWPORT_MARGIN_PX,
-      POPOVER_MAX_WIDTH_REM * remPx,
-    );
-    let left = rect.right - width;
-    const maxLeft = window.innerWidth - VIEWPORT_MARGIN_PX - width;
-    left = Math.max(VIEWPORT_MARGIN_PX, Math.min(left, maxLeft));
-    const top = rect.bottom + VIEWPORT_MARGIN_PX;
-    setPopoverBox({ top, left, width });
-  }, [open]);
-
-  useLayoutEffect(() => {
-    if (!open) {
-      setPopoverBox(null);
-      return;
-    }
-    layoutPopover();
-    window.addEventListener('resize', layoutPopover);
-    window.addEventListener('scroll', layoutPopover, true);
-    return () => {
-      window.removeEventListener('resize', layoutPopover);
-      window.removeEventListener('scroll', layoutPopover, true);
-    };
-  }, [open, layoutPopover]);
+  const sortedItems = useMemo(
+    () =>
+      [...filteredItems].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      ),
+    [filteredItems],
+  );
 
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = '';
     };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      appHaptics.selection();
+    }
   }, [open]);
 
   const onRowClick = useCallback(
@@ -139,10 +181,165 @@ export function NotificationBell({ userId, role = null }: NotificationBellProps)
     [markRead, navigate],
   );
 
+  const handleClose = useCallback(() => {
+    appHaptics.selection();
+    setOpen(false);
+  }, []);
+
   if (!userId) return <></>;
 
+  const drawer =
+    open &&
+    createPortal(
+      <div
+        className="fixed inset-0 z-[60] flex justify-end"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="notification-drawer-title"
+      >
+        <button
+          type="button"
+          className="absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-sm transition-opacity"
+          onClick={handleClose}
+          aria-label="Close notifications"
+        />
+        <aside
+          ref={panelRef}
+          className={`
+            relative z-10 flex h-[100dvh] w-full max-w-md flex-col
+            border-l border-[var(--border-subtle)] bg-[var(--bg-primary)] shadow-2xl
+            animate-slide-in-right [animation-fill-mode:both]
+          `}
+          style={{
+            paddingTop: 'env(safe-area-inset-top, 0px)',
+            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          }}
+        >
+          <div className="flex shrink-0 flex-col gap-1 border-b border-[var(--border-subtle)] px-4 pb-3 pt-2">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2
+                  id="notification-drawer-title"
+                  className="text-lg font-semibold tracking-tight text-[var(--content-primary)]"
+                >
+                  Notifications
+                </h2>
+                <p className="mt-0.5 text-sm text-[var(--content-tertiary)]">
+                  {loading
+                    ? 'Loading…'
+                    : fetchError
+                      ? 'Could not refresh'
+                      : `${unreadCount} unread · ${filteredItems.length} total`}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                {unreadCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void markAllRead()}
+                    className="min-h-10 rounded-xl px-3 text-sm font-medium text-[var(--content-accent)] hover:bg-[var(--bg-tertiary)]"
+                  >
+                    Mark all read
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="flex min-h-10 min-w-10 items-center justify-center rounded-full text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]"
+                  aria-label="Close"
+                >
+                  <X size={22} weight="regular" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            {fetchError && (
+              <p className="border-b border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-4 py-3 text-sm text-[var(--content-warning)]">
+                {fetchError}. Run Admin → Notification diagnostics or apply migration 014.
+              </p>
+            )}
+            {loading && (
+              <p className="px-4 py-10 text-center text-sm text-[var(--content-tertiary)]">Loading…</p>
+            )}
+            {!loading && filteredItems.length === 0 && (
+              <p className="px-4 py-10 text-center text-sm text-[var(--content-tertiary)]">
+                {items.length === 0 ? 'No notifications yet' : 'No notifications for this role'}
+              </p>
+            )}
+            {!loading &&
+              sortedItems.map((n, i) => {
+                const showDay =
+                  i === 0 || dayHeading(n.created_at) !== dayHeading(sortedItems[i - 1]!.created_at);
+                const hasLink = deepLinkFromPayload(n) !== null;
+                const unread = n.read_at === null;
+
+                return (
+                  <Fragment key={n.id}>
+                    {showDay && (
+                      <div className="sticky top-0 z-[1] border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/95 px-4 py-2 backdrop-blur-sm">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                          {dayHeading(n.created_at)}
+                        </p>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void onRowClick(n)}
+                      className={`
+                        w-full border-b border-[var(--border-subtle)] text-left transition-colors
+                        hover:bg-[var(--bg-tertiary)]
+                        ${unread ? 'bg-[var(--bg-accent-subtle)]/25' : ''}
+                      `}
+                    >
+                      <div
+                        className={`flex gap-3 px-4 py-4 ${unread ? 'border-l-[3px] border-l-[var(--bg-accent)] pl-[13px]' : 'border-l-[3px] border-l-transparent'}`}
+                      >
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-md bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--content-secondary)]">
+                              {notificationTypeLabel(n.type)}
+                            </span>
+                            {n.order_id != null && (
+                              <span className="font-mono text-xs text-[var(--content-tertiary)]">
+                                Order #{n.order_id}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-base font-semibold leading-snug text-[var(--content-primary)]">
+                            {notificationDisplayTitle(n)}
+                          </p>
+                          <p className="text-sm leading-relaxed text-[var(--content-secondary)] whitespace-pre-wrap">
+                            {n.body}
+                          </p>
+                          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-[var(--content-tertiary)]">
+                            <span className="font-medium text-[var(--content-secondary)] tabular-nums">
+                              {timeShort(n.created_at)}
+                            </span>
+                            <span className="text-[var(--content-quaternary)]">·</span>
+                            <span className="tabular-nums">{formatFullTimestamp(n.created_at)}</span>
+                          </div>
+                          {hasLink && (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-[var(--content-accent)]">
+                              <ArrowSquareOut size={14} weight="bold" aria-hidden />
+                              Open related screen
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  </Fragment>
+                );
+              })}
+          </div>
+        </aside>
+      </div>,
+      document.body,
+    );
+
   return (
-    <div className="relative" ref={panelRef}>
+    <div className="relative">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -164,75 +361,7 @@ export function NotificationBell({ userId, role = null }: NotificationBellProps)
         )}
       </button>
 
-      {open && popoverBox && (
-        <div
-          className="fixed max-h-[min(70vh,28rem)] rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] shadow-xl z-50 flex flex-col overflow-hidden"
-          style={{
-            top: popoverBox.top,
-            left: popoverBox.left,
-            width: popoverBox.width,
-          }}
-        >
-          <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-subtle)]">
-            <span className="text-sm font-semibold text-[var(--content-primary)]">Notifications</span>
-            {unreadCount > 0 && (
-              <button
-                type="button"
-                onClick={() => void markAllRead()}
-                className="text-xs font-medium text-[var(--content-accent)] hover:underline min-h-8 px-2"
-              >
-                Mark all read
-              </button>
-            )}
-          </div>
-          <div className="overflow-y-auto flex-1">
-            {fetchError && (
-              <p className="px-3 py-2 text-xs text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] border-b border-[var(--border-warning)]">
-                {fetchError}. Run Admin → Notification diagnostics or apply migration 014.
-              </p>
-            )}
-            {loading && (
-              <p className="px-4 py-6 text-sm text-[var(--content-tertiary)] text-center">Loading…</p>
-            )}
-            {!loading && filteredItems.length === 0 && (
-              <p className="px-4 py-6 text-sm text-[var(--content-tertiary)] text-center">
-                {items.length === 0 ? 'No notifications yet' : 'No notifications for this role'}
-              </p>
-            )}
-            {!loading &&
-              filteredItems.map((n) => (
-                <button
-                  key={n.id}
-                  type="button"
-                  onClick={() => void onRowClick(n)}
-                  className={`w-full text-left px-3 py-3 border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-tertiary)] transition-colors ${
-                    n.read_at === null ? 'bg-[var(--bg-accent-subtle)]/30' : ''
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-[var(--content-primary)] truncate">
-                        {n.title}
-                      </p>
-                      <p className="text-xs text-[var(--content-secondary)] line-clamp-3 mt-0.5 whitespace-pre-wrap">
-                        {n.body}
-                      </p>
-                    </div>
-                    <span className="text-[10px] text-[var(--content-quaternary)] shrink-0 tabular-nums">
-                      {timeShort(n.created_at)}
-                    </span>
-                  </div>
-                  {n.read_at === null && (
-                    <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-medium text-[var(--content-accent)]">
-                      <CaretRight size={12} weight="bold" />
-                      Open
-                    </span>
-                  )}
-                </button>
-              ))}
-          </div>
-        </div>
-      )}
+      {drawer}
     </div>
   );
 }

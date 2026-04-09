@@ -119,16 +119,18 @@ export default function ReviewPage(): React.JSX.Element | null {
     [visibleItems.length, pendingCount, priceMismatchCount],
   );
 
-  const { totalItems, grandTotal } = useMemo(() => {
-    let count = 0;
+  const { totalQty, grandTotal } = useMemo(() => {
+    let qty = 0;
     let total = 0;
     for (const item of visibleItems) {
       const price = item.price_quoted ?? item.price_system ?? 0;
-      count += item.qty_approved;
+      qty += item.qty_approved;
       total += item.qty_approved * price;
     }
-    return { totalItems: count, grandTotal: total };
+    return { totalQty: qty, grandTotal: total };
   }, [visibleItems]);
+
+  const busyItemCount = visibleItems.length;
 
   const pickingSummary = useMemo(() => {
     if (!order?.items) {
@@ -483,7 +485,7 @@ export default function ReviewPage(): React.JSX.Element | null {
                         Picking progress
                       </p>
                       <p className="text-sm font-mono text-[var(--content-secondary)]">
-                        {pickingSummary.done}/{pickingSummary.totalLines} lines
+                        {pickingSummary.done}/{pickingSummary.totalLines} items
                         done
                       </p>
                     </div>
@@ -697,14 +699,22 @@ export default function ReviewPage(): React.JSX.Element | null {
                     </span>
                   </div>
                 </div>
-                <div className="flex justify-between items-center pt-3 border-t border-[var(--border-warning)]">
-                  <div>
-                    <p className="text-xs text-[var(--content-secondary)]">Total items (qty)</p>
-                    <p className="text-xl font-bold tabular-nums text-[var(--content-primary)]">
-                      {totalItems}
-                    </p>
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 pt-3 border-t border-[var(--border-warning)]">
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs text-[var(--content-secondary)]">Items (Busy)</p>
+                      <p className="text-xl font-bold tabular-nums text-[var(--content-primary)]">
+                        {busyItemCount}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[var(--content-secondary)]">Total quantity</p>
+                      <p className="text-base font-semibold tabular-nums text-[var(--content-secondary)]">
+                        {totalQty}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-left sm:text-right">
                     <p className="text-xs text-[var(--content-secondary)]">Grand total</p>
                     <p className="text-2xl lg:text-3xl font-bold font-mono text-[var(--content-primary)]">
                       {formatCurrency(grandTotal)}

@@ -61,6 +61,7 @@ export interface Order {
   workflow_status: WorkflowStatus;
   priority: OrderPriority;
   notes: string | null;
+  /** Busy “items”: number of invoice rows (distinct order_lines), not sum of qty. Prefer live count from order_items when available. */
   item_count: number;
   total_value: number;
   created_at: string;

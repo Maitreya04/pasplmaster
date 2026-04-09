@@ -1,6 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import type { Order } from '../types';
+import {
+  ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
+  normalizeOrderBusyItemCount,
+  type OrderRowWithEmbed,
+} from '../lib/orderItemCount';
 
 // Targets are stored with financial year label "2025-26"
 const TARGET_YEAR = '2025-26';
@@ -167,14 +172,18 @@ export function useSalesDashboard(salespersonName: string | null) {
         (monthOrders ?? []).reduce((sum, o) => sum + Number(o.total_value || 0), 0) || 0;
 
       // 4. Last 3 orders
-      const { data: recentOrders, error: recentErr } = await supabase
+      const { data: recentRaw, error: recentErr } = await supabase
         .from('orders')
-        .select('*')
+        .select(ORDERS_SELECT_WITH_ITEM_LINE_COUNT)
         .eq('salesperson_name', salespersonName)
         .order('created_at', { ascending: false })
         .limit(3);
 
       if (recentErr) throw recentErr;
+
+      const recentOrders = (recentRaw ?? []).map((row) =>
+        normalizeOrderBusyItemCount(row as OrderRowWithEmbed),
+      );
 
       return {
         annualTargetLakhs,
@@ -183,7 +192,7 @@ export function useSalesDashboard(salespersonName: string | null) {
         thisMonthOrders,
         thisMonthValue,
         topProductGroups,
-        recentOrders: (recentOrders ?? []) as Order[],
+        recentOrders,
         lastUpdatedAt,
       };
     },

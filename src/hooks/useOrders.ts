@@ -3,6 +3,11 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { queryClient } from '../lib/queryClient';
 import type { Order, WorkflowStatus } from '../types';
+import {
+  ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
+  normalizeOrderBusyItemCount,
+  type OrderRowWithEmbed,
+} from '../lib/orderItemCount';
 
 interface UseOrdersOptions {
   status?: WorkflowStatus;
@@ -57,7 +62,7 @@ export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
       const orderAsc = sort === 'oldest-first';
       let q = supabase
         .from('orders')
-        .select('*')
+        .select(ORDERS_SELECT_WITH_ITEM_LINE_COUNT)
         .order('created_at', { ascending: orderAsc });
 
       if (opts.status && !opts.overdueOnly) {
@@ -84,7 +89,9 @@ export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
 
       const { data, error } = await q;
       if (error) throw error;
-      return data as Order[];
+      return (data ?? []).map((row) =>
+        normalizeOrderBusyItemCount(row as OrderRowWithEmbed),
+      );
     },
     staleTime: 0,
     refetchInterval: (query) => (query.state.data !== undefined ? LIVE_REFRESH_MS : false),
@@ -109,6 +116,14 @@ export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'work_claims' },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['orders'] });
+          queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'order_items' },
         () => {
           queryClient.invalidateQueries({ queryKey: ['orders'] });
           queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });

@@ -1072,25 +1072,25 @@ export default function CartPage(): React.JSX.Element | null {
             navigate('/sales');
           }}
         />
-        <div className="flex-1 flex flex-col p-6 pb-10">
+        <div className="flex-1 flex flex-col p-6 pb-10 min-h-0">
           <div className="flex flex-col items-center text-center shrink-0">
-            <div className="w-20 h-20 rounded-full bg-[var(--bg-positive-subtle)] flex items-center justify-center mb-6">
-              <CheckCircle size={40} weight="fill" className="text-[var(--content-positive)]" />
+            <div className="w-16 h-16 rounded-full bg-[var(--bg-positive-subtle)] flex items-center justify-center mb-4">
+              <CheckCircle size={36} weight="fill" className="text-[var(--content-positive)]" />
             </div>
-            <h2 className="text-2xl font-bold text-[var(--content-primary)] mb-2">
+            <h2 className="text-xl font-bold text-[var(--content-primary)] mb-1">
               Order Submitted
             </h2>
-            <p className="text-3xl font-bold font-mono text-[var(--content-accent)] mb-4">
+            <p className="text-2xl sm:text-3xl font-bold font-mono text-[var(--content-accent)] mb-3">
               {submitSuccess.orderNumber}
             </p>
-            <p className="text-sm text-[var(--content-tertiary)] max-w-md mb-4">
+            <p className="text-sm text-[var(--content-tertiary)] max-w-md mb-3">
               Share the summary below with your customer (billed vs pending as of submit time). WhatsApp
               opens with the text ready — choose the party in WhatsApp and send.
             </p>
           </div>
 
-          <div className="w-full max-w-lg mx-auto flex-1 min-h-0 flex flex-col gap-3">
-            <div className="relative max-h-[40vh] min-h-0 flex flex-col rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
+          <div className="w-full max-w-lg mx-auto flex flex-col gap-3 shrink-0">
+            <div className="relative rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
               <button
                 type="button"
                 onClick={() => void copySummaryToClipboard()}
@@ -1109,7 +1109,7 @@ export default function CartPage(): React.JSX.Element | null {
                   </>
                 )}
               </button>
-              <pre className="text-left text-[13px] leading-relaxed text-[var(--content-secondary)] whitespace-pre-wrap break-words pt-11 pr-3 pb-4 pl-4 overflow-y-auto min-h-0 flex-1">
+              <pre className="max-h-[min(11rem,28dvh)] overflow-y-auto overscroll-y-contain text-left text-[13px] leading-relaxed text-[var(--content-secondary)] whitespace-pre-wrap break-words pt-11 pr-3 pb-3 pl-4 [scrollbar-gutter:stable]">
                 {submitSuccess.shareText}
               </pre>
             </div>
@@ -1121,9 +1121,6 @@ export default function CartPage(): React.JSX.Element | null {
             >
               WhatsApp
             </a>
-          </div>
-
-          <div className="w-full max-w-sm mx-auto space-y-3 mt-6">
             <BigButton
               variant="primary"
               onClick={() => {
@@ -1132,15 +1129,6 @@ export default function CartPage(): React.JSX.Element | null {
               }}
             >
               Create Another
-            </BigButton>
-            <BigButton
-              variant="secondary"
-              onClick={() => {
-                setSubmitSuccess(null);
-                navigate('/sales/orders');
-              }}
-            >
-              My Orders
             </BigButton>
           </div>
         </div>

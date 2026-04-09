@@ -4,6 +4,11 @@ import { supabase } from '../lib/supabase/client';
 import { queryClient } from '../lib/queryClient';
 import { useAuth } from '../context/AuthContext';
 import type { Order, ClaimStage, WorkflowStatus } from '../types';
+import {
+  ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
+  normalizeOrderBusyItemCount,
+  type OrderRowWithEmbed,
+} from '../lib/orderItemCount';
 
 /** Stale threshold in ms — matches the 3-minute heartbeat timeout */
 const STALE_THRESHOLD_MS = 3 * 60 * 1000;
@@ -71,7 +76,7 @@ export function useClaimableOrders(
       // 1. Fetch orders
       let orderQuery = supabase
         .from('orders')
-        .select('*')
+        .select(ORDERS_SELECT_WITH_ITEM_LINE_COUNT)
         .order('created_at', { ascending: false });
 
       if (workflowStatus) {
@@ -88,9 +93,13 @@ export function useClaimableOrders(
         orderQuery = orderQuery.gte('created_at', d.toISOString());
       }
 
-      const { data: orders, error: orderError } = await orderQuery;
+      const { data: rawOrders, error: orderError } = await orderQuery;
       if (orderError) throw orderError;
-      if (!orders || orders.length === 0) return [];
+      if (!rawOrders || rawOrders.length === 0) return [];
+
+      const orders = rawOrders.map((row) =>
+        normalizeOrderBusyItemCount(row as OrderRowWithEmbed),
+      );
 
       const orderIds = orders.map((o: Order) => o.id);
 
@@ -122,7 +131,7 @@ export function useClaimableOrders(
       }
 
       // 3. Enrich orders
-      return (orders as Order[]).map((order): OrderWithClaimInfo => {
+      return orders.map((order): OrderWithClaimInfo => {
         const claimInfo = claimMap.get(order.id) ?? null;
         return {
           ...order,
@@ -152,6 +161,13 @@ export function useClaimableOrders(
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'work_claims' },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'order_items' },
         () => {
           queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
         },

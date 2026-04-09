@@ -68,8 +68,8 @@ function SalesTopBar({
   role: Parameters<typeof NotificationBell>[0]['role'];
   push: Parameters<typeof PushAlertsCompact>[0]['push'];
 }): React.JSX.Element | null {
-  const { topBarHidden } = useSalesChrome();
-  if (topBarHidden) return null;
+  const { topBarHidden, suppressTopBarActions } = useSalesChrome();
+  if (topBarHidden || suppressTopBarActions) return null;
 
   return (
     <div className="sticky top-0 z-30 flex items-center justify-end gap-2 px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-sm">

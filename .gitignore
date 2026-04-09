@@ -15,6 +15,9 @@ dist-ssr
 .env.*
 !.env.example
 
+# Cursor agent-generated assets (not part of the app)
+.cursor/agent-images/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

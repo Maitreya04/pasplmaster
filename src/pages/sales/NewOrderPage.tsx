@@ -40,6 +40,7 @@ import {
   Skeleton,
   NumberStepper,
 } from '../../components/shared';
+import { useSalesChrome } from './SalesChromeContext';
 import type { Item, Customer } from '../../types';
 import {
   formatStockQty,
@@ -1659,6 +1660,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const deferredQuery = useDeferredValue(effectiveQuery);
   const isStale = deferredQuery !== effectiveQuery;
   const isSearchMode = isSearchFocused || effectiveQuery.length > 0;
+  const { setSuppressTopBarActions } = useSalesChrome();
   const activeFilterCount = (selectedBrand ? 1 : 0) + (selectedGroup ? 1 : 0);
   const activeFilterSummary = [selectedBrand, selectedGroup].filter(Boolean).join(' · ');
 
@@ -1679,6 +1681,11 @@ export default function NewOrderPage(): React.JSX.Element | null {
 
     return () => window.clearTimeout(focusTimer);
   }, [location.key, navigate]);
+
+  useEffect(() => {
+    setSuppressTopBarActions(isSearchMode);
+    return () => setSuppressTopBarActions(false);
+  }, [isSearchMode, setSuppressTopBarActions]);
 
   useEffect(() => {
     return () => {
