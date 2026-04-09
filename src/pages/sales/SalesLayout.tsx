@@ -10,6 +10,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useRolePushNotifications } from '../../hooks/useRolePushNotifications';
 import { NotificationBell } from '../../components/notifications/NotificationBell';
 import { PushAlertsCompact } from '../../components/notifications/PushAlertsCompact';
+import { SalesChromeProvider, useSalesChrome } from './SalesChromeContext';
 
 const preloadSalesHome = () => import('./SalesHome');
 const preloadNewOrder = () => import('./NewOrderPage');
@@ -43,18 +44,37 @@ export default function SalesLayout(): React.JSX.Element | null {
   const push = useRolePushNotifications({ role, userId, userName });
 
   return (
-    <CartProvider>
-      <div className="role-sales min-h-screen bg-[var(--bg-primary)] relative">
-        <div className="sticky top-0 z-30 flex items-center justify-end gap-2 px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-sm">
-          <NotificationBell userId={userId} />
-          <PushAlertsCompact label="Sales alerts" push={push} />
+    <SalesChromeProvider>
+      <CartProvider>
+        <div className="role-sales min-h-screen bg-[var(--bg-primary)] relative">
+          <SalesTopBar userId={userId} role={role} push={push} />
+          <div className="pb-[6.5rem]">
+            <Outlet />
+          </div>
+          <BottomNav items={NAV_ITEMS} />
+          <DevRoleSwitcher />
         </div>
-        <div className="pb-[6.5rem]">
-          <Outlet />
-        </div>
-        <BottomNav items={NAV_ITEMS} />
-        <DevRoleSwitcher />
-      </div>
-    </CartProvider>
+      </CartProvider>
+    </SalesChromeProvider>
+  );
+}
+
+function SalesTopBar({
+  userId,
+  role,
+  push,
+}: {
+  userId: number | null;
+  role: Parameters<typeof NotificationBell>[0]['role'];
+  push: Parameters<typeof PushAlertsCompact>[0]['push'];
+}): React.JSX.Element | null {
+  const { topBarHidden } = useSalesChrome();
+  if (topBarHidden) return null;
+
+  return (
+    <div className="sticky top-0 z-30 flex items-center justify-end gap-2 px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-sm">
+      <NotificationBell userId={userId} role={role} />
+      <PushAlertsCompact label="Sales alerts" push={push} />
+    </div>
   );
 }

@@ -188,7 +188,7 @@ export default function QueuePage(): React.JSX.Element | null {
         title="Pick Queue"
         action={
           <div className="flex items-center gap-1">
-            <NotificationBell userId={userId} />
+            <NotificationBell userId={userId} role={role} />
             <div className="relative">
             <button
               type="button"

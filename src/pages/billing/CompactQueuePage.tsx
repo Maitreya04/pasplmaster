@@ -755,7 +755,7 @@ export default function CompactQueuePage() {
           PASPL Companion
         </p>
         <div className="w-16 flex items-center justify-end gap-0.5 [-webkit-app-region:no-drag]">
-          <NotificationBell userId={userId} />
+          <NotificationBell userId={userId} role={role} />
           <PushAlertsCompact label="Alerts" push={push} />
         </div>
       </div>

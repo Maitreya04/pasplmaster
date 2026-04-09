@@ -1,8 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, CaretRight, Warning } from '@phosphor-icons/react';
 import { useUserNotifications } from '../../hooks/useUserNotifications';
 import type { UserNotification } from '../../types';
+
+type AppRole = 'sales' | 'billing' | 'picking' | 'admin';
+
+function matchesRole(n: UserNotification, role: AppRole | null): boolean {
+  if (!role) return true;
+  if (role === 'sales') return n.type === 'order_update_for_sales' || n.type === 'item_flagged_by_picker';
+  if (role === 'billing') return n.type === 'item_flagged_by_picker';
+  if (role === 'picking') return n.type === 'order_ready_to_pick';
+  return false;
+}
 
 function deepLinkFromPayload(n: UserNotification): string | null {
   const p = n.payload;
@@ -36,14 +46,20 @@ function timeShort(iso: string): string {
 
 interface NotificationBellProps {
   userId: number | null;
+  role?: AppRole | null;
 }
 
-export function NotificationBell({ userId }: NotificationBellProps): React.JSX.Element {
+export function NotificationBell({ userId, role = null }: NotificationBellProps): React.JSX.Element {
   const navigate = useNavigate();
-  const { items, loading, fetchError, unreadCount, markRead, markAllRead } =
-    useUserNotifications(userId);
+  const { items, loading, fetchError, markRead, markAllRead } = useUserNotifications(userId);
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  const filteredItems = useMemo(() => items.filter((n) => matchesRole(n, role)), [items, role]);
+  const unreadCount = useMemo(
+    () => filteredItems.filter((n) => n.read_at === null).length,
+    [filteredItems],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -122,7 +138,7 @@ export function NotificationBell({ userId }: NotificationBellProps): React.JSX.E
               </p>
             )}
             {!loading &&
-              items.map((n) => (
+              filteredItems.map((n) => (
                 <button
                   key={n.id}
                   type="button"
