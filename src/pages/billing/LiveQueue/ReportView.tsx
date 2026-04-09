@@ -25,7 +25,12 @@ function buildReportText(params: {
   const { orderNumber, orderName, salesperson, items, flags } = params;
   const lines: string[] = [];
 
-  lines.push(`Hi ${salesperson || 'Team'} — billing update for order ${orderNumber} (${orderName}):`);
+  const num = orderNumber.trim();
+  const orderHead =
+    num.length > 0
+      ? `order ${num} (${orderName})`
+      : `order for ${orderName}`;
+  lines.push(`Hi ${salesperson || 'Team'} — billing update for ${orderHead}:`);
 
   const partialItems: string[] = [];
   const noStockItems: string[] = [];
@@ -193,7 +198,11 @@ export function ReportView({
             onClick={() => {
               copy(reportText, 'report');
               const encoded = encodeURIComponent(reportText);
-              window.open(`https://wa.me/?text=${encoded}`, '_blank');
+              window.open(
+                `https://api.whatsapp.com/send?text=${encoded}`,
+                '_blank',
+                'noopener,noreferrer',
+              );
             }}
             className="flex-1 h-11 rounded-xl bg-[#25D366] text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all"
           >

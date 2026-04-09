@@ -11,6 +11,10 @@ import {
   orderItemProductCode,
 } from '../../../utils/formatters';
 
+/** UI labels for billing (Windows-first). Finish still works with Cmd+Enter on Mac. */
+const SHORTCUT_COPY_ALL = 'Alt+C';
+const SHORTCUT_FINISH = 'Ctrl+Enter';
+
 interface OrderSheetViewProps {
   orderName: string;
   orderNumber: string;
@@ -94,10 +98,7 @@ export function OrderSheetView({
 
   const copyAllItems = useCallback(() => {
     const text = items
-      .map((i) => {
-        const code = orderItemProductCode(i);
-        return `${code || i.item_name}\t${i.qty_requested}`;
-      })
+      .map((i) => `${orderItemDisplayName(i)}\t${i.qty_requested}`)
       .join('\n');
     copy(text, 'all-items');
     setCopyState('copied');
@@ -134,6 +135,16 @@ export function OrderSheetView({
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      // Use `code` so Mac Option+C works (Option sets altKey; `key` may be "ç" not "c").
+      if (e.altKey && e.code === 'KeyC' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        if (!isClaiming && items.length > 0) {
+          copyAllItems();
+          showHintsTemporarily();
+        }
+        return;
+      }
 
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
@@ -203,6 +214,7 @@ export function OrderSheetView({
   }, [
     items.length, activeRow, flags, partialInputRow, showConfirm, jumpBuffer,
     onFlagNoStock, onClearFlag, handleFinishAttempt, confirmFinish, showHintsTemporarily,
+    copyAllItems, isClaiming,
   ]);
 
   useEffect(() => {
@@ -285,6 +297,10 @@ export function OrderSheetView({
               <>
                 <Copy size={18} weight="bold" />
                 Copy {items.length} items to clipboard
+                <span className="text-[11px] font-normal opacity-60 hidden sm:inline mx-1">·</span>
+                <span className="text-[11px] font-normal opacity-80 hidden sm:inline tabular-nums">
+                  {SHORTCUT_COPY_ALL}
+                </span>
               </>
             )}
             {copyState === 'copied' && (
@@ -303,12 +319,14 @@ export function OrderSheetView({
 
           {/* Item table — DS classes */}
           <div className="ds-card overflow-hidden">
-            <table className="ds-table">
+            <table className="ds-table w-full table-fixed">
               <thead>
                 <tr>
                   <th className="w-10 text-center">#</th>
-                  <th>Item</th>
-                  <th className="hidden sm:table-cell">Code</th>
+                  <th className="min-w-0">Item</th>
+                  <th className="hidden sm:table-cell w-[10.5rem] max-w-[10.5rem] lg:w-[13rem] lg:max-w-[13rem] align-top">
+                    Code
+                  </th>
                   <th className="text-right w-14">Qty</th>
                   <th className="text-right w-32">Status</th>
                 </tr>
@@ -334,7 +352,7 @@ export function OrderSheetView({
                       }`}
                     >
                       {/* Row number */}
-                      <td className="text-center tabular-nums">
+                      <td className="text-center tabular-nums align-top">
                         {isActive ? (
                           <span className="text-[var(--role-primary)] font-bold text-xs">&#9654;</span>
                         ) : (
@@ -342,38 +360,48 @@ export function OrderSheetView({
                         )}
                       </td>
 
-                      {/* Item name — wrap fully; never ellipsis-truncate */}
-                      <td className="min-w-0 max-w-none align-top">
+                      {/* Item name — multi-line wrap; min-w-0 required for wrapping in table-fixed */}
+                      <td className="min-w-0 align-top">
                         <p
-                          className={`text-sm font-medium whitespace-normal break-words [overflow-wrap:anywhere] ${
+                          className={`text-sm font-medium leading-snug whitespace-normal break-words [overflow-wrap:anywhere] ${
                             flag ? 'text-[var(--content-secondary)]' : 'text-[var(--content-primary)]'
                           }`}
                         >
                           {orderItemDisplayName(item)}
                         </p>
                         {productCode && (
-                          <p className="text-[11px] font-mono text-[var(--content-quaternary)] mt-0.5 sm:hidden">
-                            {productCode}
-                          </p>
+                          <div className="mt-1 sm:hidden max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]">
+                            <span
+                              className="inline-block text-[11px] font-mono text-[var(--content-quaternary)] whitespace-nowrap"
+                              title={productCode}
+                            >
+                              {productCode}
+                            </span>
+                          </div>
                         )}
                       </td>
 
-                      {/* Product code — same as New Order search (alias 1 → alias) */}
-                      <td className="hidden sm:table-cell">
-                        <span className="text-[11px] font-mono text-[var(--content-quaternary)]">
-                          {productCode || '—'}
-                        </span>
+                      {/* Product code — always one line; long codes scroll inside capped column */}
+                      <td className="hidden sm:table-cell align-top min-w-0 w-[10.5rem] max-w-[10.5rem] lg:w-[13rem] lg:max-w-[13rem]">
+                        <div
+                          className="max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]"
+                          title={productCode || undefined}
+                        >
+                          <span className="inline-block text-[11px] font-mono text-[var(--content-quaternary)] whitespace-nowrap pr-1">
+                            {productCode || '—'}
+                          </span>
+                        </div>
                       </td>
 
                       {/* Qty */}
-                      <td className="text-right">
+                      <td className="text-right align-top">
                         <span className="text-sm font-mono font-semibold text-[var(--content-primary)] tabular-nums">
                           {item.qty_requested}
                         </span>
                       </td>
 
                       {/* Status */}
-                      <td className="text-right">
+                      <td className="text-right align-top">
                         {isPartialInput ? (
                           <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
                             <input
@@ -422,7 +450,9 @@ export function OrderSheetView({
                 <span className="mx-1.5 text-[var(--border-opaque)]">·</span>
                 <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">S</kbd> Undo
                 <span className="mx-1.5 text-[var(--border-opaque)]">·</span>
-                <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">⌘↵</kbd> Finish
+                <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">{SHORTCUT_COPY_ALL}</kbd> Copy lines
+                <span className="mx-1.5 text-[var(--border-opaque)]">·</span>
+                <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">{SHORTCUT_FINISH}</kbd> Finish
               </p>
             </div>
           )}
@@ -449,7 +479,10 @@ export function OrderSheetView({
           >
             {isApproving ? 'Approving...' : 'Finish Billing'}
             {!isApproving && (
-              <span className="text-[11px] font-normal opacity-70 hidden sm:inline">⌘↵</span>
+              <>
+                <span className="text-[11px] font-normal opacity-60 hidden sm:inline mx-1">·</span>
+                <span className="text-[11px] font-normal opacity-70 hidden sm:inline tabular-nums">{SHORTCUT_FINISH}</span>
+              </>
             )}
           </button>
         </div>
@@ -500,7 +533,7 @@ export function OrderSheetView({
             </p>
 
             <p className="text-[11px] text-[var(--content-quaternary)] mb-5 text-center sm:text-left">
-              <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">⌘↵</kbd>
+              <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">{SHORTCUT_FINISH}</kbd>
               <span className="text-[var(--content-quaternary)]"> confirm</span>
               <span className="mx-1.5 text-[var(--border-opaque)]">·</span>
               <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">Esc</kbd>
@@ -524,7 +557,7 @@ export function OrderSheetView({
               >
                 {isApproving ? 'Approving...' : 'Confirm & Finish'}
                 {!isApproving && (
-                  <span className="text-[11px] font-normal opacity-80 hidden sm:inline">⌘↵</span>
+                  <span className="text-[11px] font-normal opacity-80 hidden sm:inline tabular-nums">{SHORTCUT_FINISH}</span>
                 )}
               </button>
             </div>

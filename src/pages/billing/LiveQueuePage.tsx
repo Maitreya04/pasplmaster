@@ -18,7 +18,17 @@ import { QueueView } from './LiveQueue/QueueView';
 import { OrderSheetView } from './LiveQueue/OrderSheetView';
 import { ReportView } from './LiveQueue/ReportView';
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
+import type { OrderItem } from '../../types';
 import { orderLineLabel } from '../../utils/formatters';
+
+/** Frozen at approve time so the report/WhatsApp text stays correct after the order drops off the submitted queue. */
+type BillingReportSnapshot = {
+  orderId: number;
+  orderNumber: string;
+  orderName: string;
+  salesperson: string | null;
+  items: OrderItem[];
+};
 
 function sortByUrgencyAndAge(orders: OrderWithClaimInfo[]): OrderWithClaimInfo[] {
   return [...orders].sort((a, b) => {
@@ -104,6 +114,7 @@ export default function LiveQueuePage() {
 
   // Track auto-claiming
   const claimAttempted = useRef<number | null>(null);
+  const billingReportSnapshotRef = useRef<BillingReportSnapshot | null>(null);
 
   // When entering orderSheet, fire the background claim
   useEffect(() => {
@@ -155,6 +166,14 @@ export default function LiveQueuePage() {
     mutationFn: async () => {
       if (!order || !claimId || !userId) throw new Error('Cannot approve. Missing claim context.');
       const reviewer = userName || 'Billing';
+
+      const reportSnapshot: BillingReportSnapshot = {
+        orderId: order.id,
+        orderNumber: order.order_number?.trim() || '',
+        orderName: order.customer_name?.trim() || 'Customer',
+        salesperson: order.salesperson_name?.trim() || null,
+        items: items.map((line) => ({ ...line })),
+      };
 
       // Resolve approved qty per line (sync)
       const lineResults = items.map((item, i) => {
@@ -256,12 +275,13 @@ export default function LiveQueuePage() {
 
       await Promise.all(notifyTasks);
 
-      return order.order_number;
+      return reportSnapshot;
     },
-    onSuccess: () => {
+    onSuccess: (snapshot) => {
+      billingReportSnapshotRef.current = snapshot;
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['order', effectiveOrderId] });
+      queryClient.invalidateQueries({ queryKey: ['order', snapshot.orderId] });
 
       // Move to report screen
       flow.finishBilling();
@@ -299,6 +319,9 @@ export default function LiveQueuePage() {
 
   // ── Handle next from report (release claim, move to next order or queue) ──
   const handleNext = useCallback(async () => {
+    const completedOrderId = billingReportSnapshotRef.current?.orderId ?? effectiveOrderId;
+    billingReportSnapshotRef.current = null;
+
     if (claimId && userId) {
       try {
         await release();
@@ -309,7 +332,7 @@ export default function LiveQueuePage() {
 
     // If there are more orders, auto-claim next
     const remainingOrders = queue.filter(
-      o => o.id !== effectiveOrderId && (!o.claim_info || o.is_mine)
+      o => o.id !== completedOrderId && (!o.claim_info || o.is_mine)
     );
 
     if (remainingOrders.length > 0) {
@@ -377,14 +400,16 @@ export default function LiveQueuePage() {
   }
 
   if (flow.state === 'report') {
+    const snap = billingReportSnapshotRef.current;
+    const completedId = snap?.orderId ?? effectiveOrderId;
     return (
       <ReportView
-        orderName={order?.customer_name || 'Order'}
-        orderNumber={order?.order_number || ''}
-        salesperson={order?.salesperson_name || null}
-        items={items}
+        orderName={snap?.orderName ?? order?.customer_name ?? 'Order'}
+        orderNumber={snap?.orderNumber ?? order?.order_number ?? ''}
+        salesperson={snap?.salesperson ?? order?.salesperson_name ?? null}
+        items={snap?.items ?? items}
         flags={flow.flags}
-        totalWaiting={Math.max(0, queue.filter(o => (!o.claim_info || o.is_mine) && o.id !== effectiveOrderId).length)}
+        totalWaiting={Math.max(0, queue.filter(o => (!o.claim_info || o.is_mine) && o.id !== completedId).length)}
         onNext={handleNext}
       />
     );
