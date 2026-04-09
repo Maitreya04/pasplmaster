@@ -39,6 +39,21 @@ interface PushSubscriptionRow {
   auth: string;
 }
 
+async function getOrderSalespersonName(
+  admin: SupabaseClient,
+  orderId: number,
+): Promise<string | null> {
+  const { data, error } = await admin
+    .from('orders')
+    .select('salesperson_name')
+    .eq('id', orderId)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  const name = (data as { salesperson_name?: string | null } | null)?.salesperson_name ?? null;
+  return typeof name === 'string' && name.trim().length > 0 ? name : null;
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -316,7 +331,7 @@ serve(async (req) => {
       const body = `${payload.itemName} — ${payload.flagReason}`;
 
       const billingIds = await fetchActiveUserIds(admin, 'billing');
-      const deepLink = `/billing/review/${payload.orderId}`;
+      const billingDeepLink = `/billing/review/${payload.orderId}`;
       await insertUserNotifications(
         admin,
         billingIds.map((user_id) => ({
@@ -333,7 +348,35 @@ serve(async (req) => {
             flagReason: payload.flagReason,
             pickerName: payload.pickerName ?? null,
             orderItemId: payload.orderItemId,
-            deep_link: deepLink,
+            deep_link: billingDeepLink,
+          },
+        })),
+      );
+
+      // Also notify sales (billing is typically desktop-only).
+      const salespersonName = await getOrderSalespersonName(admin, payload.orderId);
+      const salesIds = salespersonName
+        ? await resolveSalesUserIds(admin, salespersonName)
+        : await fetchActiveUserIds(admin, 'sales');
+      const salesDeepLink = `/sales/orders`;
+      await insertUserNotifications(
+        admin,
+        salesIds.map((user_id) => ({
+          user_id,
+          title,
+          body,
+          type: 'item_flagged_by_picker',
+          order_id: payload.orderId,
+          payload: {
+            eventType: 'item_flagged_by_picker',
+            orderNumber: payload.orderNumber,
+            customerName: payload.customerName,
+            itemName: payload.itemName,
+            flagReason: payload.flagReason,
+            pickerName: payload.pickerName ?? null,
+            orderItemId: payload.orderItemId,
+            salespersonName: salespersonName,
+            deep_link: salesDeepLink,
           },
         })),
       );
@@ -341,11 +384,11 @@ serve(async (req) => {
       let sentCount = 0;
       let failedCount = 0;
       if (pushConfigured) {
-        const subs = await fetchPushSubscriptions(admin, cutoffIso, { role: 'billing' });
-        const r = await sendWebPushes(admin, subs, {
+        const billingSubs = await fetchPushSubscriptions(admin, cutoffIso, { role: 'billing' });
+        const billingResult = await sendWebPushes(admin, billingSubs, {
           title,
           body: pushBodyPreview(body),
-          url: deepLink,
+          url: billingDeepLink,
           tag: `flag-${payload.orderId}-${payload.orderItemId}`,
           payload: {
             eventType: 'item_flagged_by_picker',
@@ -354,20 +397,41 @@ serve(async (req) => {
             orderItemId: payload.orderItemId,
           },
         });
-        sentCount = r.sentCount;
-        failedCount = r.failedCount;
+        sentCount += billingResult.sentCount;
+        failedCount += billingResult.failedCount;
+
+        const salesSubs = await fetchPushSubscriptions(admin, cutoffIso, { userIds: salesIds });
+        const salesResult = await sendWebPushes(admin, salesSubs, {
+          title,
+          body: pushBodyPreview(body),
+          url: salesDeepLink,
+          tag: `flag-sales-${payload.orderId}-${payload.orderItemId}`,
+          payload: {
+            eventType: 'item_flagged_by_picker',
+            orderId: payload.orderId,
+            orderNumber: payload.orderNumber,
+            orderItemId: payload.orderItemId,
+          },
+        });
+        sentCount += salesResult.sentCount;
+        failedCount += salesResult.failedCount;
       }
 
       await admin.from('notification_events').insert({
         event_type: 'item_flagged_by_picker',
         order_id: payload.orderId,
         payload: raw,
-        target_role: 'billing',
+        target_role: 'broadcast',
         sent_count: sentCount,
         failed_count: failedCount,
       });
 
-      return json(200, { success: true, sentCount, failedCount, inboxCount: billingIds.length });
+      return json(200, {
+        success: true,
+        sentCount,
+        failedCount,
+        inboxCount: billingIds.length + salesIds.length,
+      });
     }
 
     if (eventType === 'order_update_for_sales') {

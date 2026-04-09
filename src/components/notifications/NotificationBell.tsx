@@ -13,7 +13,8 @@ function deepLinkFromPayload(n: UserNotification): string | null {
     return `/picking?claimOrderId=${n.order_id}`;
   }
   if (n.type === 'item_flagged_by_picker' && n.order_id) {
-    return `/billing/review/${n.order_id}`;
+    // If edge function didn't provide a deep link, prefer Sales list on sales-facing notifications.
+    return '/sales/orders';
   }
   if (n.type === 'order_update_for_sales') {
     return '/sales/orders';

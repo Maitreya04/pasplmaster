@@ -210,10 +210,10 @@ export default function MyOrdersPage(): React.JSX.Element | null {
     const map = new Map<number, { id: number; label: string; created_at: string }>();
     for (const n of notifications) {
       if (n.read_at !== null) continue;
-      if (n.type !== 'order_update_for_sales') continue;
+      if (n.type !== 'order_update_for_sales' && n.type !== 'item_flagged_by_picker') continue;
       if (typeof n.order_id !== 'number' || !Number.isFinite(n.order_id)) continue;
       const existing = map.get(n.order_id);
-      const label = inferSalesUpdateLabel(n.body);
+      const label = n.type === 'item_flagged_by_picker' ? 'Flagged' : inferSalesUpdateLabel(n.body);
       if (!existing || new Date(n.created_at).getTime() > new Date(existing.created_at).getTime()) {
         map.set(n.order_id, { id: n.id, label, created_at: n.created_at });
       }
@@ -225,9 +225,11 @@ export default function MyOrdersPage(): React.JSX.Element | null {
     async (orderId: number) => {
       setSelectedOrderId(orderId);
       // Best-effort: mark any unread sales updates for this order as read.
-      const toRead = notifications.filter(
-        (n) => n.read_at === null && n.type === 'order_update_for_sales' && n.order_id === orderId,
-      );
+      const toRead = notifications.filter((n) => {
+        if (n.read_at !== null) return false;
+        if (n.order_id !== orderId) return false;
+        return n.type === 'order_update_for_sales' || n.type === 'item_flagged_by_picker';
+      });
       await Promise.allSettled(toRead.map((n) => markRead(n.id)));
     },
     [markRead, notifications],
