@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, CaretRight } from '@phosphor-icons/react';
+import { Bell, CaretRight, Warning } from '@phosphor-icons/react';
 import { useUserNotifications } from '../../hooks/useUserNotifications';
 import type { UserNotification } from '../../types';
 
@@ -39,7 +39,8 @@ interface NotificationBellProps {
 
 export function NotificationBell({ userId }: NotificationBellProps): React.JSX.Element {
   const navigate = useNavigate();
-  const { items, loading, unreadCount, markRead, markAllRead } = useUserNotifications(userId);
+  const { items, loading, fetchError, unreadCount, markRead, markAllRead } =
+    useUserNotifications(userId);
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -74,10 +75,16 @@ export function NotificationBell({ userId }: NotificationBellProps): React.JSX.E
         type="button"
         onClick={() => setOpen((o) => !o)}
         className="relative min-h-10 min-w-10 flex items-center justify-center rounded-full text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-        aria-label="Notifications"
+        aria-label={fetchError ? `Notifications — error: ${fetchError}` : 'Notifications'}
         aria-expanded={open}
+        title={fetchError ?? undefined}
       >
         <Bell size={22} weight={unreadCount > 0 ? 'fill' : 'regular'} />
+        {fetchError && (
+          <span className="absolute -bottom-0.5 -right-0.5 text-[var(--content-warning)]" aria-hidden>
+            <Warning size={14} weight="fill" />
+          </span>
+        )}
         {unreadCount > 0 && (
           <span className="absolute -top-0.5 -right-0.5 min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-[var(--bg-negative)] text-[10px] font-bold text-white flex items-center justify-center">
             {unreadCount > 9 ? '9+' : unreadCount}
@@ -100,6 +107,11 @@ export function NotificationBell({ userId }: NotificationBellProps): React.JSX.E
             )}
           </div>
           <div className="overflow-y-auto flex-1">
+            {fetchError && (
+              <p className="px-3 py-2 text-xs text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] border-b border-[var(--border-warning)]">
+                {fetchError}. Run Admin → Notification diagnostics or apply migration 014.
+              </p>
+            )}
             {loading && (
               <p className="px-4 py-6 text-sm text-[var(--content-tertiary)] text-center">Loading…</p>
             )}

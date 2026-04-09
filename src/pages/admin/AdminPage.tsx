@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { Upload, SignOut, ChartBar } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
+import { NotificationDiagnosticsPanel } from '../../components/notifications/NotificationDiagnosticsPanel';
 
 export default function AdminPage(): React.JSX.Element | null {
   const navigate = useNavigate();
@@ -21,6 +22,10 @@ export default function AdminPage(): React.JSX.Element | null {
             <SignOut size={18} weight="regular" />
             Switch Role
           </button>
+        </div>
+
+        <div className="mb-8">
+          <NotificationDiagnosticsPanel />
         </div>
 
         <div className="space-y-3">

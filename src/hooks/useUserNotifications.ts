@@ -8,10 +8,13 @@ export function useUserNotifications(userId: number | null) {
   const uid = useId();
   const [items, setItems] = useState<UserNotification[]>([]);
   const [loading, setLoading] = useState(true);
+  /** Set when the table is missing, RLS blocks read, or network fails — inbox is empty. */
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const fetchNotifications = useCallback(async () => {
     if (!userId) {
       setItems([]);
+      setFetchError(null);
       setLoading(false);
       return;
     }
@@ -24,8 +27,12 @@ export function useUserNotifications(userId: number | null) {
       .limit(PAGE_SIZE);
     if (error) {
       console.error('user_notifications fetch', error);
+      setFetchError(
+        [error.code, error.message].filter(Boolean).join(': ') || 'Failed to load notifications',
+      );
       setItems([]);
     } else {
+      setFetchError(null);
       setItems((data ?? []) as UserNotification[]);
     }
     setLoading(false);
@@ -99,6 +106,7 @@ export function useUserNotifications(userId: number | null) {
   return {
     items,
     loading,
+    fetchError,
     unreadCount,
     refetch: fetchNotifications,
     markRead,
