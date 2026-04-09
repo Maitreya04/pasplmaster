@@ -76,6 +76,10 @@ export interface OrderItem {
   item_id: number;
   item_name: string;
   item_alias: string | null;
+  /** From `items` join in useOrderDetail — catalog `alias` at read time. */
+  catalog_alias?: string | null;
+  /** From `items` join — same as New Order search primary code (`alias1`). */
+  catalog_alias1?: string | null;
   rack_no: string | null;
   qty_requested: number;
   /** Units to pick from on-hand stock (≤ qty_requested). Omitted on legacy rows. */

@@ -1,7 +1,26 @@
 import { useEffect, useId } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
-import type { OrderWithItems } from '../types';
+import type { OrderItem, OrderWithItems } from '../types';
+
+type ItemCatalogJoin = { alias: string | null; alias1: string | null };
+
+type OrderItemRow = Omit<OrderItem, 'catalog_alias' | 'catalog_alias1'> & {
+  items?: ItemCatalogJoin | ItemCatalogJoin[] | null;
+};
+
+function mapOrderItemsWithCatalog(rows: OrderItemRow[] | null): OrderItem[] {
+  if (!rows?.length) return [];
+  return rows.map((row) => {
+    const { items: cat, ...base } = row;
+    const c = Array.isArray(cat) ? cat[0] : cat;
+    return {
+      ...base,
+      catalog_alias: c?.alias ?? null,
+      catalog_alias1: c?.alias1 ?? null,
+    };
+  });
+}
 
 export function useOrderDetail(orderId: number | null) {
   const queryClient = useQueryClient();
@@ -42,12 +61,22 @@ export function useOrderDetail(orderId: number | null) {
 
       if (orderError) throw orderError;
 
-      const { data: items, error: itemsError } = await supabase
+      const { data: rawItems, error: itemsError } = await supabase
         .from('order_items')
-        .select('*')
+        .select(
+          `
+          *,
+          items (
+            alias,
+            alias1
+          )
+        `,
+        )
         .eq('order_id', orderId!);
 
       if (itemsError) throw itemsError;
+
+      const items = mapOrderItemsWithCatalog(rawItems as OrderItemRow[] | null);
 
       return { ...order, items } as OrderWithItems;
     },

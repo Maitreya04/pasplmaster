@@ -4,7 +4,12 @@ import type { OrderItem } from '../../../types';
 import type { ItemFlag } from '../../../hooks/useBillingFlow';
 import { StatusBadge } from '../../../components/shared';
 import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
-import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
+import {
+  formatCurrency,
+  formatTimeAgo,
+  orderItemDisplayName,
+  orderItemProductCode,
+} from '../../../utils/formatters';
 
 interface OrderSheetViewProps {
   orderName: string;
@@ -59,6 +64,7 @@ export function OrderSheetView({
   const partialInputRef = useRef<HTMLInputElement>(null);
 
   const [showConfirm, setShowConfirm] = useState(false);
+  const confirmFinishRef = useRef<HTMLButtonElement>(null);
 
   const [jumpBuffer, setJumpBuffer] = useState('');
   const jumpTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -87,7 +93,12 @@ export function OrderSheetView({
   }, [copyState]);
 
   const copyAllItems = useCallback(() => {
-    const text = items.map(i => `${i.item_name}\t${i.qty_requested}`).join('\n');
+    const text = items
+      .map((i) => {
+        const code = orderItemProductCode(i);
+        return `${code || i.item_name}\t${i.qty_requested}`;
+      })
+      .join('\n');
     copy(text, 'all-items');
     setCopyState('copied');
   }, [items, copy]);
@@ -106,6 +117,18 @@ export function OrderSheetView({
     }
   }, [flagCount, onFinish]);
 
+  const confirmFinish = useCallback(() => {
+    if (isApproving) return;
+    setShowConfirm(false);
+    onFinish();
+  }, [isApproving, onFinish]);
+
+  useEffect(() => {
+    if (!showConfirm) return;
+    const id = window.setTimeout(() => confirmFinishRef.current?.focus(), 0);
+    return () => window.clearTimeout(id);
+  }, [showConfirm]);
+
   // Keyboard handler
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -114,7 +137,11 @@ export function OrderSheetView({
 
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        handleFinishAttempt();
+        if (showConfirm) {
+          confirmFinish();
+        } else {
+          handleFinishAttempt();
+        }
         return;
       }
 
@@ -175,7 +202,7 @@ export function OrderSheetView({
     return () => window.removeEventListener('keydown', onKey);
   }, [
     items.length, activeRow, flags, partialInputRow, showConfirm, jumpBuffer,
-    onFlagNoStock, onClearFlag, handleFinishAttempt, showHintsTemporarily,
+    onFlagNoStock, onClearFlag, handleFinishAttempt, confirmFinish, showHintsTemporarily,
   ]);
 
   useEffect(() => {
@@ -281,7 +308,7 @@ export function OrderSheetView({
                 <tr>
                   <th className="w-10 text-center">#</th>
                   <th>Item</th>
-                  <th className="hidden sm:table-cell">Alias</th>
+                  <th className="hidden sm:table-cell">Code</th>
                   <th className="text-right w-14">Qty</th>
                   <th className="text-right w-32">Status</th>
                 </tr>
@@ -291,6 +318,7 @@ export function OrderSheetView({
                   const flag = flags[index];
                   const isActive = activeRow === index;
                   const isPartialInput = partialInputRow === index;
+                  const productCode = orderItemProductCode(item);
 
                   let rowBg = '';
                   if (flag?.type === 'no_stock') rowBg = 'bg-[var(--bg-negative-subtle)]';
@@ -314,24 +342,26 @@ export function OrderSheetView({
                         )}
                       </td>
 
-                      {/* Item name */}
-                      <td>
-                        <p className={`text-sm font-medium truncate max-w-[280px] ${
-                          flag ? 'text-[var(--content-secondary)]' : 'text-[var(--content-primary)]'
-                        }`}>
-                          {item.item_name}
+                      {/* Item name — wrap fully; never ellipsis-truncate */}
+                      <td className="min-w-0 max-w-none align-top">
+                        <p
+                          className={`text-sm font-medium whitespace-normal break-words [overflow-wrap:anywhere] ${
+                            flag ? 'text-[var(--content-secondary)]' : 'text-[var(--content-primary)]'
+                          }`}
+                        >
+                          {orderItemDisplayName(item)}
                         </p>
-                        {item.item_alias && (
+                        {productCode && (
                           <p className="text-[11px] font-mono text-[var(--content-quaternary)] mt-0.5 sm:hidden">
-                            {item.item_alias}
+                            {productCode}
                           </p>
                         )}
                       </td>
 
-                      {/* Alias — desktop */}
+                      {/* Product code — same as New Order search (alias 1 → alias) */}
                       <td className="hidden sm:table-cell">
                         <span className="text-[11px] font-mono text-[var(--content-quaternary)]">
-                          {item.item_alias || '—'}
+                          {productCode || '—'}
                         </span>
                       </td>
 
@@ -449,7 +479,7 @@ export function OrderSheetView({
                   const item = items[Number(idx)];
                   return (
                     <p key={idx} className="text-sm text-[var(--content-warning)]">
-                      {item?.item_name} — {f.availableQty} of {item?.qty_requested}, rest pending
+                      {item ? orderItemDisplayName(item) : ''} — {f.availableQty} of {item?.qty_requested}, rest pending
                     </p>
                   );
                 })}
@@ -459,29 +489,43 @@ export function OrderSheetView({
                   const item = items[Number(idx)];
                   return (
                     <p key={idx} className="text-sm text-[var(--content-negative)]">
-                      {item?.item_name} — no stock, {item?.qty_requested} pending
+                      {item ? orderItemDisplayName(item) : ''} — no stock, {item?.qty_requested} pending
                     </p>
                   );
                 })}
             </div>
 
-            <p className="text-[11px] text-[var(--content-quaternary)] mb-5">
+            <p className="text-[11px] text-[var(--content-quaternary)] mb-4">
               Out of stock items will be marked pending. Partial items billed at available qty.
+            </p>
+
+            <p className="text-[11px] text-[var(--content-quaternary)] mb-5 text-center sm:text-left">
+              <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">⌘↵</kbd>
+              <span className="text-[var(--content-quaternary)]"> confirm</span>
+              <span className="mx-1.5 text-[var(--border-opaque)]">·</span>
+              <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">Esc</kbd>
+              <span className="text-[var(--content-quaternary)]"> cancel</span>
             </p>
 
             <div className="flex gap-3">
               <button
+                type="button"
                 onClick={() => setShowConfirm(false)}
                 className="flex-1 h-11 rounded-xl border border-[var(--border-opaque)] text-sm font-semibold text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={() => { setShowConfirm(false); onFinish(); }}
+                ref={confirmFinishRef}
+                type="button"
+                onClick={confirmFinish}
                 disabled={isApproving}
-                className="flex-1 h-11 rounded-xl bg-[var(--role-primary)] text-white text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
+                className="flex-1 h-11 rounded-xl bg-[var(--role-primary)] text-white text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {isApproving ? 'Approving...' : 'Confirm & Finish'}
+                {!isApproving && (
+                  <span className="text-[11px] font-normal opacity-80 hidden sm:inline">⌘↵</span>
+                )}
               </button>
             </div>
           </div>

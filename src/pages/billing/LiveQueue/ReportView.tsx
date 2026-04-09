@@ -1,6 +1,7 @@
 import { useEffect, useMemo, type ReactElement } from 'react';
 import { CheckCircle, Copy, Check, WhatsappLogo, ArrowRight } from '@phosphor-icons/react';
 import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
+import { orderLineLabel } from '../../../utils/formatters';
 import type { OrderItem } from '../../../types';
 import type { ItemFlag } from '../../../hooks/useBillingFlow';
 
@@ -36,7 +37,7 @@ function buildReportText(params: {
       billedCount++;
       return;
     }
-    const label = item.item_alias ? `${item.item_alias} ${item.item_name}` : item.item_name;
+    const label = orderLineLabel(item);
     if (flag.type === 'partial' && flag.availableQty != null) {
       const pending = item.qty_requested - flag.availableQty;
       partialItems.push(`• ${label}: Ordered ${item.qty_requested}, billed ${flag.availableQty}, ${pending} pending`);

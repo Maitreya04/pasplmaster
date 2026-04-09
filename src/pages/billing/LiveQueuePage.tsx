@@ -18,6 +18,7 @@ import { QueueView } from './LiveQueue/QueueView';
 import { OrderSheetView } from './LiveQueue/OrderSheetView';
 import { ReportView } from './LiveQueue/ReportView';
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
+import { orderLineLabel } from '../../utils/formatters';
 
 function sortByUrgencyAndAge(orders: OrderWithClaimInfo[]): OrderWithClaimInfo[] {
   return [...orders].sort((a, b) => {
@@ -155,28 +156,31 @@ export default function LiveQueuePage() {
       if (!order || !claimId || !userId) throw new Error('Cannot approve. Missing claim context.');
       const reviewer = userName || 'Billing';
 
-      // Apply flags directly: no flag = full qty, partial = availableQty, no_stock = 0
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
+      // Resolve approved qty per line (sync)
+      const lineResults = items.map((item, i) => {
         const flag = flow.flags[i];
-
         let approvedQty = item.qty_requested;
-
-        if (flag?.type === 'no_stock') {
-          approvedQty = 0;
-        } else if (flag?.type === 'partial' && flag.availableQty != null) {
+        if (flag?.type === 'no_stock') approvedQty = 0;
+        else if (flag?.type === 'partial' && flag.availableQty != null) {
           approvedQty = flag.availableQty;
         }
+        return { item, approvedQty, flag };
+      });
 
-        // Update qty_approved
-        await supabase.from('order_items').update({
-          qty_approved: approvedQty,
-        }).eq('id', item.id);
+      // Parallel updates — sequential await per row was the main latency source (N round trips).
+      const updateResponses = await Promise.all(
+        lineResults.map(({ item, approvedQty }) =>
+          supabase.from('order_items').update({ qty_approved: approvedQty }).eq('id', item.id),
+        ),
+      );
+      const updateError = updateResponses.find((r) => r.error)?.error;
+      if (updateError) throw updateError;
 
-        // Create pending item for shortfall
-        const pendingQty = item.qty_requested - approvedQty;
-        if (pendingQty > 0) {
-          await supabase.from('pending_items').insert({
+      const pendingRows = lineResults
+        .map(({ item, approvedQty, flag }) => {
+          const pendingQty = item.qty_requested - approvedQty;
+          if (pendingQty <= 0) return null;
+          return {
             order_id: order.id,
             order_number: order.order_number,
             customer_id: order.customer_id,
@@ -184,13 +188,19 @@ export default function LiveQueuePage() {
             item_id: item.item_id,
             item_name: item.item_name,
             qty_pending: pendingQty,
-            source: 'billing',
+            source: 'billing' as const,
             created_by: reviewer,
-            note: flag?.type === 'no_stock'
-              ? 'No stock in Busy — fully pending'
-              : `Partial stock — ${approvedQty} billed, ${pendingQty} pending`,
-          });
-        }
+            note:
+              flag?.type === 'no_stock'
+                ? 'No stock in Busy — fully pending'
+                : `Partial stock — ${approvedQty} billed, ${pendingQty} pending`,
+          };
+        })
+        .filter((row): row is NonNullable<typeof row> => row != null);
+
+      if (pendingRows.length > 0) {
+        const { error: pendingError } = await supabase.from('pending_items').insert(pendingRows);
+        if (pendingError) throw pendingError;
       }
 
       // Execute complete_billing RPC
@@ -203,45 +213,48 @@ export default function LiveQueuePage() {
 
       if (rpcError) throw rpcError;
 
-      // Send notifications
-      try {
-        await sendPickerReadyNotification({
+      const approvedAt = new Date().toISOString();
+      const notifyTasks: Promise<unknown>[] = [
+        sendPickerReadyNotification({
           eventType: 'order_ready_to_pick',
           orderId: order.id,
           orderNumber: order.order_number,
           customerName: order.customer_name,
           priority: order.priority,
-          approvedAt: new Date().toISOString(),
-        });
-      } catch { /* silent */ }
+          approvedAt,
+        }).catch(() => { /* silent */ }),
+      ];
 
-      // Send sales notification if there were flags
       if (flow.hasFlags) {
-        try {
-          // Build a summary for the internal notification
-          const flagSummary = Object.entries(flow.flags).map(([idx, flag]) => {
-            const item = items[Number(idx)];
+        const flagSummary = Object.entries(flow.flags)
+          .map(([idx, flag]) => {
+            const line = items[Number(idx)];
+            const label = orderLineLabel(line);
             if (flag.type === 'no_stock') {
-              return `${item.item_name}: No stock, ${item.qty_requested} pending`;
+              return `${label}: No stock, ${line.qty_requested} pending`;
             }
-            return `${item.item_name}: ${flag.availableQty} of ${item.qty_requested} billed, rest pending`;
-          }).join('; ');
+            return `${label}: ${flag.availableQty} of ${line.qty_requested} billed, rest pending`;
+          })
+          .join('; ');
 
-          await sendInternalNotification({
+        notifyTasks.push(
+          sendInternalNotification({
             eventType: 'order_update_for_sales',
             orderId: order.id,
             orderNumber: order.order_number,
             customerName: order.customer_name,
             salespersonName: order.salesperson_name,
             messageBody: `Billing update for ${order.order_number}: ${flagSummary}`,
-          });
-        } catch (e) {
-          console.error('order_update_for_sales', e);
-          toast.error(
-            `Sales notification failed: ${formatInternalNotificationError(e)}`,
-          );
-        }
+          }).catch((e) => {
+            console.error('order_update_for_sales', e);
+            toast.error(
+              `Sales notification failed: ${formatInternalNotificationError(e)}`,
+            );
+          }),
+        );
       }
+
+      await Promise.all(notifyTasks);
 
       return order.order_number;
     },

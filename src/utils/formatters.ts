@@ -1,3 +1,45 @@
+import type { OrderItem } from '../types';
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Same rule as New Order search rows: `alias1 ?? alias`, with snapshot fallback. */
+export function orderItemProductCode(item: OrderItem): string {
+  const a1 = item.catalog_alias1?.trim();
+  const ca = item.catalog_alias?.trim();
+  const frozen = item.item_alias?.trim();
+  if (a1) return a1;
+  if (ca) return ca;
+  return frozen ?? '';
+}
+
+/**
+ * Catalog `item_name` often repeats the product code as a leading token.
+ * Strip using alias1, then catalog alias, then frozen line alias (same order as
+ * `orderItemProductCode`).
+ */
+export function orderItemDisplayName(item: OrderItem): string {
+  const name = item.item_name.trim();
+  for (const code of [
+    item.catalog_alias1?.trim(),
+    item.catalog_alias?.trim(),
+    item.item_alias?.trim(),
+  ].filter((c): c is string => Boolean(c && c.length > 0))) {
+    const re = new RegExp(`^${escapeRegExp(code)}\\s+`, 'i');
+    const stripped = name.replace(re, '').trim();
+    if (stripped.length > 0) return stripped;
+  }
+  return name;
+}
+
+/** One line for messages: code + description (matches New Order semantics). */
+export function orderLineLabel(item: OrderItem): string {
+  const code = orderItemProductCode(item);
+  const name = orderItemDisplayName(item);
+  return code ? `${code} ${name}` : name;
+}
+
 const currencyFormatter = new Intl.NumberFormat('en-IN', {
   style: 'currency',
   currency: 'INR',
