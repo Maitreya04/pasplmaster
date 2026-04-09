@@ -46,7 +46,7 @@ export function OrderSheetView({
   onFinish,
   onSkip,
 }: OrderSheetViewProps): ReactElement {
-  const { copy, copiedId } = useCopyToClipboard();
+  const { copy } = useCopyToClipboard();
 
   // --- Copy button state ---
   const [copyState, setCopyState] = useState<CopyState>('ready');
@@ -54,7 +54,7 @@ export function OrderSheetView({
   // --- Table navigation ---
   const [activeRow, setActiveRow] = useState<number | null>(null);
   const [showHints, setShowHints] = useState(false);
-  const hintsTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const hintsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // --- Partial input ---
   const [partialInputRow, setPartialInputRow] = useState<number | null>(null);
@@ -66,7 +66,7 @@ export function OrderSheetView({
 
   // --- Number jump ---
   const [jumpBuffer, setJumpBuffer] = useState('');
-  const jumpTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const jumpTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const flagCount = Object.keys(flags).length;
 

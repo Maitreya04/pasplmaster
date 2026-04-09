@@ -149,7 +149,8 @@ export default function LiveQueuePage() {
     toast.info(`Switching to urgent order: ${urgentOrder.customer_name}`);
   }, [urgentInQueue, claimId, userId, release, flow, toast]);
 
-  // ── Park Order (Transition to Flagged) ──
+  // ── Park Order (Transition to Flagged) — kept for future use ──
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const parkMutation = useMutation({
     mutationFn: async () => {
       if (!order) throw new Error('No order');
@@ -382,7 +383,7 @@ export default function LiveQueuePage() {
         salesperson={order?.salesperson_name || null}
         items={items}
         flags={flow.flags}
-        totalWaiting={Math.max(0, queue.filter(o => !o.active_claim && o.id !== effectiveOrderId).length)}
+        totalWaiting={Math.max(0, queue.filter(o => (!o.claim_info || o.is_mine) && o.id !== effectiveOrderId).length)}
         onNext={handleNext}
       />
     );
