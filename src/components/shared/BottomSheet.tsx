@@ -6,6 +6,8 @@ interface BottomSheetProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
+  /** Header row with only the close button — put party/title context inside the scroll area to save vertical space. */
+  closeOnly?: boolean;
   children: ReactNode;
   sheetClassName?: string;
   contentClassName?: string;
@@ -16,11 +18,14 @@ export function BottomSheet({
   isOpen,
   onClose,
   title,
+  closeOnly = false,
   children,
   sheetClassName = '',
   contentClassName = '',
   keyboardBehavior = 'adjust',
 }: BottomSheetProps): React.JSX.Element | null {
+  const hasTitle = Boolean(title?.trim());
+  const showHeader = hasTitle || closeOnly;
   const containerRef = useRef<HTMLDivElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const dragStartY = useRef<number | null>(null);
@@ -173,17 +178,22 @@ export function BottomSheet({
           <div className="w-10 h-1 rounded-full bg-[var(--border-subtle)]" />
         </div>
 
-        {title && (
+        {showHeader && (
           <div
-            className="flex items-center justify-between px-5 pb-4"
+            className={`flex items-start gap-2 px-5 pb-3 ${hasTitle ? 'justify-between' : 'justify-end'}`}
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
           >
-            <h2 className="text-lg font-semibold text-[var(--content-primary)]">{title}</h2>
+            {hasTitle ? (
+              <h2 className="text-lg font-semibold text-[var(--content-primary)] min-w-0 pr-2">{title}</h2>
+            ) : (
+              <span className="sr-only">Order details</span>
+            )}
             <button
+              type="button"
               onClick={handleClose}
-              className="p-2 min-h-11 min-w-11 flex items-center justify-center -mr-2 rounded-lg text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors duration-150"
+              className="p-2 min-h-11 min-w-11 shrink-0 flex items-center justify-center -mr-2 rounded-lg text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors duration-150"
               aria-label="Close"
             >
               <X size={20} weight="regular" />

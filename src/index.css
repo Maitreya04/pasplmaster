@@ -138,7 +138,10 @@
   /* Status — warning / in-progress */
   --bg-warning: #f59e0b;
   --bg-warning-subtle: #fef3c7;
+  /** Legacy brown; prefer --content-warning-on-light for amber text on white. */
   --content-warning: #92400e;
+  /** Dark amber for text/icons on light surfaces (~5:1 on white); do not use --bg-warning as body text. */
+  --content-warning-on-light: #b45309;
   --border-warning: #fbbf24;
 
   /* Status — negative / errors */
