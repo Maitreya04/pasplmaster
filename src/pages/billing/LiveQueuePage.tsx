@@ -50,20 +50,6 @@ export default function LiveQueuePage() {
 
   const [currentOrderId, setCurrentOrderId] = useState<number | null>(null);
 
-  // ── Handle pre-selection from URL on mount ──
-  const didConsumeParam = useRef(false);
-  useEffect(() => {
-    if (preSelectedOrderId && !didConsumeParam.current) {
-      didConsumeParam.current = true;
-      setCurrentOrderId(preSelectedOrderId);
-      // Clear the param so refreshing doesn't re-trigger
-      setSearchParams({}, { replace: true });
-      // Jump straight to commit
-      machine.startCommit();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preSelectedOrderId]);
-
   // Sync active order logic
   useEffect(() => {
     if (myActive.length > 0 && currentOrderId !== myActive[0].id) {
@@ -83,6 +69,30 @@ export default function LiveQueuePage() {
 
   const effectiveOrderId = activeInQueue?.id ?? null;
 
+  // 2. Work Claim logic
+  const { claimId, isClaimedByMe, claim, release } = useWorkClaim(effectiveOrderId, 'billing');
+
+  // 3. Order Details
+  const { data: order, isLoading: orderLoading } = useOrderDetail(effectiveOrderId);
+  const items = useMemo(() => order?.items ?? [], [order]);
+
+  // 4. State Machine
+  const machine = useBillingFlowMachine(items);
+
+  // ── Handle pre-selection from URL on mount (after machine exists) ──
+  const didConsumeParam = useRef(false);
+  useEffect(() => {
+    if (preSelectedOrderId && !didConsumeParam.current) {
+      didConsumeParam.current = true;
+      setCurrentOrderId(preSelectedOrderId);
+      // Clear the param so refreshing doesn't re-trigger
+      setSearchParams({}, { replace: true });
+      // Jump straight to commit
+      machine.startCommit();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preSelectedOrderId]);
+
   // ── Urgent order detection ──
   // While working on a non-urgent order, check if an urgent one arrived
   const urgentInQueue = useMemo(
@@ -93,16 +103,6 @@ export default function LiveQueuePage() {
     urgentInQueue.length > 0 &&
     machine.state !== 'orient' &&
     activeInQueue?.priority !== 'urgent';
-
-  // 2. Work Claim logic
-  const { claimId, isClaimedByMe, claim, releaseClaim } = useWorkClaim(effectiveOrderId, 'billing');
-
-  // 3. Order Details
-  const { data: order, isLoading: orderLoading } = useOrderDetail(effectiveOrderId);
-  const items = useMemo(() => order?.items ?? [], [order]);
-
-  // 4. State Machine
-  const machine = useBillingFlowMachine(items);
 
   // Track auto-claiming to avoid loops
   const claimAttempted = useRef<number | null>(null);
@@ -126,7 +126,7 @@ export default function LiveQueuePage() {
   const handleSkip = useCallback(async () => {
     if (claimId && userId) {
       try {
-        await releaseClaim();
+        await release();
       } catch {
         console.warn('Failed to release claim gracefully');
       }
@@ -134,7 +134,7 @@ export default function LiveQueuePage() {
     setCurrentOrderId(null);
     claimAttempted.current = null;
     machine.reset();
-  }, [claimId, userId, releaseClaim, machine]);
+  }, [claimId, userId, release, machine]);
 
   // ── Urgent interrupt: release current, jump to urgent ──
   const handleUrgentInterrupt = useCallback(async () => {
@@ -144,7 +144,7 @@ export default function LiveQueuePage() {
     // Release current claim gracefully
     if (claimId && userId) {
       try {
-        await releaseClaim();
+        await release();
       } catch {
         /* best effort */
       }
@@ -157,7 +157,7 @@ export default function LiveQueuePage() {
     // Small delay to let state settle before entering commit
     setTimeout(() => machine.startCommit(), 50);
     toast.info(`Switching to urgent order: ${urgentOrder.customer_name}`);
-  }, [urgentInQueue, claimId, userId, releaseClaim, machine, toast]);
+  }, [urgentInQueue, claimId, userId, release, machine, toast]);
 
   // B. Park Order (Transition to Flagged)
   const parkMutation = useMutation({

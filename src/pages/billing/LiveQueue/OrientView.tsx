@@ -1,6 +1,6 @@
+import type { ReactElement } from 'react';
 import { Lightning } from '@phosphor-icons/react';
 import type { OrderWithClaimInfo } from '../../../hooks/useClaimableOrders';
-import { formatTimeAgo } from '../../../utils/formatters';
 
 interface OrientViewProps {
   queue: OrderWithClaimInfo[];
@@ -10,7 +10,7 @@ interface OrientViewProps {
   isLoading: boolean;
 }
 
-export function OrientView({ queue, totalWaiting, onStart, isLoading }: OrientViewProps): JSX.Element {
+export function OrientView({ queue, totalWaiting, onStart, isLoading }: OrientViewProps): ReactElement {
   const urgentCount = queue.filter(o => o.priority === 'urgent').length;
   const nextOrder = queue[0];
 

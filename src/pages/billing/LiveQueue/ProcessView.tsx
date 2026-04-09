@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Copy, Check, CheckCircle, Warning, XCircle } from '@phosphor-icons/react';
 import type { OrderItem } from '../../../types';
 import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
@@ -18,7 +18,7 @@ interface ProcessViewProps {
   onFinish: () => void;
 }
 
-export function ProcessView({ orderName, items, activeIndex, isSubmitting, manualFlags, onAdvance, onJump, onFlag, onUnflag, onFinish }: ProcessViewProps): JSX.Element {
+export function ProcessView({ orderName, items, activeIndex, isSubmitting, manualFlags, onAdvance, onJump, onFlag, onUnflag: _onUnflag, onFinish }: ProcessViewProps): ReactElement {
   const { copy, copiedId } = useCopyToClipboard();
   const isComplete = activeIndex >= items.length;
   

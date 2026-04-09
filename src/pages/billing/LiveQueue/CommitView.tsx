@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { ArrowLeft, Warning } from '@phosphor-icons/react';
 import type { OrderItem } from '../../../types';
 import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
@@ -30,7 +31,7 @@ export function CommitView({
   onCommit,
   onSkip,
   isClaiming
-}: CommitViewProps): JSX.Element {
+}: CommitViewProps): ReactElement {
   
   const flaggedItems = items.filter(i => i.state === 'flagged').length;
   const noStockItems = items.filter(i => i.qty_shippable === 0).length;

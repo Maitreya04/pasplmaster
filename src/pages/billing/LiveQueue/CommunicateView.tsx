@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { WhatsappLogo, CaretRight, Copy, Check } from '@phosphor-icons/react';
 import type { OrderItem } from '../../../types';
 import type { FlagIssue, ResolveDecision, ManualFlag } from '../../../hooks/useBillingFlowMachine';
@@ -27,7 +28,7 @@ export function CommunicateView({
   onSend,
   onSkip,
   isSubmitting
-}: CommunicateViewProps): JSX.Element {
+}: CommunicateViewProps): ReactElement {
   const { copy, copiedId } = useCopyToClipboard();
   
   // Draft building

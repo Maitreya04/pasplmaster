@@ -555,7 +555,7 @@ export default function CompactQueuePage() {
   const effectiveOrderId = activeInQueue?.id ?? null;
 
   // 2. Work Claim
-  const { claimId, isClaimedByMe, claim, releaseClaim } = useWorkClaim(effectiveOrderId, 'billing');
+  const { claimId, isClaimedByMe, claim, release } = useWorkClaim(effectiveOrderId, 'billing');
 
   // 3. Order Detail
   const { data: order, isLoading: orderLoading } = useOrderDetail(effectiveOrderId);
@@ -582,7 +582,7 @@ export default function CompactQueuePage() {
   const handleSkip = useCallback(async () => {
     if (claimId && userId) {
       try {
-        await releaseClaim();
+        await release();
       } catch {
         console.warn('Failed to release claim gracefully');
       }
@@ -590,7 +590,7 @@ export default function CompactQueuePage() {
     setCurrentOrderId(null);
     claimAttempted.current = null;
     machine.reset();
-  }, [claimId, userId, releaseClaim, machine]);
+  }, [claimId, userId, release, machine]);
 
   // Park
   const parkMutation = useMutation({

@@ -1,4 +1,5 @@
 import { Warning, Question } from '@phosphor-icons/react';
+import type { ReactElement } from 'react';
 import type { OrderItem } from '../../../types';
 import type { FlagIssue, ResolveDecision } from '../../../hooks/useBillingFlowMachine';
 
@@ -22,7 +23,7 @@ export function ResolveView({
   overrideAvailable,
   onDecide,
   onPark,
-}: ResolveViewProps): JSX.Element {
+}: ResolveViewProps): ReactElement {
   
   const requested = item.qty_requested;
   const available = overrideAvailable ?? item.qty_shippable ?? 0;

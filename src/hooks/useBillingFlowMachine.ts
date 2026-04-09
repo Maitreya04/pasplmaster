@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo } from 'react';
-import type { OrderItem } from '../../types';
+import { useState, useCallback } from 'react';
+import type { OrderItem } from '../types';
 
 export type BillingFlowState = 
   | 'orient' 

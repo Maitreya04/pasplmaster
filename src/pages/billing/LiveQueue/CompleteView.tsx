@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, type ReactElement } from 'react';
 import { CheckCircle } from '@phosphor-icons/react';
 
 interface CompleteViewProps {
@@ -7,7 +7,7 @@ interface CompleteViewProps {
   onAutoAdvance: () => void;
 }
 
-export function CompleteView({ orderName, totalWaiting, onAutoAdvance }: CompleteViewProps): JSX.Element {
+export function CompleteView({ orderName, totalWaiting, onAutoAdvance }: CompleteViewProps): ReactElement {
   useEffect(() => {
     // Norman: closure signal provides feedback proportional to significance.
     // 1.5s gives enough time to read and feel completion before resetting.
