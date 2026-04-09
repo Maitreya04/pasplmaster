@@ -7,7 +7,11 @@ import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { sendInternalNotification, sendPickerReadyNotification } from '../../lib/pickerPush';
+import {
+  formatInternalNotificationError,
+  sendInternalNotification,
+  sendPickerReadyNotification,
+} from '../../lib/pickerPush';
 
 import { useBillingFlowMachine } from '../../hooks/useBillingFlowMachine';
 import { OrientView } from './LiveQueue/OrientView';
@@ -244,7 +248,7 @@ export default function LiveQueuePage() {
 
       if (vars?.salesDraftText) {
         try {
-          await sendInternalNotification({
+          const notifyResult = await sendInternalNotification({
             eventType: 'order_update_for_sales',
             orderId: order.id,
             orderNumber: order.order_number,
@@ -252,8 +256,16 @@ export default function LiveQueuePage() {
             salespersonName: order.salesperson_name,
             messageBody: vars.salesDraftText,
           });
-        } catch {
-          /* silent */
+          if (notifyResult?.inboxCount === 0) {
+            toast.info(
+              'No sales users in the database received this update. Check users.role = sales and is_active.',
+            );
+          }
+        } catch (e) {
+          console.error('order_update_for_sales', e);
+          toast.error(
+            `Sales notification failed: ${formatInternalNotificationError(e)}. Deploy send-internal-notification and run migration 014.`,
+          );
         }
       }
 

@@ -1,4 +1,11 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  type ReactNode,
+} from 'react';
 import { supabase } from '../lib/supabase/client';
 import { clearCartDraft } from '../lib/cartDraftStorage';
 
@@ -102,6 +109,29 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   const [userId, setUserId] = useState<number | null>(() => loadFromStorage().userId);
   const [adminUnlocked, setAdminUnlocked] = useState(() => loadFromStorage().adminUnlocked);
 
+  // Backfill userId when name + role exist but id was missing (e.g. older exact-match lookup failed).
+  useEffect(() => {
+    if (!userName || !role || role === 'admin' || userId !== null) return;
+    let cancelled = false;
+    void supabase
+      .from('users')
+      .select('id, full_name')
+      .eq('role', role)
+      .eq('is_active', true)
+      .then(({ data: rows }) => {
+        if (cancelled) return;
+        const needle = userName.trim().toLowerCase();
+        const match = (rows ?? []).find((u) => u.full_name.trim().toLowerCase() === needle);
+        if (match?.id != null) {
+          setUserId(match.id);
+          safeLocalStorageSet(LS_KEYS.userId, String(match.id));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userName, role, userId]);
+
   const login = useCallback(async (code: string): Promise<boolean> => {
     const { data, error } = await supabase
       .from('app_config')
@@ -139,17 +169,23 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
       safeLocalStorageRemove(LS_KEYS.userName);
     }
 
-    // Resolve userId from users table
+    // Resolve userId from users table (case-insensitive name match; scoped by role)
     if (resolvedName) {
       supabase
         .from('users')
-        .select('id')
-        .eq('full_name', resolvedName)
+        .select('id, full_name')
+        .eq('role', newRole)
         .eq('is_active', true)
-        .limit(1)
-        .maybeSingle()
-        .then(({ data }) => {
-          const id = data?.id ?? null;
+        .then(({ data: rows, error }) => {
+          if (error) {
+            console.error('users lookup', error);
+            setUserId(null);
+            safeLocalStorageRemove(LS_KEYS.userId);
+            return;
+          }
+          const needle = resolvedName.trim().toLowerCase();
+          const match = (rows ?? []).find((u) => u.full_name.trim().toLowerCase() === needle);
+          const id = match?.id ?? null;
           setUserId(id);
           if (id !== null) {
             safeLocalStorageSet(LS_KEYS.userId, String(id));

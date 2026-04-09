@@ -35,12 +35,32 @@ export type InternalNotificationPayload =
   | ItemFlaggedPayload
   | OrderUpdateForSalesPayload;
 
-export async function sendInternalNotification(payload: InternalNotificationPayload) {
+/** Edge function JSON body (partial; varies by eventType). */
+export type InternalNotificationResult = {
+  success?: boolean;
+  inboxCount?: number;
+  sentCount?: number;
+  failedCount?: number;
+  error?: string;
+};
+
+export function formatInternalNotificationError(err: unknown): string {
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    const m = (err as { message: string }).message;
+    if (typeof m === 'string' && m.length > 0) return m;
+  }
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+export async function sendInternalNotification(
+  payload: InternalNotificationPayload,
+): Promise<InternalNotificationResult | null> {
   const { data, error } = await supabase.functions.invoke('send-internal-notification', {
     body: payload,
   });
   if (error) throw error;
-  return data;
+  return (data ?? null) as InternalNotificationResult | null;
 }
 
 export async function sendPickerReadyNotification(payload: PickerReadyPayload) {
