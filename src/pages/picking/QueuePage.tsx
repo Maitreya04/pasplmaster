@@ -14,6 +14,7 @@ import {
 import { supabase } from '../../lib/supabase/client';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
 import { usePickerPushNotifications } from '../../hooks/usePickerPushNotifications';
+import { NotificationBell } from '../../components/notifications/NotificationBell';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import {
@@ -186,7 +187,9 @@ export default function QueuePage(): React.JSX.Element | null {
       <PageHeader
         title="Pick Queue"
         action={
-          <div className="relative">
+          <div className="flex items-center gap-1">
+            <NotificationBell userId={userId} />
+            <div className="relative">
             <button
               type="button"
               onClick={() => setSettingsOpen((open) => !open)}
@@ -214,6 +217,7 @@ export default function QueuePage(): React.JSX.Element | null {
                 )}
               </div>
             )}
+          </div>
           </div>
         }
       />

@@ -7,7 +7,7 @@ import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { sendPickerReadyNotification } from '../../lib/pickerPush';
+import { sendInternalNotification, sendPickerReadyNotification } from '../../lib/pickerPush';
 
 import { useBillingFlowMachine } from '../../hooks/useBillingFlowMachine';
 import { OrientView } from './LiveQueue/OrientView';
@@ -179,7 +179,7 @@ export default function LiveQueuePage() {
 
   // C. Complete Billing (Approve)
   const approveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (vars?: { salesDraftText?: string }) => {
       if (!order || !claimId || !userId) throw new Error('Cannot approve. Missing claim context.');
       const reviewer = userName || 'Billing';
 
@@ -242,7 +242,21 @@ export default function LiveQueuePage() {
 
       if (rpcError) throw rpcError;
 
-      // Push notification
+      if (vars?.salesDraftText) {
+        try {
+          await sendInternalNotification({
+            eventType: 'order_update_for_sales',
+            orderId: order.id,
+            orderNumber: order.order_number,
+            customerName: order.customer_name,
+            salespersonName: order.salesperson_name,
+            messageBody: vars.salesDraftText,
+          });
+        } catch {
+          /* silent */
+        }
+      }
+
       try {
         await sendPickerReadyNotification({
           eventType: 'order_ready_to_pick',
@@ -359,7 +373,7 @@ export default function LiveQueuePage() {
           onFinish={() => {
             const hasIssues = machine.finishProcessPhase();
             if (!hasIssues) {
-              approveMutation.mutate();
+              approveMutation.mutate(undefined);
             }
           }}
         />
@@ -399,8 +413,8 @@ export default function LiveQueuePage() {
         decisions={machine.decisions}
         manualFlags={machine.manualFlags}
         isSubmitting={approveMutation.isPending}
-        onSkip={() => approveMutation.mutate()}
-        onSend={() => approveMutation.mutate()}
+        onSkip={() => approveMutation.mutate(undefined)}
+        onSend={(draftText) => approveMutation.mutate({ salesDraftText: draftText })}
       />
     );
   }

@@ -3,6 +3,7 @@ import { WhatsappLogo, CaretRight, Copy, Check } from '@phosphor-icons/react';
 import type { OrderItem } from '../../../types';
 import type { FlagIssue, ResolveDecision, ManualFlag } from '../../../hooks/useBillingFlowMachine';
 import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
+import { buildSalesCommunicateDraft } from '../../../lib/buildSalesCommunicateDraft';
 
 interface CommunicateViewProps {
   orderNumber: string;
@@ -12,7 +13,7 @@ interface CommunicateViewProps {
   issues: FlagIssue[];
   decisions: Record<number, ResolveDecision>;
   manualFlags: Record<number, ManualFlag>;
-  onSend: () => void;
+  onSend: (draftText: string) => void;
   onSkip: () => void;
   isSubmitting: boolean;
 }
@@ -30,30 +31,16 @@ export function CommunicateView({
   isSubmitting
 }: CommunicateViewProps): ReactElement {
   const { copy, copiedId } = useCopyToClipboard();
-  
-  // Draft building
-  const lines: string[] = [];
-  lines.push(`Hi ${salesperson || 'Team'} — order ${orderNumber} for ${orderName} has updates:`);
-  
-  issues.forEach(issue => {
-    const item = items[issue.itemIndex];
-    if (!item) return;
-    const decision = decisions[issue.itemIndex];
-    const manualFlag = manualFlags[issue.itemIndex];
-    const available = manualFlag?.availableQty ?? item.qty_shippable ?? 0;
-    
-    if (decision === 'bill_available_po_rest') {
-      lines.push(`• ${item.item_alias || ''} ${item.item_name}: Only ${available} available. Billed ${available}, remaining ${item.qty_requested - available} sent to PO.`);
-    } else if (decision === 'bill_available') {
-      lines.push(`• ${item.item_alias || ''} ${item.item_name}: Only ${available} available. Billed ${available}, rest dropped.`);
-    } else if (decision === 'drop_entirely') {
-      lines.push(`• ${item.item_alias || ''} ${item.item_name}: Removed from order entirely.`);
-    }
-  });
 
-  lines.push('Rest of the order is approved and going to picking.');
-  
-  const draftText = lines.join('\n\n');
+  const draftText = buildSalesCommunicateDraft({
+    orderNumber,
+    orderName,
+    salesperson,
+    items,
+    issues,
+    decisions,
+    manualFlags,
+  });
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-[var(--bg-primary)] p-6 animate-slide-up">
@@ -97,7 +84,7 @@ export function CommunicateView({
              <button
                onClick={() => {
                  copy(draftText, 'draft');
-                 onSend(); // Submits the approveMutation and proceeds
+                 onSend(draftText);
                }}
                disabled={isSubmitting}
                className="flex-[2] h-14 rounded-xl bg-[var(--bg-accent)] text-white text-base font-bold flex items-center justify-center gap-2 hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 shadow-md"

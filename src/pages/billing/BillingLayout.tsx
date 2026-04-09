@@ -9,6 +9,10 @@ import {
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
 import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
+import { useAuth } from '../../context/AuthContext';
+import { useRolePushNotifications } from '../../hooks/useRolePushNotifications';
+import { NotificationBell } from '../../components/notifications/NotificationBell';
+import { PushAlertsCompact } from '../../components/notifications/PushAlertsCompact';
 
 const preloadDashboard = () => import('./DashboardPage');
 const preloadNeedsReview = () => import('./NeedsReviewPage');
@@ -40,15 +44,23 @@ const NAV_ITEMS: BottomNavItem[] = [
 export default function BillingLayout(): React.JSX.Element | null {
   const location = useLocation();
   const navigate = useNavigate();
+  const { userId, userName, role } = useAuth();
+  const push = useRolePushNotifications({ role, userId, userName });
 
   return (
     <div className="role-billing min-h-screen bg-[var(--bg-primary)] relative">
       <div className="flex">
         {/* Sidebar — visible on lg+ */}
         <aside className="hidden lg:flex flex-col w-56 min-h-screen border-r border-[var(--border-opaque)] bg-[var(--bg-secondary)] py-6 px-3 shrink-0">
-          <p className="px-3 text-xs font-semibold text-[var(--content-quaternary)] uppercase tracking-wider mb-4">
-            Billing
-          </p>
+          <div className="flex items-center justify-between gap-2 px-3 mb-4">
+            <p className="text-xs font-semibold text-[var(--content-quaternary)] uppercase tracking-wider">
+              Billing
+            </p>
+            <div className="flex items-center gap-1 shrink-0">
+              <NotificationBell userId={userId} />
+              <PushAlertsCompact label="Billing alerts" push={push} />
+            </div>
+          </div>
           {NAV_ITEMS.map(({ icon: IconCmp, label, path }) => {
             const active = location.pathname === path;
             return (
@@ -69,8 +81,14 @@ export default function BillingLayout(): React.JSX.Element | null {
         </aside>
 
         {/* Content */}
-        <main className="flex-1 pb-[6.5rem] lg:pb-0">
-          <Outlet />
+        <main className="flex-1 pb-[6.5rem] lg:pb-0 flex flex-col min-w-0">
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-end gap-2 px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-sm">
+            <NotificationBell userId={userId} />
+            <PushAlertsCompact label="Billing alerts" push={push} />
+          </div>
+          <div className="flex-1 min-h-0">
+            <Outlet />
+          </div>
         </main>
       </div>
 

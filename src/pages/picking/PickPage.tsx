@@ -28,6 +28,7 @@ import { imageToBase64 } from '../../lib/ocr/geminiOCR';
 import { verifyWithAI } from '../../lib/ocr/pickVerifier';
 import { pickQuantityTarget } from '../../lib/cartSupply';
 import { appHaptics } from '../../lib/haptics';
+import { sendInternalNotification } from '../../lib/pickerPush';
 
 
 interface ItemMeta {
@@ -310,6 +311,24 @@ export default function PickPage(): React.JSX.Element | null {
               });
             }
           }
+        }
+      }
+
+      const flaggedLine = order.items.find((oi) => oi.id === itemId);
+      if (flaggedLine) {
+        try {
+          await sendInternalNotification({
+            eventType: 'item_flagged_by_picker',
+            orderId: order.id,
+            orderNumber: order.order_number,
+            customerName: order.customer_name,
+            itemName: flaggedLine.item_name,
+            flagReason: reason,
+            pickerName: userName,
+            orderItemId: itemId,
+          });
+        } catch {
+          /* silent */
         }
       }
     },

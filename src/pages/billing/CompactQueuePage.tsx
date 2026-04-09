@@ -7,9 +7,14 @@ import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useBillingFlowMachine } from '../../hooks/useBillingFlowMachine';
+import type { FlagIssue, ResolveDecision, ManualFlag } from '../../hooks/useBillingFlowMachine';
 import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
 import { formatCurrency } from '../../utils/formatters';
-import { sendPickerReadyNotification } from '../../lib/pickerPush';
+import { sendInternalNotification, sendPickerReadyNotification } from '../../lib/pickerPush';
+import { buildSalesCommunicateDraft } from '../../lib/buildSalesCommunicateDraft';
+import { NotificationBell } from '../../components/notifications/NotificationBell';
+import { useRolePushNotifications } from '../../hooks/useRolePushNotifications';
+import { PushAlertsCompact } from '../../components/notifications/PushAlertsCompact';
 import { Check, Copy, Lightning, CheckCircle, Warning, Question, CaretLeft, CaretRight } from '@phosphor-icons/react';
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 import type { OrderItem } from '../../types';
@@ -455,27 +460,53 @@ function CompactResolve({
 }
 
 function CompactCommunicate({
+  orderNumber,
+  orderName,
+  salesperson,
+  items,
+  issues,
+  decisions,
+  manualFlags,
   isSubmitting,
   onSkip,
   onSend,
 }: {
+  orderNumber: string;
+  orderName: string;
+  salesperson: string | null;
+  items: OrderItem[];
+  issues: FlagIssue[];
+  decisions: Record<number, ResolveDecision>;
+  manualFlags: Record<number, ManualFlag>;
   isSubmitting: boolean;
   onSkip: () => void;
-  onSend: () => void;
+  onSend: (draftText: string) => void;
 }) {
+  const draftText = buildSalesCommunicateDraft({
+    orderNumber,
+    orderName,
+    salesperson,
+    items,
+    issues,
+    decisions,
+    manualFlags,
+  });
+
   return (
     <div className="flex flex-col items-center justify-center h-full p-5 text-center">
       <Warning size={24} weight="fill" className="text-[var(--content-warning)] mb-3" />
-      <h2 className="text-base font-bold text-[var(--content-primary)] mb-1">Issues resolved</h2>
-      <p className="text-xs text-[var(--content-secondary)] mb-6">Notify salesperson from the full view if needed.</p>
+      <h2 className="text-base font-bold text-[var(--content-primary)] mb-1">Notify sales</h2>
+      <p className="text-[11px] text-[var(--content-secondary)] mb-4 line-clamp-4 whitespace-pre-wrap text-left w-full rounded-lg bg-[var(--bg-tertiary)] p-2 border border-[var(--border-subtle)]">
+        {draftText}
+      </p>
 
       <div className="w-full space-y-2">
         <button
-          onClick={onSend}
+          onClick={() => onSend(draftText)}
           disabled={isSubmitting}
           className="w-full h-11 rounded-xl bg-[var(--bg-accent)] text-white text-sm font-bold hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 shadow-md"
         >
-          {isSubmitting ? 'Approving…' : 'Approve Order'}
+          {isSubmitting ? 'Approving…' : 'Notify & approve'}
         </button>
         <button
           onClick={onSkip}
@@ -521,7 +552,8 @@ function CompactComplete({
 export default function CompactQueuePage() {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { userName, userId } = useAuth();
+  const { userName, userId, role } = useAuth();
+  const push = useRolePushNotifications({ role, userId, userName });
 
   // 1. Queue Data
   const { available, myActive, stale, isLoading: queueLoading } = useClaimableOrders({
@@ -612,7 +644,7 @@ export default function CompactQueuePage() {
 
   // Approve
   const approveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (vars?: { salesDraftText?: string }) => {
       if (!order || !claimId || !userId) throw new Error('Cannot approve.');
       const reviewer = userName || 'Billing';
 
@@ -661,6 +693,21 @@ export default function CompactQueuePage() {
       });
       if (rpcError) throw rpcError;
 
+      if (vars?.salesDraftText) {
+        try {
+          await sendInternalNotification({
+            eventType: 'order_update_for_sales',
+            orderId: order.id,
+            orderNumber: order.order_number,
+            customerName: order.customer_name,
+            salespersonName: order.salesperson_name,
+            messageBody: vars.salesDraftText,
+          });
+        } catch {
+          /* silent */
+        }
+      }
+
       try {
         await sendPickerReadyNotification({
           eventType: 'order_ready_to_pick',
@@ -670,7 +717,9 @@ export default function CompactQueuePage() {
           priority: order.priority,
           approvedAt: new Date().toISOString(),
         });
-      } catch { /* silent */ }
+      } catch {
+        /* silent */
+      }
 
       return order.order_number;
     },
@@ -688,10 +737,15 @@ export default function CompactQueuePage() {
   return (
     <div className="role-billing h-screen w-screen bg-[var(--bg-primary)] overflow-hidden flex flex-col">
       {/* Tiny top bar — window drag area + context */}
-      <div className="h-7 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center justify-center shrink-0 select-none [-webkit-app-region:drag]">
+      <div className="h-9 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center justify-between px-2 shrink-0 select-none [-webkit-app-region:drag]">
+        <span className="w-16" aria-hidden />
         <p className="text-[10px] font-semibold text-[var(--content-quaternary)] tracking-widest uppercase">
           PASPL Companion
         </p>
+        <div className="w-16 flex items-center justify-end gap-0.5 [-webkit-app-region:no-drag]">
+          <NotificationBell userId={userId} />
+          <PushAlertsCompact label="Alerts" push={push} />
+        </div>
       </div>
 
       {/* Content */}
@@ -740,7 +794,7 @@ export default function CompactQueuePage() {
             onFinish={() => {
               const hasIssues = machine.finishProcessPhase();
               if (!hasIssues) {
-                approveMutation.mutate();
+                approveMutation.mutate(undefined);
               }
             }}
           />
@@ -762,9 +816,16 @@ export default function CompactQueuePage() {
 
         {machine.state === 'communicate' && order && (
           <CompactCommunicate
+            orderNumber={order.order_number}
+            orderName={order.customer_name}
+            salesperson={order.salesperson_name}
+            items={items}
+            issues={machine.issues}
+            decisions={machine.decisions}
+            manualFlags={machine.manualFlags}
             isSubmitting={approveMutation.isPending}
-            onSkip={() => approveMutation.mutate()}
-            onSend={() => approveMutation.mutate()}
+            onSkip={() => approveMutation.mutate(undefined)}
+            onSend={(draftText) => approveMutation.mutate({ salesDraftText: draftText })}
           />
         )}
 

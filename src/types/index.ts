@@ -237,3 +237,16 @@ export interface PickerPushPayload {
   url: string;
   approvedAt: string | null;
 }
+
+/** In-app notification row (see `user_notifications` table) */
+export interface UserNotification {
+  id: number;
+  user_id: number;
+  title: string;
+  body: string;
+  type: string;
+  order_id: number | null;
+  payload: Record<string, unknown>;
+  read_at: string | null;
+  created_at: string;
+}
