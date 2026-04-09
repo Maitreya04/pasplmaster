@@ -7,25 +7,92 @@ export type NotificationDiagnosticCheck = {
   detail: string;
 };
 
-function fnErrorStatus(err: unknown): number | null {
-  if (typeof err !== 'object' || err === null) return null;
-  const e = err as { context?: { status?: number }; status?: number };
-  if (typeof e.context?.status === 'number') return e.context.status;
-  if (typeof e.status === 'number') return e.status;
-  return null;
-}
+/**
+ * Direct POST to the Edge Function URL — returns real HTTP status (404 = not deployed).
+ * `supabase.functions.invoke` sometimes only reports "Failed to send a request" with empty context.
+ */
+async function probeEdgeFunctionHttp(): Promise<NotificationDiagnosticCheck> {
+  const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+  const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-function formatFnError(err: unknown): string {
-  if (err == null) return '';
-  if (typeof err === 'object' && err !== null) {
-    const e = err as Record<string, unknown>;
-    const parts: string[] = [];
-    if (typeof e.message === 'string') parts.push(e.message);
-    if (e.context != null) parts.push(JSON.stringify(e.context));
-    if (e.cause != null) parts.push(String(e.cause));
-    if (parts.length > 0) return parts.join(' ');
+  if (!url || !key) {
+    return {
+      id: 'edge_function',
+      ok: false,
+      label: 'Edge function send-internal-notification',
+      detail:
+        'VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY is missing in this build. Set both in Vercel → Environment Variables and redeploy.',
+    };
   }
-  return String(err);
+
+  const endpoint = `${url.replace(/\/$/, '')}/functions/v1/send-internal-notification`;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+        apikey: key,
+      },
+      body: JSON.stringify({ eventType: '__diagnostic_invalid__' }),
+    });
+
+    const text = await res.text();
+    let snippet = text.slice(0, 200);
+    if (snippet.length === 200) snippet += '…';
+
+    if (res.status === 404) {
+      return {
+        id: 'edge_function',
+        ok: false,
+        label: 'Edge function send-internal-notification',
+        detail: `HTTP 404 — this function is not deployed on the Supabase project used by this app.\n\nOpen Supabase Dashboard → Edge Functions. You should see \`send-internal-notification\`. If not, run:\n\nsupabase functions deploy send-internal-notification\n\nEndpoint tried:\n${endpoint}`,
+      };
+    }
+
+    if (res.status === 400) {
+      return {
+        id: 'edge_function',
+        ok: true,
+        label: 'Edge function send-internal-notification',
+        detail: `HTTP 400 (expected for test payload) — function is deployed and reachable.\n${snippet}`,
+      };
+    }
+
+    if (res.status === 401 || res.status === 403) {
+      return {
+        id: 'edge_function',
+        ok: false,
+        label: 'Edge function send-internal-notification',
+        detail: `HTTP ${res.status} — anon key may not match this project. Check VITE_SUPABASE_ANON_KEY in Vercel matches Dashboard → API.\n${snippet}`,
+      };
+    }
+
+    if (res.status === 500) {
+      return {
+        id: 'edge_function',
+        ok: false,
+        label: 'Edge function send-internal-notification',
+        detail: `HTTP 500 — function runs but failed (often missing VAPID or service role). Check Edge Function logs in Dashboard.\n${snippet}`,
+      };
+    }
+
+    return {
+      id: 'edge_function',
+      ok: res.ok,
+      label: 'Edge function send-internal-notification',
+      detail: `HTTP ${res.status}: ${snippet}`,
+    };
+  } catch (e) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    return {
+      id: 'edge_function',
+      ok: false,
+      label: 'Edge function send-internal-notification',
+      detail: `Fetch failed: ${errMsg}\n\nTried: ${endpoint}\n\nREST works (table check above), so the Supabase URL is usually correct. Common causes: function not deployed (try direct URL in browser after deploy), VPN/ad-blocker, or iOS limiting cross-site requests.`,
+    };
+  }
 }
 
 /**
@@ -37,6 +104,16 @@ export async function runNotificationDiagnostics(opts: {
   role: string | null;
 }): Promise<NotificationDiagnosticCheck[]> {
   const checks: NotificationDiagnosticCheck[] = [];
+
+  const baseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+  checks.push({
+    id: 'vite_supabase_url',
+    ok: !!baseUrl?.startsWith('https://'),
+    label: 'Build VITE_SUPABASE_URL',
+    detail: baseUrl
+      ? `Loaded (${baseUrl.length} chars). Must match Supabase Dashboard → Project Settings → API → Project URL.`
+      : 'MISSING — set in Vercel and redeploy.',
+  });
 
   const isAdminNoPersona = opts.role === 'admin';
   checks.push({
@@ -92,56 +169,7 @@ export async function runNotificationDiagnostics(opts: {
     });
   }
 
-  const { error: fnErr } = await supabase.functions.invoke('send-internal-notification', {
-    body: { eventType: '__diagnostic_invalid__' },
-  });
-
-  const status = fnErr ? fnErrorStatus(fnErr) : null;
-  const msg = formatFnError(fnErr);
-
-  if (fnErr == null) {
-    checks.push({
-      id: 'edge_function',
-      ok: false,
-      label: 'Edge function send-internal-notification',
-      detail: 'Unexpected: invalid payload returned no error — check function code.',
-    });
-  } else if (status === 404 || /not\s*found|404/i.test(msg)) {
-    checks.push({
-      id: 'edge_function',
-      ok: false,
-      label: 'Edge function send-internal-notification',
-      detail:
-        'Not deployed or wrong name (HTTP 404). In Supabase Dashboard → Edge Functions, confirm `send-internal-notification` exists. Deploy: `supabase functions deploy send-internal-notification`',
-    });
-  } else if (
-    status === 400 ||
-    /non-2xx|400|Unknown|Invalid|unknown or missing eventtype/i.test(msg)
-  ) {
-    checks.push({
-      id: 'edge_function',
-      ok: true,
-      label: 'Edge function send-internal-notification',
-      detail:
-        'Reachable (expected error for test payload). Billing “Copy & approve” can call this function. Ensure VAPID secrets are set on the function for push.',
-    });
-  } else if (/failed to send|failed to fetch|network|load failed|could not connect/i.test(msg)) {
-    checks.push({
-      id: 'edge_function',
-      ok: false,
-      label: 'Edge function send-internal-notification',
-      detail: `${msg}\n\nUsually: function not deployed to this Supabase project, wrong VITE_SUPABASE_URL in the hosted build, ad-blocker/VPN, or device offline. Compare Dashboard project URL with your .env.`,
-    });
-  } else {
-    checks.push({
-      id: 'edge_function',
-      ok: false,
-      label: 'Edge function send-internal-notification',
-      detail:
-        msg ||
-        'Invoke failed — open Supabase → Edge Functions → send-internal-notification → Logs.',
-    });
-  }
+  checks.push(await probeEdgeFunctionHttp());
 
   checks.push({
     id: 'billing_path',
