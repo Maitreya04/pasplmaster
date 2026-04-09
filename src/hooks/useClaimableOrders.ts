@@ -7,7 +7,7 @@ import type { Order, ClaimStage, WorkflowStatus } from '../types';
 
 /** Stale threshold in ms — matches the 3-minute heartbeat timeout */
 const STALE_THRESHOLD_MS = 3 * 60 * 1000;
-const LIVE_REFRESH_MS = 5_000;
+const LIVE_REFRESH_MS = 2_000;
 
 interface ClaimableOrdersOptions {
   /** The stage to check claims for */

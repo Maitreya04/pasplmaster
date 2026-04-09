@@ -1,158 +1,306 @@
 import { useState, useEffect, type ReactElement } from 'react';
+import { Tray } from '@phosphor-icons/react';
 import type { OrderWithClaimInfo } from '../../../hooks/useClaimableOrders';
+import { StatusBadge, EmptyState } from '../../../components/shared';
 import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
 
 interface QueueViewProps {
-  queue: OrderWithClaimInfo[];
+  available: OrderWithClaimInfo[];
+  otherActive: OrderWithClaimInfo[];
+  stale: OrderWithClaimInfo[];
+  myActive: OrderWithClaimInfo[];
   isLoading: boolean;
   onSelect: (orderId: number) => void;
+  onTakeover: (orderId: number) => void;
 }
 
-export function QueueView({ queue, isLoading, onSelect }: QueueViewProps): ReactElement {
+function SectionHeader({ label, count }: { label: string; count: number }) {
+  if (count === 0) return null;
+  return (
+    <div className="flex items-center gap-3 pt-6 pb-2 px-1 first:pt-0">
+      <span className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+        {label}
+      </span>
+      <span className="text-xs font-mono font-semibold text-[var(--content-quaternary)] bg-[var(--bg-tertiary)] rounded-full px-2 py-0.5">
+        {count}
+      </span>
+    </div>
+  );
+}
+
+function OrderRow({
+  order,
+  isSelected,
+  isClaimed,
+  isStale,
+  onClick,
+  onTakeover,
+}: {
+  order: OrderWithClaimInfo;
+  isSelected: boolean;
+  isClaimed: boolean;
+  isStale: boolean;
+  onClick: () => void;
+  onTakeover?: () => void;
+}) {
+  const isUrgent = order.priority === 'urgent';
+
+  return (
+    <button
+      onClick={isClaimed && !isStale ? undefined : onClick}
+      disabled={isClaimed && !isStale}
+      className={`ds-card ds-card--pressable w-full text-left p-4 transition-all ${
+        isClaimed && !isStale
+          ? 'opacity-50 cursor-not-allowed'
+          : isSelected
+            ? 'ds-row--selected ring-1 ring-[var(--role-primary)]'
+            : ''
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            {isUrgent && <StatusBadge status="urgent" />}
+            <h3 className={`text-base font-semibold truncate ${
+              isClaimed && !isStale ? 'text-[var(--content-tertiary)]' : 'text-[var(--content-primary)]'
+            }`}>
+              {order.customer_name}
+            </h3>
+          </div>
+          <p className="text-xs text-[var(--content-tertiary)]">
+            {[order.order_number, order.customer_city, order.salesperson_name].filter(Boolean).join(' · ')}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className={`text-sm font-mono font-semibold tabular-nums ${
+            isClaimed && !isStale ? 'text-[var(--content-quaternary)]' : 'text-[var(--content-primary)]'
+          }`}>
+            {formatCurrency(order.total_value)}
+          </p>
+          <p className="text-[11px] text-[var(--content-quaternary)] mt-0.5">
+            {order.item_count} items · {formatTimeAgo(order.created_at)}
+          </p>
+        </div>
+      </div>
+
+      {/* Being billed by someone else */}
+      {isClaimed && !isStale && order.claim_info && (
+        <p className="text-[11px] text-[var(--content-quaternary)] mt-2 flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--content-accent)] shrink-0" />
+          {order.claim_info.claimed_by_name} · started {formatTimeAgo(order.claim_info.claimed_at)}
+        </p>
+      )}
+
+      {/* Stale — takeover */}
+      {isStale && order.claim_info && (
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-[var(--border-faint)]">
+          <p className="text-[11px] text-[var(--content-warning)] flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--content-warning)] animate-pulse shrink-0" />
+            Stale · {order.claim_info.claimed_by_name} · {formatTimeAgo(order.claim_info.last_heartbeat_at)}
+          </p>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onTakeover?.();
+            }}
+            className="text-xs font-semibold text-[var(--content-accent)] hover:text-[var(--content-primary)] px-3 py-1.5 rounded-lg bg-[var(--bg-accent-subtle)] hover:bg-[var(--bg-tertiary)] transition-colors"
+          >
+            Take over
+          </button>
+        </div>
+      )}
+    </button>
+  );
+}
+
+export function QueueView({
+  available,
+  otherActive,
+  stale,
+  myActive,
+  isLoading,
+  onSelect,
+  onTakeover,
+}: QueueViewProps): ReactElement {
+  // Flat list for keyboard navigation: myActive → available → stale
+  const navigable = [...myActive, ...available, ...stale];
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  // Clamp selected index when queue changes
   useEffect(() => {
-    if (selectedIndex >= queue.length) {
-      setSelectedIndex(Math.max(0, queue.length - 1));
+    if (selectedIndex >= navigable.length) {
+      setSelectedIndex(Math.max(0, navigable.length - 1));
     }
-  }, [queue.length, selectedIndex]);
+  }, [navigable.length, selectedIndex]);
 
-  // Keyboard navigation
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedIndex(prev => Math.min(prev + 1, queue.length - 1));
+        setSelectedIndex(prev => Math.min(prev + 1, navigable.length - 1));
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
         setSelectedIndex(prev => Math.max(prev - 1, 0));
       }
-      if (e.key === 'Enter' && queue.length > 0) {
+      if (e.key === 'Enter' && navigable.length > 0) {
         e.preventDefault();
-        const order = queue[selectedIndex];
-        // Don't allow selecting orders claimed by others
-        if (order && (!order.claim_info || order.is_mine)) {
+        const order = navigable[selectedIndex];
+        if (order && (!order.claim_info || order.is_mine || order.claim_info.is_stale)) {
           onSelect(order.id);
         }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [queue, selectedIndex, onSelect]);
+  }, [navigable, selectedIndex, onSelect]);
+
+  const totalCount = available.length + stale.length + myActive.length;
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[var(--bg-primary)] p-4 sm:p-8">
+      <div className="min-h-screen bg-[var(--bg-primary)] p-4 lg:p-8">
         <div className="max-w-2xl mx-auto">
-          <div className="h-8 w-48 bg-[var(--bg-tertiary)] rounded-lg animate-pulse mb-8" />
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-24 bg-[var(--bg-secondary)] rounded-2xl mb-3 animate-pulse border border-[var(--border-subtle)]" />
-          ))}
+          <div className="h-7 w-40 bg-[var(--bg-tertiary)] rounded-lg animate-pulse mb-6" />
+          <div className="space-y-3">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="ds-card h-20 animate-pulse" />
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
-  const availableCount = queue.filter(o => !o.claim_info || o.is_mine).length;
+  if (totalCount === 0 && otherActive.length === 0) {
+    return (
+      <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
+        <EmptyState
+          icon={Tray}
+          title="No orders waiting"
+          description="New orders will appear here when sales submits them."
+        />
+      </div>
+    );
+  }
+
+  // Track a running navigable index to highlight the correct row across sections
+  let navIndex = 0;
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)] p-4 sm:p-8">
+    <div className="min-h-screen bg-[var(--bg-primary)] p-4 lg:p-8">
       <div className="max-w-2xl mx-auto">
 
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-2xl font-bold text-[var(--content-primary)]">
+        <div className="flex items-baseline justify-between mb-6">
+          <h1 className="text-xl font-bold text-[var(--content-primary)]">
             Billing Queue
           </h1>
-          {availableCount > 0 && (
-            <span className="text-sm font-bold text-[var(--content-secondary)] bg-[var(--bg-tertiary)] border border-[var(--border-opaque)] px-3 py-1 rounded-full font-mono">
-              {availableCount}
+          {totalCount > 0 && (
+            <span className="text-sm font-mono font-semibold text-[var(--content-secondary)] bg-[var(--bg-tertiary)] px-2.5 py-0.5 rounded-full">
+              {totalCount}
             </span>
           )}
         </div>
 
-        {/* Empty state */}
-        {queue.length === 0 && (
-          <div className="text-center py-20">
-            <p className="text-lg font-semibold text-[var(--content-secondary)] mb-2">
-              No orders waiting
-            </p>
-            <p className="text-sm text-[var(--content-quaternary)]">
-              New orders will appear here when sales submits them.
-            </p>
-          </div>
+        {/* My active orders */}
+        {myActive.length > 0 && (
+          <>
+            <SectionHeader label="Your active" count={myActive.length} />
+            <div className="space-y-2">
+              {myActive.map((order) => {
+                const idx = navIndex++;
+                return (
+                  <OrderRow
+                    key={order.id}
+                    order={order}
+                    isSelected={idx === selectedIndex}
+                    isClaimed={false}
+                    isStale={false}
+                    onClick={() => {
+                      setSelectedIndex(idx);
+                      onSelect(order.id);
+                    }}
+                  />
+                );
+              })}
+            </div>
+          </>
         )}
 
-        {/* Order cards */}
-        <div className="space-y-3">
-          {queue.map((order, index) => {
-            const isSelected = index === selectedIndex;
-            const isClaimed = !!order.claim_info && !order.is_mine;
-            const isUrgent = order.priority === 'urgent';
+        {/* Available orders */}
+        {available.length > 0 && (
+          <>
+            <SectionHeader label="Available" count={available.length} />
+            <div className="space-y-2">
+              {available.map((order) => {
+                const idx = navIndex++;
+                return (
+                  <OrderRow
+                    key={order.id}
+                    order={order}
+                    isSelected={idx === selectedIndex}
+                    isClaimed={false}
+                    isStale={false}
+                    onClick={() => {
+                      setSelectedIndex(idx);
+                      onSelect(order.id);
+                    }}
+                  />
+                );
+              })}
+            </div>
+          </>
+        )}
 
-            return (
-              <button
-                key={order.id}
-                onClick={() => {
-                  if (!isClaimed) {
-                    setSelectedIndex(index);
-                    onSelect(order.id);
-                  }
-                }}
-                disabled={isClaimed}
-                className={`w-full text-left p-5 rounded-2xl border-2 transition-all ${
-                  isClaimed
-                    ? 'opacity-50 cursor-not-allowed bg-[var(--bg-tertiary)] border-[var(--border-subtle)]'
-                    : isSelected
-                      ? 'bg-[var(--bg-secondary)] border-[var(--role-primary)] shadow-sm'
-                      : 'bg-[var(--bg-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-opaque)]'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      {isUrgent && (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[var(--bg-negative)] text-white text-xs font-bold uppercase tracking-wide">
-                          <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                          Urgent
-                        </span>
-                      )}
-                      <h3 className={`text-lg font-bold truncate ${isClaimed ? 'text-[var(--content-tertiary)]' : 'text-[var(--content-primary)]'}`}>
-                        {order.customer_name}
-                      </h3>
-                    </div>
-                    <p className={`text-sm font-medium ${isClaimed ? 'text-[var(--content-quaternary)]' : 'text-[var(--content-secondary)]'}`}>
-                      {order.order_number}
-                      {order.customer_city && <span> · {order.customer_city}</span>}
-                      {order.salesperson_name && <span> · {order.salesperson_name}</span>}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className={`text-sm font-mono font-bold ${isClaimed ? 'text-[var(--content-quaternary)]' : 'text-[var(--content-primary)]'}`}>
-                      {formatCurrency(order.total_value)}
-                    </p>
-                    <p className="text-xs text-[var(--content-tertiary)] mt-1">
-                      {order.item_count} items · {formatTimeAgo(order.created_at)}
-                    </p>
-                  </div>
-                </div>
+        {/* Being billed by others */}
+        {otherActive.length > 0 && (
+          <>
+            <SectionHeader label="Being billed" count={otherActive.length} />
+            <div className="space-y-2">
+              {otherActive.map((order) => (
+                <OrderRow
+                  key={order.id}
+                  order={order}
+                  isSelected={false}
+                  isClaimed={true}
+                  isStale={false}
+                  onClick={() => {}}
+                />
+              ))}
+            </div>
+          </>
+        )}
 
-                {isClaimed && (
-                  <p className="text-xs font-medium text-[var(--content-quaternary)] mt-2 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--content-quaternary)]" />
-                    Being billed by {order.claim_info!.claimed_by_name} · started {formatTimeAgo(order.claim_info!.claimed_at)}
-                  </p>
-                )}
-              </button>
-            );
-          })}
-        </div>
+        {/* Stale orders — takeover */}
+        {stale.length > 0 && (
+          <>
+            <SectionHeader label="Stale — take over" count={stale.length} />
+            <div className="space-y-2">
+              {stale.map((order) => {
+                const idx = navIndex++;
+                return (
+                  <OrderRow
+                    key={order.id}
+                    order={order}
+                    isSelected={idx === selectedIndex}
+                    isClaimed={false}
+                    isStale={true}
+                    onClick={() => {
+                      setSelectedIndex(idx);
+                      onSelect(order.id);
+                    }}
+                    onTakeover={() => onTakeover(order.id)}
+                  />
+                );
+              })}
+            </div>
+          </>
+        )}
 
         {/* Keyboard hint */}
-        {queue.length > 0 && (
-          <p className="text-center text-xs text-[var(--content-quaternary)] mt-8">
+        {navigable.length > 0 && (
+          <p className="text-center text-[11px] text-[var(--content-quaternary)] mt-8">
             ↑↓ navigate · Enter to start billing
           </p>
         )}

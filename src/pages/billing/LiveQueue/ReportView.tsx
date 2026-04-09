@@ -46,13 +46,13 @@ function buildReportText(params: {
   });
 
   if (partialItems.length > 0) {
-    lines.push(`⚠️ Partial stock:\n${partialItems.join('\n')}`);
+    lines.push(`Partial stock:\n${partialItems.join('\n')}`);
   }
   if (noStockItems.length > 0) {
-    lines.push(`❌ Out of stock:\n${noStockItems.join('\n')}`);
+    lines.push(`Out of stock:\n${noStockItems.join('\n')}`);
   }
   if (billedCount > 0) {
-    lines.push(`✅ ${billedCount} item${billedCount !== 1 ? 's' : ''} billed as ordered.`);
+    lines.push(`${billedCount} item${billedCount !== 1 ? 's' : ''} billed as ordered.`);
   }
 
   lines.push('Order approved and sent to picking.');
@@ -79,7 +79,6 @@ export function ReportView({
   const flagCount = Object.keys(flags).length;
   const billedCount = items.length - flagCount;
 
-  // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
@@ -98,31 +97,31 @@ export function ReportView({
     return () => window.removeEventListener('keydown', onKey);
   }, [copy, reportText, onNext]);
 
-  // Clean order — minimal view
+  // Clean order — minimal success view
   if (!hasFlags) {
     return (
       <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-6 animate-slide-up">
-        <div className="w-full max-w-md text-center">
-          <div className="w-20 h-20 bg-[var(--bg-positive-subtle)] rounded-full flex items-center justify-center mx-auto mb-6">
-            <CheckCircle size={44} weight="fill" className="text-[var(--content-positive)]" />
+        <div className="w-full max-w-sm text-center">
+          <div className="w-16 h-16 bg-[var(--bg-positive-subtle)] rounded-full flex items-center justify-center mx-auto mb-5">
+            <CheckCircle size={36} weight="fill" className="text-[var(--content-positive)]" />
           </div>
-          <h2 className="text-2xl font-bold text-[var(--content-primary)] mb-2">
+          <h2 className="text-xl font-bold text-[var(--content-primary)] mb-1">
             {orderName} — billed
           </h2>
-          <p className="text-base text-[var(--content-secondary)] mb-10">
-            All {items.length} items billed successfully. No issues to report.
+          <p className="text-sm text-[var(--content-secondary)] mb-8">
+            All {items.length} items billed. Sent to picking.
           </p>
           <button
             onClick={onNext}
-            className="w-full h-14 rounded-2xl bg-[var(--role-primary)] text-white text-base font-bold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all shadow-md"
+            className="w-full h-12 rounded-xl bg-[var(--role-primary)] text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all shadow-sm"
           >
             Next order
             {totalWaiting > 0 && (
-              <span className="text-sm font-normal opacity-80">({totalWaiting} remaining)</span>
+              <span className="text-xs font-normal opacity-80">({totalWaiting} remaining)</span>
             )}
-            <ArrowRight size={18} weight="bold" />
+            <ArrowRight size={16} weight="bold" />
           </button>
-          <p className="text-xs text-[var(--content-quaternary)] mt-4">
+          <p className="text-[11px] text-[var(--content-quaternary)] mt-3">
             Press Enter
           </p>
         </div>
@@ -132,41 +131,41 @@ export function ReportView({
 
   // Flagged order — full report
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-4 sm:p-6 animate-slide-up">
-      <div className="w-full max-w-xl">
+    <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-4 lg:p-6 animate-slide-up">
+      <div className="w-full max-w-lg">
 
         {/* Header */}
-        <div className="text-center mb-6">
-          <div className="w-16 h-16 bg-[var(--bg-positive-subtle)] rounded-full flex items-center justify-center mx-auto mb-4">
-            <CheckCircle size={36} weight="fill" className="text-[var(--content-positive)]" />
+        <div className="text-center mb-5">
+          <div className="w-14 h-14 bg-[var(--bg-positive-subtle)] rounded-full flex items-center justify-center mx-auto mb-4">
+            <CheckCircle size={32} weight="fill" className="text-[var(--content-positive)]" />
           </div>
-          <h2 className="text-2xl font-bold text-[var(--content-primary)] mb-1">
+          <h2 className="text-xl font-bold text-[var(--content-primary)] mb-1">
             {orderName} — billed
           </h2>
-          <p className="text-sm text-[var(--content-secondary)]">
+          <p className="text-xs text-[var(--content-secondary)]">
             {billedCount} billed · {flagCount} flagged
           </p>
         </div>
 
         {/* Report card */}
-        <div className="bg-[var(--bg-secondary)] rounded-2xl p-6 shadow-[var(--shadow-card)] border border-[var(--border-subtle)] relative mb-6">
-          {/* Copy button top-right */}
+        <div className="ds-card p-5 relative mb-5">
+          {/* Copy icon */}
           <button
             onClick={() => copy(reportText, 'report')}
-            className="absolute top-4 right-4 p-2 rounded-lg bg-[var(--bg-tertiary)] hover:bg-[var(--bg-accent-subtle)] transition-colors text-[var(--content-secondary)]"
+            className="absolute top-3 right-3 p-2 rounded-lg bg-[var(--bg-tertiary)] hover:bg-[var(--bg-accent-subtle)] transition-colors text-[var(--content-secondary)]"
             title="Copy report (C)"
           >
             {copiedId === 'report' ? (
-              <Check size={18} weight="bold" className="text-[var(--content-positive)]" />
+              <Check size={16} weight="bold" className="text-[var(--content-positive)]" />
             ) : (
-              <Copy size={18} />
+              <Copy size={16} />
             )}
           </button>
 
-          {/* Report content with WhatsApp styling */}
-          <div className="bg-[#EFEAE2] dark:bg-[#0b141a] rounded-xl p-5 border border-[var(--border-opaque)] relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-1.5 h-full bg-[#25D366]" />
-            <p className="text-[14px] leading-relaxed whitespace-pre-wrap text-[#111B21] dark:text-[#E9EDEF] pl-2">
+          {/* WhatsApp-style message bubble */}
+          <div className="bg-[#EFEAE2] dark:bg-[#0b141a] rounded-xl p-4 border border-[var(--border-subtle)] relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1 h-full bg-[#25D366]" />
+            <p className="text-[13px] leading-relaxed whitespace-pre-wrap text-[#111B21] dark:text-[#E9EDEF] pl-2">
               {reportText}
             </p>
           </div>
@@ -176,51 +175,43 @@ export function ReportView({
         <div className="flex gap-3 mb-4">
           <button
             onClick={() => copy(reportText, 'report')}
-            className={`flex-1 h-12 rounded-xl border-2 text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${
+            className={`flex-1 h-11 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${
               copiedId === 'report'
                 ? 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
                 : 'border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)] hover:bg-[var(--bg-tertiary)]'
             }`}
           >
             {copiedId === 'report' ? (
-              <>
-                <Check size={18} weight="bold" />
-                Copied!
-              </>
+              <><Check size={16} weight="bold" /> Copied!</>
             ) : (
-              <>
-                <Copy size={18} />
-                Copy
-              </>
+              <><Copy size={16} /> Copy</>
             )}
           </button>
 
           <button
             onClick={() => {
-              // Copy first, then open WhatsApp
               copy(reportText, 'report');
-              // Open WhatsApp with pre-filled text
               const encoded = encodeURIComponent(reportText);
               window.open(`https://wa.me/?text=${encoded}`, '_blank');
             }}
-            className="flex-1 h-12 rounded-xl bg-[#25D366] text-white text-sm font-bold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all"
+            className="flex-1 h-11 rounded-xl bg-[#25D366] text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all"
           >
-            <WhatsappLogo size={20} weight="fill" />
+            <WhatsappLogo size={18} weight="fill" />
             WhatsApp {salesperson || ''}
           </button>
         </div>
 
         <button
           onClick={onNext}
-          className="w-full h-14 rounded-2xl bg-[var(--role-primary)] text-white text-base font-bold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all shadow-md"
+          className="w-full h-12 rounded-xl bg-[var(--role-primary)] text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all shadow-sm"
         >
           Next order
           {totalWaiting > 0 && (
-            <span className="text-sm font-normal opacity-80">({totalWaiting} remaining)</span>
+            <span className="text-xs font-normal opacity-80">({totalWaiting} remaining)</span>
           )}
-          <ArrowRight size={18} weight="bold" />
+          <ArrowRight size={16} weight="bold" />
         </button>
-        <p className="text-center text-xs text-[var(--content-quaternary)] mt-3">
+        <p className="text-center text-[11px] text-[var(--content-quaternary)] mt-3">
           C copy · Enter next order
         </p>
 

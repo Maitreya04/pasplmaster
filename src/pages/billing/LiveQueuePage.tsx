@@ -39,7 +39,7 @@ export default function LiveQueuePage() {
     : null;
 
   // 1. Queue Data
-  const { available, myActive, stale, isLoading: queueLoading } = useClaimableOrders({
+  const { available, myActive, otherActive, stale, isLoading: queueLoading } = useClaimableOrders({
     stage: 'billing',
     workflowStatus: 'submitted',
   });
@@ -315,9 +315,16 @@ export default function LiveQueuePage() {
   if (flow.state === 'queue') {
     return (
       <QueueView
-        queue={queue}
+        available={available}
+        otherActive={otherActive}
+        stale={stale}
+        myActive={myActive}
         isLoading={queueLoading}
         onSelect={(orderId) => {
+          setCurrentOrderId(orderId);
+          flow.openOrder();
+        }}
+        onTakeover={(orderId) => {
           setCurrentOrderId(orderId);
           flow.openOrder();
         }}
