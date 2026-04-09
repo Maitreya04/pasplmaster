@@ -149,25 +149,6 @@ export default function LiveQueuePage() {
     toast.info(`Switching to urgent order: ${urgentOrder.customer_name}`);
   }, [urgentInQueue, claimId, userId, release, flow, toast]);
 
-  // ── Park Order (Transition to Flagged) — kept for future use ──
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const parkMutation = useMutation({
-    mutationFn: async () => {
-      if (!order) throw new Error('No order');
-      await supabase
-        .from('orders')
-        .update({ workflow_status: 'flagged', notes: 'Parked by Billing operator for review' })
-        .eq('id', order.id);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-      queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-      toast.info(`Order ${order?.order_number} parked. Dropped from Live Queue.`);
-      handleSkip();
-    },
-    onError: () => toast.error('Failed to park order'),
-  });
-
   // ── Complete Billing (Approve) — simplified from flags only ──
   const approveMutation = useMutation({
     mutationFn: async () => {
