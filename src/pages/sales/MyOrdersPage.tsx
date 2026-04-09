@@ -1,20 +1,31 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Package, HourglassHigh, Warning } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { useOrders } from '../../hooks/useOrders';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { usePendingItems } from '../../hooks/usePendingItems';
+import { useUserNotifications } from '../../hooks/useUserNotifications';
 import { Card, BottomSheet, StatusBadge, EmptyState, Skeleton } from '../../components/shared';
 import type { Order, OrderItem, OrderWithItems } from '../../types';
 
 import { formatCurrency, formatTimeAgo } from '../../utils/formatters';
 
+function inferSalesUpdateLabel(text: string): string {
+  const t = text.toLowerCase();
+  if (t.includes('sent to po') || t.includes('pending') || t.includes('po.')) return 'Partial (PO)';
+  if (t.includes('removed from order') || t.includes('dropped')) return 'Dropped';
+  if (t.includes('only') && t.includes('available')) return 'Partial';
+  return 'Update';
+}
+
 function OrderCard({
   order,
   onTap,
+  salesUpdateLabel,
 }: {
   order: OrderWithItems | Order;
   onTap: () => void;
+  salesUpdateLabel?: string | null;
 }) {
   return (
     <Card pressable onClick={onTap}>
@@ -22,6 +33,18 @@ function OrderCard({
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="font-mono font-bold text-[var(--content-primary)]">{order.order_number}</span>
+            {salesUpdateLabel && (
+              <>
+                <span
+                  className="inline-block w-2 h-2 rounded-full bg-[var(--bg-negative)]"
+                  aria-label="Order has an unread update"
+                  title="Unread update"
+                />
+                <span className="text-[11px] font-semibold text-[var(--content-negative)]">
+                  {salesUpdateLabel}
+                </span>
+              </>
+            )}
             {order.workflow_status !== 'flagged' && 'items' in order && order.items && (order.items as OrderItem[]).some((i: OrderItem) => i.state === 'flagged') && (
               <Warning size={16} weight="fill" className="text-[var(--content-warning)]" />
             )}
@@ -176,11 +199,39 @@ function OrderDetailSheet({
 }
 
 export default function MyOrdersPage(): React.JSX.Element | null {
-  const { userName } = useAuth();
+  const { userName, userId } = useAuth();
   const { data: orders, isLoading, error } = useOrders({
     salespersonName: userName ?? undefined,
   });
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+  const { items: notifications, markRead } = useUserNotifications(userId);
+
+  const unreadSalesUpdatesByOrderId = useMemo(() => {
+    const map = new Map<number, { id: number; label: string; created_at: string }>();
+    for (const n of notifications) {
+      if (n.read_at !== null) continue;
+      if (n.type !== 'order_update_for_sales') continue;
+      if (typeof n.order_id !== 'number' || !Number.isFinite(n.order_id)) continue;
+      const existing = map.get(n.order_id);
+      const label = inferSalesUpdateLabel(n.body);
+      if (!existing || new Date(n.created_at).getTime() > new Date(existing.created_at).getTime()) {
+        map.set(n.order_id, { id: n.id, label, created_at: n.created_at });
+      }
+    }
+    return map;
+  }, [notifications]);
+
+  const openOrder = useCallback(
+    async (orderId: number) => {
+      setSelectedOrderId(orderId);
+      // Best-effort: mark any unread sales updates for this order as read.
+      const toRead = notifications.filter(
+        (n) => n.read_at === null && n.type === 'order_update_for_sales' && n.order_id === orderId,
+      );
+      await Promise.allSettled(toRead.map((n) => markRead(n.id)));
+    },
+    [markRead, notifications],
+  );
 
   return (
     <div className="p-4 min-h-screen bg-[var(--bg-primary)]">
@@ -207,7 +258,8 @@ export default function MyOrdersPage(): React.JSX.Element | null {
             <OrderCard
               key={order.id}
               order={order}
-              onTap={() => setSelectedOrderId(order.id)}
+              salesUpdateLabel={unreadSalesUpdatesByOrderId.get(order.id)?.label ?? null}
+              onTap={() => void openOrder(order.id)}
             />
           ))}
         </div>
