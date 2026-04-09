@@ -85,6 +85,25 @@ function StatCard({
   );
 }
 
+/** Matches StatusBadge “approved” so billing attribution reads as one system with workflow. */
+function BillingApproverChip({ name }: { name: string }): React.JSX.Element {
+  return (
+    <span
+      title={`Approved by ${name}`}
+      aria-label={`Approved by ${name}`}
+      className="
+        inline-flex items-center h-6 max-w-[11rem] sm:max-w-[14rem]
+        rounded-full border gap-1 pl-2.5 pr-3
+        text-xs font-semibold leading-none shrink-0
+        bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border-[var(--border-positive)]
+      "
+    >
+      <span className="opacity-80 font-medium">By</span>
+      <span className="font-bold truncate min-w-0">{name}</span>
+    </span>
+  );
+}
+
 function OrderCard({
   order,
   onTap,
@@ -93,46 +112,63 @@ function OrderCard({
   onTap: () => void;
 }) {
   const claim = order.claim_info;
+  const timeSource = order.approved_at ?? order.created_at;
 
   return (
-    <Card pressable onClick={onTap} className={`min-h-14 ${claim?.is_stale ? 'border-[var(--border-warning)] ring-1 ring-[var(--border-warning)]' : ''}`}>
-      <div className="flex flex-col gap-2">
+    <Card
+      pressable
+      onClick={onTap}
+      className={`
+        !p-4 min-h-0
+        ${claim?.is_stale ? 'border-[var(--border-warning)] ring-1 ring-[var(--border-warning)]' : ''}
+      `}
+    >
+      <div className="flex flex-col gap-1.5">
         <div className="flex items-start justify-between gap-3">
-          <span className="font-mono text-sm text-[var(--content-tertiary)]">
+          <span className="font-mono text-xs sm:text-sm text-[var(--content-tertiary)] min-w-0 pt-0.5 tabular-nums">
             {order.order_number}
           </span>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0 max-w-[min(100%,20rem)]">
             {order.priority === 'urgent' && order.workflow_status !== 'completed' && (
               <StatusBadge status="urgent" className="text-xs" />
             )}
             <StatusBadge status={order.workflow_status} />
+            {order.reviewer_name && <BillingApproverChip name={order.reviewer_name} />}
           </div>
         </div>
 
-        {/* Claim status row for submitted orders */}
         {order.workflow_status === 'submitted' && claim && (
-          <div className={`text-xs px-2 py-1 rounded inline-flex w-max ${
-            claim.is_stale 
-              ? 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] font-semibold'
-              : order.is_mine
-                ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] font-semibold'
-                : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
-          }`}>
-            {claim.is_stale 
+          <div
+            className={`text-xs px-2 py-1 rounded-md inline-flex w-max max-w-full ${
+              claim.is_stale
+                ? 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] font-semibold'
+                : order.is_mine
+                  ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] font-semibold'
+                  : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
+            }`}
+          >
+            {claim.is_stale
               ? `Stale claim by ${claim.claimed_by_name} (${formatTimeAgo(claim.last_heartbeat_at)})`
               : order.is_mine
                 ? 'Claimed by you'
-                : `Processing by ${claim.claimed_by_name}`
-            }
+                : `Processing by ${claim.claimed_by_name}`}
           </div>
         )}
-        <p className="font-bold text-[var(--content-primary)]">{order.customer_name}</p>
-        <p className="text-sm text-[var(--content-secondary)]">{order.salesperson_name}</p>
-        <div className="flex items-center justify-between text-sm">
-          <span className="font-mono text-[var(--content-secondary)]">
+
+        <div className="flex flex-col gap-0.5 pt-0.5">
+          <p className="font-bold text-[var(--content-primary)] leading-snug text-base">
+            {order.customer_name}
+          </p>
+          <p className="text-sm text-[var(--content-secondary)] leading-snug">{order.salesperson_name}</p>
+        </div>
+
+        <div className="flex items-baseline justify-between gap-3 pt-2 mt-0.5 border-t border-[var(--border-subtle)] text-sm">
+          <span className="font-mono text-[var(--content-secondary)] min-w-0">
             {order.item_count} items · {formatCurrency(order.total_value)}
           </span>
-          <span className="text-[var(--content-tertiary)]">{formatTimeAgo(order.created_at)}</span>
+          <span className="text-xs sm:text-sm text-[var(--content-tertiary)] shrink-0 tabular-nums">
+            {formatTimeAgo(timeSource)}
+          </span>
         </div>
       </div>
     </Card>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, CaretRight, Warning } from '@phosphor-icons/react';
 import { useUserNotifications } from '../../hooks/useUserNotifications';
@@ -6,10 +6,31 @@ import type { UserNotification } from '../../types';
 
 type AppRole = 'sales' | 'billing' | 'picking' | 'admin';
 
+function payloadDeepLink(n: UserNotification): string | null {
+  const dl = n.payload?.deep_link;
+  return typeof dl === 'string' ? dl : null;
+}
+
+/**
+ * Billing bell: only picker → billing signals (flags needing review).
+ * Excludes sales inbox copies of the same event (`deep_link` under `/sales`) and any `order_update_for_sales` rows.
+ */
 function matchesRole(n: UserNotification, role: AppRole | null): boolean {
   if (!role) return true;
-  if (role === 'sales') return n.type === 'order_update_for_sales' || n.type === 'item_flagged_by_picker';
-  if (role === 'billing') return n.type === 'item_flagged_by_picker';
+  if (role === 'sales') {
+    if (n.type === 'order_update_for_sales') return true;
+    if (n.type !== 'item_flagged_by_picker') return false;
+    const dl = payloadDeepLink(n);
+    if (dl?.startsWith('/billing')) return false;
+    return dl == null || dl.startsWith('/sales');
+  }
+  if (role === 'billing') {
+    if (n.type === 'order_update_for_sales') return false;
+    if (n.type !== 'item_flagged_by_picker') return false;
+    const dl = payloadDeepLink(n);
+    if (dl?.startsWith('/sales')) return false;
+    return dl == null || dl.startsWith('/billing');
+  }
   if (role === 'picking') return n.type === 'order_ready_to_pick';
   return false;
 }
@@ -49,17 +70,51 @@ interface NotificationBellProps {
   role?: AppRole | null;
 }
 
+const POPOVER_MAX_WIDTH_REM = 22;
+const VIEWPORT_MARGIN_PX = 8;
+
 export function NotificationBell({ userId, role = null }: NotificationBellProps): React.JSX.Element {
   const navigate = useNavigate();
   const { items, loading, fetchError, markRead, markAllRead } = useUserNotifications(userId);
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const [popoverBox, setPopoverBox] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const filteredItems = useMemo(() => items.filter((n) => matchesRole(n, role)), [items, role]);
   const unreadCount = useMemo(
     () => filteredItems.filter((n) => n.read_at === null).length,
     [filteredItems],
   );
+
+  const layoutPopover = useCallback(() => {
+    const root = panelRef.current;
+    if (!root || !open) return;
+    const rect = root.getBoundingClientRect();
+    const remPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    const width = Math.min(
+      window.innerWidth - 2 * VIEWPORT_MARGIN_PX,
+      POPOVER_MAX_WIDTH_REM * remPx,
+    );
+    let left = rect.right - width;
+    const maxLeft = window.innerWidth - VIEWPORT_MARGIN_PX - width;
+    left = Math.max(VIEWPORT_MARGIN_PX, Math.min(left, maxLeft));
+    const top = rect.bottom + VIEWPORT_MARGIN_PX;
+    setPopoverBox({ top, left, width });
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPopoverBox(null);
+      return;
+    }
+    layoutPopover();
+    window.addEventListener('resize', layoutPopover);
+    window.addEventListener('scroll', layoutPopover, true);
+    return () => {
+      window.removeEventListener('resize', layoutPopover);
+      window.removeEventListener('scroll', layoutPopover, true);
+    };
+  }, [open, layoutPopover]);
 
   useEffect(() => {
     if (!open) return;
@@ -109,8 +164,15 @@ export function NotificationBell({ userId, role = null }: NotificationBellProps)
         )}
       </button>
 
-      {open && (
-        <div className="absolute right-0 top-full mt-2 w-[min(100vw-2rem,22rem)] max-h-[min(70vh,28rem)] rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] shadow-xl z-50 flex flex-col overflow-hidden">
+      {open && popoverBox && (
+        <div
+          className="fixed max-h-[min(70vh,28rem)] rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] shadow-xl z-50 flex flex-col overflow-hidden"
+          style={{
+            top: popoverBox.top,
+            left: popoverBox.left,
+            width: popoverBox.width,
+          }}
+        >
           <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-subtle)]">
             <span className="text-sm font-semibold text-[var(--content-primary)]">Notifications</span>
             {unreadCount > 0 && (
@@ -132,9 +194,9 @@ export function NotificationBell({ userId, role = null }: NotificationBellProps)
             {loading && (
               <p className="px-4 py-6 text-sm text-[var(--content-tertiary)] text-center">Loading…</p>
             )}
-            {!loading && items.length === 0 && (
+            {!loading && filteredItems.length === 0 && (
               <p className="px-4 py-6 text-sm text-[var(--content-tertiary)] text-center">
-                No notifications yet
+                {items.length === 0 ? 'No notifications yet' : 'No notifications for this role'}
               </p>
             )}
             {!loading &&
