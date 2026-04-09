@@ -4,6 +4,7 @@ import {
   ClipboardText,
   ClockCounterClockwise,
   HourglassHigh,
+  Lightning,
 } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
@@ -13,9 +14,16 @@ const preloadDashboard = () => import('./DashboardPage');
 const preloadNeedsReview = () => import('./NeedsReviewPage');
 const preloadPending = () => import('./PendingPage');
 const preloadHistory = () => import('./HistoryPage');
+const preloadLiveQueue = () => import('./LiveQueuePage');
 
 const NAV_ITEMS: BottomNavItem[] = [
   { icon: SquaresFour, label: 'Dashboard', path: '/billing', preload: preloadDashboard },
+  {
+    icon: Lightning,
+    label: 'Live Queue',
+    path: '/billing/queue',
+    preload: preloadLiveQueue,
+  },
   {
     icon: ClipboardText,
     label: 'Needs Review',

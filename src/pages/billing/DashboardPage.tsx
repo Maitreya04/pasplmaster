@@ -273,7 +273,13 @@ export default function DashboardPage(): React.JSX.Element | null {
                 <OrderCard
                   key={order.id}
                   order={order}
-                  onTap={() => navigate(`/billing/review/${order.id}`)}
+                  onTap={() => {
+                    if (order.workflow_status === 'submitted') {
+                      navigate(`/billing/queue?orderId=${order.id}`);
+                    } else {
+                      navigate(`/billing/review/${order.id}`);
+                    }
+                  }}
                 />
               ))}
             </div>

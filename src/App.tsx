@@ -17,6 +17,8 @@ const NeedsReviewPage = lazy(() => import('./pages/billing/NeedsReviewPage'));
 const ReviewPage = lazy(() => import('./pages/billing/ReviewPage'));
 const HistoryPage = lazy(() => import('./pages/billing/HistoryPage'));
 const PendingPage = lazy(() => import('./pages/billing/PendingPage'));
+const LiveQueuePage = lazy(() => import('./pages/billing/LiveQueuePage'));
+const CompactQueuePage = lazy(() => import('./pages/billing/CompactQueuePage'));
 
 const PickingLayout = lazy(() => import('./pages/picking/PickingLayout'));
 const QueuePage = lazy(() => import('./pages/picking/QueuePage'));
@@ -29,7 +31,7 @@ const SupplyDemandPage = lazy(() => import('./pages/admin/SupplyDemandPage'));
 
 const ROLE_HOME: Record<string, string> = {
   sales: '/sales',
-  billing: '/billing',
+  billing: '/billing/queue',
   picking: '/picking',
   admin: '/admin',
 };
@@ -106,11 +108,22 @@ export default function App(): React.JSX.Element | null {
           }
         >
           <Route index element={<DashboardPage />} />
+          <Route path="queue" element={<LiveQueuePage />} />
           <Route path="needs-review" element={<NeedsReviewPage />} />
           <Route path="pending" element={<PendingPage />} />
           <Route path="review/:id" element={<ReviewPage />} />
           <Route path="history" element={<HistoryPage />} />
         </Route>
+
+        {/* Compact Companion — no layout chrome */}
+        <Route
+          path="/billing/compact"
+          element={
+            <RequireRole>
+              <CompactQueuePage />
+            </RequireRole>
+          }
+        />
 
         {/* Picking */}
         <Route
