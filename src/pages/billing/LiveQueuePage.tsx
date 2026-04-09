@@ -13,13 +13,10 @@ import {
   sendPickerReadyNotification,
 } from '../../lib/pickerPush';
 
-import { useBillingFlowMachine } from '../../hooks/useBillingFlowMachine';
-import { OrientView } from './LiveQueue/OrientView';
-import { CommitView } from './LiveQueue/CommitView';
-import { ProcessView } from './LiveQueue/ProcessView';
-import { ResolveView } from './LiveQueue/ResolveView';
-import { CommunicateView } from './LiveQueue/CommunicateView';
-import { CompleteView } from './LiveQueue/CompleteView';
+import { useBillingFlow } from '../../hooks/useBillingFlow';
+import { QueueView } from './LiveQueue/QueueView';
+import { OrderSheetView } from './LiveQueue/OrderSheetView';
+import { ReportView } from './LiveQueue/ReportView';
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 
 function sortByUrgencyAndAge(orders: OrderWithClaimInfo[]): OrderWithClaimInfo[] {
@@ -54,14 +51,13 @@ export default function LiveQueuePage() {
 
   const [currentOrderId, setCurrentOrderId] = useState<number | null>(null);
 
-  // Sync active order logic
+  // Sync active order if we already have a claim
   useEffect(() => {
     if (myActive.length > 0 && currentOrderId !== myActive[0].id) {
       setCurrentOrderId(myActive[0].id);
     }
   }, [myActive, currentOrderId]);
 
-  // Fallbacks: if nothing is actively claimed, just preview the first queue item.
   const activeInQueue = useMemo(() => {
     if (currentOrderId) {
       const found = queue.find((o) => o.id === currentOrderId);
@@ -80,41 +76,38 @@ export default function LiveQueuePage() {
   const { data: order, isLoading: orderLoading } = useOrderDetail(effectiveOrderId);
   const items = useMemo(() => order?.items ?? [], [order]);
 
-  // 4. State Machine
-  const machine = useBillingFlowMachine(items);
+  // 4. New 3-state machine
+  const flow = useBillingFlow();
 
-  // ── Handle pre-selection from URL on mount (after machine exists) ──
+  // ── Handle pre-selection from URL on mount ──
   const didConsumeParam = useRef(false);
   useEffect(() => {
     if (preSelectedOrderId && !didConsumeParam.current) {
       didConsumeParam.current = true;
       setCurrentOrderId(preSelectedOrderId);
-      // Clear the param so refreshing doesn't re-trigger
       setSearchParams({}, { replace: true });
-      // Jump straight to commit
-      machine.startCommit();
+      flow.openOrder();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preSelectedOrderId]);
 
   // ── Urgent order detection ──
-  // While working on a non-urgent order, check if an urgent one arrived
   const urgentInQueue = useMemo(
     () => queue.filter((o) => o.priority === 'urgent' && o.id !== effectiveOrderId),
     [queue, effectiveOrderId],
   );
   const hasUrgentInterrupt =
     urgentInQueue.length > 0 &&
-    machine.state !== 'orient' &&
+    flow.state !== 'queue' &&
     activeInQueue?.priority !== 'urgent';
 
-  // Track auto-claiming to avoid loops
+  // Track auto-claiming
   const claimAttempted = useRef<number | null>(null);
 
-  // When crossing into the Commit phase, we fire the background claim
+  // When entering orderSheet, fire the background claim
   useEffect(() => {
     if (
-      machine.state === 'commit' &&
+      flow.state === 'orderSheet' &&
       effectiveOrderId &&
       !isClaimedByMe &&
       claimAttempted.current !== effectiveOrderId
@@ -122,11 +115,9 @@ export default function LiveQueuePage() {
       claimAttempted.current = effectiveOrderId;
       claim();
     }
-  }, [machine.state, effectiveOrderId, isClaimedByMe, claim]);
+  }, [flow.state, effectiveOrderId, isClaimedByMe, claim]);
 
-  // 5. Background Mutations
-
-  // A. Skip / Release
+  // ── Skip / Release ──
   const handleSkip = useCallback(async () => {
     if (claimId && userId) {
       try {
@@ -137,33 +128,28 @@ export default function LiveQueuePage() {
     }
     setCurrentOrderId(null);
     claimAttempted.current = null;
-    machine.reset();
-  }, [claimId, userId, release, machine]);
+    flow.returnToQueue();
+  }, [claimId, userId, release, flow]);
 
-  // ── Urgent interrupt: release current, jump to urgent ──
+  // ── Urgent interrupt ──
   const handleUrgentInterrupt = useCallback(async () => {
     const urgentOrder = urgentInQueue[0];
     if (!urgentOrder) return;
 
-    // Release current claim gracefully
     if (claimId && userId) {
       try {
         await release();
-      } catch {
-        /* best effort */
-      }
+      } catch { /* best effort */ }
     }
 
     claimAttempted.current = null;
-    machine.reset();
-    // Set the urgent order as the current target and immediately commit
+    flow.returnToQueue();
     setCurrentOrderId(urgentOrder.id);
-    // Small delay to let state settle before entering commit
-    setTimeout(() => machine.startCommit(), 50);
+    setTimeout(() => flow.openOrder(), 50);
     toast.info(`Switching to urgent order: ${urgentOrder.customer_name}`);
-  }, [urgentInQueue, claimId, userId, release, machine, toast]);
+  }, [urgentInQueue, claimId, userId, release, flow, toast]);
 
-  // B. Park Order (Transition to Flagged)
+  // ── Park Order (Transition to Flagged) ──
   const parkMutation = useMutation({
     mutationFn: async () => {
       if (!order) throw new Error('No order');
@@ -181,62 +167,51 @@ export default function LiveQueuePage() {
     onError: () => toast.error('Failed to park order'),
   });
 
-  // C. Complete Billing (Approve)
+  // ── Complete Billing (Approve) — simplified from flags only ──
   const approveMutation = useMutation({
-    mutationFn: async (vars?: { salesDraftText?: string }) => {
+    mutationFn: async () => {
       if (!order || !claimId || !userId) throw new Error('Cannot approve. Missing claim context.');
       const reviewer = userName || 'Billing';
 
-      // Apply decisions from the machine tracking
-      const finalItems = items.map((item, index) => {
-        const decision = machine.decisions[item.id];
-        const manualFlag = machine.manualFlags[index];
-        let approvedQty = item.qty_shippable ?? item.qty_requested;
+      // Apply flags directly: no flag = full qty, partial = availableQty, no_stock = 0
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const flag = flow.flags[i];
 
-        if (decision === 'bill_available' || decision === 'bill_available_po_rest') {
-          // Use manual flag qty if billing person flagged it, else fall back to db
-          approvedQty = manualFlag?.availableQty ?? item.qty_shippable ?? 0;
-        } else if (decision === 'drop_entirely') {
+        let approvedQty = item.qty_requested;
+
+        if (flag?.type === 'no_stock') {
           approvedQty = 0;
+        } else if (flag?.type === 'partial' && flag.availableQty != null) {
+          approvedQty = flag.availableQty;
         }
 
-        return { ...item, approvedQty, decision };
-      });
+        // Update qty_approved
+        await supabase.from('order_items').update({
+          qty_approved: approvedQty,
+        }).eq('id', item.id);
 
-      // Update item quantities — billing only sets qty_approved.
-      // Item state remains untouched; pickers handle state transitions.
-      for (const item of finalItems) {
-        const update: Record<string, unknown> = {
-          qty_approved: item.approvedQty,
-        };
-
-        if (item.decision === 'drop_entirely') {
-          update.qty_approved = 0;
-        }
-
-        await supabase.from('order_items').update(update).eq('id', item.id);
-
-        // Handle PO tracking if requested
-        if (item.decision === 'bill_available_po_rest') {
-          const pendingVal = item.qty_requested - item.approvedQty;
-          if (pendingVal > 0) {
-            await supabase.from('pending_items').insert({
-              order_id: order.id,
-              order_number: order.order_number,
-              customer_id: order.customer_id,
-              customer_name: order.customer_name,
-              item_id: item.item_id,
-              item_name: item.item_name,
-              qty_pending: pendingVal,
-              source: 'billing',
-              created_by: reviewer,
-              note: 'Marked pending by billing (no stock in Busy)',
-            });
-          }
+        // Create pending item for shortfall
+        const pendingQty = item.qty_requested - approvedQty;
+        if (pendingQty > 0) {
+          await supabase.from('pending_items').insert({
+            order_id: order.id,
+            order_number: order.order_number,
+            customer_id: order.customer_id,
+            customer_name: order.customer_name,
+            item_id: item.item_id,
+            item_name: item.item_name,
+            qty_pending: pendingQty,
+            source: 'billing',
+            created_by: reviewer,
+            note: flag?.type === 'no_stock'
+              ? 'No stock in Busy — fully pending'
+              : `Partial stock — ${approvedQty} billed, ${pendingQty} pending`,
+          });
         }
       }
 
-      // Execute Complete transition
+      // Execute complete_billing RPC
       const { error: rpcError } = await supabase.rpc('complete_billing', {
         p_order_id: order.id,
         p_claim_id: claimId,
@@ -246,29 +221,7 @@ export default function LiveQueuePage() {
 
       if (rpcError) throw rpcError;
 
-      if (vars?.salesDraftText) {
-        try {
-          const notifyResult = await sendInternalNotification({
-            eventType: 'order_update_for_sales',
-            orderId: order.id,
-            orderNumber: order.order_number,
-            customerName: order.customer_name,
-            salespersonName: order.salesperson_name,
-            messageBody: vars.salesDraftText,
-          });
-          if (notifyResult?.inboxCount === 0) {
-            toast.info(
-              'No sales users in the database received this update. Check users.role = sales and is_active.',
-            );
-          }
-        } catch (e) {
-          console.error('order_update_for_sales', e);
-          toast.error(
-            `Sales notification failed: ${formatInternalNotificationError(e)}. Deploy send-internal-notification and run migration 014.`,
-          );
-        }
-      }
-
+      // Send notifications
       try {
         await sendPickerReadyNotification({
           eventType: 'order_ready_to_pick',
@@ -278,8 +231,34 @@ export default function LiveQueuePage() {
           priority: order.priority,
           approvedAt: new Date().toISOString(),
         });
-      } catch {
-        // silent
+      } catch { /* silent */ }
+
+      // Send sales notification if there were flags
+      if (flow.hasFlags) {
+        try {
+          // Build a summary for the internal notification
+          const flagSummary = Object.entries(flow.flags).map(([idx, flag]) => {
+            const item = items[Number(idx)];
+            if (flag.type === 'no_stock') {
+              return `${item.item_name}: No stock, ${item.qty_requested} pending`;
+            }
+            return `${item.item_name}: ${flag.availableQty} of ${item.qty_requested} billed, rest pending`;
+          }).join('; ');
+
+          await sendInternalNotification({
+            eventType: 'order_update_for_sales',
+            orderId: order.id,
+            orderNumber: order.order_number,
+            customerName: order.customer_name,
+            salespersonName: order.salesperson_name,
+            messageBody: `Billing update for ${order.order_number}: ${flagSummary}`,
+          });
+        } catch (e) {
+          console.error('order_update_for_sales', e);
+          toast.error(
+            `Sales notification failed: ${formatInternalNotificationError(e)}`,
+          );
+        }
       }
 
       return order.order_number;
@@ -289,15 +268,15 @@ export default function LiveQueuePage() {
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', effectiveOrderId] });
 
-      // Moving to final closure state
-      machine.confirmCommunication();
+      // Move to report screen
+      flow.finishBilling();
     },
     onError: () => {
       toast.error('Failed to approve order');
     },
   });
 
-  // ── Urgent interrupt banner (rendered at top of process/commit/resolve views) ──
+  // ── Urgent interrupt banner ──
   const urgentBanner = hasUrgentInterrupt ? (
     <div className="ds-card border-2 border-[var(--border-negative)] bg-[var(--bg-negative-subtle)] mx-4 mt-3 mb-0 animate-slide-up">
       <div className="flex items-center justify-between gap-4 p-3">
@@ -323,33 +302,56 @@ export default function LiveQueuePage() {
     </div>
   ) : null;
 
-  // 6. Router Renderer
+  // ── Handle next from report (release claim, move to next order or queue) ──
+  const handleNext = useCallback(async () => {
+    if (claimId && userId) {
+      try {
+        await release();
+      } catch { /* best effort */ }
+    }
+    claimAttempted.current = null;
+    setCurrentOrderId(null);
 
-  if (machine.state === 'orient') {
+    // If there are more orders, auto-claim next
+    const remainingOrders = queue.filter(
+      o => o.id !== effectiveOrderId && (!o.claim_info || o.is_mine)
+    );
+
+    if (remainingOrders.length > 0) {
+      const next = remainingOrders[0];
+      setCurrentOrderId(next.id);
+      flow.openOrder();
+    } else {
+      flow.nextOrder();
+    }
+  }, [claimId, userId, release, queue, effectiveOrderId, flow]);
+
+  // ══════════════════════════════════════════
+  //  VIEW ROUTING
+  // ══════════════════════════════════════════
+
+  if (flow.state === 'queue') {
     return (
-      <OrientView
+      <QueueView
         queue={queue}
-        totalWaiting={queue.length}
         isLoading={queueLoading}
-        staleCount={stale.length}
-        onStart={() => {
-          if (activeInQueue) {
-            setCurrentOrderId(activeInQueue.id);
-            machine.startCommit();
-          }
+        onSelect={(orderId) => {
+          setCurrentOrderId(orderId);
+          flow.openOrder();
         }}
       />
     );
   }
 
-  if (machine.state === 'commit') {
-    if (!order || orderLoading)
+  if (flow.state === 'orderSheet') {
+    if (!order || orderLoading) {
       return <div className="min-h-screen bg-[var(--bg-primary)] animate-pulse" />;
+    }
 
     return (
       <>
         {urgentBanner}
-        <CommitView
+        <OrderSheetView
           orderName={order.customer_name}
           orderNumber={order.order_number}
           salesperson={order.salesperson_name}
@@ -359,84 +361,29 @@ export default function LiveQueuePage() {
           priority={order.priority}
           createdAt={order.created_at}
           items={items}
-          onCommit={machine.confirmCommit}
-          onSkip={handleSkip}
+          flags={flow.flags}
           isClaiming={!isClaimedByMe}
+          isApproving={approveMutation.isPending}
+          onFlagNoStock={flow.flagNoStock}
+          onFlagPartial={flow.flagPartial}
+          onClearFlag={flow.clearFlag}
+          onFinish={() => approveMutation.mutate()}
+          onSkip={handleSkip}
         />
       </>
     );
   }
 
-  if (machine.state === 'process') {
-    if (!order) return <div />;
+  if (flow.state === 'report') {
     return (
-      <>
-        {urgentBanner}
-        <ProcessView
-          orderName={order.customer_name}
-          items={items}
-          activeIndex={machine.activeItemIndex}
-          isSubmitting={approveMutation.isPending}
-          manualFlags={machine.manualFlags}
-          onAdvance={machine.advanceProcessCursor}
-          onJump={machine.jumpToItem}
-          onFlag={machine.flagItem}
-          onUnflag={machine.unflagItem}
-          onFinish={() => {
-            const hasIssues = machine.finishProcessPhase();
-            if (!hasIssues) {
-              approveMutation.mutate(undefined);
-            }
-          }}
-        />
-      </>
-    );
-  }
-
-  if (machine.state === 'resolve') {
-    if (!order || !machine.currentIssue) return <div />;
-    const issueItem = items[machine.currentIssue.itemIndex];
-    return (
-      <>
-        {urgentBanner}
-        <ResolveView
-          orderName={order.customer_name}
-          item={issueItem}
-          issue={machine.currentIssue}
-          issueIndex={machine.activeIssueIndex}
-          totalIssues={machine.issues.length}
-          overrideAvailable={machine.manualFlags[machine.currentIssue.itemIndex]?.availableQty}
-          onDecide={(decision) => machine.recordDecisionAndNext(issueItem.id, decision)}
-          onPark={() => parkMutation.mutate()}
-        />
-      </>
-    );
-  }
-
-  if (machine.state === 'communicate') {
-    if (!order) return <div />;
-    return (
-      <CommunicateView
-        orderNumber={order.order_number}
-        orderName={order.customer_name}
-        salesperson={order.salesperson_name}
-        items={items}
-        issues={machine.issues}
-        decisions={machine.decisions}
-        manualFlags={machine.manualFlags}
-        isSubmitting={approveMutation.isPending}
-        onSkip={() => approveMutation.mutate(undefined)}
-        onSend={(draftText) => approveMutation.mutate({ salesDraftText: draftText })}
-      />
-    );
-  }
-
-  if (machine.state === 'complete') {
-    return (
-      <CompleteView
+      <ReportView
         orderName={order?.customer_name || 'Order'}
-        totalWaiting={Math.max(0, queue.length - 1)}
-        onAutoAdvance={handleSkip}
+        orderNumber={order?.order_number || ''}
+        salesperson={order?.salesperson_name || null}
+        items={items}
+        flags={flow.flags}
+        totalWaiting={Math.max(0, queue.filter(o => !o.active_claim && o.id !== effectiveOrderId).length)}
+        onNext={handleNext}
       />
     );
   }
