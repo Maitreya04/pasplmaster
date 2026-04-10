@@ -1626,11 +1626,13 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [cartPulse, setCartPulse] = useState(false);
   const searchRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const focusGuardUntilRef = useRef(0);
   const touchScrollStartYRef = useRef<number | null>(null);
   const addedFeedbackTimeoutRef = useRef<number | null>(null);
   const cartPulseTimeoutRef = useRef<number | null>(null);
 
   const focusSearchInput = (delayMs = 0) => {
+    focusGuardUntilRef.current = Date.now() + 900;
     window.setTimeout(() => {
       requestAnimationFrame(() => {
         searchInputRef.current?.focus({ preventScroll: true });
@@ -1669,17 +1671,23 @@ export default function NewOrderPage(): React.JSX.Element | null {
     if (!wantFocus) return;
 
     setIsSearchFocused(true);
+    focusGuardUntilRef.current = Date.now() + 900;
 
-    const focusTimer = window.setTimeout(() => {
-      requestAnimationFrame(() => {
-        searchInputRef.current?.focus({ preventScroll: true });
-      });
-      window.setTimeout(() => {
-        navigate('.', { replace: true, state: {} });
-      }, 0);
-    }, 120);
+    const focusNow = () => {
+      searchInputRef.current?.focus({ preventScroll: true });
+    };
+    focusNow();
+    const focusRetry = window.setTimeout(() => {
+      requestAnimationFrame(focusNow);
+    }, 80);
+    const clearStateTimer = window.setTimeout(() => {
+      navigate('.', { replace: true, state: {} });
+    }, 0);
 
-    return () => window.clearTimeout(focusTimer);
+    return () => {
+      window.clearTimeout(focusRetry);
+      window.clearTimeout(clearStateTimer);
+    };
   }, [location.key, navigate]);
 
   useEffect(() => {
@@ -1700,6 +1708,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
 
   useEffect(() => {
     const dismissSearchKeyboard = () => {
+      if (Date.now() < focusGuardUntilRef.current) return;
       if (document.activeElement === searchInputRef.current) {
         searchInputRef.current?.blur();
       }
@@ -1713,6 +1722,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   }, []);
 
   const dismissSearchKeyboard = useCallback(() => {
+    if (Date.now() < focusGuardUntilRef.current) return;
     if (document.activeElement === searchInputRef.current) {
       searchInputRef.current?.blur();
     }

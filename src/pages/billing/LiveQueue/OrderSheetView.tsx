@@ -28,10 +28,12 @@ interface OrderSheetViewProps {
   flags: Record<number, ItemFlag>;
   isClaiming: boolean;
   isApproving: boolean;
+  isRejecting: boolean;
   onFlagNoStock: (itemIndex: number) => void;
   onFlagPartial: (itemIndex: number, availableQty: number) => void;
   onClearFlag: (itemIndex: number) => void;
   onFinish: () => void;
+  onReject: (reason: string) => void;
   onSkip: () => void;
 }
 
@@ -50,10 +52,12 @@ export function OrderSheetView({
   flags,
   isClaiming,
   isApproving,
+  isRejecting,
   onFlagNoStock,
   onFlagPartial,
   onClearFlag,
   onFinish,
+  onReject,
   onSkip,
 }: OrderSheetViewProps): ReactElement {
   const { copy } = useCopyToClipboard();
@@ -69,6 +73,8 @@ export function OrderSheetView({
 
   const [showConfirm, setShowConfirm] = useState(false);
   const confirmFinishRef = useRef<HTMLButtonElement>(null);
+  const [showReject, setShowReject] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
 
   const [jumpBuffer, setJumpBuffer] = useState('');
   const jumpTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -157,6 +163,14 @@ export function OrderSheetView({
       }
 
       if (e.key === 'Escape') {
+        if (showReject) {
+          e.preventDefault();
+          if (!isRejecting) {
+            setShowReject(false);
+            setRejectReason('');
+          }
+          return;
+        }
         if (showConfirm) { e.preventDefault(); setShowConfirm(false); return; }
         if (partialInputRow !== null) { e.preventDefault(); setPartialInputRow(null); setPartialQty(''); return; }
       }
@@ -212,9 +226,9 @@ export function OrderSheetView({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
-    items.length, activeRow, flags, partialInputRow, showConfirm, jumpBuffer,
+    items.length, activeRow, flags, partialInputRow, showConfirm, showReject, jumpBuffer,
     onFlagNoStock, onClearFlag, handleFinishAttempt, confirmFinish, showHintsTemporarily,
-    copyAllItems, isClaiming,
+    copyAllItems, isClaiming, isRejecting,
   ]);
 
   useEffect(() => {
@@ -238,6 +252,12 @@ export function OrderSheetView({
     setPartialInputRow(null);
     setPartialQty('');
   }, [partialInputRow, partialQty, items, onFlagNoStock, onFlagPartial, onClearFlag]);
+
+  const handleRejectConfirm = useCallback(() => {
+    const trimmedReason = rejectReason.trim();
+    if (!trimmedReason || isRejecting) return;
+    onReject(trimmedReason);
+  }, [rejectReason, isRejecting, onReject]);
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col animate-slide-up">
@@ -462,7 +482,7 @@ export function OrderSheetView({
 
       {/* Sticky footer */}
       <div className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 lg:px-6 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
+        <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
           {flagCount > 0 ? (
             <p className="text-xs text-[var(--content-secondary)]">
               <span className="font-semibold text-[var(--content-warning)]">{flagCount}</span> flagged
@@ -472,19 +492,29 @@ export function OrderSheetView({
           ) : (
             <div />
           )}
-          <button
-            onClick={handleFinishAttempt}
-            disabled={isApproving}
-            className="h-11 px-6 rounded-xl bg-[var(--role-primary)] text-white text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
-          >
-            {isApproving ? 'Approving...' : 'Finish Billing'}
-            {!isApproving && (
-              <>
-                <span className="text-[11px] font-normal opacity-60 hidden sm:inline mx-1">·</span>
-                <span className="text-[11px] font-normal opacity-70 hidden sm:inline tabular-nums">{SHORTCUT_FINISH}</span>
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowReject(true)}
+              disabled={isApproving || isRejecting}
+              className="h-11 px-4 rounded-xl border border-[var(--border-negative)] text-[var(--content-negative)] text-sm font-semibold hover:bg-[var(--bg-negative-subtle)] transition-all disabled:opacity-50"
+            >
+              Reject
+            </button>
+            <button
+              onClick={handleFinishAttempt}
+              disabled={isApproving || isRejecting}
+              className="h-11 px-6 rounded-xl bg-[var(--role-primary)] text-white text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
+            >
+              {isApproving ? 'Approving...' : 'Finish Billing'}
+              {!isApproving && (
+                <>
+                  <span className="text-[11px] font-normal opacity-60 hidden sm:inline mx-1">·</span>
+                  <span className="text-[11px] font-normal opacity-70 hidden sm:inline tabular-nums">{SHORTCUT_FINISH}</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -559,6 +589,52 @@ export function OrderSheetView({
                 {!isApproving && (
                   <span className="text-[11px] font-normal opacity-80 hidden sm:inline tabular-nums">{SHORTCUT_FINISH}</span>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject overlay */}
+      {showReject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div
+            className="ds-card p-6 max-w-md w-full shadow-xl animate-slide-up"
+            role="dialog"
+            aria-modal="true"
+          >
+            <h3 className="text-base font-bold text-[var(--content-primary)] mb-2">
+              Reject {orderName}?
+            </h3>
+            <p className="text-sm text-[var(--content-secondary)] mb-4">
+              Enter a reason. Sales will be notified with this message.
+            </p>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="e.g. Pricing mismatch, customer requested change..."
+              className="w-full h-28 px-3 py-2 rounded-xl border border-[var(--border-opaque)] text-sm text-[var(--content-primary)] bg-[var(--bg-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--role-primary)]"
+              autoFocus
+            />
+            <div className="mt-4 flex gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReject(false);
+                  setRejectReason('');
+                }}
+                disabled={isRejecting}
+                className="flex-1 h-11 rounded-xl border border-[var(--border-opaque)] text-sm font-semibold text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRejectConfirm}
+                disabled={isRejecting || !rejectReason.trim()}
+                className="flex-1 h-11 rounded-xl bg-[var(--bg-negative)] text-white text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
+              >
+                {isRejecting ? 'Rejecting...' : 'Confirm Reject'}
               </button>
             </div>
           </div>

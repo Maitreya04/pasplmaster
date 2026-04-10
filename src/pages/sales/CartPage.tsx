@@ -263,17 +263,28 @@ function SearchableCustomerDropdown({
 
                 {value && (
                   <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
-                      Selected
-                    </p>
-                    <p className="mt-1 text-[15px] font-semibold text-[var(--content-primary)]">
-                      {value.name}
-                      {value.city && (
-                        <span className="ml-1 font-normal text-[var(--content-tertiary)]">
-                          · {value.city}
-                        </span>
-                      )}
-                    </p>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+                          Selected
+                        </p>
+                        <p className="mt-1 text-[15px] font-semibold text-[var(--content-primary)]">
+                          {value.name}
+                          {value.city && (
+                            <span className="ml-1 font-normal text-[var(--content-tertiary)]">
+                              · {value.city}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onChange(null)}
+                        className="shrink-0 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs font-semibold text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]"
+                      >
+                        Clear
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

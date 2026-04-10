@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Warning, X, ArrowSquareOut } from '@phosphor-icons/react';
 import { appHaptics } from '../../lib/haptics';
 import { useUserNotifications } from '../../hooks/useUserNotifications';
 import type { UserNotification } from '../../types';
 
 type AppRole = 'sales' | 'billing' | 'picking' | 'admin';
+
+function roleFromPath(pathname: string): AppRole | null {
+  if (pathname.startsWith('/billing')) return 'billing';
+  if (pathname.startsWith('/sales')) return 'sales';
+  if (pathname.startsWith('/picking')) return 'picking';
+  if (pathname.startsWith('/admin')) return 'admin';
+  return null;
+}
 
 function payloadDeepLink(n: UserNotification): string | null {
   const dl = n.payload?.deep_link;
@@ -128,11 +136,16 @@ interface NotificationBellProps {
 
 export function NotificationBell({ userId, role = null }: NotificationBellProps): React.JSX.Element {
   const navigate = useNavigate();
+  const location = useLocation();
   const { items, loading, fetchError, markRead, markAllRead } = useUserNotifications(userId);
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const scopedRole = useMemo(() => roleFromPath(location.pathname) ?? role, [location.pathname, role]);
 
-  const filteredItems = useMemo(() => items.filter((n) => matchesRole(n, role)), [items, role]);
+  const filteredItems = useMemo(
+    () => items.filter((n) => matchesRole(n, scopedRole)),
+    [items, scopedRole],
+  );
   const unreadCount = useMemo(
     () => filteredItems.filter((n) => n.read_at === null).length,
     [filteredItems],

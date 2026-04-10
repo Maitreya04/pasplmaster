@@ -291,6 +291,51 @@ export default function LiveQueuePage() {
     },
   });
 
+  const rejectMutation = useMutation({
+    mutationFn: async (reason: string) => {
+      if (!order) throw new Error('No order selected');
+
+      const trimmedReason = reason.trim();
+      if (!trimmedReason) throw new Error('Rejection reason is required');
+
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({
+          workflow_status: 'flagged',
+          notes: trimmedReason,
+        })
+        .eq('id', order.id);
+
+      if (updateError) throw updateError;
+
+      await sendInternalNotification({
+        eventType: 'order_update_for_sales',
+        orderId: order.id,
+        orderNumber: order.order_number,
+        customerName: order.customer_name,
+        salespersonName: order.salesperson_name,
+        messageBody: `Billing rejected order ${order.order_number}. Reason: ${trimmedReason}`,
+      }).catch((e) => {
+        console.error('order_update_for_sales', e);
+        toast.error(
+          `Sales notification failed: ${formatInternalNotificationError(e)}`,
+        );
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+      if (order) {
+        queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+      }
+      toast.success('Order rejected and salesperson notified');
+      void handleSkip();
+    },
+    onError: () => {
+      toast.error('Failed to reject order');
+    },
+  });
+
   // ── Urgent interrupt banner ──
   const urgentBanner = hasUrgentInterrupt ? (
     <div className="ds-card border-2 border-[var(--border-negative)] bg-[var(--bg-negative-subtle)] mx-4 mt-3 mb-0 animate-slide-up">
@@ -389,10 +434,12 @@ export default function LiveQueuePage() {
           flags={flow.flags}
           isClaiming={!isClaimedByMe}
           isApproving={approveMutation.isPending}
+          isRejecting={rejectMutation.isPending}
           onFlagNoStock={flow.flagNoStock}
           onFlagPartial={flow.flagPartial}
           onClearFlag={flow.clearFlag}
           onFinish={() => approveMutation.mutate()}
+          onReject={(reason) => rejectMutation.mutate(reason)}
           onSkip={handleSkip}
         />
       </>
