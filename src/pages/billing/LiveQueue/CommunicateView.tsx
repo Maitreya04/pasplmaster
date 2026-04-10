@@ -47,8 +47,8 @@ export function CommunicateView({
       <div className="w-full max-w-xl">
         
         <div className="flex items-center justify-center gap-3 mb-8">
-          <div className="w-12 h-12 bg-[#25D366]/10 rounded-full flex items-center justify-center">
-            <WhatsappLogo size={24} weight="fill" className="text-[#25D366]" />
+          <div className="w-12 h-12 bg-embed-whatsapp-tint rounded-full flex items-center justify-center">
+            <WhatsappLogo size={24} weight="fill" className="text-embed-whatsapp" />
           </div>
           <h2 className="text-2xl font-bold text-[var(--content-primary)]">Notify {salesperson || 'Salesperson'}</h2>
         </div>
@@ -64,10 +64,9 @@ export function CommunicateView({
              </button>
           </div>
           
-          <div className="bg-[#EFEAE2] dark:bg-[#0b141a] rounded-2xl p-6 font-sans border border-[var(--border-opaque)] relative overflow-hidden">
-             {/* WhatsApp styling touches */}
-             <div className="absolute top-0 left-0 w-2 h-full bg-[#25D366]"></div>
-             <p className="text-[15px] leading-relaxed whitespace-pre-wrap text-[#111B21] dark:text-[#E9EDEF]">
+          <div className="rounded-2xl p-6 font-sans border border-[var(--border-opaque)] relative overflow-hidden bg-[var(--embed-whatsapp-bg)]">
+             <div className="absolute top-0 left-0 w-2 h-full bg-embed-whatsapp-solid" aria-hidden />
+             <p className="font-ds-lead leading-relaxed whitespace-pre-wrap text-[var(--embed-whatsapp-fg)]">
                {draftText}
              </p>
           </div>

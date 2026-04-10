@@ -747,7 +747,7 @@ export default function CompactQueuePage() {
   // ─── Render ─────────────────────────────────────────────
 
   return (
-    <div className="role-billing h-screen w-screen bg-[var(--bg-primary)] overflow-hidden flex flex-col">
+    <div className="role-billing density-compact h-screen w-screen bg-[var(--bg-primary)] overflow-hidden flex flex-col">
       {/* Tiny top bar — window drag area + context */}
       <div className="h-9 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center justify-between px-2 shrink-0 select-none [-webkit-app-region:drag]">
         <span className="w-16" aria-hidden />

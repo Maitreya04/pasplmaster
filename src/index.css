@@ -8,11 +8,14 @@
 
 
 /* ═══════════════════════════════════════════════════════════════
-   DESIGN SYSTEM: Core / Accent / Greys (reference structure)
-   • Core:    primary brand, white, black — main surfaces and text
-   • Accent:  intents (blue, green, amber, red) + role overrides
-   • Greys:   neutral scale for borders, secondary text, hierarchy
-   Use semantic tokens (--bg-*, --content-*, --role-*) in components.
+   DESIGN SYSTEM — single source of truth (experiment here first)
+   • Palette scales:     :root --gray-* … --indigo-* (regenerate: npm run tokens:generate)
+   • Meaning (light):    :root --bg-* / --content-* / --border-* / status / role
+   • Density & rhythm:   :root --ds-*  +  .density-compact overrides
+   • Scan & signals:     :root --content-signal-*  +  third-party --embed-*
+   • Primitives:         .ds-card, .ds-table, .ds-row, .ds-field, .ds-chip
+   • Tailwind v4 bridge: @theme { … }  →  utilities like text-content-signal-ok
+   design_system.md mirrors this file; components should use tokens/utilities, not raw hex.
    ═══════════════════════════════════════════════════════════════ */
 
 /* ─── Core (brand + base) ─── */
@@ -154,6 +157,34 @@
   --role-primary: var(--core-primary);
   --role-primary-subtle: #eff6ff;
   --role-content: #1d4ed8;
+
+  /* Data scanning — stock / quantity signal (tune contrast in one place) */
+  --content-signal-ok: #047857;
+  --content-signal-low: var(--content-warning-on-light);
+  --content-signal-out: var(--content-negative);
+
+  /* Third-party embeds (e.g. WhatsApp preview) — not part of brand palette */
+  --embed-whatsapp: #25d366;
+  --embed-whatsapp-surface: #efeae2;
+  --embed-whatsapp-surface-dark: #0b141a;
+  --embed-whatsapp-text: #111b21;
+  --embed-whatsapp-text-dark: #e9edef;
+  --embed-whatsapp-tint: color-mix(in srgb, var(--embed-whatsapp) 10%, transparent);
+
+  /* Resolved text/background for message bubbles (switches with .dark on ancestor) */
+  --embed-whatsapp-bg: var(--embed-whatsapp-surface);
+  --embed-whatsapp-fg: var(--embed-whatsapp-text);
+
+  /* Page-level rhythm (optional; tighten with .density-compact) */
+  --ds-page-pad-x: 1rem;
+  --ds-page-pad-y: 1rem;
+  --ds-stack: 1rem;
+  --ds-stack-tight: 0.75rem;
+}
+
+.dark {
+  --embed-whatsapp-bg: var(--embed-whatsapp-surface-dark);
+  --embed-whatsapp-fg: var(--embed-whatsapp-text-dark);
 }
 
 /* ─── Role accent overrides ─── */
@@ -250,7 +281,8 @@ select {
   overflow: hidden;
 }
 
-@keyframes slide-up {
+/* Full-height sheet enter (BottomSheet); name is distinct from @theme slide-up fade */
+@keyframes slide-up-sheet {
   from {
     transform: translateY(100%);
   }
@@ -260,7 +292,7 @@ select {
 }
 
 .animate-slide-up {
-  animation: slide-up 200ms ease-out;
+  animation: slide-up-sheet 200ms ease-out;
 }
 
 @keyframes shake {
@@ -309,9 +341,12 @@ select {
   --ds-gap-sm: 0.375rem;   /*  6px — tight gaps (label→input, chip→chip) */
   --ds-radius: 0.5rem;     /*  8px — inputs, rows */
   --ds-row-h: 3rem;        /* 48px — min row/item height */
+  --ds-font-micro: 0.625rem;   /* 10px — kbd hints, tiny badges */
   --ds-font-label: 0.6875rem;  /* 11px — ALL-CAPS labels */
-  --ds-font-body: 0.875rem;    /* 14px — table cell, helper text */
   --ds-font-caption: 0.75rem;  /* 12px — helper/error text */
+  --ds-font-body: 0.875rem;    /* 14px — table cell, helper text */
+  --ds-font-prose: 0.8125rem;  /* 13px — dense preview / secondary prose */
+  --ds-font-lead: 0.9375rem;   /* 15px — emphasized list titles, embed body */
 }
 
 .density-compact {
@@ -321,9 +356,16 @@ select {
   --ds-gap-sm: 0.25rem;    /*  4px */
   --ds-radius: 0.375rem;   /*  6px */
   --ds-row-h: 2.25rem;     /* 36px */
+  --ds-font-micro: 0.625rem;   /* keep 10px — legibility floor */
   --ds-font-label: 0.625rem;   /* 10px */
-  --ds-font-body: 0.8125rem;   /* 13px */
   --ds-font-caption: 0.6875rem; /* 11px */
+  --ds-font-body: 0.8125rem;   /* 13px */
+  --ds-font-prose: 0.75rem;    /* 12px */
+  --ds-font-lead: 0.875rem;    /* 14px */
+  --ds-page-pad-x: 0.75rem;
+  --ds-page-pad-y: 0.75rem;
+  --ds-stack: 0.75rem;
+  --ds-stack-tight: 0.5rem;
 }
 
 /* ─── B) DS Card ─── */
@@ -581,14 +623,65 @@ table.ds-table td {
   font-size: var(--ds-font-label);
 }
 
+/* ─── Typography + scan helpers (use instead of text-[10px], text-[11px], …) ─── */
+.font-ds-micro {
+  font-size: var(--ds-font-micro);
+  line-height: 1.35;
+}
+.font-ds-label-size {
+  font-size: var(--ds-font-label);
+  line-height: 1.35;
+}
+.font-ds-caption-size {
+  font-size: var(--ds-font-caption);
+  line-height: 1.45;
+}
+.font-ds-body-size {
+  font-size: var(--ds-font-body);
+  line-height: 1.45;
+}
+.font-ds-prose {
+  font-size: var(--ds-font-prose);
+  line-height: 1.55;
+}
+.font-ds-lead {
+  font-size: var(--ds-font-lead);
+  line-height: 1.5;
+}
+
+.text-content-signal-ok {
+  color: var(--content-signal-ok);
+}
+.text-content-signal-low {
+  color: var(--content-signal-low);
+}
+.text-content-signal-out {
+  color: var(--content-signal-out);
+}
+
+.bg-embed-whatsapp-tint {
+  background: var(--embed-whatsapp-tint);
+}
+.text-embed-whatsapp {
+  color: var(--embed-whatsapp);
+}
+.bg-embed-whatsapp-solid {
+  background: var(--embed-whatsapp);
+}
+
 @theme {
-  --animate-slide-up: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --color-content-signal-ok: var(--content-signal-ok);
+  --color-content-signal-low: var(--content-signal-low);
+  --color-content-signal-out: var(--content-signal-out);
+  --color-embed-whatsapp: var(--embed-whatsapp);
+
+  --animate-slide-up: ds-slide-up-fade 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-slide-in-right: slide-in-right 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-slide-out-left: slide-out-left 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-pop: pop 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   --animate-copied-flash: copied-flash 0.6s ease-out forwards;
 }
-@keyframes slide-up {
+@keyframes ds-slide-up-fade {
   0% { transform: translateY(10px) scale(0.98); opacity: 0; }
   100% { transform: translateY(0) scale(1); opacity: 1; }
 }

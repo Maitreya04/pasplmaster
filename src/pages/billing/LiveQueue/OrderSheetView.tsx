@@ -260,7 +260,7 @@ export function OrderSheetView({
   }, [rejectReason, isRejecting, onReject]);
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col animate-slide-up">
+    <div className="density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col animate-slide-up">
 
       {/* Top bar */}
       <div className="px-4 lg:px-6 py-3 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] shrink-0">
@@ -294,7 +294,7 @@ export function OrderSheetView({
                 <p className="text-base font-mono font-semibold text-[var(--content-primary)] tabular-nums">
                   {formatCurrency(totalValue)}
                 </p>
-                <p className="text-[11px] text-[var(--content-quaternary)] mt-0.5">
+                <p className="font-ds-label-size text-[var(--content-quaternary)] mt-0.5">
                   {itemCount} items · {formatTimeAgo(createdAt)}
                 </p>
               </div>
@@ -317,8 +317,8 @@ export function OrderSheetView({
               <>
                 <Copy size={18} weight="bold" />
                 Copy {items.length} items to clipboard
-                <span className="text-[11px] font-normal opacity-60 hidden sm:inline mx-1">·</span>
-                <span className="text-[11px] font-normal opacity-80 hidden sm:inline tabular-nums">
+                <span className="font-ds-label-size font-normal opacity-60 hidden sm:inline mx-1">·</span>
+                <span className="font-ds-label-size font-normal opacity-80 hidden sm:inline tabular-nums">
                   {SHORTCUT_COPY_ALL}
                 </span>
               </>
@@ -392,7 +392,7 @@ export function OrderSheetView({
                         {productCode && (
                           <div className="mt-1 sm:hidden max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]">
                             <span
-                              className="inline-block text-[11px] font-mono text-[var(--content-quaternary)] whitespace-nowrap"
+                              className="inline-block font-ds-label-size font-mono text-[var(--content-quaternary)] whitespace-nowrap"
                               title={productCode}
                             >
                               {productCode}
@@ -407,7 +407,7 @@ export function OrderSheetView({
                           className="max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]"
                           title={productCode || undefined}
                         >
-                          <span className="inline-block text-[11px] font-mono text-[var(--content-quaternary)] whitespace-nowrap pr-1">
+                          <span className="inline-block font-ds-label-size font-mono text-[var(--content-quaternary)] whitespace-nowrap pr-1">
                             {productCode || '—'}
                           </span>
                         </div>
@@ -461,18 +461,18 @@ export function OrderSheetView({
           {/* Keyboard hints — progressive disclosure */}
           {showHints && (
             <div className="text-center animate-slide-up">
-              <p className="text-[11px] text-[var(--content-quaternary)]">
-                <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">↑↓</kbd> Navigate
+              <p className="font-ds-label-size text-[var(--content-quaternary)]">
+                <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 font-ds-micro mx-0.5">↑↓</kbd> Navigate
                 <span className="mx-1.5 text-[var(--border-opaque)]">·</span>
-                <kbd className="font-mono bg-[var(--bg-warning-subtle)] border border-[var(--border-warning)] rounded px-1.5 py-0.5 text-[10px] text-[var(--content-warning)] font-semibold mx-0.5">F</kbd> No stock
+                <kbd className="font-mono bg-[var(--bg-warning-subtle)] border border-[var(--border-warning)] rounded px-1.5 py-0.5 font-ds-micro text-[var(--content-warning)] font-semibold mx-0.5">F</kbd> No stock
                 <span className="mx-1.5 text-[var(--border-opaque)]">·</span>
-                <kbd className="font-mono bg-[var(--bg-warning-subtle)] border border-[var(--border-warning)] rounded px-1.5 py-0.5 text-[10px] text-[var(--content-warning)] font-semibold mx-0.5">P</kbd> Partial
+                <kbd className="font-mono bg-[var(--bg-warning-subtle)] border border-[var(--border-warning)] rounded px-1.5 py-0.5 font-ds-micro text-[var(--content-warning)] font-semibold mx-0.5">P</kbd> Partial
                 <span className="mx-1.5 text-[var(--border-opaque)]">·</span>
-                <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">S</kbd> Undo
+                <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 font-ds-micro mx-0.5">S</kbd> Undo
                 <span className="mx-1.5 text-[var(--border-opaque)]">·</span>
-                <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">{SHORTCUT_COPY_ALL}</kbd> Copy lines
+                <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 font-ds-micro mx-0.5">{SHORTCUT_COPY_ALL}</kbd> Copy lines
                 <span className="mx-1.5 text-[var(--border-opaque)]">·</span>
-                <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">{SHORTCUT_FINISH}</kbd> Finish
+                <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 font-ds-micro mx-0.5">{SHORTCUT_FINISH}</kbd> Finish
               </p>
             </div>
           )}
@@ -509,8 +509,8 @@ export function OrderSheetView({
               {isApproving ? 'Approving...' : 'Finish Billing'}
               {!isApproving && (
                 <>
-                  <span className="text-[11px] font-normal opacity-60 hidden sm:inline mx-1">·</span>
-                  <span className="text-[11px] font-normal opacity-70 hidden sm:inline tabular-nums">{SHORTCUT_FINISH}</span>
+                  <span className="font-ds-label-size font-normal opacity-60 hidden sm:inline mx-1">·</span>
+                  <span className="font-ds-label-size font-normal opacity-70 hidden sm:inline tabular-nums">{SHORTCUT_FINISH}</span>
                 </>
               )}
             </button>
@@ -558,15 +558,15 @@ export function OrderSheetView({
                 })}
             </div>
 
-            <p className="text-[11px] text-[var(--content-quaternary)] mb-4">
+            <p className="font-ds-label-size text-[var(--content-quaternary)] mb-4">
               Out of stock items will be marked pending. Partial items billed at available qty.
             </p>
 
-            <p className="text-[11px] text-[var(--content-quaternary)] mb-5 text-center sm:text-left">
-              <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">{SHORTCUT_FINISH}</kbd>
+            <p className="font-ds-label-size text-[var(--content-quaternary)] mb-5 text-center sm:text-left">
+              <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 font-ds-micro mx-0.5">{SHORTCUT_FINISH}</kbd>
               <span className="text-[var(--content-quaternary)]"> confirm</span>
               <span className="mx-1.5 text-[var(--border-opaque)]">·</span>
-              <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] mx-0.5">Esc</kbd>
+              <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 font-ds-micro mx-0.5">Esc</kbd>
               <span className="text-[var(--content-quaternary)]"> cancel</span>
             </p>
 
@@ -587,7 +587,7 @@ export function OrderSheetView({
               >
                 {isApproving ? 'Approving...' : 'Confirm & Finish'}
                 {!isApproving && (
-                  <span className="text-[11px] font-normal opacity-80 hidden sm:inline tabular-nums">{SHORTCUT_FINISH}</span>
+                  <span className="font-ds-label-size font-normal opacity-80 hidden sm:inline tabular-nums">{SHORTCUT_FINISH}</span>
                 )}
               </button>
             </div>

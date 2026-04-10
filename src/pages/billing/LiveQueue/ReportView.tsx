@@ -169,9 +169,9 @@ export function ReportView({
           </button>
 
           {/* WhatsApp-style message bubble */}
-          <div className="bg-[#EFEAE2] dark:bg-[#0b141a] rounded-xl p-4 border border-[var(--border-subtle)] relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-1 h-full bg-[#25D366]" />
-            <p className="text-[13px] leading-relaxed whitespace-pre-wrap text-[#111B21] dark:text-[#E9EDEF] pl-2">
+          <div className="rounded-xl p-4 border border-[var(--border-subtle)] relative overflow-hidden bg-[var(--embed-whatsapp-bg)]">
+            <div className="absolute top-0 left-0 w-1 h-full bg-embed-whatsapp-solid" aria-hidden />
+            <p className="font-ds-prose leading-relaxed whitespace-pre-wrap text-[var(--embed-whatsapp-fg)] pl-2">
               {reportText}
             </p>
           </div>
@@ -204,7 +204,7 @@ export function ReportView({
                 'noopener,noreferrer',
               );
             }}
-            className="flex-1 h-11 rounded-xl bg-[#25D366] text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all"
+            className="flex-1 h-11 rounded-xl bg-embed-whatsapp-solid text-white text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all"
           >
             <WhatsappLogo size={18} weight="fill" />
             WhatsApp {salesperson || ''}
@@ -221,7 +221,7 @@ export function ReportView({
           )}
           <ArrowRight size={16} weight="bold" />
         </button>
-        <p className="text-center text-[11px] text-[var(--content-quaternary)] mt-3">
+        <p className="text-center font-ds-label-size text-[var(--content-quaternary)] mt-3">
           C copy · Enter next order
         </p>
 

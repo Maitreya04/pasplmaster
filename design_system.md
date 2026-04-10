@@ -119,3 +119,21 @@ Rather than relying purely on utility classes everywhere, standard blocks are pa
   - `.ds-chip--positive`, `.ds-chip--warning`, `.ds-chip--negative`
   - `.ds-chip--role` (Heavy uppercase tracking)
   - `.ds-chip--sm` (Highly compressed)
+
+---
+
+## 6. Single source of truth (where to change things)
+
+**Authoritative file:** `src/index.css` (header block lists all layers). This document mirrors it; **change the CSS first**, then adjust this file if the conceptual map changed.
+
+| Concern | Where in `index.css` |
+|--------|------------------------|
+| Raw scales (`--gray-*`, `--blue-*`, …) | `:root` palette block — regenerate with `npm run tokens:generate` |
+| App meaning (backgrounds, text, borders, status) | `:root` semantic tokens |
+| Stock / scan colors (OK / low / out) | `--content-signal-ok`, `--content-signal-low`, `--content-signal-out` |
+| WhatsApp-style preview surfaces | `--embed-whatsapp*`, `--embed-whatsapp-bg` / `--embed-whatsapp-fg` (`.dark` flips bubble) |
+| Density (table rows, labels, cell padding) | `:root` `--ds-*` + **`.density-compact`** overrides on a page root |
+| Typography steps vs arbitrary `text-[11px]` | `.font-ds-micro`, `.font-ds-label-size`, `.font-ds-caption-size`, `.font-ds-body-size`, `.font-ds-prose`, `.font-ds-lead` |
+| Tailwind utilities | `@theme` — e.g. `text-content-signal-ok`, `text-embed-whatsapp`, `bg-embed-whatsapp-solid` |
+
+**Wiring in React:** Prefer `var(--…)` in `className`, the DS classes above, or Tailwind tokens from `@theme`. Avoid new hex in TSX unless it is a one-off experiment you plan to promote into `:root`.

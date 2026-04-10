@@ -112,8 +112,8 @@ export default function UploadPage(): React.JSX.Element | null {
         // Sales history aggregates updated – refresh dashboard & frequently bought data
         void queryClient.invalidateQueries({ queryKey: ['sales-dashboard'] });
         void queryClient.invalidateQueries({ queryKey: ['salesperson_top_customers'] });
-        void queryClient.invalidateQueries({ queryKey: ['customer_top_items_trending'] });
-        void queryClient.invalidateQueries({ queryKey: ['customer_top_items_by_customer'] });
+        void queryClient.invalidateQueries({ queryKey: ['trending_items'] });
+        void queryClient.invalidateQueries({ queryKey: ['customer_quick_reorder'] });
       }
       if (result.failedCount > 0) {
         toast.info(

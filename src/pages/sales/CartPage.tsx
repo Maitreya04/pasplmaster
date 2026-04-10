@@ -1022,6 +1022,9 @@ export default function CartPage(): React.JSX.Element | null {
       queryClient.invalidateQueries({ queryKey: ['pending-items'] });
       queryClient.invalidateQueries({ queryKey: ['open-po-demand-lines'] });
       queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: ['customer_quick_reorder'] });
+      queryClient.invalidateQueries({ queryKey: ['salesperson_top_customers'] });
+      queryClient.invalidateQueries({ queryKey: ['trending_items'] });
     },
     onError: (e) => {
       const msg =

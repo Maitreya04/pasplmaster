@@ -63,17 +63,17 @@ interface TopCustomer {
   last_order_date: string | null;
 }
 
-interface CustomerTopItemRow {
-  customer_name: string;
-  item_name: string;
+/** Rows from get_customer_quick_reorder_stats (live orders + order_lines). */
+interface CustomerQuickReorderRow {
+  item_id: number;
   order_count: number;
   most_common_qty: number | null;
   last_ordered: string | null;
 }
 
 interface TrendingRow {
-  item_name: string;
-  total_order_count: number | null;
+  item_id: number;
+  order_count: number;
 }
 
 function BrandFilterSheetContent({
@@ -194,7 +194,7 @@ function BrandFilterSheetContent({
 // Smart landing empty state (Your Customers / Quick Reorder / Trending)
 // ---------------------------------------------------------------------------
 
-const EMPTY_CUSTOMER_TOP_ITEMS: CustomerTopItemRow[] = [];
+const EMPTY_CUSTOMER_QUICK_REORDER: CustomerQuickReorderRow[] = [];
 const EMPTY_TOP_CUSTOMERS: TopCustomer[] = [];
 const EMPTY_TRENDING: TrendingRow[] = [];
 
@@ -228,40 +228,25 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
   const { data: topCustomers = EMPTY_TOP_CUSTOMERS, isLoading: topCustomersLoading } = useQuery<TopCustomer[]>({
     queryKey: ['salesperson_top_customers', userName],
     enabled: !!userName,
-    staleTime: 10 * 60 * 1000,
+    staleTime: 60 * 1000,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('salesperson_top_customers')
-        .select('customer_name, order_count, last_order_date')
-        .eq('salesperson_name', userName)
-        .order('order_count', { ascending: false })
-        .limit(8);
+      if (!userName) return [];
+      const { data, error } = await supabase.rpc('get_salesperson_top_customers_live', {
+        p_salesperson_name: userName,
+        p_limit: 8,
+      });
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as TopCustomer[];
     },
   });
 
   const { data: trendingRaw = EMPTY_TRENDING } = useQuery<TrendingRow[]>({
-    queryKey: ['customer_top_items_trending'],
-    staleTime: 10 * 60 * 1000,
+    queryKey: ['trending_items'],
+    staleTime: 60 * 1000,
     queryFn: async () => {
-      const query = supabase.from('customer_top_items') as unknown as {
-        select: (s: string) => {
-          group: (g: string) => {
-            order: (o: string, opts: { ascending: boolean }) => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              limit: (l: number) => Promise<{ data: any[] | null; error: any }>
-            }
-          }
-        }
-      };
-      const { data, error } = await query
-        .select('item_name, total_order_count:order_count.sum()')
-        .group('item_name')
-        .order('total_order_count', { ascending: false })
-        .limit(5);
+      const { data, error } = await supabase.rpc('get_trending_items_live', { p_limit: 5 });
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as TrendingRow[];
     },
   });
 
@@ -269,14 +254,6 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
   const [quickReorderItems, setQuickReorderItems] = useState<
     { item: Item; suggestedQty: number; checked: boolean; orderCount: number; mostCommonQty: number | null }[]
   >([]);
-
-  const nameToItem = useMemo(() => {
-    const map = new Map<string, Item>();
-    for (const it of items) {
-      map.set(it.name, it);
-    }
-    return map;
-  }, [items]);
 
   const nameToCustomer = useMemo(() => {
     const map = new Map<string, Customer>();
@@ -294,28 +271,42 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
     return map;
   }, [items]);
 
+  const activeCustomer = activeCustomerName ? nameToCustomer.get(activeCustomerName) ?? null : null;
+
   const {
-    data: customerTopItems = EMPTY_CUSTOMER_TOP_ITEMS,
-    isLoading: customerTopItemsLoading,
-  } = useQuery<CustomerTopItemRow[]>({
-    queryKey: ['customer_top_items_by_customer', activeCustomerName],
+    data: quickReorderStats = EMPTY_CUSTOMER_QUICK_REORDER,
+    isLoading: quickReorderLoading,
+  } = useQuery<CustomerQuickReorderRow[]>({
+    queryKey: ['customer_quick_reorder', activeCustomerName, activeCustomer?.id],
     enabled: !!activeCustomerName,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 60 * 1000,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('customer_top_items')
-        .select('customer_name, item_name, order_count, most_common_qty, last_ordered')
-        .eq('customer_name', activeCustomerName)
-        .order('order_count', { ascending: false })
-        .limit(15);
+      if (!activeCustomerName) return [];
+
+      let customerId = activeCustomer?.id;
+      if (customerId == null) {
+        const { data: row, error: lookupError } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('name', activeCustomerName)
+          .maybeSingle();
+        if (lookupError) throw lookupError;
+        customerId = row?.id;
+      }
+      if (customerId == null) return [];
+
+      const { data, error } = await supabase.rpc('get_customer_quick_reorder_stats', {
+        p_customer_id: customerId,
+        p_limit: 15,
+      });
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as CustomerQuickReorderRow[];
     },
   });
 
   // Build quick reorder items when selection or source data changes
   useEffect(() => {
-    if (!customerTopItems || !customerTopItems.length) {
+    if (!quickReorderStats?.length) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuickReorderItems([]);
       return;
@@ -327,37 +318,34 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
       orderCount: number;
       mostCommonQty: number | null;
     }[] = [];
-    for (const row of customerTopItems) {
-      const item = nameToItem.get(row.item_name);
-      if (!item) continue; // skip silently if item not found
+    for (const row of quickReorderStats) {
+      const item = idToItem.get(Number(row.item_id));
+      if (!item) continue;
       const suggested =
         row.most_common_qty && row.most_common_qty > 0 ? Math.round(Number(row.most_common_qty)) : 1;
       rows.push({
         item,
         suggestedQty: suggested,
-        // Suggestions start inactive; salesperson opts in explicitly
         checked: false,
         orderCount: row.order_count ?? 0,
         mostCommonQty: row.most_common_qty,
       });
     }
     setQuickReorderItems(rows);
-  }, [customerTopItems, nameToItem]);
+  }, [quickReorderStats, idToItem]);
 
-  const hasSmartData = !!userName && !topCustomersLoading && topCustomers.length > 0;
+  const hasSmartData = !!userName && !topCustomersLoading;
 
   const trendingItems = useMemo(() => {
     if (!trendingRaw.length) return [];
     const out: { item: Item; totalOrderCount: number }[] = [];
     for (const row of trendingRaw) {
-      const item = nameToItem.get(row.item_name);
-      if (!item) continue; // skip silently
-      out.push({ item, totalOrderCount: row.total_order_count ?? 0 });
+      const item = idToItem.get(Number(row.item_id));
+      if (!item) continue;
+      out.push({ item, totalOrderCount: row.order_count ?? 0 });
     }
     return out;
-  }, [trendingRaw, nameToItem]);
-
-  const activeCustomer = activeCustomerName ? nameToCustomer.get(activeCustomerName) ?? null : null;
+  }, [trendingRaw, idToItem]);
 
   const customerRail = useMemo(() => {
     if (!activeCustomerName) return topCustomers;
@@ -507,7 +495,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
   });
 
   if (!hasSmartData) {
-    // New salesperson with no data — just show Trending section below search
+    // Logged-out or still loading top-customer summary
     return (
       <div className="space-y-6 pt-4">
         {trendingItems.length > 0 && (
@@ -515,6 +503,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
             <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
               Trending
             </h3>
+            <p className="text-xs text-[var(--content-quaternary)]">From orders placed in the app</p>
             <div className="space-y-2">
               {trendingItems.map(({ item, totalOrderCount }) => (
                 <div
@@ -526,7 +515,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                       {item.name}
                     </p>
                     <p className="text-xs text-[var(--content-tertiary)]">
-                      Ordered {totalOrderCount} times
+                      In {totalOrderCount} order{totalOrderCount === 1 ? '' : 's'}
                     </p>
                   </div>
                   <button
@@ -862,18 +851,18 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
             </h3>
             {quickReorderItems.length > 0 && (
               <p className="text-xs text-[var(--content-tertiary)] mt-1">
-                Based on past orders
+                From orders placed in the app
               </p>
             )}
           </div>
 
-          {customerTopItemsLoading && (
+          {quickReorderLoading && (
             <p className="text-xs text-[var(--content-tertiary)]">Loading suggestions…</p>
           )}
 
-          {!customerTopItemsLoading && quickReorderItems.length === 0 && (
+          {!quickReorderLoading && quickReorderItems.length === 0 && (
             <p className="text-xs text-[var(--content-tertiary)]">
-              No history yet. Use search above to add items.
+              No order history in the app for this customer yet. Use search above to add items.
             </p>
           )}
 
@@ -971,9 +960,12 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
       {/* Section 4 — Trending */}
       {trendingItems.length > 0 && (
         <section className="space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-            Trending
-          </h3>
+          <div className="flex items-baseline justify-between gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+              Trending
+            </h3>
+            <p className="text-xs text-[var(--content-quaternary)]">From orders in the app</p>
+          </div>
           <div className="space-y-2">
             {trendingItems.map(({ item, totalOrderCount }) => (
               <div
@@ -985,7 +977,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                     {item.name}
                   </p>
                   <p className="text-xs text-[var(--content-tertiary)]">
-                    Ordered {totalOrderCount} times
+                    In {totalOrderCount} order{totalOrderCount === 1 ? '' : 's'}
                   </p>
                 </div>
                 <button
@@ -1115,11 +1107,11 @@ function PendingItemStockLine({
   const primary = stockPrimaryLabel(stockQty, tier);
   const primaryTextClass =
     tier === 'ok'
-      ? 'text-[#047857]'
+      ? 'text-content-signal-ok'
       : tier === 'low'
-        ? 'text-[#b45309]'
+        ? 'text-content-signal-low'
         : tier === 'out'
-          ? 'text-[#b91c1c]'
+          ? 'text-content-signal-out'
           : 'text-[var(--content-tertiary)]';
 
   if (tier === 'unknown' || stockQty == null || !Number.isFinite(Number(stockQty))) {
@@ -1236,11 +1228,11 @@ function ItemStockBlock({
 
   const primaryTextClass =
     tier === 'ok'
-      ? 'text-[#047857]'
+      ? 'text-content-signal-ok'
       : tier === 'low'
-        ? 'text-[#b45309]'
+        ? 'text-content-signal-low'
         : tier === 'out'
-          ? 'text-[#b91c1c]'
+          ? 'text-content-signal-out'
           : 'text-[var(--content-tertiary)]';
 
   return (
@@ -1256,9 +1248,9 @@ function ItemStockBlock({
           </div>
         ) : (
           <p
-            className={`pl-3 text-[11px] font-medium leading-[1.35] ${
+            className={`pl-3 font-ds-label-size font-medium leading-[1.35] ${
               secondary.tone === 'negative'
-                ? 'text-[#b91c1c]'
+                ? 'text-content-signal-out'
                 : 'text-[var(--content-secondary)]'
             }`}
           >
