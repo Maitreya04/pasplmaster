@@ -51,7 +51,7 @@ export function CommitView({
   const isCopied = copiedId === 'all-items';
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)] p-4 sm:p-8 flex flex-col justify-center max-w-2xl mx-auto animate-slide-up">
+    <div className="density-compact min-h-screen bg-[var(--bg-primary)] p-4 sm:p-8 flex flex-col justify-center max-w-2xl mx-auto animate-slide-up">
 
       <button
         onClick={onSkip}

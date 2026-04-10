@@ -29,7 +29,7 @@ export function ResolveView({
   const available = overrideAvailable ?? item.qty_shippable ?? 0;
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-6 animate-slide-up">
+    <div className="density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-6 animate-slide-up">
       
       <div className="w-full max-w-xl">
         <div className="text-center mb-8">

@@ -18,7 +18,7 @@ export function CompleteView({ orderName, totalWaiting, onAutoAdvance }: Complet
   }, [onAutoAdvance]);
 
   return (
-    <div className="min-h-screen bg-[var(--bg-positive)] flex flex-col items-center justify-center p-6 animate-slide-up">
+    <div className="density-compact min-h-screen bg-[var(--bg-positive)] flex flex-col items-center justify-center p-6 animate-slide-up">
       <div className="w-24 h-24 bg-white/20 rounded-full flex items-center justify-center mb-8 shadow-inner relative">
         <CheckCircle size={56} weight="bold" className="text-white relative z-10" />
       </div>

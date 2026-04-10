@@ -310,18 +310,18 @@ function CompactProcess({
         {/* Qty + Rate row */}
         <div className="flex items-center gap-6">
           <div className="text-center">
-            <p className="text-[10px] uppercase tracking-wider text-[var(--content-tertiary)] mb-0.5">Qty</p>
+            <p className="font-ds-micro uppercase tracking-wider text-[var(--content-tertiary)] mb-0.5">Qty</p>
             <p className="text-2xl font-mono font-bold text-[var(--content-primary)]">{activeItem!.qty_requested}</p>
           </div>
           {activeItem!.price_quoted != null && (
             <div className="text-center">
-              <p className="text-[10px] uppercase tracking-wider text-[var(--content-tertiary)] mb-0.5">Rate</p>
+              <p className="font-ds-micro uppercase tracking-wider text-[var(--content-tertiary)] mb-0.5">Rate</p>
               <p className="text-lg font-mono font-bold text-[var(--content-secondary)]">{formatCurrency(activeItem!.price_quoted)}</p>
             </div>
           )}
           {activeItem!.rack_no && (
             <div className="text-center">
-              <p className="text-[10px] uppercase tracking-wider text-[var(--content-tertiary)] mb-0.5">Rack</p>
+              <p className="font-ds-micro uppercase tracking-wider text-[var(--content-tertiary)] mb-0.5">Rack</p>
               <p className="text-lg font-mono font-bold text-[var(--content-secondary)]">{activeItem!.rack_no}</p>
             </div>
           )}
@@ -348,7 +348,7 @@ function CompactProcess({
               </span>
             ) : (
               <span className="text-xs text-[var(--content-quaternary)]">
-                <kbd className="font-mono bg-[var(--bg-secondary)] border border-[var(--border-opaque)] rounded px-1 py-0.5 text-[10px] shadow-sm">Enter</kbd>
+                <kbd className="font-mono bg-[var(--bg-secondary)] border border-[var(--border-opaque)] rounded px-1 py-0.5 font-ds-micro shadow-sm">Enter</kbd>
                 {' '}copy & next
               </span>
             )}
@@ -403,7 +403,7 @@ function CompactResolve({
   return (
     <div className="flex flex-col h-full p-4 overflow-y-auto">
       <div className="text-center mb-3">
-        <p className="text-[10px] font-bold tracking-widest uppercase text-[var(--content-tertiary)]">
+        <p className="font-ds-micro font-bold tracking-widest uppercase text-[var(--content-tertiary)]">
           Issue {issueIndex + 1}/{totalIssues}
         </p>
         <p className="text-xs text-[var(--content-secondary)] truncate">{orderName}</p>
@@ -419,7 +419,7 @@ function CompactResolve({
                 : 'Needs attention'}
             </p>
             <p className="text-xs text-[var(--content-secondary)] mt-0.5 truncate">{item.item_name}</p>
-            {item.item_alias && <p className="font-mono text-[10px] text-[var(--content-tertiary)]">{item.item_alias}</p>}
+            {item.item_alias && <p className="font-mono font-ds-micro text-[var(--content-tertiary)]">{item.item_alias}</p>}
           </div>
         </div>
         <div className="p-2 bg-[var(--bg-warning-subtle)] rounded-lg border border-[var(--border-warning)]">
@@ -500,7 +500,7 @@ function CompactCommunicate({
     <div className="flex flex-col items-center justify-center h-full p-5 text-center">
       <Warning size={24} weight="fill" className="text-[var(--content-warning)] mb-3" />
       <h2 className="text-base font-bold text-[var(--content-primary)] mb-1">Notify sales</h2>
-      <p className="text-[11px] text-[var(--content-secondary)] mb-4 line-clamp-4 whitespace-pre-wrap text-left w-full rounded-lg bg-[var(--bg-tertiary)] p-2 border border-[var(--border-subtle)]">
+      <p className="font-ds-label-size text-[var(--content-secondary)] mb-4 line-clamp-4 whitespace-pre-wrap text-left w-full rounded-lg bg-[var(--bg-tertiary)] p-2 border border-[var(--border-subtle)]">
         {draftText}
       </p>
 
@@ -751,7 +751,7 @@ export default function CompactQueuePage() {
       {/* Tiny top bar — window drag area + context */}
       <div className="h-9 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center justify-between px-2 shrink-0 select-none [-webkit-app-region:drag]">
         <span className="w-16" aria-hidden />
-        <p className="text-[10px] font-semibold text-[var(--content-quaternary)] tracking-widest uppercase">
+        <p className="font-ds-micro font-semibold text-[var(--content-quaternary)] tracking-widest uppercase">
           PASPL Companion
         </p>
         <div className="w-16 flex items-center justify-end gap-0.5 [-webkit-app-region:no-drag]">

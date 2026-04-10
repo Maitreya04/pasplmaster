@@ -106,7 +106,7 @@ export function ProcessView({ orderName, items, activeIndex, isSubmitting, manua
   }, [isComplete, activeItem, copy, onAdvance, onFinish, onJump, activeIndex, onFlag, showFlagPanel]);
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col">
+    <div className="density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col">
       {/* Mini header */}
       <div className="px-6 py-4 bg-[var(--bg-secondary)] border-b border-[var(--border-opaque)] shadow-sm shrink-0 flex items-center justify-between">
         <h2 className="text-lg font-bold text-[var(--content-primary)] truncate">{orderName}</h2>

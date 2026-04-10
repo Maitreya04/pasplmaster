@@ -15,7 +15,7 @@ export function OrientView({ queue, totalWaiting, onStart, isLoading }: OrientVi
   const nextOrder = queue[0];
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[80vh] p-6 max-w-xl mx-auto text-center animate-slide-up">
+    <div className="density-compact flex flex-col items-center justify-center min-h-[80vh] p-6 max-w-xl mx-auto text-center animate-slide-up">
       <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-[var(--bg-accent)] mb-8 shadow-lg">
         <Lightning size={32} weight="fill" className="text-white" />
       </div>

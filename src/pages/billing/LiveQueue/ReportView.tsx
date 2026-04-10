@@ -106,7 +106,7 @@ export function ReportView({
   // Clean order — minimal success view
   if (!hasFlags) {
     return (
-      <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-6 animate-slide-up">
+      <div className="density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-6 animate-slide-up">
         <div className="w-full max-w-sm text-center">
           <div className="w-16 h-16 bg-[var(--bg-positive-subtle)] rounded-full flex items-center justify-center mx-auto mb-5">
             <CheckCircle size={36} weight="fill" className="text-[var(--content-positive)]" />
@@ -127,7 +127,7 @@ export function ReportView({
             )}
             <ArrowRight size={16} weight="bold" />
           </button>
-          <p className="text-[11px] text-[var(--content-quaternary)] mt-3">
+          <p className="font-ds-label-size text-[var(--content-quaternary)] mt-3">
             Press Enter
           </p>
         </div>
@@ -137,7 +137,7 @@ export function ReportView({
 
   // Flagged order — full report
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-4 lg:p-6 animate-slide-up">
+    <div className="density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-4 lg:p-6 animate-slide-up">
       <div className="w-full max-w-lg">
 
         {/* Header */}

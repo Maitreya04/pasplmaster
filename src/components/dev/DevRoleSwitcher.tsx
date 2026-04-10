@@ -49,7 +49,7 @@ export function DevRoleSwitcher(): React.JSX.Element | null {
     <div className="fixed right-3 bottom-28 z-40 flex flex-col items-end gap-2 text-xs pointer-events-none">
       {open && (
         <div className="rounded-2xl bg-black/80 text-white shadow-lg backdrop-blur px-3 py-2 space-y-1 min-w-[180px] pointer-events-auto">
-          <p className="mb-1 text-[10px] uppercase tracking-wide text-white/60">
+          <p className="mb-1 font-ds-micro uppercase tracking-wide text-white/60">
             Dev Role Switch
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -58,7 +58,7 @@ export function DevRoleSwitcher(): React.JSX.Element | null {
                 key={key}
                 type="button"
                 onClick={() => handleSwitch(key)}
-                className={`h-6 px-3 rounded-full border text-[11px] transition-colors ${
+                className={`h-6 px-3 rounded-full border font-ds-label-size transition-colors ${
                   role === key
                     ? 'bg-white text-black border-white'
                     : 'border-white/30 text-white/90 hover:bg-white/10'
@@ -77,7 +77,7 @@ export function DevRoleSwitcher(): React.JSX.Element | null {
         className="flex items-center gap-1.5 rounded-full bg-black/80 text-white px-3 py-1.5 shadow-lg backdrop-blur-sm pointer-events-auto"
       >
         <ArrowsLeftRight size={16} weight="bold" />
-        <span className="text-[11px]">
+        <span className="font-ds-label-size">
           {currentLabel}
         </span>
       </button>

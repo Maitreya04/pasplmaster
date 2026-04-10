@@ -132,8 +132,8 @@ Rather than relying purely on utility classes everywhere, standard blocks are pa
 | App meaning (backgrounds, text, borders, status) | `:root` semantic tokens |
 | Stock / scan colors (OK / low / out) | `--content-signal-ok`, `--content-signal-low`, `--content-signal-out` |
 | WhatsApp-style preview surfaces | `--embed-whatsapp*`, `--embed-whatsapp-bg` / `--embed-whatsapp-fg` (`.dark` flips bubble) |
-| Density (table rows, labels, cell padding) | `:root` `--ds-*` + **`.density-compact`** overrides on a page root |
-| Typography steps vs arbitrary `text-[11px]` | `.font-ds-micro`, `.font-ds-label-size`, `.font-ds-caption-size`, `.font-ds-body-size`, `.font-ds-prose`, `.font-ds-lead` |
+| Density (table rows, labels, cell padding) | `:root` `--ds-*` + **`.density-compact`** on dense shells: `LiveQueue/*` views, `QueueView`, `OrderSheetView`, `CompactQueuePage` |
+| Typography steps vs arbitrary `text-[Npx]` | `.font-ds-micro` … `.font-ds-lead`, **`.font-ds-stat`** (hero numbers); use Tailwind **`text-base`** (16px) / **`text-lg`** (18px) where no DS step exists |
 | Tailwind utilities | `@theme` — e.g. `text-content-signal-ok`, `text-embed-whatsapp`, `bg-embed-whatsapp-solid` |
 
 **Wiring in React:** Prefer `var(--…)` in `className`, the DS classes above, or Tailwind tokens from `@theme`. Avoid new hex in TSX unless it is a one-off experiment you plan to promote into `:root`.

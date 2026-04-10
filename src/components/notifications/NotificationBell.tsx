@@ -292,7 +292,7 @@ export function NotificationBell({ userId, role = null }: NotificationBellProps)
                   <Fragment key={n.id}>
                     {showDay && (
                       <div className="sticky top-0 z-[1] border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/95 px-4 py-2 backdrop-blur-sm">
-                        <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                        <p className="font-ds-label-size font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
                           {dayHeading(n.created_at)}
                         </p>
                       </div>
@@ -311,7 +311,7 @@ export function NotificationBell({ userId, role = null }: NotificationBellProps)
                       >
                         <div className="min-w-0 flex-1 space-y-2">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="rounded-md bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--content-secondary)]">
+                            <span className="rounded-md bg-[var(--bg-tertiary)] px-2 py-0.5 font-ds-micro font-semibold uppercase tracking-wide text-[var(--content-secondary)]">
                               {notificationTypeLabel(n.type)}
                             </span>
                             {n.order_id != null && (
@@ -368,7 +368,7 @@ export function NotificationBell({ userId, role = null }: NotificationBellProps)
           </span>
         )}
         {unreadCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-[var(--bg-negative)] text-[10px] font-bold text-white flex items-center justify-center">
+          <span className="absolute -top-0.5 -right-0.5 min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-[var(--bg-negative)] font-ds-micro font-bold text-white flex items-center justify-center">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}

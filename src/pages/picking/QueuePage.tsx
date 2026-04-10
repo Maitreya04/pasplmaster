@@ -442,7 +442,7 @@ function OrderCard({
             </span>
             {isUrgent && <StatusBadge status="urgent" />}
             {order.claim_info?.is_stale && (
-              <span className="text-[10px] uppercase font-bold text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] px-2 py-0.5 rounded border border-[var(--border-warning)]">
+              <span className="font-ds-micro uppercase font-bold text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] px-2 py-0.5 rounded border border-[var(--border-warning)]">
                 Stale (Takeover)
               </span>
             )}

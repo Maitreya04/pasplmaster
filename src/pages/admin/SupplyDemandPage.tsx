@@ -64,7 +64,7 @@ function getAgeBand(createdAt: string): AgeBand {
 function AgePill({ createdAt }: { createdAt: string }) {
   const band = getAgeBand(createdAt);
   return (
-    <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${band.pillClass}`}>
+    <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 font-ds-micro font-bold tabular-nums ${band.pillClass}`}>
       {band.label}
     </span>
   );
@@ -266,7 +266,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
         </div>
 
         {/* Age legend */}
-        <div className="mt-3 flex items-center gap-2 text-[10px] text-[var(--content-quaternary)]">
+        <div className="mt-3 flex items-center gap-2 font-ds-micro text-[var(--content-quaternary)]">
           <span>Age:</span>
           <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border border-[color-mix(in_srgb,var(--content-positive)_20%,transparent)] font-bold">
             &lt;7d fresh
@@ -550,7 +550,7 @@ function LinesTab({
                   )}
                 </div>
                 {o?.created_at && (
-                  <p className="text-[10px] text-[var(--content-quaternary)] mt-2">
+                  <p className="font-ds-micro text-[var(--content-quaternary)] mt-2">
                     {formatShortDate(o.created_at)} · {formatTimeAgo(o.created_at)}
                   </p>
                 )}

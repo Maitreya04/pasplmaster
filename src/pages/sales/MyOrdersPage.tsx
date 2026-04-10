@@ -138,7 +138,7 @@ function StatusTag({ variant, pickerFlagged }: { variant: StockUiVariant; picker
 
   if (pickerFlagged) {
     return (
-      <span className="inline-flex shrink-0 items-center rounded px-1.5 py-px text-[10px] font-semibold bg-[var(--bg-tertiary)] text-[var(--content-secondary)] leading-tight">
+      <span className="inline-flex shrink-0 items-center rounded px-1.5 py-px font-ds-micro font-semibold bg-[var(--bg-tertiary)] text-[var(--content-secondary)] leading-tight">
         Warehouse
       </span>
     );
@@ -146,7 +146,7 @@ function StatusTag({ variant, pickerFlagged }: { variant: StockUiVariant; picker
   if (variant === 'partial') {
     return (
       <span
-        className={`inline-flex shrink-0 items-center rounded px-1.5 py-px text-[10px] font-semibold leading-tight bg-[var(--bg-warning-subtle)] ${TEXT_STATUS_PARTIAL}`}
+        className={`inline-flex shrink-0 items-center rounded px-1.5 py-px font-ds-micro font-semibold leading-tight bg-[var(--bg-warning-subtle)] ${TEXT_STATUS_PARTIAL}`}
       >
         Partial
       </span>
@@ -154,7 +154,7 @@ function StatusTag({ variant, pickerFlagged }: { variant: StockUiVariant; picker
   }
   return (
     <span
-      className={`inline-flex shrink-0 items-center rounded px-1.5 py-px text-[10px] font-semibold leading-tight bg-[var(--bg-negative-subtle)] ${TEXT_STATUS_CRITICAL}`}
+      className={`inline-flex shrink-0 items-center rounded px-1.5 py-px font-ds-micro font-semibold leading-tight bg-[var(--bg-negative-subtle)] ${TEXT_STATUS_CRITICAL}`}
     >
       Out of Stock
     </span>
@@ -203,7 +203,7 @@ function OrderLineRow({
       {/* name + tag ……… amount */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <span className="text-[13px] font-semibold leading-snug text-[var(--content-primary)] normal-case">
+          <span className="font-ds-prose font-semibold leading-snug text-[var(--content-primary)] normal-case">
             {name}
           </span>
           {(variant !== 'ok' || pickerFlagged) && (
@@ -269,7 +269,7 @@ function OrderCard({
                   aria-label="Order has an unread update"
                   title="Unread update"
                 />
-                <span className="text-[11px] font-semibold text-[var(--content-negative)]">
+                <span className="font-ds-label-size font-semibold text-[var(--content-negative)]">
                   {salesUpdateLabel}
                 </span>
               </>
@@ -344,7 +344,7 @@ function OrderDetailSheet({
         <div>
           {/* ── Header: date + party ──────────────────── */}
           <div className="pb-4">
-            <p className="text-[22px] font-bold tabular-nums text-[var(--content-primary)] leading-tight">
+            <p className="font-ds-stat font-bold tabular-nums text-[var(--content-primary)] leading-tight">
               {billingDate ?? 'Not billed yet'}
             </p>
 

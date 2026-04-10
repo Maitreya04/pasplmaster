@@ -347,6 +347,7 @@ select {
   --ds-font-body: 0.875rem;    /* 14px — table cell, helper text */
   --ds-font-prose: 0.8125rem;  /* 13px — dense preview / secondary prose */
   --ds-font-lead: 0.9375rem;   /* 15px — emphasized list titles, embed body */
+  --ds-font-stat: 1.375rem;    /* 22px — card hero numbers (tabular) */
 }
 
 .density-compact {
@@ -362,6 +363,7 @@ select {
   --ds-font-body: 0.8125rem;   /* 13px */
   --ds-font-prose: 0.75rem;    /* 12px */
   --ds-font-lead: 0.875rem;    /* 14px */
+  --ds-font-stat: 1.25rem;     /* 20px */
   --ds-page-pad-x: 0.75rem;
   --ds-page-pad-y: 0.75rem;
   --ds-stack: 0.75rem;
@@ -647,6 +649,10 @@ table.ds-table td {
 .font-ds-lead {
   font-size: var(--ds-font-lead);
   line-height: 1.5;
+}
+.font-ds-stat {
+  font-size: var(--ds-font-stat);
+  line-height: 1.2;
 }
 
 .text-content-signal-ok {

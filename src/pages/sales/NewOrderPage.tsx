@@ -651,7 +651,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
             <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
               <div className="space-y-2">
               <div className="flex items-center justify-between px-1">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+                <p className="font-ds-label-size font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
                   {customerQuery.trim() ? 'Matches' : 'Customers'}
                 </p>
                 {filteredCustomers.length > 0 && (
@@ -683,7 +683,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-[15px] font-semibold text-[var(--content-primary)]">
+                        <p className="truncate font-ds-lead font-semibold text-[var(--content-primary)]">
                           {customer.name}
                         </p>
                         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--content-tertiary)]">
@@ -1047,7 +1047,7 @@ interface ItemRowProps {
 /** Same block size as `AliasCode` (px-3 py-1.5, 12px semibold) so SKU + special rate read as one chip row. */
 function SpecialRateChip() {
   return (
-    <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--bg-accent-subtle)] px-3 py-1.5 text-[12px] font-semibold leading-none text-[var(--content-accent)]">
+    <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--bg-accent-subtle)] px-3 py-1.5 font-ds-caption-size font-semibold leading-none text-[var(--content-accent)]">
       Special rate
     </span>
   );
@@ -1067,7 +1067,7 @@ function AliasCode({
   const isMatched = matchedField === 'alias1' || matchedField === 'alias' || matchedField === 'name+alias';
   return (
     <span
-      className={`inline-flex max-w-full items-center rounded-full px-3 py-1.5 font-mono text-[12px] font-semibold tracking-[0.04em] shrink-0 truncate ${
+      className={`inline-flex max-w-full items-center rounded-full px-3 py-1.5 font-mono font-ds-caption-size font-semibold tracking-[0.04em] shrink-0 truncate ${
         placeholder
           ? 'bg-[var(--bg-tertiary)] text-[var(--content-quaternary)]'
           : 'bg-[var(--bg-tertiary)] text-[var(--content-primary)]'
@@ -1116,7 +1116,7 @@ function PendingItemStockLine({
 
   if (tier === 'unknown' || stockQty == null || !Number.isFinite(Number(stockQty))) {
     return (
-      <p className="flex min-w-0 items-center gap-1.5 text-[12px] font-semibold leading-snug">
+      <p className="flex min-w-0 items-center gap-1.5 font-ds-caption-size font-semibold leading-snug">
         <StockStatusDot tier={tier} />
         <span className={`min-w-0 ${primaryTextClass}`}>{primary}</span>
       </p>
@@ -1144,7 +1144,7 @@ function PendingItemStockLine({
         className="rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5"
         role="status"
       >
-        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] font-semibold leading-snug">
+        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 font-ds-caption-size font-semibold leading-snug">
           {body}
         </p>
       </div>
@@ -1198,7 +1198,7 @@ function PendingItemStockLine({
         className="rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5"
         role="status"
       >
-        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] font-semibold leading-snug">
+        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 font-ds-caption-size font-semibold leading-snug">
           {body}
         </p>
       </div>
@@ -1206,7 +1206,7 @@ function PendingItemStockLine({
   }
 
   return (
-    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] font-semibold leading-snug">
+    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 font-ds-caption-size font-semibold leading-snug">
       {body}
     </p>
   );
@@ -1237,14 +1237,14 @@ function ItemStockBlock({
 
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
-      <p className="flex min-w-0 items-center gap-1.5 text-[12px] font-semibold leading-none">
+      <p className="flex min-w-0 items-center gap-1.5 font-ds-caption-size font-semibold leading-none">
         <StockStatusDot tier={tier} />
         <span className={`min-w-0 ${primaryTextClass}`}>{primary}</span>
       </p>
       {secondary &&
         (secondary.variant === 'shortfall' ? (
           <div className="mt-1 rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5">
-            <p className="text-[12px] font-semibold leading-snug text-[var(--content-warning)]">{secondary.text}</p>
+            <p className="font-ds-caption-size font-semibold leading-snug text-[var(--content-warning)]">{secondary.text}</p>
           </div>
         ) : (
           <p
@@ -1324,7 +1324,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
             />
             {hasSpecialLine && <SpecialRateChip />}
           </div>
-          <p className="text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
+          <p className="font-ds-body-size font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
             {highlightText(item.name, query)}
           </p>
           <PendingItemStockLine
@@ -1333,7 +1333,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
             draftQty={draftQty}
           />
         </div>
-        <p className="shrink-0 pt-0.5 text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
+        <p className="shrink-0 pt-0.5 text-right font-mono font-ds-caption-size font-medium leading-none text-[var(--content-tertiary)]">
           {formatCurrency(price)}
         </p>
       </div>
@@ -1348,7 +1348,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
                   e.stopPropagation();
                   handleSpecialRate();
                 }}
-                className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-0 text-[13px] font-semibold text-[var(--content-accent)]"
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-0 font-ds-prose font-semibold text-[var(--content-accent)]"
                 aria-label={`${hasSpecialLine ? 'Edit' : 'Set'} special rate for ${item.name}`}
               >
                 <CurrencyInr size={14} weight="bold" />
@@ -1388,7 +1388,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
                     }
                   }}
                   aria-label="Quantity"
-                  className="h-11 w-14 rounded-[14px] border border-[var(--bg-accent)] bg-[var(--bg-secondary)] text-center font-mono text-[18px] font-semibold text-[var(--content-primary)] outline-none focus:ring-1 focus:ring-[var(--bg-accent)]"
+                  className="h-11 w-14 rounded-[14px] border border-[var(--bg-accent)] bg-[var(--bg-secondary)] text-center font-mono text-lg font-semibold text-[var(--content-primary)] outline-none focus:ring-1 focus:ring-[var(--bg-accent)]"
                 />
 
                 <button
@@ -1473,7 +1473,7 @@ const ItemRow = memo(function ItemRow({
               {hasSpecialLine && <SpecialRateChip />}
             </div>
 
-            <p className="text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
+            <p className="font-ds-body-size font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
               {highlightText(item.name, query)}
             </p>
 
@@ -1481,7 +1481,7 @@ const ItemRow = memo(function ItemRow({
 
             {justAdded && (
               <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-positive-subtle)] px-3 py-1.5 text-[12px] font-semibold leading-none text-[var(--content-positive)]">
+                <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-positive-subtle)] px-3 py-1.5 font-ds-caption-size font-semibold leading-none text-[var(--content-positive)]">
                   <Check size={12} weight="bold" />
                   Added
                 </span>
@@ -1490,7 +1490,7 @@ const ItemRow = memo(function ItemRow({
           </div>
 
           <div className="flex shrink-0 flex-col items-end justify-center gap-2 self-stretch">
-            <p className="text-right font-mono text-[12px] font-medium leading-none text-[var(--content-tertiary)]">
+            <p className="text-right font-mono font-ds-caption-size font-medium leading-none text-[var(--content-tertiary)]">
               {formatCurrency(price)}
             </p>
             <button
@@ -1561,7 +1561,7 @@ function ResultSection({
   if (!results.length) return null;
   return (
     <div className="space-y-2">
-      <p className="px-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+      <p className="px-0.5 font-ds-label-size font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
         {label}
       </p>
       <ul className="space-y-2">
@@ -1935,7 +1935,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
             >
               <FunnelSimple size={18} weight="bold" />
               {activeFilterCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)] text-[11px] font-bold flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)] font-ds-label-size font-bold flex items-center justify-center">
                   {activeFilterCount}
                 </span>
               )}

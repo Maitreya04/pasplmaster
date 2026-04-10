@@ -56,7 +56,7 @@ export function PushAlertsCompact({ label, push }: PushAlertsCompactProps): Reac
             </button>
           ) : (
             <>
-              <p className="text-[11px] text-[var(--content-tertiary)] mb-2 leading-snug">
+              <p className="font-ds-label-size text-[var(--content-tertiary)] mb-2 leading-snug">
                 {!push.supported
                   ? 'This browser does not support push.'
                   : !push.standalone
@@ -66,7 +66,7 @@ export function PushAlertsCompact({ label, push }: PushAlertsCompactProps): Reac
                       : 'Get alerts when this device is in the background.'}
               </p>
               {push.error && (
-                <p className="text-[10px] text-[var(--content-negative)] mb-2">{push.error}</p>
+                <p className="font-ds-micro text-[var(--content-negative)] mb-2">{push.error}</p>
               )}
               {push.supported && push.standalone && (
                 <button

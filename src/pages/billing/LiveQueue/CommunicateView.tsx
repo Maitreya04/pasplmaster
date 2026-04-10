@@ -43,7 +43,7 @@ export function CommunicateView({
   });
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-[var(--bg-primary)] p-6 animate-slide-up">
+    <div className="density-compact flex flex-col items-center justify-center min-h-screen bg-[var(--bg-primary)] p-6 animate-slide-up">
       <div className="w-full max-w-xl">
         
         <div className="flex items-center justify-center gap-3 mb-8">

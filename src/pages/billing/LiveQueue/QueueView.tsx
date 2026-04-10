@@ -77,7 +77,7 @@ function OrderRow({
           }`}>
             {formatCurrency(order.total_value)}
           </p>
-          <p className="text-[11px] text-[var(--content-quaternary)] mt-0.5">
+          <p className="font-ds-label-size text-[var(--content-quaternary)] mt-0.5">
             {order.item_count} items · {formatTimeAgo(order.created_at)}
           </p>
         </div>
@@ -85,7 +85,7 @@ function OrderRow({
 
       {/* Being billed by someone else */}
       {isClaimed && !isStale && order.claim_info && (
-        <p className="text-[11px] text-[var(--content-quaternary)] mt-2 flex items-center gap-1.5">
+        <p className="font-ds-label-size text-[var(--content-quaternary)] mt-2 flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-[var(--content-accent)] shrink-0" />
           {order.claim_info.claimed_by_name} · started {formatTimeAgo(order.claim_info.claimed_at)}
         </p>
@@ -94,7 +94,7 @@ function OrderRow({
       {/* Stale — takeover */}
       {isStale && order.claim_info && (
         <div className="flex items-center justify-between mt-3 pt-3 border-t border-[var(--border-faint)]">
-          <p className="text-[11px] text-[var(--content-warning)] flex items-center gap-1.5">
+          <p className="font-ds-label-size text-[var(--content-warning)] flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-[var(--content-warning)] animate-pulse shrink-0" />
             Stale · {order.claim_info.claimed_by_name} · {formatTimeAgo(order.claim_info.last_heartbeat_at)}
           </p>
@@ -159,7 +159,7 @@ export function QueueView({
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[var(--bg-primary)] p-4 lg:p-8">
+      <div className="density-compact min-h-screen bg-[var(--bg-primary)] p-4 lg:p-8">
         <div className="max-w-2xl mx-auto">
           <div className="h-7 w-40 bg-[var(--bg-tertiary)] rounded-lg animate-pulse mb-6" />
           <div className="space-y-3">
@@ -174,7 +174,7 @@ export function QueueView({
 
   if (totalCount === 0 && otherActive.length === 0) {
     return (
-      <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
+      <div className="density-compact min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
         <EmptyState
           icon={Tray}
           title="No orders waiting"
@@ -188,7 +188,7 @@ export function QueueView({
   let navIndex = 0;
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)] p-4 lg:p-8">
+    <div className="density-compact min-h-screen bg-[var(--bg-primary)] p-4 lg:p-8">
       <div className="max-w-2xl mx-auto">
 
         {/* Header */}
@@ -300,7 +300,7 @@ export function QueueView({
 
         {/* Keyboard hint */}
         {navigable.length > 0 && (
-          <p className="text-center text-[11px] text-[var(--content-quaternary)] mt-8">
+          <p className="text-center font-ds-label-size text-[var(--content-quaternary)] mt-8">
             ↑↓ navigate · Enter to start billing
           </p>
         )}

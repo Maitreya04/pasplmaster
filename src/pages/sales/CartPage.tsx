@@ -265,10 +265,10 @@ function SearchableCustomerDropdown({
                   <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+                        <p className="font-ds-label-size font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
                           Selected
                         </p>
-                        <p className="mt-1 text-[15px] font-semibold text-[var(--content-primary)]">
+                        <p className="mt-1 font-ds-lead font-semibold text-[var(--content-primary)]">
                           {value.name}
                           {value.city && (
                             <span className="ml-1 font-normal text-[var(--content-tertiary)]">
@@ -292,7 +292,7 @@ function SearchableCustomerDropdown({
               <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
                 <div className="space-y-2">
                 <div className="flex items-center justify-between px-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+                  <p className="font-ds-label-size font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
                     {query.trim() ? 'Matches' : 'Customers'}
                   </p>
                   {!isLoading && filtered.length > 0 && (
@@ -332,7 +332,7 @@ function SearchableCustomerDropdown({
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="truncate text-[15px] font-semibold text-[var(--content-primary)]">
+                          <p className="truncate font-ds-lead font-semibold text-[var(--content-primary)]">
                             {c.name}
                           </p>
                           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--content-tertiary)]">
@@ -448,7 +448,7 @@ const SWIPE_PREVIEW_OFFSET = 36;
 
 function SpecialRateChip() {
   return (
-    <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--bg-accent-subtle)] px-3 py-1.5 text-[12px] font-semibold leading-none text-[var(--content-accent)]">
+    <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--bg-accent-subtle)] px-3 py-1.5 font-ds-caption-size font-semibold leading-none text-[var(--content-accent)]">
       Special rate
     </span>
   );
@@ -609,18 +609,18 @@ const BillingItemCard = memo(function BillingItemCard({
           <div className="flex items-start gap-4">
             <div className="min-w-0 flex-1">
               {partNo && (
-                <p className="inline-flex max-w-full items-center truncate rounded-full border border-[var(--border-faint)] bg-[color:color-mix(in_srgb,var(--bg-tertiary)_72%,white)] px-3 py-1.5 font-mono text-[11px] font-semibold tracking-[0.04em] text-[var(--content-secondary)]">
+                <p className="inline-flex max-w-full items-center truncate rounded-full border border-[var(--border-faint)] bg-[color:color-mix(in_srgb,var(--bg-tertiary)_72%,white)] px-3 py-1.5 font-mono font-ds-label-size font-semibold tracking-[0.04em] text-[var(--content-secondary)]">
                   {partNo}
                 </p>
               )}
-              <p className="mt-2.5 text-[16px] font-semibold leading-[1.35] text-[var(--content-primary)] whitespace-normal break-words line-clamp-2">
+              <p className="mt-2.5 text-base font-semibold leading-[1.35] text-[var(--content-primary)] whitespace-normal break-words line-clamp-2">
                 {cartItem.item.name}
               </p>
 
               <div className="mt-2.5 flex flex-wrap items-center gap-2">
                 {hasSpecialRate && <SpecialRateChip />}
                 {hasSpecialRate && (
-                  <span className="font-mono text-[10px] text-[var(--content-tertiary)] line-through">
+                  <span className="font-mono font-ds-micro text-[var(--content-tertiary)] line-through">
                     {formatCurrency(cartItem.item.sales_price)}
                   </span>
                 )}
@@ -629,10 +629,10 @@ const BillingItemCard = memo(function BillingItemCard({
 
             <div className="shrink-0 flex min-w-[142px] flex-col items-end gap-3.5 pl-4">
               <div className="text-right">
-                <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+                <p className="font-ds-micro font-medium uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
                   Total
                 </p>
-                <p className="mt-1 font-mono text-[16px] font-semibold leading-none text-[var(--content-primary)]">
+                <p className="mt-1 font-mono text-base font-semibold leading-none text-[var(--content-primary)]">
                   {formatCurrency(lineTotal)}
                 </p>
               </div>
@@ -790,11 +790,11 @@ const PurchaseOrderCard = memo(function PurchaseOrderCard({
         <div className="flex items-center gap-3">
           <div className="flex-1 min-w-0">
             {partNo && (
-              <span className="inline-flex max-w-full shrink-0 items-center truncate rounded-full border border-[color-mix(in_srgb,var(--content-primary)_12%,var(--border-subtle))] bg-[var(--bg-secondary)] px-3 py-1 font-mono text-[11px] font-semibold tracking-[0.04em] text-[var(--content-primary)]">
+              <span className="inline-flex max-w-full shrink-0 items-center truncate rounded-full border border-[color-mix(in_srgb,var(--content-primary)_12%,var(--border-subtle))] bg-[var(--bg-secondary)] px-3 py-1 font-mono font-ds-label-size font-semibold tracking-[0.04em] text-[var(--content-primary)]">
                 {partNo}
               </span>
             )}
-            <p className="mt-1.5 text-[14px] font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
+            <p className="mt-1.5 font-ds-body-size font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
               {cartItem.item.name}
             </p>
           </div>
@@ -1123,7 +1123,7 @@ export default function CartPage(): React.JSX.Element | null {
                   </>
                 )}
               </button>
-              <pre className="max-h-[min(11rem,28dvh)] overflow-y-auto overscroll-y-contain text-left text-[13px] leading-relaxed text-[var(--content-secondary)] whitespace-pre-wrap break-words pt-11 pr-3 pb-3 pl-4 [scrollbar-gutter:stable]">
+              <pre className="max-h-[min(11rem,28dvh)] overflow-y-auto overscroll-y-contain text-left font-ds-prose leading-relaxed text-[var(--content-secondary)] whitespace-pre-wrap break-words pt-11 pr-3 pb-3 pl-4 [scrollbar-gutter:stable]">
                 {submitSuccess.shareText}
               </pre>
             </div>

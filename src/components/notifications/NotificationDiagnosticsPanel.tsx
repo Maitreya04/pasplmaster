@@ -63,7 +63,7 @@ export function NotificationDiagnosticsPanel(): React.JSX.Element {
         </ul>
       )}
 
-      <p className="text-[11px] text-[var(--content-quaternary)] leading-relaxed">
+      <p className="font-ds-label-size text-[var(--content-quaternary)] leading-relaxed">
         Supabase SQL (service role / SQL editor):{' '}
         <code className="text-[var(--content-tertiary)]">
           select * from notification_events order by created_at desc limit 10;
