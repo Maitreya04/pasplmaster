@@ -30,6 +30,29 @@ function inferSalesUpdateLabel(text: string): string {
   return 'Update';
 }
 
+function isWholeOrderRejected(order: Order | OrderWithItems): boolean {
+  if (order.workflow_status === 'rejected') return true;
+  if (order.workflow_status !== 'flagged') return false;
+  const note = order.notes?.toLowerCase() ?? '';
+  if (note.includes('reject') || note.includes('account lock')) return true;
+  if (!('items' in order) || !Array.isArray(order.items)) return false;
+  return order.items.length > 0 && order.items.every((item) => item.state !== 'flagged');
+}
+
+function badgeStatusForOrder(order: Order | OrderWithItems): Order['workflow_status'] {
+  return isWholeOrderRejected(order) ? 'rejected' : order.workflow_status;
+}
+
+function formatRejectReason(notes: string | null | undefined): string | null {
+  const raw = notes?.trim();
+  if (!raw) return null;
+  const normalized = raw.replace(/\s+/g, ' ');
+  if (normalized.toLowerCase().includes('account lock')) {
+    return 'Account locked. Billing cannot process this order until the account is unlocked.';
+  }
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
 // ─── Merge helpers ────────────────────────────────────────────
 
 type OrderSheetRow =
@@ -258,7 +281,7 @@ function OrderCard({
                 <Warning size={16} weight="fill" className={TEXT_STATUS_CRITICAL} />
               )}
           </div>
-          <StatusBadge status={order.workflow_status} />
+          <StatusBadge status={badgeStatusForOrder(order)} />
         </div>
         <p className="font-bold text-[var(--content-primary)]">{order.customer_name}</p>
         <div className="flex items-center justify-between text-sm">
@@ -310,6 +333,8 @@ function OrderDetailSheet({
         return acc + p * q;
       }, 0)
     : null;
+  const isRejected = order ? isWholeOrderRejected(order) : false;
+  const rejectReason = formatRejectReason(order?.notes);
 
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose} closeOnly>
@@ -319,13 +344,9 @@ function OrderDetailSheet({
         <div>
           {/* ── Header: date + party ──────────────────── */}
           <div className="pb-4">
-            {billingDate ? (
-              <p className="text-[22px] font-bold tabular-nums text-[var(--content-primary)] leading-tight">
-                {billingDate}
-              </p>
-            ) : (
-              <p className="text-sm font-medium text-[var(--content-secondary)]">Not billed yet</p>
-            )}
+            <p className="text-[22px] font-bold tabular-nums text-[var(--content-primary)] leading-tight">
+              {billingDate ?? 'Not billed yet'}
+            </p>
 
             <p className="mt-2 text-base font-bold text-[var(--content-primary)] leading-snug normal-case">
               {order.customer_name?.trim() || 'Order'}
@@ -339,6 +360,16 @@ function OrderDetailSheet({
                 </>
               )}
             </p>
+            {isRejected && rejectReason && (
+              <p className="mt-2 text-sm text-[var(--content-negative)] whitespace-pre-wrap">
+                <span className="font-semibold">Reason:</span> {rejectReason}
+              </p>
+            )}
+            {!isRejected && order.notes && (
+              <p className="mt-2 text-sm text-[var(--content-warning)] whitespace-pre-wrap">
+                {order.notes}
+              </p>
+            )}
           </div>
 
           {/* ── Items list ────────────────────────────── */}

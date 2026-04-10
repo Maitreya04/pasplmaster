@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode, type RefObject } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, type ReactNode, type RefObject } from 'react';
 import { MagnifyingGlass, X, SpinnerGap } from '@phosphor-icons/react';
 
 interface SearchInputProps {
@@ -36,9 +36,9 @@ export function SearchInput({
     setLocalValue(value);
   }, [value]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (autoFocus) {
-      inputRef.current?.focus();
+      inputRef.current?.focus({ preventScroll: true });
     }
   }, [autoFocus]);
 
@@ -86,6 +86,7 @@ export function SearchInput({
       <input
         ref={inputRef}
         type="text"
+        autoFocus={autoFocus}
         value={localValue}
         onChange={handleChange}
         onClick={handleSelectAll}

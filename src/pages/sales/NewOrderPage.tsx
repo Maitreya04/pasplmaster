@@ -1666,7 +1666,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const activeFilterCount = (selectedBrand ? 1 : 0) + (selectedGroup ? 1 : 0);
   const activeFilterSummary = [selectedBrand, selectedGroup].filter(Boolean).join(' · ');
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const wantFocus = (location.state as { focusSearch?: boolean } | null | undefined)?.focusSearch;
     if (!wantFocus) return;
 
@@ -1682,7 +1682,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
     }, 80);
     const clearStateTimer = window.setTimeout(() => {
       navigate('.', { replace: true, state: {} });
-    }, 0);
+    }, 320);
 
     return () => {
       window.clearTimeout(focusRetry);

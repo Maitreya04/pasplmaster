@@ -109,17 +109,31 @@ async function resolveSalesUserIds(
 ): Promise<number[]> {
   const { data, error } = await admin
     .from('users')
-    .select('id, full_name')
+    .select('id, full_name, station_label')
     .eq('role', 'sales')
     .eq('is_active', true);
   if (error) throw error;
   const list = data ?? [];
-  const needle = salespersonName.trim().toLowerCase();
-  const exact = list.filter(
-    (u: { full_name: string }) => u.full_name.trim().toLowerCase() === needle,
-  );
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const needleRaw = salespersonName.trim();
+  const needle = normalize(needleRaw);
+  const exact = list.filter((u: { full_name?: string | null; station_label?: string | null }) => {
+    const full = typeof u.full_name === 'string' ? normalize(u.full_name.trim()) : '';
+    const station = typeof u.station_label === 'string' ? normalize(u.station_label.trim()) : '';
+    if (!needle) return false;
+    return full === needle || station === needle;
+  });
   if (exact.length > 0) {
     return exact.map((u: { id: number }) => u.id);
+  }
+  const fuzzy = list.filter((u: { full_name?: string | null; station_label?: string | null }) => {
+    const full = typeof u.full_name === 'string' ? normalize(u.full_name.trim()) : '';
+    const station = typeof u.station_label === 'string' ? normalize(u.station_label.trim()) : '';
+    if (!needle) return false;
+    return full.includes(needle) || needle.includes(full) || station.includes(needle) || needle.includes(station);
+  });
+  if (fuzzy.length > 0) {
+    return fuzzy.map((u: { id: number }) => u.id);
   }
   return list.map((u: { id: number }) => u.id);
 }
@@ -448,8 +462,12 @@ serve(async (req) => {
 
       const title = `Order update · ${payload.customerName}`;
       const body = payload.messageBody.trim();
-
-      const salesIds = await resolveSalesUserIds(admin, payload.salespersonName);
+      const resolvedSalespersonName =
+        (await getOrderSalespersonName(admin, payload.orderId)) ?? payload.salespersonName;
+      let salesIds = await resolveSalesUserIds(admin, resolvedSalespersonName);
+      if (salesIds.length === 0) {
+        salesIds = await fetchActiveUserIds(admin, 'sales');
+      }
       const deepLink = `/sales/orders`;
       await insertUserNotifications(
         admin,
@@ -463,7 +481,7 @@ serve(async (req) => {
             eventType: 'order_update_for_sales',
             orderNumber: payload.orderNumber,
             customerName: payload.customerName,
-            salespersonName: payload.salespersonName,
+            salespersonName: resolvedSalespersonName,
             deep_link: deepLink,
             messageBody: body,
           },
@@ -493,7 +511,7 @@ serve(async (req) => {
         event_type: 'order_update_for_sales',
         order_id: payload.orderId,
         payload: raw,
-        target_role: 'broadcast',
+        target_role: 'sales',
         sent_count: sentCount,
         failed_count: failedCount,
       });

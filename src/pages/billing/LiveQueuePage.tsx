@@ -301,7 +301,7 @@ export default function LiveQueuePage() {
       const { error: updateError } = await supabase
         .from('orders')
         .update({
-          workflow_status: 'flagged',
+          workflow_status: 'rejected',
           notes: trimmedReason,
         })
         .eq('id', order.id);
