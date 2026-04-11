@@ -94,7 +94,7 @@ export default function UploadPage(): React.JSX.Element | null {
       } else if (detection.type === 'sales_history') {
         result = await importSalesHistory(workbook, fileName, setProgress);
       } else {
-        result = await importCustomers(workbook, fileName, setProgress);
+        result = await importCustomers(workbook, fileName, detection.headerRowIndex, setProgress);
       }
       setProgress(result);
       setState('done');

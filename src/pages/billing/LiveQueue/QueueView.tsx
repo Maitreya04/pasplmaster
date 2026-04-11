@@ -44,6 +44,7 @@ function OrderRow({
   onTakeover?: () => void;
 }) {
   const isUrgent = order.priority === 'urgent';
+  const hasSpecialRate = order.special_rate_line_count > 0;
 
   return (
     <button
@@ -61,6 +62,11 @@ function OrderRow({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1">
             {isUrgent && <StatusBadge status="urgent" />}
+            {hasSpecialRate && (
+              <span className="ds-chip ds-chip--warning ds-chip--sm">
+                Special rate
+              </span>
+            )}
             <h3 className={`text-base font-semibold truncate ${
               isClaimed && !isStale ? 'text-[var(--content-tertiary)]' : 'text-[var(--content-primary)]'
             }`}>
@@ -82,6 +88,15 @@ function OrderRow({
           </p>
         </div>
       </div>
+
+      {hasSpecialRate && (
+        <div className="mt-3 rounded-xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2">
+          <p className="text-xs font-semibold text-[var(--content-warning)]">
+            Quote locked on {order.special_rate_line_count} line{order.special_rate_line_count === 1 ? '' : 's'}
+            {order.special_rate_qty > 0 ? ` · ${order.special_rate_qty} pcs` : ''} · check highlighted rate before billing in Busy
+          </p>
+        </div>
+      )}
 
       {/* Being billed by someone else */}
       {isClaimed && !isStale && order.claim_info && (

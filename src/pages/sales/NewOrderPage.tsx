@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash, CurrencyInr, MagnifyingGlass, MapPin, Phone, CaretLeft } from '@phosphor-icons/react';
+import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash, CurrencyInr, MagnifyingGlass, CaretLeft } from '@phosphor-icons/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import { useCart } from '../../context/CartContext';
@@ -33,6 +33,13 @@ import { buildNarrowIndex } from '../../lib/search/narrowSuggestions';
 import { buildSearchIndex } from '../../lib/search/searchIndex';
 import { formatCurrency, formatShortDate } from '../../utils/formatters';
 import { supabase } from '../../lib/supabase/client';
+import {
+  buildCustomerDuplicateNameSet,
+  getCustomerSearchText,
+  getCustomerSecondaryLine,
+  getCustomerTertiaryLine,
+  normalizeCustomerText,
+} from '../../lib/customerDisplay';
 import {
   PageHeader,
   SearchInput,
@@ -207,9 +214,71 @@ interface SmartLandingProps {
 
 type CustomerSheetMode = 'search' | 'create';
 
-function normalizeCustomerText(value: string): string {
-  return value.trim().replace(/\s+/g, ' ').toLowerCase();
-}
+const TrendingAddControl = memo(function TrendingAddControl({
+  item,
+  onApply,
+}: {
+  item: Item;
+  onApply: (entries: { item: Item; qty: number }[]) => void;
+}) {
+  const [draftQty, setDraftQty] = useState(1);
+  const [isEditing, setIsEditing] = useState(false);
+
+  const handleStart = useCallback(() => {
+    appHaptics.impactLight();
+    setDraftQty(1);
+    setIsEditing(true);
+  }, []);
+
+  const handleCancel = useCallback(() => {
+    appHaptics.warning();
+    setDraftQty(1);
+    setIsEditing(false);
+  }, []);
+
+  const handleApply = useCallback(() => {
+    onApply([{ item, qty: draftQty }]);
+    setDraftQty(1);
+    setIsEditing(false);
+  }, [draftQty, item, onApply]);
+
+  if (!isEditing) {
+    return (
+      <button
+        type="button"
+        onClick={handleStart}
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--bg-accent)] text-[var(--content-on-color)] shadow-sm transition-all duration-200 hover:opacity-95 active:scale-95"
+        aria-label={`Add ${item.name}`}
+      >
+        <Plus size={20} weight="bold" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      <div onClick={(event) => event.stopPropagation()}>
+        <NumberStepper
+          value={draftQty}
+          min={1}
+          presets={[]}
+          variant="compact"
+          showRemoveAtMin
+          onRemove={handleCancel}
+          onChange={setDraftQty}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={handleApply}
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--bg-accent)] text-[var(--content-on-color)] shadow-sm transition-all duration-200 hover:opacity-95 active:scale-95"
+        aria-label={`Add ${draftQty} of ${item.name}`}
+      >
+        <Check size={18} weight="bold" />
+      </button>
+    </div>
+  );
+});
 
 function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSearch }: SmartLandingProps) {
   const { userName } = useAuth();
@@ -250,18 +319,11 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
     },
   });
 
-  const [activeCustomerName, setActiveCustomerName] = useState<string | null>(null);
+  const [activeCustomerId, setActiveCustomerId] = useState<number | null>(null);
   const [quickReorderItems, setQuickReorderItems] = useState<
     { item: Item; suggestedQty: number; checked: boolean; orderCount: number; mostCommonQty: number | null }[]
   >([]);
-
-  const nameToCustomer = useMemo(() => {
-    const map = new Map<string, Customer>();
-    for (const c of customers) {
-      map.set(c.name, c);
-    }
-    return map;
-  }, [customers]);
+  const duplicateCustomerNames = useMemo(() => buildCustomerDuplicateNameSet(customers), [customers]);
 
   const idToItem = useMemo(() => {
     const map = new Map<number, Item>();
@@ -271,28 +333,20 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
     return map;
   }, [items]);
 
-  const activeCustomer = activeCustomerName ? nameToCustomer.get(activeCustomerName) ?? null : null;
+  const activeCustomer = activeCustomerId != null
+    ? customers.find((customer) => customer.id === activeCustomerId) ?? null
+    : null;
+  const activeCustomerName = activeCustomer?.name ?? null;
 
   const {
     data: quickReorderStats = EMPTY_CUSTOMER_QUICK_REORDER,
     isLoading: quickReorderLoading,
   } = useQuery<CustomerQuickReorderRow[]>({
-    queryKey: ['customer_quick_reorder', activeCustomerName, activeCustomer?.id],
-    enabled: !!activeCustomerName,
+    queryKey: ['customer_quick_reorder', activeCustomer?.id],
+    enabled: !!activeCustomer?.id,
     staleTime: 60 * 1000,
     queryFn: async () => {
-      if (!activeCustomerName) return [];
-
-      let customerId = activeCustomer?.id;
-      if (customerId == null) {
-        const { data: row, error: lookupError } = await supabase
-          .from('customers')
-          .select('id')
-          .eq('name', activeCustomerName)
-          .maybeSingle();
-        if (lookupError) throw lookupError;
-        customerId = row?.id;
-      }
+      const customerId = activeCustomer?.id;
       if (customerId == null) return [];
 
       const { data, error } = await supabase.rpc('get_customer_quick_reorder_stats', {
@@ -424,13 +478,17 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
       .map((customer) => {
         const name = customer.name.toLowerCase();
         const city = customer.city?.toLowerCase() ?? '';
+        const address = customer.address?.toLowerCase() ?? '';
+        const searchText = getCustomerSearchText(customer);
         let score = Number.POSITIVE_INFINITY;
         if (name === q) score = 0;
         else if (name.startsWith(q)) score = 1;
         else if (name.split(/\s+/).some((part) => part.startsWith(q))) score = 2;
-        else if (city.startsWith(q)) score = 3;
-        else if (name.includes(q)) score = 4;
-        else if (city.includes(q)) score = 5;
+        else if (address.startsWith(q)) score = 3;
+        else if (city.startsWith(q)) score = 4;
+        else if (name.includes(q)) score = 5;
+        else if (address.includes(q) || city.includes(q)) score = 6;
+        else if (searchText.includes(q)) score = 7;
         return { customer, score };
       })
       .filter((entry) => Number.isFinite(entry.score))
@@ -440,7 +498,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
   }, [customerQuery, customers]);
 
   const selectCustomer = useCallback((customer: Customer | null) => {
-    setActiveCustomerName(customer?.name ?? null);
+    setActiveCustomerId(customer?.id ?? null);
     onCustomerSelect(customer);
   }, [onCustomerSelect]);
 
@@ -518,13 +576,10 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                       In {totalOrderCount} order{totalOrderCount === 1 ? '' : 's'}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className="shrink-0 px-3 h-9 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)] text-sm font-semibold active:scale-95"
-                    onClick={() => onQuickReorderApply(null, [{ item, qty: 1 }])}
-                  >
-                    Quick add
-                  </button>
+                  <TrendingAddControl
+                    item={item}
+                    onApply={(entries) => onQuickReorderApply(null, entries)}
+                  />
                 </div>
               ))}
             </div>
@@ -563,14 +618,21 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
             </div>
           </button>
           {customerRail.map((c) => {
-            const isActive = c.customer_name === activeCustomerName;
+            const matchingCustomers = customers.filter((customer) => customer.name === c.customer_name);
+            const hasDuplicateName = matchingCustomers.length > 1;
+            const isActive = matchingCustomers.some((customer) => customer.id === activeCustomerId);
             return (
               <button
-                key={c.customer_name}
+                key={`${c.customer_name}-${c.last_order_date ?? 'none'}`}
                 type="button"
                 onClick={() => {
-                  const customer = nameToCustomer.get(c.customer_name) ?? null;
-                  selectCustomer(customer);
+                  if (matchingCustomers.length === 1) {
+                    selectCustomer(matchingCustomers[0]);
+                    return;
+                  }
+                  setCustomerQuery(c.customer_name);
+                  setCustomerSheetOpen(true);
+                  setCustomerSheetMode('search');
                 }}
                 className={`min-w-44 max-w-56 px-3 py-3 rounded-lg text-left flex flex-col justify-between gap-1.5 ${
                   isActive
@@ -584,6 +646,8 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                 <p className="text-xs text-[var(--content-secondary)]">
                   {c.order_count > 0
                     ? `${c.order_count} order${c.order_count === 1 ? '' : 's'}`
+                    : hasDuplicateName
+                      ? 'Choose branch'
                     : isActive
                       ? 'Selected customer'
                       : 'Customer'}
@@ -642,7 +706,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                   type="text"
                   value={customerQuery}
                   onChange={(event) => setCustomerQuery(event.target.value)}
-                  placeholder="Search by customer name or city…"
+                  placeholder="Search by customer, city, or address…"
                   className="w-full min-h-14 rounded-2xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] pl-10 pr-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
                 />
               </div>
@@ -676,7 +740,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                       closeCustomerSheet();
                     }}
                     className={`w-full rounded-2xl border px-4 py-3 text-left transition-colors ${
-                      activeCustomerName === customer.name
+                      activeCustomerId === customer.id
                         ? 'border-[color-mix(in_srgb,var(--bg-accent)_34%,var(--border-subtle))] bg-[color-mix(in_srgb,var(--bg-accent)_8%,white)]'
                         : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)]'
                     }`}
@@ -686,22 +750,23 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                         <p className="truncate font-ds-lead font-semibold text-[var(--content-primary)]">
                           {customer.name}
                         </p>
-                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--content-tertiary)]">
-                          {customer.city && (
-                            <span className="inline-flex items-center gap-1">
-                              <MapPin size={14} />
-                              {customer.city}
-                            </span>
-                          )}
-                          {customer.mobile && (
-                            <span className="inline-flex items-center gap-1">
-                              <Phone size={14} />
-                              {customer.mobile}
-                            </span>
-                          )}
-                        </div>
+                        {(getCustomerSecondaryLine(customer, duplicateCustomerNames) || getCustomerTertiaryLine(customer, duplicateCustomerNames)) && (
+                          <p className="mt-1 line-clamp-1 text-sm text-[var(--content-tertiary)]">
+                            {getCustomerSecondaryLine(customer, duplicateCustomerNames) && (
+                              <span className="font-medium text-[var(--content-secondary)]">
+                                {getCustomerSecondaryLine(customer, duplicateCustomerNames)}
+                              </span>
+                            )}
+                            {getCustomerSecondaryLine(customer, duplicateCustomerNames) && getCustomerTertiaryLine(customer, duplicateCustomerNames) && (
+                              <span className="px-1 text-[var(--content-quaternary)]">·</span>
+                            )}
+                            {getCustomerTertiaryLine(customer, duplicateCustomerNames) && (
+                              <span>{getCustomerTertiaryLine(customer, duplicateCustomerNames)}</span>
+                            )}
+                          </p>
+                        )}
                       </div>
-                      {activeCustomerName === customer.name && (
+                      {activeCustomerId === customer.id && (
                         <Check size={16} weight="bold" className="shrink-0 text-[var(--content-accent)]" />
                       )}
                     </div>
@@ -980,13 +1045,10 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                     In {totalOrderCount} order{totalOrderCount === 1 ? '' : 's'}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className="shrink-0 px-3 h-9 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)] text-sm font-semibold active:scale-95"
-                  onClick={() => onQuickReorderApply(null, [{ item, qty: 1 }])}
-                >
-                  Quick add
-                </button>
+                <TrendingAddControl
+                  item={item}
+                  onApply={(entries) => onQuickReorderApply(null, entries)}
+                />
               </div>
             ))}
           </div>
@@ -1829,6 +1891,9 @@ export default function NewOrderPage(): React.JSX.Element | null {
   };
 
   const handleQueryChange = (value: string) => {
+    // iOS can emit tiny viewport/scroll adjustments while a long query is being edited.
+    // Keep the keyboard alive during active typing so the input doesn't blur mid-entry.
+    focusGuardUntilRef.current = Date.now() + 450;
     if (value.trim()) {
       setPendingAddItemId(null);
     }
@@ -1915,7 +1980,10 @@ export default function NewOrderPage(): React.JSX.Element | null {
                 placeholder="Search parts, name or code…"
                 value={query}
                 onChange={handleQueryChange}
-                onFocus={() => setIsSearchFocused(true)}
+                onFocus={() => {
+                  focusGuardUntilRef.current = Date.now() + 900;
+                  setIsSearchFocused(true);
+                }}
                 onBlur={() => setIsSearchFocused(false)}
                 loading={itemsLoading}
                 autoFocus

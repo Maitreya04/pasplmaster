@@ -27,23 +27,33 @@ function str(val: unknown): string | null {
 export async function importCustomers(
   workbook: XLSX.WorkBook,
   fileName: string,
+  headerRowIndex: number,
   onProgress: ProgressCallback,
 ): Promise<ImportProgress> {
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const raw: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-  // Customer file: header at Excel row 1 (index 0), data from row 2 (index 1)
-  const header = (raw[0] as unknown[]).map(c => String(c ?? '').trim());
+  const header = (raw[headerRowIndex] as unknown[] | undefined)?.map(c => String(c ?? '').trim()) ?? [];
   const col = {
     name: header.indexOf('Name'),
     address: header.indexOf('Address'),
     parentGroup: header.indexOf('Parent Group'),
-    mobile: header.indexOf('Mobile'),
-    salesman: header.indexOf('Salesman'),
+    mobile: (() => {
+      const mobileIndex = header.indexOf('Mobile');
+      return mobileIndex >= 0 ? mobileIndex : header.indexOf('Mobile No.');
+    })(),
+    salesman: (() => {
+      const salesmanIndex = header.indexOf('Salesman');
+      return salesmanIndex >= 0 ? salesmanIndex : header.indexOf('Sales Man');
+    })(),
     gstin: header.indexOf('GSTIN'),
+    dealerType: (() => {
+      const dealerTypeIndex = header.indexOf('Dealer Type');
+      return dealerTypeIndex >= 0 ? dealerTypeIndex : header.indexOf('Type of Dealer');
+    })(),
   };
 
-  const dataRows = raw.slice(1).filter(
+  const dataRows = raw.slice(headerRowIndex + 1).filter(
     row =>
       Array.isArray(row) &&
       row.some(c => c != null && String(c).trim() !== '') &&
@@ -78,6 +88,7 @@ export async function importCustomers(
           mobile: col.mobile >= 0 ? str(row[col.mobile]) : null,
           salesman: col.salesman >= 0 ? str(row[col.salesman]) : null,
           gstin: col.gstin >= 0 ? str(row[col.gstin]) : null,
+          dealer_type: col.dealerType >= 0 ? str(row[col.dealerType]) : null,
           is_active: true,
           updated_at: new Date().toISOString(),
         };

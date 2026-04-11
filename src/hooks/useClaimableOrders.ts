@@ -37,6 +37,10 @@ export interface OrderWithClaimInfo extends Order {
   claim_info: ActiveClaimInfo | null;
   /** Is this order claimed by the current user? */
   is_mine: boolean;
+  /** Number of lines where quoted price differs from book price. */
+  special_rate_line_count: number;
+  /** Total units carrying a special rate. */
+  special_rate_qty: number;
 }
 
 interface UseClaimableOrdersReturn {

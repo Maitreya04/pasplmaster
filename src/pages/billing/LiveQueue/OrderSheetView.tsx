@@ -4,6 +4,7 @@ import type { OrderItem } from '../../../types';
 import type { ItemFlag } from '../../../hooks/useBillingFlow';
 import { StatusBadge } from '../../../components/shared';
 import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
+import { getBookPrice, getQuotedPrice, isSpecialRateItem, summarizeSpecialPricing } from '../../../lib/specialPricing';
 import {
   formatCurrency,
   formatTimeAgo,
@@ -80,6 +81,7 @@ export function OrderSheetView({
   const jumpTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const flagCount = Object.keys(flags).length;
+  const { specialLineCount, specialQty } = summarizeSpecialPricing(items);
 
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
 
@@ -299,6 +301,17 @@ export function OrderSheetView({
                 </p>
               </div>
             </div>
+            {specialLineCount > 0 && (
+              <div className="mt-4 rounded-2xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-4 py-3">
+                <p className="text-sm font-semibold text-[var(--content-warning)]">
+                  Special-rate order on {specialLineCount} line{specialLineCount === 1 ? '' : 's'}
+                  {specialQty > 0 ? ` · ${specialQty} pcs` : ''}.
+                </p>
+                <p className="mt-1 text-xs text-[var(--content-warning)]">
+                  Busy may default to book price after paste. Use the highlighted quoted rate shown on each line while billing.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Copy CTA */}
@@ -347,6 +360,7 @@ export function OrderSheetView({
                   <th className="hidden sm:table-cell w-[10.5rem] max-w-[10.5rem] lg:w-[13rem] lg:max-w-[13rem] align-top">
                     Code
                   </th>
+                  <th className="text-right w-24">Rate</th>
                   <th className="text-right w-14">Qty</th>
                   <th className="text-right w-32">Status</th>
                 </tr>
@@ -357,10 +371,14 @@ export function OrderSheetView({
                   const isActive = activeRow === index;
                   const isPartialInput = partialInputRow === index;
                   const productCode = orderItemProductCode(item);
+                  const hasSpecialRate = isSpecialRateItem(item);
+                  const quotedPrice = getQuotedPrice(item);
+                  const bookPrice = getBookPrice(item);
 
                   let rowBg = '';
                   if (flag?.type === 'no_stock') rowBg = 'bg-[var(--bg-negative-subtle)]';
                   else if (flag?.type === 'partial') rowBg = 'bg-[var(--bg-warning-subtle)]';
+                  else if (hasSpecialRate) rowBg = 'bg-[var(--bg-warning-subtle)]';
 
                   return (
                     <tr
@@ -410,6 +428,24 @@ export function OrderSheetView({
                           <span className="inline-block font-ds-label-size font-mono text-[var(--content-quaternary)] whitespace-nowrap pr-1">
                             {productCode || '—'}
                           </span>
+                        </div>
+                      </td>
+
+                      <td className="text-right align-top">
+                        <div className="flex flex-col items-end gap-1">
+                          <span className={`text-sm font-mono font-semibold tabular-nums ${
+                            hasSpecialRate ? 'text-[var(--content-warning)]' : 'text-[var(--content-primary)]'
+                          }`}>
+                            {formatCurrency(quotedPrice)}
+                          </span>
+                          {hasSpecialRate && bookPrice != null && (
+                            <>
+                              <span className="ds-chip ds-chip--warning ds-chip--sm">Special</span>
+                              <span className="text-[11px] text-[var(--content-quaternary)]">
+                                Book {formatCurrency(bookPrice)}
+                              </span>
+                            </>
+                          )}
                         </div>
                       </td>
 

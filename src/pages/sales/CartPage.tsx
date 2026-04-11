@@ -8,8 +8,6 @@ import {
   Trash,
   Copy,
   Check,
-  MapPin,
-  Phone,
 } from '@phosphor-icons/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCart } from '../../context/CartContext';
@@ -36,6 +34,13 @@ import {
   type OrderCustomerShareLine,
   whatsappPrefilledUrl,
 } from '../../lib/buildOrderCustomerMessage';
+import {
+  buildCustomerDuplicateNameSet,
+  getCustomerSearchText,
+  getCustomerSecondaryLine,
+  getCustomerTertiaryLine,
+  normalizeCustomerText,
+} from '../../lib/customerDisplay';
 
 function submitSalesOrderErrorMessage(code: string | undefined, detail?: string): string {
   switch (code) {
@@ -63,10 +68,6 @@ interface SearchableCustomerDropdownProps {
 
 type CustomerSheetMode = 'search' | 'create';
 
-function normalizeCustomerText(value: string): string {
-  return value.trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
 function SearchableCustomerDropdown({
   value,
   onChange,
@@ -81,6 +82,7 @@ function SearchableCustomerDropdown({
   const { data: customers = [], isLoading } = useCustomers();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const duplicateCustomerNames = useMemo(() => buildCustomerDuplicateNameSet(customers), [customers]);
 
   const openSheet = useCallback((nextMode: CustomerSheetMode = 'search') => {
     setOpen(true);
@@ -110,13 +112,17 @@ function SearchableCustomerDropdown({
       .map((c) => {
         const name = c.name.toLowerCase();
         const city = c.city?.toLowerCase() ?? '';
+        const address = c.address?.toLowerCase() ?? '';
+        const searchText = getCustomerSearchText(c);
         let score = Number.POSITIVE_INFINITY;
         if (name === q) score = 0;
         else if (name.startsWith(q)) score = 1;
         else if (name.split(/\s+/).some((part) => part.startsWith(q))) score = 2;
-        else if (city.startsWith(q)) score = 3;
-        else if (name.includes(q)) score = 4;
-        else if (city.includes(q)) score = 5;
+        else if (address.startsWith(q)) score = 3;
+        else if (city.startsWith(q)) score = 4;
+        else if (name.includes(q)) score = 5;
+        else if (address.includes(q) || city.includes(q)) score = 6;
+        else if (searchText.includes(q)) score = 7;
         return { customer: c, score };
       })
       .filter((entry) => Number.isFinite(entry.score))
@@ -205,10 +211,20 @@ function SearchableCustomerDropdown({
       >
         {value && (
           <>
-            {value.name}
-            {value.city && (
-              <span className="text-[var(--content-tertiary)] font-normal ml-1">
-                · {value.city}
+            <span className="block truncate">{value.name}</span>
+            {(getCustomerSecondaryLine(value, duplicateCustomerNames) || getCustomerTertiaryLine(value, duplicateCustomerNames)) && (
+              <span className="mt-0.5 block truncate text-sm font-normal text-[var(--content-tertiary)]">
+                {getCustomerSecondaryLine(value, duplicateCustomerNames) && (
+                  <span className="font-medium text-[var(--content-secondary)]">
+                    {getCustomerSecondaryLine(value, duplicateCustomerNames)}
+                  </span>
+                )}
+                {getCustomerSecondaryLine(value, duplicateCustomerNames) && getCustomerTertiaryLine(value, duplicateCustomerNames) && (
+                  <span className="px-1 text-[var(--content-quaternary)]">·</span>
+                )}
+                {getCustomerTertiaryLine(value, duplicateCustomerNames) && (
+                  <span>{getCustomerTertiaryLine(value, duplicateCustomerNames)}</span>
+                )}
               </span>
             )}
           </>
@@ -236,30 +252,10 @@ function SearchableCustomerDropdown({
                     type="text"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search by customer name or city…"
+                    placeholder="Search by customer, city, or address…"
                     className="w-full min-h-14 rounded-2xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] pl-10 pr-4 text-base text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
                   />
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => startCreateMode(query)}
-                  className="w-full rounded-2xl border border-[color-mix(in_srgb,var(--bg-accent)_22%,var(--border-subtle))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--bg-accent)_9%,white),color-mix(in_srgb,var(--bg-accent)_4%,white))] px-4 py-3.5 text-left"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--bg-accent)] text-[var(--content-on-color)]">
-                      <Plus size={18} weight="bold" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-[var(--content-accent)]">
-                        {query.trim() && !hasExactMatch ? `Add "${query.trim()}"` : 'Add new customer'}
-                      </p>
-                      <p className="mt-0.5 text-sm text-[color-mix(in_srgb,var(--content-accent)_74%,var(--content-primary))]">
-                        Quick create with name, city, and phone.
-                      </p>
-                    </div>
-                  </div>
-                </button>
 
                 {value && (
                   <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3">
@@ -270,12 +266,22 @@ function SearchableCustomerDropdown({
                         </p>
                         <p className="mt-1 font-ds-lead font-semibold text-[var(--content-primary)]">
                           {value.name}
-                          {value.city && (
-                            <span className="ml-1 font-normal text-[var(--content-tertiary)]">
-                              · {value.city}
-                            </span>
-                          )}
                         </p>
+                        {(getCustomerSecondaryLine(value, duplicateCustomerNames) || getCustomerTertiaryLine(value, duplicateCustomerNames)) && (
+                          <p className="mt-1 text-sm text-[var(--content-tertiary)]">
+                            {getCustomerSecondaryLine(value, duplicateCustomerNames) && (
+                              <span className="font-medium text-[var(--content-secondary)]">
+                                {getCustomerSecondaryLine(value, duplicateCustomerNames)}
+                              </span>
+                            )}
+                            {getCustomerSecondaryLine(value, duplicateCustomerNames) && getCustomerTertiaryLine(value, duplicateCustomerNames) && (
+                              <span className="px-1 text-[var(--content-quaternary)]">·</span>
+                            )}
+                            {getCustomerTertiaryLine(value, duplicateCustomerNames) && (
+                              <span>{getCustomerTertiaryLine(value, duplicateCustomerNames)}</span>
+                            )}
+                          </p>
+                        )}
                       </div>
                       <button
                         type="button"
@@ -295,11 +301,20 @@ function SearchableCustomerDropdown({
                   <p className="font-ds-label-size font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
                     {query.trim() ? 'Matches' : 'Customers'}
                   </p>
-                  {!isLoading && filtered.length > 0 && (
-                    <p className="text-xs text-[var(--content-tertiary)]">
-                      {filtered.length} shown
-                    </p>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {!isLoading && filtered.length > 0 && (
+                      <p className="text-xs text-[var(--content-tertiary)]">
+                        {filtered.length} shown
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => startCreateMode(query)}
+                      className="text-xs font-semibold text-[var(--content-accent)]"
+                    >
+                      {query.trim() && !hasExactMatch ? `Add "${query.trim()}"` : 'Add new'}
+                    </button>
+                  </div>
                 </div>
 
                 {isLoading ? (
@@ -335,20 +350,21 @@ function SearchableCustomerDropdown({
                           <p className="truncate font-ds-lead font-semibold text-[var(--content-primary)]">
                             {c.name}
                           </p>
-                          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--content-tertiary)]">
-                            {c.city && (
-                              <span className="inline-flex items-center gap-1">
-                                <MapPin size={14} />
-                                {c.city}
-                              </span>
-                            )}
-                            {c.mobile && (
-                              <span className="inline-flex items-center gap-1">
-                                <Phone size={14} />
-                                {c.mobile}
-                              </span>
-                            )}
-                          </div>
+                          {(getCustomerSecondaryLine(c, duplicateCustomerNames) || getCustomerTertiaryLine(c, duplicateCustomerNames)) && (
+                            <p className="mt-1 line-clamp-1 text-sm text-[var(--content-tertiary)]">
+                              {getCustomerSecondaryLine(c, duplicateCustomerNames) && (
+                                <span className="font-medium text-[var(--content-secondary)]">
+                                  {getCustomerSecondaryLine(c, duplicateCustomerNames)}
+                                </span>
+                              )}
+                              {getCustomerSecondaryLine(c, duplicateCustomerNames) && getCustomerTertiaryLine(c, duplicateCustomerNames) && (
+                                <span className="px-1 text-[var(--content-quaternary)]">·</span>
+                              )}
+                              {getCustomerTertiaryLine(c, duplicateCustomerNames) && (
+                                <span>{getCustomerTertiaryLine(c, duplicateCustomerNames)}</span>
+                              )}
+                            </p>
+                          )}
                         </div>
                         {value?.id === c.id && (
                           <CheckCircle size={20} weight="fill" className="shrink-0 text-[var(--content-accent)]" />

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Copy, Check, CheckCircle, Warning, XCircle } from '@phosphor-icons/react';
 import type { OrderItem } from '../../../types';
 import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
+import { getBookPrice, getQuotedPrice, isSpecialRateItem } from '../../../lib/specialPricing';
 import { formatCurrency } from '../../../utils/formatters';
 import type { ManualFlagType, ManualFlag } from '../../../hooks/useBillingFlowMachine';
 
@@ -23,6 +24,9 @@ export function ProcessView({ orderName, items, activeIndex, isSubmitting, manua
   const isComplete = activeIndex >= items.length;
   
   const activeItem = isComplete ? null : items[activeIndex];
+  const activeQuotedPrice = activeItem ? getQuotedPrice(activeItem) : null;
+  const activeBookPrice = activeItem ? getBookPrice(activeItem) : null;
+  const activeHasSpecialRate = activeItem ? isSpecialRateItem(activeItem) : false;
   const previousItems = items.slice(0, activeIndex).reverse();
   const flagCount = Object.keys(manualFlags).length;
   
@@ -133,6 +137,19 @@ export function ProcessView({ orderName, items, activeIndex, isSubmitting, manua
               </div>
               
               <div className="bg-[var(--bg-secondary)] rounded-3xl p-8 lg:p-12 shadow-[var(--shadow-card-hover)] border border-[var(--border-subtle)]">
+                {activeHasSpecialRate && (
+                  <div className="mb-6 rounded-2xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-4 py-3 text-center">
+                    <p className="text-sm font-bold uppercase tracking-[0.18em] text-[var(--content-warning)]">
+                      Special Rate Order
+                    </p>
+                    <p className="mt-1 text-sm text-[var(--content-warning)]">
+                      Busy may show book price. Bill this line at{' '}
+                      <span className="font-mono font-bold">{formatCurrency(activeQuotedPrice)}</span>
+                      {activeBookPrice != null ? `, not ${formatCurrency(activeBookPrice)}` : ''}.
+                    </p>
+                  </div>
+                )}
+
                 {activeItem.item_alias ? (
                   <div className="mb-4 text-center cursor-pointer group" onClick={() => copy(activeItem.item_alias!, `click-code-${activeItem.id}`)}>
                     <h1 className="text-5xl lg:text-7xl font-mono font-bold text-[var(--content-primary)] tracking-tight inline-block relative transition-transform active:scale-95">
@@ -173,10 +190,21 @@ export function ProcessView({ orderName, items, activeIndex, isSubmitting, manua
                     <p className="text-xs uppercase tracking-wider text-[var(--content-tertiary)] mb-1">Quantity</p>
                     <p className="text-4xl font-mono font-bold text-[var(--content-primary)]">{activeItem.qty_requested}</p>
                   </div>
-                  {activeItem.price_quoted != null && (
+                  {activeQuotedPrice != null && (
                     <div className="text-center">
-                      <p className="text-xs uppercase tracking-wider text-[var(--content-tertiary)] mb-1">Rate</p>
-                      <p className="text-2xl font-mono font-bold text-[var(--content-secondary)]">{formatCurrency(activeItem.price_quoted)}</p>
+                      <p className="text-xs uppercase tracking-wider text-[var(--content-tertiary)] mb-1">
+                        {activeHasSpecialRate ? 'Special Rate' : 'Rate'}
+                      </p>
+                      <p className={`text-2xl font-mono font-bold ${
+                        activeHasSpecialRate ? 'text-[var(--content-warning)]' : 'text-[var(--content-secondary)]'
+                      }`}>
+                        {formatCurrency(activeQuotedPrice)}
+                      </p>
+                      {activeHasSpecialRate && activeBookPrice != null && (
+                        <p className="mt-1 text-xs text-[var(--content-quaternary)]">
+                          Book {formatCurrency(activeBookPrice)}
+                        </p>
+                      )}
                     </div>
                   )}
                   {activeItem.rack_no && (

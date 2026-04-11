@@ -31,6 +31,16 @@ function hasAll(headers: string[], required: string[]): boolean {
   return required.every(r => set.has(r.toLowerCase()));
 }
 
+function hasCustomerColumns(headers: string[]): boolean {
+  const set = new Set(headers.map(h => h.toLowerCase()));
+  return (
+    set.has('name') &&
+    set.has('parent group') &&
+    (set.has('sales man') || set.has('salesman')) &&
+    (set.has('mobile no.') || set.has('mobile'))
+  );
+}
+
 export function detectFileType(workbook: XLSX.WorkBook): DetectionResult {
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const data: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
@@ -75,9 +85,17 @@ export function detectFileType(workbook: XLSX.WorkBook): DetectionResult {
     };
   }
 
-  // Customer file: row 1 (index 0) has 'Name' + 'Parent Group'
-  if (row1.includes('Name') && row1.includes('Parent Group')) {
-    return { type: 'customers', label: 'Customer List', rowCount: countDataRows(data, 1), headerRowIndex: 0 };
+  // Customer file: scan first 10 rows because Tally-style exports often have title rows above the actual header.
+  for (let i = 0; i < scanLimit; i++) {
+    const row = getStringRow(data, i);
+    if (hasCustomerColumns(row) || (row.includes('Name') && row.includes('Parent Group'))) {
+      return {
+        type: 'customers',
+        label: 'Customer List',
+        rowCount: countDataRows(data, i + 1),
+        headerRowIndex: i,
+      };
+    }
   }
 
   // Sales plan: first 5 rows contain "SATISHJI" or "Item Group" with multiple salesperson names
