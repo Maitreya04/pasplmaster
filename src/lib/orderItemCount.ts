@@ -1,12 +1,15 @@
 import type { Order } from '../types';
 import { summarizeSpecialPricing } from './specialPricing';
 
-/** PostgREST: live count of rows in order_items (Busy “items” = invoice lines / SKUs). */
-export const ORDERS_SELECT_WITH_ITEM_LINE_COUNT = '*, order_items(count,price_quoted,price_system,qty_requested)' as const;
+/**
+ * Keep the embedded order_items select simple.
+ * PostgREST can reject mixed aggregate-style embeds like `count` plus regular
+ * columns, which breaks every orders list query.
+ */
+export const ORDERS_SELECT_WITH_ITEM_LINE_COUNT = '*, order_items(price_quoted,price_system,qty_requested)' as const;
 
 export type OrderRowWithEmbed = Order & {
   order_items?: {
-    count?: number;
     price_quoted?: number | null;
     price_system?: number | null;
     qty_requested?: number;
@@ -22,8 +25,7 @@ export function normalizeOrderBusyItemCount(row: OrderRowWithEmbed): Order & {
   special_rate_qty: number;
 } {
   const { order_items: embed, ...rest } = row;
-  const n = embed?.[0]?.count;
-  const liveLineCount = typeof n === 'number' ? n : (embed?.length ?? rest.item_count);
+  const liveLineCount = embed?.length ?? rest.item_count;
   const { specialLineCount, specialQty } = summarizeSpecialPricing(
     (embed ?? []).map((item) => ({
       price_quoted: item.price_quoted ?? null,

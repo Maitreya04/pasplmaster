@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { CaretDown, CaretUp, Check, Copy, Package, Warning, WhatsappLogo } from '@phosphor-icons/react';
+import { CaretDown, CaretUp, Check, Copy, Package, Warning } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { useOrders } from '../../hooks/useOrders';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
@@ -431,8 +431,7 @@ function OrderDetailSheet({
                     {billingUpdateTime ? ` · ${billingUpdateTime}` : ''}
                   </p>
                 </div>
-                <div className="inline-flex items-center gap-1 rounded-full bg-embed-whatsapp-tint px-2.5 py-1 text-xs font-semibold text-embed-whatsapp">
-                  <WhatsappLogo size={14} weight="fill" />
+                <div className="inline-flex items-center rounded-full bg-embed-whatsapp-tint px-2.5 py-1 text-xs font-semibold text-embed-whatsapp">
                   Ready to send
                 </div>
               </div>
@@ -443,10 +442,7 @@ function OrderDetailSheet({
                   onClick={handleSendToCustomer}
                   className="flex-[1.3] rounded-xl bg-embed-whatsapp-solid px-4 py-3 text-sm font-semibold text-white hover:opacity-90"
                 >
-                  <span className="inline-flex items-center justify-center gap-2">
-                    <WhatsappLogo size={16} weight="fill" />
-                    Send update
-                  </span>
+                  <span className="inline-flex items-center justify-center">Send update</span>
                 </button>
                 <button
                   type="button"
