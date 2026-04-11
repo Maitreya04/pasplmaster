@@ -77,9 +77,23 @@ export function useOrderDetail(orderId: number | null) {
       if (itemsError) throw itemsError;
 
       const items = mapOrderItemsWithCatalog(rawItems as OrderItemRow[] | null);
+      let customerMobile: string | null = null;
+
+      if (typeof order.customer_id === 'number') {
+        const { data: customer, error: customerError } = await supabase
+          .from('customers')
+          .select('mobile')
+          .eq('id', order.customer_id)
+          .limit(1)
+          .maybeSingle();
+
+        if (customerError) throw customerError;
+        customerMobile = (customer as { mobile?: string | null } | null)?.mobile ?? null;
+      }
 
       return {
         ...order,
+        customer_mobile: customerMobile,
         items,
         /** Busy “items” = invoice lines; prefer live row count over denormalized column. */
         item_count: items.length,

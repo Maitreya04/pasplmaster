@@ -12,6 +12,7 @@ import {
   sendInternalNotification,
   sendPickerReadyNotification,
 } from '../../lib/pickerPush';
+import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 
 import { useBillingFlow } from '../../hooks/useBillingFlow';
 import { QueueView } from './LiveQueue/QueueView';
@@ -19,7 +20,6 @@ import { OrderSheetView } from './LiveQueue/OrderSheetView';
 import { ReportView } from './LiveQueue/ReportView';
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 import type { OrderItem } from '../../types';
-import { orderLineLabel } from '../../utils/formatters';
 
 /** Frozen at approve time so the report/WhatsApp text stays correct after the order drops off the submitted queue. */
 type BillingReportSnapshot = {
@@ -222,6 +222,34 @@ export default function LiveQueuePage() {
         if (pendingError) throw pendingError;
       }
 
+      const { messageText: customerMessageText, summary: customerMessageSummary } =
+        buildBillingCustomerUpdate({
+          orderNumber: order.order_number,
+          customerName: order.customer_name,
+          businessName: import.meta.env.VITE_BUSINESS_DISPLAY_NAME,
+          date: new Date(),
+          lines: lineResults.map(({ item, approvedQty }) => ({
+            itemId: item.item_id,
+            name: item.item_name,
+            qtyRequested: item.qty_requested,
+            qtyBilled: approvedQty,
+            qtyPending: Math.max(0, item.qty_requested - approvedQty),
+          })),
+        });
+
+      const { data: customerUpdateRow, error: customerUpdateError } = await supabase
+        .from('billing_customer_updates')
+        .insert({
+          order_id: order.id,
+          message_text: customerMessageText,
+          summary_json: customerMessageSummary,
+          created_by: reviewer,
+        })
+        .select('id')
+        .single();
+
+      if (customerUpdateError) throw customerUpdateError;
+
       // Execute complete_billing RPC
       const { error: rpcError } = await supabase.rpc('complete_billing', {
         p_order_id: order.id,
@@ -244,34 +272,22 @@ export default function LiveQueuePage() {
         }).catch(() => { /* silent */ }),
       ];
 
-      if (flow.hasFlags) {
-        const flagSummary = Object.entries(flow.flags)
-          .map(([idx, flag]) => {
-            const line = items[Number(idx)];
-            const label = orderLineLabel(line);
-            if (flag.type === 'no_stock') {
-              return `${label}: No stock, ${line.qty_requested} pending`;
-            }
-            return `${label}: ${flag.availableQty} of ${line.qty_requested} billed, rest pending`;
-          })
-          .join('; ');
-
-        notifyTasks.push(
-          sendInternalNotification({
-            eventType: 'order_update_for_sales',
-            orderId: order.id,
-            orderNumber: order.order_number,
-            customerName: order.customer_name,
-            salespersonName: order.salesperson_name,
-            messageBody: `Billing update for ${order.order_number}: ${flagSummary}`,
-          }).catch((e) => {
-            console.error('order_update_for_sales', e);
-            toast.error(
-              `Sales notification failed: ${formatInternalNotificationError(e)}`,
-            );
-          }),
-        );
-      }
+      notifyTasks.push(
+        sendInternalNotification({
+          eventType: 'order_update_for_sales',
+          orderId: order.id,
+          orderNumber: order.order_number,
+          customerName: order.customer_name,
+          salespersonName: order.salesperson_name,
+          messageBody: customerMessageText,
+          billingCustomerUpdateId: (customerUpdateRow as { id: number }).id,
+        }).catch((e) => {
+          console.error('order_update_for_sales', e);
+          toast.error(
+            `Sales notification failed: ${formatInternalNotificationError(e)}`,
+          );
+        }),
+      );
 
       await Promise.all(notifyTasks);
 

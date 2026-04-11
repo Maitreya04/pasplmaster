@@ -1,14 +1,20 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Package, Warning } from '@phosphor-icons/react';
+import { CaretDown, CaretUp, Check, Copy, Package, Warning, WhatsappLogo } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { useOrders } from '../../hooks/useOrders';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
+import { useBillingCustomerUpdate } from '../../hooks/useBillingCustomerUpdate';
 import { usePendingItems } from '../../hooks/usePendingItems';
 import { useUserNotifications } from '../../hooks/useUserNotifications';
 import { Card, BottomSheet, StatusBadge, EmptyState, Skeleton } from '../../components/shared';
 import type { Order, OrderItem, OrderWithItems, PendingItem } from '../../types';
 
 import { formatCurrency, formatTimeAgo } from '../../utils/formatters';
+import {
+  digitsOnlyMobile,
+  whatsappPrefilledUrl,
+  whatsappShareUrl,
+} from '../../lib/buildOrderCustomerMessage';
 
 const BILLING_OOS_FLAG_REASON = 'Out of Stock (Billing)';
 const TEXT_STATUS_PARTIAL = 'text-[color:var(--content-warning-on-light)]';
@@ -25,6 +31,7 @@ function isPickerOrNonBillingFlag(item: OrderItem): boolean {
 function inferSalesUpdateLabel(text: string): string {
   const t = text.toLowerCase();
   if (t.includes('sent to po') || t.includes('pending') || t.includes('po.')) return 'Partial (PO)';
+  if (t.includes('*billed:*') || t.includes('billed items as of')) return 'Billed';
   if (t.includes('removed from order') || t.includes('dropped')) return 'Dropped';
   if (t.includes('only') && t.includes('available')) return 'Partial';
   return 'Update';
@@ -51,6 +58,12 @@ function formatRejectReason(notes: string | null | undefined): string | null {
     return 'Account locked. Billing cannot process this order until the account is unlocked.';
   }
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function normalizeWhatsappDigits(mobile: string | null | undefined): string {
+  const digits = digitsOnlyMobile(mobile);
+  if (digits.length === 10) return `91${digits}`;
+  return digits;
 }
 
 // ─── Merge helpers ────────────────────────────────────────────
@@ -307,18 +320,22 @@ function OrderDetailSheet({
   onClose: () => void;
 }) {
   const { data: order, isLoading } = useOrderDetail(orderId);
+  const { data: billingUpdate } = useBillingCustomerUpdate({
+    orderId,
+    enabled: isOpen && orderId !== null,
+  });
   const { data: pending } = usePendingItems({
     orderId,
     status: 'pending',
     enabled: orderId !== null,
   });
+  const [messageCopied, setMessageCopied] = useState(false);
+  const [showMessagePreview, setShowMessagePreview] = useState(false);
 
   const sheetRows = useMemo(
     () => mergeOrderLinesAndPending(order?.items, pending),
     [order?.items, pending],
   );
-
-  if (!isOpen) return null;
 
   const billingDateStr = order?.completed_at ?? order?.approved_at;
   const billingDate = billingDateStr
@@ -335,6 +352,37 @@ function OrderDetailSheet({
     : null;
   const isRejected = order ? isWholeOrderRejected(order) : false;
   const rejectReason = formatRejectReason(order?.notes);
+  const customerWhatsappDigits = normalizeWhatsappDigits(order?.customer_mobile);
+  const billingMessage = billingUpdate?.message_text?.trim() ?? '';
+  const billingSummaryLines = billingUpdate?.summary_json?.lines ?? [];
+  const billedLineCount = billingSummaryLines.filter((line) => line.qty_billed > 0).length;
+  const pendingLineCount = billingSummaryLines.filter((line) => line.qty_pending > 0).length;
+  const billingUpdateTime = billingUpdate?.created_at
+    ? formatTimeAgo(billingUpdate.created_at)
+    : null;
+  const sendUrl = billingMessage
+    ? customerWhatsappDigits
+      ? whatsappShareUrl(customerWhatsappDigits, billingMessage)
+      : whatsappPrefilledUrl(billingMessage)
+    : null;
+
+  const handleCopyMessage = useCallback(async () => {
+    if (!billingMessage) return;
+    try {
+      await navigator.clipboard.writeText(billingMessage);
+      setMessageCopied(true);
+      window.setTimeout(() => setMessageCopied(false), 2000);
+    } catch {
+      setMessageCopied(false);
+    }
+  }, [billingMessage]);
+
+  const handleSendToCustomer = useCallback(() => {
+    if (!sendUrl) return;
+    window.open(sendUrl, '_blank', 'noopener,noreferrer');
+  }, [sendUrl]);
+
+  if (!isOpen) return null;
 
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose} closeOnly>
@@ -371,6 +419,76 @@ function OrderDetailSheet({
               </p>
             )}
           </div>
+
+          {billingMessage && (
+            <div className="mb-5 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--content-primary)]">Billing update ready</p>
+                  <p className="text-xs text-[var(--content-secondary)]">
+                    {billedLineCount} billed line{billedLineCount === 1 ? '' : 's'}
+                    {pendingLineCount > 0 ? ` · ${pendingLineCount} pending` : ' · fully billed'}
+                    {billingUpdateTime ? ` · ${billingUpdateTime}` : ''}
+                  </p>
+                </div>
+                <div className="inline-flex items-center gap-1 rounded-full bg-embed-whatsapp-tint px-2.5 py-1 text-xs font-semibold text-embed-whatsapp">
+                  <WhatsappLogo size={14} weight="fill" />
+                  Ready to send
+                </div>
+              </div>
+
+              <div className="mt-3 flex gap-3">
+                <button
+                  type="button"
+                  onClick={handleSendToCustomer}
+                  className="flex-[1.3] rounded-xl bg-embed-whatsapp-solid px-4 py-3 text-sm font-semibold text-white hover:opacity-90"
+                >
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <WhatsappLogo size={16} weight="fill" />
+                    Send update
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowMessagePreview((prev) => !prev)}
+                  className="rounded-xl border border-[var(--border-opaque)] bg-[var(--bg-primary)] px-4 py-3 text-sm font-semibold text-[var(--content-primary)] hover:bg-[var(--bg-tertiary)]"
+                >
+                  <span className="inline-flex items-center justify-center gap-2">
+                    {showMessagePreview ? <CaretUp size={16} weight="bold" /> : <CaretDown size={16} weight="bold" />}
+                    {showMessagePreview ? 'Hide preview' : 'Preview'}
+                  </span>
+                </button>
+              </div>
+
+              {!customerWhatsappDigits && (
+                <p className="mt-2 text-xs text-[var(--content-warning)]">
+                  Customer mobile not saved. WhatsApp will open with the message only so you can choose the chat manually.
+                </p>
+              )}
+
+              {showMessagePreview && (
+                <div className="mt-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--embed-whatsapp-bg)] p-4">
+                  <div className="mb-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyMessage()}
+                      className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
+                        messageCopied
+                          ? 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
+                          : 'border-[var(--border-opaque)] bg-[var(--bg-primary)] text-[var(--content-primary)] hover:bg-[var(--bg-tertiary)]'
+                      }`}
+                    >
+                      {messageCopied ? <Check size={14} weight="bold" /> : <Copy size={14} weight="bold" />}
+                      {messageCopied ? 'Copied' : 'Copy message'}
+                    </button>
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--embed-whatsapp-fg)]">
+                    {billingMessage}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── Items list ────────────────────────────── */}
           <div className="divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">

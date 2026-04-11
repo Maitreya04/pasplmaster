@@ -28,6 +28,7 @@ export type OrderUpdateForSalesPayload = {
   customerName: string;
   salespersonName: string;
   messageBody: string;
+  billingCustomerUpdateId?: number;
 };
 
 export type InternalNotificationPayload =

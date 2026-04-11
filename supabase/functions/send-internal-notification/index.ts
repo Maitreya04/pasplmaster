@@ -30,6 +30,7 @@ type InternalRequest =
       customerName: string;
       salespersonName: string;
       messageBody: string;
+      billingCustomerUpdateId?: number;
     };
 
 interface PushSubscriptionRow {
@@ -484,6 +485,10 @@ serve(async (req) => {
             salespersonName: resolvedSalespersonName,
             deep_link: deepLink,
             messageBody: body,
+            billingCustomerUpdateId:
+              typeof payload.billingCustomerUpdateId === 'number'
+                ? payload.billingCustomerUpdateId
+                : null,
           },
         })),
       );

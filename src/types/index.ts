@@ -52,6 +52,7 @@ export interface Order {
   order_number: string;
   customer_id: number;
   customer_name: string;
+  customer_mobile?: string | null;
   customer_city: string | null;
   transport_id: number | null;
   transport_name: string | null;
@@ -254,4 +255,31 @@ export interface UserNotification {
   payload: Record<string, unknown>;
   read_at: string | null;
   created_at: string;
+}
+
+export interface BillingCustomerUpdateLineSummary {
+  item_id: number | null;
+  item_name: string;
+  qty_requested: number;
+  qty_billed: number;
+  qty_pending: number;
+  classification: 'billed' | 'partial' | 'pending';
+}
+
+export interface BillingCustomerUpdateSummary {
+  order_number: string;
+  customer_name: string;
+  message_type: 'billed_pending_blocks';
+  lines: BillingCustomerUpdateLineSummary[];
+}
+
+export interface BillingCustomerUpdate {
+  id: number;
+  order_id: number;
+  message_text: string;
+  summary_json: BillingCustomerUpdateSummary;
+  created_by: string | null;
+  created_at: string;
+  sent_at: string | null;
+  sent_by_user_id: number | null;
 }

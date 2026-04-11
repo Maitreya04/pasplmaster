@@ -3,7 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, CheckCircle, XCircle, Hourglass, Warning } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
-import { sendPickerReadyNotification } from '../../lib/pickerPush';
+import {
+  formatInternalNotificationError,
+  sendInternalNotification,
+  sendPickerReadyNotification,
+} from '../../lib/pickerPush';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { useAuth } from '../../context/AuthContext';
@@ -18,6 +22,7 @@ import {
 } from '../../components/shared';
 import type { OrderItem } from '../../types';
 import { formatCurrency, formatTimestamp } from '../../utils/formatters';
+import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 
 interface EditableItem extends OrderItem {
   qty_approved: number;
@@ -269,6 +274,51 @@ export default function ReviewPage(): React.JSX.Element | null {
               flag_reason: 'Out of Stock (Billing)',
             })
             .in('id', pendingItemIds);
+        }
+      }
+
+      if (!resolvingFlags) {
+        const { messageText, summary } = buildBillingCustomerUpdate({
+          orderNumber: order.order_number,
+          customerName: order.customer_name,
+          businessName: import.meta.env.VITE_BUSINESS_DISPLAY_NAME,
+          date: new Date(),
+          lines: visibleItems.map((item) => ({
+            itemId: item.item_id,
+            name: item.item_name,
+            qtyRequested: item.qty_requested,
+            qtyBilled: item.qty_approved,
+            qtyPending: Math.max(0, item.qty_requested - item.qty_approved),
+          })),
+        });
+
+        const { data: customerUpdateRow, error: updateInsertError } = await supabase
+          .from('billing_customer_updates')
+          .insert({
+            order_id: order.id,
+            message_text: messageText,
+            summary_json: summary,
+            created_by: reviewer,
+          })
+          .select('id')
+          .single();
+        if (updateInsertError) throw updateInsertError;
+
+        try {
+          await sendInternalNotification({
+            eventType: 'order_update_for_sales',
+            orderId: order.id,
+            orderNumber: order.order_number,
+            customerName: order.customer_name,
+            salespersonName: order.salesperson_name,
+            messageBody: messageText,
+            billingCustomerUpdateId: (customerUpdateRow as { id: number }).id,
+          });
+        } catch (notifyError) {
+          console.error('order_update_for_sales', notifyError);
+          toast.error(
+            `Sales notification failed: ${formatInternalNotificationError(notifyError)}`,
+          );
         }
       }
 
