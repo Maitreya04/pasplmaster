@@ -4,15 +4,18 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeftIcon,
   ArrowsClockwiseIcon,
-  PackageIcon,
+  Check,
+  Copy,
+  HourglassHighIcon,
+  ListBulletsIcon,
   SquaresFourIcon,
   TagIcon,
-  ListBulletsIcon,
-  HourglassHighIcon,
-  CurrencyInrIcon,
   UserIcon,
+  WarningCircle,
 } from '@phosphor-icons/react';
 import { usePendingItems } from '../../hooks/usePendingItems';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import { useToast } from '../../context/ToastContext';
 import {
   useOpenPoDemandLines,
   OPEN_PO_WORKFLOW_STATUSES,
@@ -23,9 +26,47 @@ import {
 import { formatCurrency, formatShortDate, formatTimeAgo } from '../../utils/formatters';
 import type { PendingItem } from '../../types';
 
-type TabId = 'sku' | 'brand' | 'lines' | 'pending';
+type TabId = 'brand' | 'sku' | 'lines' | 'pending';
 
-// ── Age helpers ──────────────────────────────────────────────────────────────
+type BrandSkuRow = {
+  item_id: number;
+  item_name: string;
+  totalPo: number;
+  totalValue: number;
+  lineCount: number;
+  customerCount: number;
+  oldestCreatedAt: string | null;
+};
+
+type BrandSummary = {
+  label: string;
+  totalPo: number;
+  totalValue: number;
+  lineCount: number;
+  distinctSkus: number;
+  customerCount: number;
+  staleQty: number;
+  staleLines: number;
+  oldestCreatedAt: string | null;
+  skuRows: BrandSkuRow[];
+};
+
+type SkuSummary = {
+  item_id: number;
+  item_name: string;
+  brandLabel: string;
+  totalPo: number;
+  totalValue: number;
+  lineCount: number;
+  customerCount: number;
+  oldestCreatedAt: string | null;
+};
+
+type PendingDayRow = {
+  dateKey: string;
+  itemCount: number;
+  qtyPending: number;
+};
 
 function ageDays(createdAt: string): number {
   return Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000);
@@ -39,20 +80,22 @@ type AgeBand = {
 
 function getAgeBand(createdAt: string): AgeBand {
   const days = ageDays(createdAt);
-  if (days < 7)
+  if (days < 7) {
     return {
       days,
       label: `${days}d`,
       pillClass:
         'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border border-[color-mix(in_srgb,var(--content-positive)_20%,transparent)]',
     };
-  if (days < 14)
+  }
+  if (days < 14) {
     return {
       days,
       label: `${days}d`,
       pillClass:
         'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border border-[color-mix(in_srgb,var(--content-warning)_20%,transparent)]',
     };
+  }
   return {
     days,
     label: `${days}d`,
@@ -70,27 +113,160 @@ function AgePill({ createdAt }: { createdAt: string }) {
   );
 }
 
-// ── Grouping helpers ─────────────────────────────────────────────────────────
-
 function groupLabel(line: OpenPoDemandLine): string {
   const it = normalizeEmbeddedItem(line.items);
   const g = it?.main_group?.trim();
   if (g) return g;
   const p = it?.parent_group?.trim();
   if (p) return p;
-  return '— Ungrouped';
+  return 'Ungrouped';
 }
 
 function linePoValue(line: OpenPoDemandLine): number {
   return line.qty_po * (line.price_quoted ?? 0);
 }
 
-// ── Page ─────────────────────────────────────────────────────────────────────
+function formatNumber(n: number): string {
+  return n.toLocaleString('en-IN');
+}
+
+function localDateKey(value: string): string {
+  const d = new Date(value);
+  const yyyy = d.getFullYear();
+  const mm = `${d.getMonth() + 1}`.padStart(2, '0');
+  const dd = `${d.getDate()}`.padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function isToday(value: string): boolean {
+  return localDateKey(value) === localDateKey(new Date().toISOString());
+}
+
+function toTabSeparated(rows: Array<Array<string | number>>): string {
+  return rows.map((row) => row.join('\t')).join('\n');
+}
+
+function buildAllBrandCopy(rows: BrandSummary[]): string {
+  return toTabSeparated([
+    ['Brand', 'Item', 'Qty To Buy', 'Estimated Buy Value', 'Order Lines', 'Customers', 'Oldest Age (days)'],
+    ...rows.flatMap((brand) =>
+      brand.skuRows.map((sku) => [
+        brand.label,
+        sku.item_name,
+        sku.totalPo,
+        sku.totalValue,
+        sku.lineCount,
+        sku.customerCount,
+        sku.oldestCreatedAt ? ageDays(sku.oldestCreatedAt) : 0,
+      ]),
+    ),
+  ]);
+}
+
+function buildSingleBrandCopy(brand: BrandSummary): string {
+  return toTabSeparated([
+    ['Brand', 'Item', 'Qty To Buy', 'Estimated Buy Value', 'Order Lines', 'Customers', 'Oldest Age (days)'],
+    ...brand.skuRows.map((sku) => [
+      brand.label,
+      sku.item_name,
+      sku.totalPo,
+      sku.totalValue,
+      sku.lineCount,
+      sku.customerCount,
+      sku.oldestCreatedAt ? ageDays(sku.oldestCreatedAt) : 0,
+    ]),
+  ]);
+}
+
+function CopyButton({
+  label,
+  copiedLabel,
+  copied,
+  onClick,
+  subtle = false,
+}: {
+  label: string;
+  copiedLabel: string;
+  copied: boolean;
+  onClick: () => void;
+  subtle?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-semibold transition-colors ${
+        subtle
+          ? 'border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'
+          : 'border border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] hover:opacity-90'
+      }`}
+    >
+      {copied ? <Check size={16} weight="bold" /> : <Copy size={16} weight="bold" />}
+      {copied ? copiedLabel : label}
+    </button>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  hint,
+  tone = 'default',
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  tone?: 'default' | 'accent' | 'warning' | 'danger';
+}) {
+  const toneClass =
+    tone === 'accent'
+      ? 'bg-[var(--bg-accent-subtle)] border-[var(--bg-accent)]'
+      : tone === 'warning'
+        ? 'bg-[var(--bg-warning-subtle)] border-[color-mix(in_srgb,var(--border-warning)_35%,var(--border-subtle))]'
+        : tone === 'danger'
+          ? 'bg-[var(--bg-negative-subtle)] border-[color-mix(in_srgb,var(--content-negative)_25%,var(--border-subtle))]'
+          : 'bg-[var(--bg-secondary)] border-[var(--border-subtle)]';
+
+  return (
+    <div className={`rounded-2xl border p-4 ${toneClass}`}>
+      <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--content-tertiary)]">{label}</p>
+      <p className="mt-2 text-2xl font-bold text-[var(--content-primary)] tabular-nums">{value}</p>
+      <p className="mt-1 text-sm text-[var(--content-secondary)]">{hint}</p>
+    </div>
+  );
+}
+
+function SectionCard({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 sm:p-5">
+      <div className="mb-4">
+        <h2 className="text-base font-semibold text-[var(--content-primary)]">{title}</h2>
+        <p className="mt-1 text-sm text-[var(--content-tertiary)]">{subtitle}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function EmptyBlock({ text }: { text: string }) {
+  return <p className="rounded-2xl border border-dashed border-[var(--border-subtle)] p-5 text-sm text-[var(--content-tertiary)]">{text}</p>;
+}
 
 export default function SupplyDemandPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<TabId>('sku');
+  const toast = useToast();
+  const { copy, copiedId } = useCopyToClipboard();
+
+  const [tab, setTab] = useState<TabId>('brand');
   const [repFilter, setRepFilter] = useState<string | null>(null);
 
   const { data: rawLines = [], isLoading: linesLoading, error: linesError } = useOpenPoDemandLines();
@@ -103,23 +279,63 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
     });
   }, [rawLines]);
 
-  // SKU aggregation — adds totalValue + oldestCreatedAt
-  const bySku = useMemo(() => {
-    const m = new Map<
-      number,
+  const byBrand = useMemo<BrandSummary[]>(() => {
+    const brandMap = new Map<
+      string,
       {
-        item_id: number;
-        item_name: string;
+        label: string;
         totalPo: number;
         totalValue: number;
         lineCount: number;
         customers: Set<string>;
         oldestCreatedAt: string | null;
+        staleQty: number;
+        staleLines: number;
+        skuMap: Map<
+          number,
+          {
+            item_id: number;
+            item_name: string;
+            totalPo: number;
+            totalValue: number;
+            lineCount: number;
+            customers: Set<string>;
+            oldestCreatedAt: string | null;
+          }
+        >;
       }
     >();
+
     for (const row of openLines) {
-      const o = normalizeEmbeddedOrder(row.orders);
-      const prev = m.get(row.item_id) ?? {
+      const order = normalizeEmbeddedOrder(row.orders);
+      const label = groupLabel(row);
+      const brand = brandMap.get(label) ?? {
+        label,
+        totalPo: 0,
+        totalValue: 0,
+        lineCount: 0,
+        customers: new Set<string>(),
+        oldestCreatedAt: null,
+        staleQty: 0,
+        staleLines: 0,
+        skuMap: new Map(),
+      };
+
+      brand.totalPo += row.qty_po;
+      brand.totalValue += linePoValue(row);
+      brand.lineCount += 1;
+      if (order?.customer_name) brand.customers.add(order.customer_name);
+      if (order?.created_at) {
+        if (!brand.oldestCreatedAt || order.created_at < brand.oldestCreatedAt) {
+          brand.oldestCreatedAt = order.created_at;
+        }
+        if (ageDays(order.created_at) >= 14) {
+          brand.staleQty += row.qty_po;
+          brand.staleLines += 1;
+        }
+      }
+
+      const sku = brand.skuMap.get(row.item_id) ?? {
         item_id: row.item_id,
         item_name: row.item_name,
         totalPo: 0,
@@ -128,68 +344,129 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
         customers: new Set<string>(),
         oldestCreatedAt: null,
       };
-      prev.totalPo += row.qty_po;
-      prev.totalValue += linePoValue(row);
-      prev.lineCount += 1;
-      if (o?.customer_name) prev.customers.add(o.customer_name);
-      if (o?.created_at) {
-        if (!prev.oldestCreatedAt || o.created_at < prev.oldestCreatedAt)
-          prev.oldestCreatedAt = o.created_at;
+      sku.totalPo += row.qty_po;
+      sku.totalValue += linePoValue(row);
+      sku.lineCount += 1;
+      if (order?.customer_name) sku.customers.add(order.customer_name);
+      if (order?.created_at) {
+        if (!sku.oldestCreatedAt || order.created_at < sku.oldestCreatedAt) {
+          sku.oldestCreatedAt = order.created_at;
+        }
       }
-      m.set(row.item_id, prev);
+      brand.skuMap.set(row.item_id, sku);
+      brandMap.set(label, brand);
     }
-    return [...m.values()].sort((a, b) => b.totalPo - a.totalPo);
-  }, [openLines]);
 
-  // Brand aggregation — adds totalValue + oldestCreatedAt
-  const byBrand = useMemo(() => {
-    const m = new Map<
-      string,
-      { label: string; totalPo: number; totalValue: number; lineCount: number; skuCount: Set<number>; oldestCreatedAt: string | null }
-    >();
-    for (const row of openLines) {
-      const o = normalizeEmbeddedOrder(row.orders);
-      const label = groupLabel(row);
-      const prev = m.get(label) ?? {
-        label,
-        totalPo: 0,
-        totalValue: 0,
-        lineCount: 0,
-        skuCount: new Set<number>(),
-        oldestCreatedAt: null,
-      };
-      prev.totalPo += row.qty_po;
-      prev.totalValue += linePoValue(row);
-      prev.lineCount += 1;
-      prev.skuCount.add(row.item_id);
-      if (o?.created_at) {
-        if (!prev.oldestCreatedAt || o.created_at < prev.oldestCreatedAt)
-          prev.oldestCreatedAt = o.created_at;
-      }
-      m.set(label, prev);
-    }
-    return [...m.values()]
-      .map((r) => ({ ...r, distinctSkus: r.skuCount.size }))
+    return [...brandMap.values()]
+      .map((brand) => ({
+        label: brand.label,
+        totalPo: brand.totalPo,
+        totalValue: brand.totalValue,
+        lineCount: brand.lineCount,
+        distinctSkus: brand.skuMap.size,
+        customerCount: brand.customers.size,
+        staleQty: brand.staleQty,
+        staleLines: brand.staleLines,
+        oldestCreatedAt: brand.oldestCreatedAt,
+        skuRows: [...brand.skuMap.values()]
+          .map((sku) => ({
+            item_id: sku.item_id,
+            item_name: sku.item_name,
+            totalPo: sku.totalPo,
+            totalValue: sku.totalValue,
+            lineCount: sku.lineCount,
+            customerCount: sku.customers.size,
+            oldestCreatedAt: sku.oldestCreatedAt,
+          }))
+          .sort((a, b) => b.totalPo - a.totalPo),
+      }))
       .sort((a, b) => b.totalPo - a.totalPo);
   }, [openLines]);
 
-  // Summary totals
+  const bySku = useMemo<SkuSummary[]>(() => {
+    const skuMap = new Map<
+      number,
+      {
+        item_id: number;
+        item_name: string;
+        brandLabel: string;
+        totalPo: number;
+        totalValue: number;
+        lineCount: number;
+        customers: Set<string>;
+        oldestCreatedAt: string | null;
+      }
+    >();
+
+    for (const row of openLines) {
+      const order = normalizeEmbeddedOrder(row.orders);
+      const prev = skuMap.get(row.item_id) ?? {
+        item_id: row.item_id,
+        item_name: row.item_name,
+        brandLabel: groupLabel(row),
+        totalPo: 0,
+        totalValue: 0,
+        lineCount: 0,
+        customers: new Set<string>(),
+        oldestCreatedAt: null,
+      };
+
+      prev.totalPo += row.qty_po;
+      prev.totalValue += linePoValue(row);
+      prev.lineCount += 1;
+      if (order?.customer_name) prev.customers.add(order.customer_name);
+      if (order?.created_at) {
+        if (!prev.oldestCreatedAt || order.created_at < prev.oldestCreatedAt) {
+          prev.oldestCreatedAt = order.created_at;
+        }
+      }
+      skuMap.set(row.item_id, prev);
+    }
+
+    return [...skuMap.values()]
+      .map((sku) => ({
+        item_id: sku.item_id,
+        item_name: sku.item_name,
+        brandLabel: sku.brandLabel,
+        totalPo: sku.totalPo,
+        totalValue: sku.totalValue,
+        lineCount: sku.lineCount,
+        customerCount: sku.customers.size,
+        oldestCreatedAt: sku.oldestCreatedAt,
+      }))
+      .sort((a, b) => b.totalPo - a.totalPo);
+  }, [openLines]);
+
   const totals = useMemo(() => {
     let poPieces = 0;
     let totalValue = 0;
+    const orderIds = new Set<number>();
+    const customers = new Set<string>();
+
     for (const row of openLines) {
       poPieces += row.qty_po;
       totalValue += linePoValue(row);
+      orderIds.add(row.order_id);
+      const order = normalizeEmbeddedOrder(row.orders);
+      if (order?.customer_name) customers.add(order.customer_name);
     }
-    return { lineCount: openLines.length, poPieces, skuCount: bySku.length, totalValue };
-  }, [openLines, bySku.length]);
 
-  // Unique reps for Lines tab filter
+    return {
+      lineCount: openLines.length,
+      poPieces,
+      skuCount: bySku.length,
+      brandCount: byBrand.length,
+      orderCount: orderIds.size,
+      customerCount: customers.size,
+      totalValue,
+    };
+  }, [openLines, byBrand.length, bySku.length]);
+
   const allReps = useMemo(() => {
     const names = new Set<string>();
     for (const row of openLines) {
-      const o = normalizeEmbeddedOrder(row.orders);
-      if (o?.salesperson_name) names.add(o.salesperson_name);
+      const order = normalizeEmbeddedOrder(row.orders);
+      if (order?.salesperson_name) names.add(order.salesperson_name);
     }
     return [...names].sort();
   }, [openLines]);
@@ -197,105 +474,149 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
   const filteredLines = useMemo(() => {
     if (!repFilter) return openLines;
     return openLines.filter((row) => {
-      const o = normalizeEmbeddedOrder(row.orders);
-      return o?.salesperson_name === repFilter;
+      const order = normalizeEmbeddedOrder(row.orders);
+      return order?.salesperson_name === repFilter;
     });
   }, [openLines, repFilter]);
+
+  const pendingByDay = useMemo<PendingDayRow[]>(() => {
+    const dayMap = new Map<string, { itemCount: number; qtyPending: number }>();
+
+    for (const item of pendingItems) {
+      const key = localDateKey(item.created_at);
+      const prev = dayMap.get(key) ?? { itemCount: 0, qtyPending: 0 };
+      prev.itemCount += 1;
+      prev.qtyPending += item.qty_pending;
+      dayMap.set(key, prev);
+    }
+
+    return [...dayMap.entries()]
+      .map(([dateKey, data]) => ({
+        dateKey,
+        itemCount: data.itemCount,
+        qtyPending: data.qtyPending,
+      }))
+      .sort((a, b) => b.dateKey.localeCompare(a.dateKey))
+      .slice(0, 7);
+  }, [pendingItems]);
+
+  const pendingSummary = useMemo(() => {
+    const todayItems = pendingItems.filter((item) => isToday(item.created_at));
+    const totalQty = pendingItems.reduce((sum, item) => sum + item.qty_pending, 0);
+    const todayQty = todayItems.reduce((sum, item) => sum + item.qty_pending, 0);
+    const sourceMap = new Map<PendingItem['source'], { count: number; qty: number }>();
+
+    let oldestCreatedAt: string | null = null;
+    for (const item of pendingItems) {
+      if (!oldestCreatedAt || item.created_at < oldestCreatedAt) oldestCreatedAt = item.created_at;
+      const prev = sourceMap.get(item.source) ?? { count: 0, qty: 0 };
+      prev.count += 1;
+      prev.qty += item.qty_pending;
+      sourceMap.set(item.source, prev);
+    }
+
+    return {
+      totalQty,
+      todayCount: todayItems.length,
+      todayQty,
+      oldestCreatedAt,
+      sources: [...sourceMap.entries()].map(([source, data]) => ({ source, ...data })),
+    };
+  }, [pendingItems]);
+
+  const totalPurchaseQty = totals.poPieces;
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['open-po-demand-lines'] });
     queryClient.invalidateQueries({ queryKey: ['pending-items'] });
   };
 
+  const copyWithToast = async (text: string, id: string, successMessage: string) => {
+    const ok = await copy(text, id);
+    if (ok) toast.success(successMessage);
+    else toast.error('Could not copy to clipboard');
+  };
+
+  const handleCopyAllBrands = () => {
+    void copyWithToast(
+      buildAllBrandCopy(byBrand),
+      'copy-all-brands',
+      `Copied ${formatNumber(byBrand.length)} brands for Excel`,
+    );
+  };
+
+  const handleCopyBrand = (brand: BrandSummary) => {
+    void copyWithToast(
+      buildSingleBrandCopy(brand),
+      `copy-brand-${brand.label}`,
+      `Copied ${brand.label} rows for Excel`,
+    );
+  };
+
   return (
     <div className="role-admin min-h-screen bg-[var(--bg-primary)]">
-      <div className="p-4 lg:px-6 max-w-3xl mx-auto pb-10">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-2">
+      <div className="mx-auto max-w-6xl px-4 pb-10 pt-4 lg:px-6">
+        <div className="mb-3 flex items-center gap-3">
           <button
             type="button"
             onClick={() => navigate('/admin')}
-            className="p-2 rounded-xl bg-[var(--bg-secondary)] text-[var(--content-secondary)] hover:text-[var(--content-primary)]"
+            className="rounded-xl bg-[var(--bg-secondary)] p-2 text-[var(--content-secondary)] hover:text-[var(--content-primary)]"
             aria-label="Back"
           >
             <ArrowLeftIcon size={22} weight="bold" />
           </button>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-bold text-[var(--content-primary)] truncate">Supply cockpit</h1>
-            <p className="text-xs text-[var(--content-tertiary)]">PO demand & pending queue</p>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-xl font-bold text-[var(--content-primary)]">Pending purchase orders</h1>
+            <p className="text-sm text-[var(--content-tertiary)]">Start with the total quantity to buy, then see the brand-wise split, then the item-level detail.</p>
           </div>
           <button
             type="button"
             onClick={refresh}
-            className="p-2 rounded-xl bg-[var(--bg-secondary)] text-[var(--content-secondary)] hover:text-[var(--content-primary)]"
+            className="rounded-xl bg-[var(--bg-secondary)] p-2 text-[var(--content-secondary)] hover:text-[var(--content-primary)]"
             aria-label="Refresh"
           >
             <ArrowsClockwiseIcon size={22} weight="bold" />
           </button>
         </div>
 
-        {/* Summary metrics */}
-        <div className="flex flex-wrap gap-2 mt-4">
-          <div className="inline-flex items-center gap-2 h-9 px-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-opaque)] text-sm">
-            <PackageIcon size={16} className="text-[var(--content-tertiary)]" />
-            <span className="font-mono font-semibold">{totals.poPieces}</span>
-            <span className="text-[var(--content-tertiary)]">PO pcs</span>
+        <section className="rounded-[28px] border border-[var(--border-subtle)] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--bg-accent-subtle)_80%,white),var(--bg-secondary)_55%,color-mix(in_srgb,var(--bg-warning-subtle)_55%,white))] p-4 shadow-sm sm:p-5">
+          <div className="rounded-2xl border border-[var(--bg-accent)] bg-[color-mix(in_srgb,var(--bg-accent-subtle)_78%,white)] px-5 py-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">Total Items To Purchase</p>
+            <p className="mt-1 text-4xl font-bold text-[var(--content-primary)] tabular-nums sm:text-5xl">
+              {formatNumber(totalPurchaseQty)}
+            </p>
           </div>
-          <div className="inline-flex items-center gap-2 h-9 px-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-opaque)] text-sm">
-            <span className="font-mono font-semibold">{totals.lineCount}</span>
-            <span className="text-[var(--content-tertiary)]">lines</span>
-          </div>
-          <div className="inline-flex items-center gap-2 h-9 px-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-opaque)] text-sm">
-            <span className="font-mono font-semibold">{totals.skuCount}</span>
-            <span className="text-[var(--content-tertiary)]">SKUs</span>
-          </div>
-          {totals.totalValue > 0 && (
-            <div className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl bg-[var(--bg-accent-subtle)] border border-[var(--bg-accent)] text-sm">
-              <CurrencyInrIcon size={14} className="text-[var(--content-accent)]" />
-              <span className="font-mono font-semibold text-[var(--content-accent)]">
-                {formatCurrency(totals.totalValue)}
-              </span>
-              <span className="text-[var(--content-accent)] opacity-70">at risk</span>
-            </div>
-          )}
-          <div className="inline-flex items-center gap-2 h-9 px-3 rounded-xl bg-[var(--bg-warning-subtle)] border border-[color-mix(in_srgb,var(--border-warning)_35%,var(--border-subtle))] text-sm">
-            <HourglassHighIcon size={16} className="text-[var(--content-warning)]" />
-            <span className="font-mono font-semibold">{pendingItems.length}</span>
-            <span className="text-[var(--content-warning)]">pending</span>
-          </div>
-        </div>
+        </section>
 
-        {/* Age legend */}
-        <div className="mt-3 flex items-center gap-2 font-ds-micro text-[var(--content-quaternary)]">
+        <div className="mt-4 flex flex-wrap items-center gap-2 font-ds-micro text-[var(--content-quaternary)]">
           <span>Age:</span>
-          <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border border-[color-mix(in_srgb,var(--content-positive)_20%,transparent)] font-bold">
+          <span className="inline-flex items-center gap-1 rounded-md border border-[color-mix(in_srgb,var(--content-positive)_20%,transparent)] bg-[var(--bg-positive-subtle)] px-1.5 py-0.5 font-bold text-[var(--content-positive)]">
             &lt;7d fresh
           </span>
-          <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border border-[color-mix(in_srgb,var(--content-warning)_20%,transparent)] font-bold">
-            7–14d warm
+          <span className="inline-flex items-center gap-1 rounded-md border border-[color-mix(in_srgb,var(--content-warning)_20%,transparent)] bg-[var(--bg-warning-subtle)] px-1.5 py-0.5 font-bold text-[var(--content-warning)]">
+            7-14d warm
           </span>
-          <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] border border-[color-mix(in_srgb,var(--content-negative)_20%,transparent)] font-bold">
+          <span className="inline-flex items-center gap-1 rounded-md border border-[color-mix(in_srgb,var(--content-negative)_20%,transparent)] bg-[var(--bg-negative-subtle)] px-1.5 py-0.5 font-bold text-[var(--content-negative)]">
             14d+ stale
           </span>
         </div>
 
-        {/* Tabs */}
-        <div className="mt-4 flex flex-wrap gap-1 p-1 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)]">
+        <div className="mt-4 flex flex-wrap gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-1">
           {(
             [
-              ['sku', 'By SKU', SquaresFourIcon],
-              ['brand', 'By brand', TagIcon],
-              ['lines', 'Open lines', ListBulletsIcon],
-              ['pending', 'Pending', HourglassHighIcon],
+              ['brand', 'Brands', TagIcon],
+              ['sku', 'Items', SquaresFourIcon],
+              ['lines', 'Orders', ListBulletsIcon],
+              ['pending', 'Queue', HourglassHighIcon],
             ] as const
           ).map(([id, label, Icon]) => (
             <button
               key={id}
               type="button"
               onClick={() => setTab(id)}
-              className={`flex-1 min-w-[6.5rem] flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-xs font-semibold transition-colors ${
+              className={`flex min-w-[7rem] flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2.5 text-sm font-semibold transition-colors ${
                 tab === id
-                  ? 'bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border border-[var(--bg-accent)]'
+                  ? 'border border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
                   : 'text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'
               }`}
             >
@@ -305,9 +626,18 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
           ))}
         </div>
 
-        <div className="mt-6 space-y-3">
+        <div className="mt-6 space-y-4">
+          {tab === 'brand' && (
+            <BrandTab
+              rows={byBrand}
+              loading={linesLoading}
+              error={linesError}
+              onCopyAllBrands={handleCopyAllBrands}
+              onCopyBrand={handleCopyBrand}
+              copiedId={copiedId}
+            />
+          )}
           {tab === 'sku' && <SkuTab rows={bySku} loading={linesLoading} error={linesError} />}
-          {tab === 'brand' && <BrandTab rows={byBrand} loading={linesLoading} error={linesError} />}
           {tab === 'lines' && (
             <LinesTab
               lines={filteredLines}
@@ -319,135 +649,171 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
               error={linesError}
             />
           )}
-          {tab === 'pending' && <PendingTab items={pendingItems} loading={pendingLoading} />}
+          {tab === 'pending' && (
+            <PendingTab
+              items={pendingItems}
+              loading={pendingLoading}
+              pendingByDay={pendingByDay}
+              pendingSummary={pendingSummary}
+            />
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-// ── SKU tab ───────────────────────────────────────────────────────────────────
+function BrandTab({
+  rows,
+  loading,
+  error,
+  onCopyAllBrands,
+  onCopyBrand,
+  copiedId,
+}: {
+  rows: BrandSummary[];
+  loading: boolean;
+  error: Error | null;
+  onCopyAllBrands: () => void;
+  onCopyBrand: (brand: BrandSummary) => void;
+  copiedId: string;
+}) {
+  if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading brands...</p>;
+  if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load brand demand.</p>;
+  if (rows.length === 0) return <EmptyBlock text="No open PO demand on active orders." />;
+
+  return (
+    <>
+      <SectionCard
+        title="Brand-wise split"
+        subtitle="Use this view to see each brand total and which items make up that brand total."
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-[var(--content-secondary)]">
+            Copy all brand rows for a master sheet, or copy one brand for a focused supplier conversation.
+          </p>
+          <CopyButton
+            label="Copy all brands"
+            copiedLabel="Copied all brands"
+            copied={copiedId === 'copy-all-brands'}
+            onClick={onCopyAllBrands}
+          />
+        </div>
+      </SectionCard>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        {rows.map((brand) => (
+          <section
+            key={brand.label}
+            className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 sm:p-5"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <h2 className="truncate text-lg font-semibold text-[var(--content-primary)]">{brand.label}</h2>
+                  {brand.oldestCreatedAt && <AgePill createdAt={brand.oldestCreatedAt} />}
+                </div>
+                <p className="mt-1 text-sm text-[var(--content-secondary)]">
+                  {formatNumber(brand.totalPo)} qty to buy across {formatNumber(brand.distinctSkus)} items and {formatNumber(brand.customerCount)} customers
+                </p>
+              </div>
+              <CopyButton
+                label="Copy brand"
+                copiedLabel="Copied brand"
+                copied={copiedId === `copy-brand-${brand.label}`}
+                onClick={() => onCopyBrand(brand)}
+                subtle
+              />
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <MetricCard label="Qty To Buy" value={formatNumber(brand.totalPo)} hint="Main brand total" />
+              <MetricCard label="Items" value={formatNumber(brand.distinctSkus)} hint="Distinct items in this brand" />
+              <MetricCard label="Value" value={formatCurrency(brand.totalValue)} hint="Estimated buy value" tone="accent" />
+              <MetricCard
+                label="Old 14d+"
+                value={formatNumber(brand.staleQty)}
+                hint={`${formatNumber(brand.staleLines)} old lines`}
+                tone={brand.staleQty > 0 ? 'warning' : 'default'}
+              />
+            </div>
+
+            <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--border-subtle)]">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 bg-[var(--bg-primary)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
+                <span>Item</span>
+                <span>Qty</span>
+                <span>Lines</span>
+              </div>
+              <div className="divide-y divide-[var(--border-subtle)] bg-[var(--bg-secondary)]">
+                {brand.skuRows.slice(0, 6).map((sku) => (
+                  <div key={sku.item_id} className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 px-4 py-3 text-sm">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-[var(--content-primary)]">{sku.item_name}</p>
+                      <p className="mt-1 text-xs text-[var(--content-tertiary)]">
+                        {formatCurrency(sku.totalValue)} · {formatNumber(sku.customerCount)} customers
+                      </p>
+                    </div>
+                    <span className="font-mono font-semibold text-[var(--content-primary)]">{formatNumber(sku.totalPo)}</span>
+                    <span className="font-mono text-[var(--content-secondary)]">{formatNumber(sku.lineCount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {brand.skuRows.length > 6 && (
+              <p className="mt-3 text-sm text-[var(--content-tertiary)]">
+                +{formatNumber(brand.skuRows.length - 6)} more items available in the copy export for {brand.label}.
+              </p>
+            )}
+          </section>
+        ))}
+      </div>
+    </>
+  );
+}
 
 function SkuTab({
   rows,
   loading,
   error,
 }: {
-  rows: {
-    item_id: number;
-    item_name: string;
-    totalPo: number;
-    totalValue: number;
-    lineCount: number;
-    customers: Set<string>;
-    oldestCreatedAt: string | null;
-  }[];
+  rows: SkuSummary[];
   loading: boolean;
   error: Error | null;
 }) {
-  if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading…</p>;
-  if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load PO lines</p>;
-  if (rows.length === 0)
-    return <p className="text-sm text-[var(--content-tertiary)]">No open PO demand on active orders.</p>;
+  if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading items...</p>;
+  if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load item demand.</p>;
+  if (rows.length === 0) return <EmptyBlock text="No open PO demand on active orders." />;
 
   return (
-    <ul className="space-y-2">
-      {rows.map((r) => (
+    <ul className="space-y-3">
+      {rows.map((row) => (
         <li
-          key={r.item_id}
-          className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3"
+          key={row.item_id}
+          className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-4"
         >
-          <div className="flex items-start justify-between gap-2">
-            <p className="font-semibold text-[var(--content-primary)] text-sm line-clamp-2 flex-1">{r.item_name}</p>
-            {r.oldestCreatedAt && <AgePill createdAt={r.oldestCreatedAt} />}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="line-clamp-2 text-base font-semibold text-[var(--content-primary)]">{row.item_name}</p>
+              <p className="mt-1 text-sm text-[var(--content-tertiary)]">{row.brandLabel}</p>
+            </div>
+            {row.oldestCreatedAt && <AgePill createdAt={row.oldestCreatedAt} />}
           </div>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--content-secondary)]">
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm text-[var(--content-secondary)]">
             <span>
-              PO qty:{' '}
-              <span className="font-mono font-bold text-[var(--content-primary)]">{r.totalPo}</span>
-            </span>
-            {r.totalValue > 0 && (
-              <span>
-                Value:{' '}
-                <span className="font-mono font-semibold text-[var(--content-accent)]">
-                  {formatCurrency(r.totalValue)}
-                </span>
-              </span>
-            )}
-            <span>
-              {r.lineCount} order line{r.lineCount === 1 ? '' : 's'}
+              Qty to buy <span className="font-mono font-bold text-[var(--content-primary)]">{formatNumber(row.totalPo)}</span>
             </span>
             <span>
-              {r.customers.size} customer{r.customers.size === 1 ? '' : 's'}
+              Value <span className="font-mono font-semibold text-[var(--content-accent)]">{formatCurrency(row.totalValue)}</span>
             </span>
+            <span>{formatNumber(row.lineCount)} order lines</span>
+            <span>{formatNumber(row.customerCount)} customers</span>
           </div>
         </li>
       ))}
     </ul>
   );
 }
-
-// ── Brand tab ─────────────────────────────────────────────────────────────────
-
-function BrandTab({
-  rows,
-  loading,
-  error,
-}: {
-  rows: {
-    label: string;
-    totalPo: number;
-    totalValue: number;
-    lineCount: number;
-    distinctSkus: number;
-    oldestCreatedAt: string | null;
-  }[];
-  loading: boolean;
-  error: Error | null;
-}) {
-  if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading…</p>;
-  if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load PO lines</p>;
-  if (rows.length === 0)
-    return <p className="text-sm text-[var(--content-tertiary)]">No open PO demand on active orders.</p>;
-
-  return (
-    <ul className="space-y-2">
-      {rows.map((r) => (
-        <li
-          key={r.label}
-          className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <p className="font-semibold text-[var(--content-primary)] text-sm">{r.label}</p>
-            {r.oldestCreatedAt && <AgePill createdAt={r.oldestCreatedAt} />}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--content-secondary)]">
-            <span>
-              PO qty:{' '}
-              <span className="font-mono font-bold text-[var(--content-primary)]">{r.totalPo}</span>
-            </span>
-            {r.totalValue > 0 && (
-              <span>
-                Value:{' '}
-                <span className="font-mono font-semibold text-[var(--content-accent)]">
-                  {formatCurrency(r.totalValue)}
-                </span>
-              </span>
-            )}
-            <span>
-              {r.distinctSkus} SKU{r.distinctSkus === 1 ? '' : 's'}
-            </span>
-            <span>
-              {r.lineCount} line{r.lineCount === 1 ? '' : 's'}
-            </span>
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-// ── Lines tab ─────────────────────────────────────────────────────────────────
 
 function LinesTab({
   lines,
@@ -466,23 +832,21 @@ function LinesTab({
   loading: boolean;
   error: Error | null;
 }) {
-  if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading…</p>;
-  if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load PO lines</p>;
-  if (allLines.length === 0)
-    return <p className="text-sm text-[var(--content-tertiary)]">No open PO demand on active orders.</p>;
+  if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading lines...</p>;
+  if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load PO lines.</p>;
+  if (allLines.length === 0) return <EmptyBlock text="No open PO demand on active orders." />;
 
   return (
     <div className="space-y-3">
-      {/* Salesperson filter chips */}
       {allReps.length > 1 && (
         <div className="flex flex-wrap gap-1.5">
           <button
             type="button"
             onClick={() => onRepFilter(null)}
-            className={`flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold transition-colors ${
+            className={`flex h-8 items-center gap-1 rounded-lg px-3 text-xs font-semibold transition-colors ${
               repFilter === null
-                ? 'bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border border-[var(--bg-accent)]'
-                : 'bg-[var(--bg-secondary)] text-[var(--content-secondary)] border border-[var(--border-subtle)] hover:bg-[var(--bg-tertiary)]'
+                ? 'border border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+                : 'border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'
             }`}
           >
             All reps
@@ -492,10 +856,10 @@ function LinesTab({
               key={rep}
               type="button"
               onClick={() => onRepFilter(rep === repFilter ? null : rep)}
-              className={`flex items-center gap-1 h-7 px-2.5 rounded-lg text-xs font-semibold transition-colors ${
+              className={`flex h-8 items-center gap-1 rounded-lg px-3 text-xs font-semibold transition-colors ${
                 repFilter === rep
-                  ? 'bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border border-[var(--bg-accent)]'
-                  : 'bg-[var(--bg-secondary)] text-[var(--content-secondary)] border border-[var(--border-subtle)] hover:bg-[var(--bg-tertiary)]'
+                  ? 'border border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+                  : 'border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'
               }`}
             >
               <UserIcon size={11} />
@@ -506,52 +870,46 @@ function LinesTab({
       )}
 
       {lines.length === 0 ? (
-        <p className="text-sm text-[var(--content-tertiary)]">No lines for this rep.</p>
+        <EmptyBlock text="No lines for this rep." />
       ) : (
-        <ul className="space-y-2">
+        <ul className="space-y-3">
           {lines.map((row) => {
-            const o = normalizeEmbeddedOrder(row.orders);
+            const order = normalizeEmbeddedOrder(row.orders);
             const poValue = linePoValue(row);
             return (
               <li
                 key={row.id}
-                className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3"
+                className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-4"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-semibold text-sm text-[var(--content-primary)] line-clamp-2 flex-1">
-                    {row.item_name}
-                  </p>
-                  {o?.created_at && <AgePill createdAt={o.created_at} />}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="line-clamp-2 text-base font-semibold text-[var(--content-primary)]">{row.item_name}</p>
+                    <p className="mt-1 font-mono text-xs text-[var(--content-tertiary)]">
+                      {order?.order_number ?? '-'} · {order?.customer_name ?? '-'}
+                    </p>
+                  </div>
+                  {order?.created_at && <AgePill createdAt={order.created_at} />}
                 </div>
-                <p className="text-xs text-[var(--content-tertiary)] mt-1 font-mono">
-                  {o?.order_number ?? '—'} · {o?.customer_name ?? '—'}
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--content-secondary)]">
+
+                <div className="mt-3 flex flex-wrap gap-2 text-sm text-[var(--content-secondary)]">
                   <span>
-                    PO{' '}
-                    <span className="font-mono font-bold text-[var(--content-warning)]">{row.qty_po}</span>
+                    Qty to buy <span className="font-mono font-bold text-[var(--content-warning)]">{formatNumber(row.qty_po)}</span>
                   </span>
-                  {poValue > 0 && (
-                    <span>
-                      <span className="font-mono font-semibold text-[var(--content-accent)]">
-                        {formatCurrency(poValue)}
-                      </span>
-                    </span>
-                  )}
-                  <span>
-                    Ship <span className="font-mono">{row.qty_shippable}</span>
-                  </span>
-                  <span className="rounded-md bg-[var(--bg-tertiary)] px-2 py-0.5">{o?.workflow_status}</span>
-                  {o?.salesperson_name && (
+                  <span>Shippable {formatNumber(row.qty_shippable)}</span>
+                  <span>Requested {formatNumber(row.qty_requested)}</span>
+                  <span>{formatCurrency(poValue)}</span>
+                  <span className="rounded-md bg-[var(--bg-primary)] px-2 py-0.5">{groupLabel(row)}</span>
+                  {order?.salesperson_name && (
                     <span className="flex items-center gap-1">
-                      <UserIcon size={10} />
-                      {o.salesperson_name}
+                      <UserIcon size={11} />
+                      {order.salesperson_name}
                     </span>
                   )}
                 </div>
-                {o?.created_at && (
-                  <p className="font-ds-micro text-[var(--content-quaternary)] mt-2">
-                    {formatShortDate(o.created_at)} · {formatTimeAgo(o.created_at)}
+
+                {order?.created_at && (
+                  <p className="mt-3 text-xs text-[var(--content-quaternary)]">
+                    {formatShortDate(order.created_at)} · {formatTimeAgo(order.created_at)} · {order.workflow_status}
                   </p>
                 )}
               </li>
@@ -563,42 +921,115 @@ function LinesTab({
   );
 }
 
-// ── Pending tab ───────────────────────────────────────────────────────────────
-
 function pendingSourceLabel(source: PendingItem['source']): string {
   if (source === 'billing') return 'Billing';
   if (source === 'picking') return 'Picking';
-  return 'Sales (PO)';
+  return 'Sales';
 }
 
-function PendingTab({ items, loading }: { items: PendingItem[]; loading: boolean }) {
-  if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading…</p>;
-  if (items.length === 0)
-    return <p className="text-sm text-[var(--content-tertiary)]">No pending items.</p>;
+function PendingTab({
+  items,
+  loading,
+  pendingByDay,
+  pendingSummary,
+}: {
+  items: PendingItem[];
+  loading: boolean;
+  pendingByDay: PendingDayRow[];
+  pendingSummary: {
+    totalQty: number;
+    todayCount: number;
+    todayQty: number;
+    oldestCreatedAt: string | null;
+    sources: Array<{ source: PendingItem['source']; count: number; qty: number }>;
+  };
+}) {
+  if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading pending queue...</p>;
+  if (items.length === 0) return <EmptyBlock text="No pending items." />;
 
   return (
-    <ul className="space-y-2">
-      {items.map((pi) => (
-        <li
-          key={pi.id}
-          className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3"
+    <>
+      <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+        <SectionCard
+          title="Queue summary"
+          subtitle="This is the operational follow-up list. It is useful for tracking, but it is separate from the main quantity to buy."
         >
-          <div className="flex items-center justify-between gap-2">
-            <p className="font-semibold text-sm text-[var(--content-primary)]">{pi.customer_name}</p>
-            <AgePill createdAt={pi.created_at} />
+          <div className="grid gap-3 sm:grid-cols-3">
+            <MetricCard label="Queue Records" value={formatNumber(items.length)} hint="Current tracking records" tone="warning" />
+            <MetricCard label="Queue Qty" value={formatNumber(pendingSummary.totalQty)} hint="Quantity mentioned inside queue records" />
+            <MetricCard
+              label="Oldest Age"
+              value={pendingSummary.oldestCreatedAt ? `${ageDays(pendingSummary.oldestCreatedAt)}d` : '0d'}
+              hint={pendingSummary.oldestCreatedAt ? formatShortDate(pendingSummary.oldestCreatedAt) : 'No queue age'}
+              tone={pendingSummary.oldestCreatedAt && ageDays(pendingSummary.oldestCreatedAt) >= 14 ? 'danger' : 'default'}
+            />
           </div>
-          <p className="text-xs text-[var(--content-tertiary)] font-mono mt-0.5">{pi.order_number}</p>
-          <p className="text-sm text-[var(--content-secondary)] mt-2 line-clamp-2">{pi.item_name}</p>
-          <div className="mt-2 flex flex-wrap gap-2 text-xs">
-            <span className="text-[var(--content-secondary)]">
-              Qty <span className="font-mono font-bold">{pi.qty_pending}</span>
-            </span>
-            <span className="rounded-md bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] px-2 py-0.5 font-semibold">
-              {pendingSourceLabel(pi.source)}
-            </span>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {pendingSummary.sources.map((source) => (
+              <span
+                key={source.source}
+                className="inline-flex items-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-1 text-sm text-[var(--content-secondary)]"
+              >
+                {pendingSourceLabel(source.source)}: {formatNumber(source.count)} items / {formatNumber(source.qty)} qty
+              </span>
+            ))}
           </div>
-        </li>
-      ))}
-    </ul>
+        </SectionCard>
+
+        <SectionCard
+          title="Queue added by day"
+          subtitle="See whether new records keep entering the queue every day."
+        >
+          <div className="space-y-3">
+            {pendingByDay.map((day) => (
+              <div key={day.dateKey} className="flex items-center justify-between rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--content-primary)]">{formatShortDate(day.dateKey)}</p>
+                  <p className="text-xs text-[var(--content-tertiary)]">{formatNumber(day.itemCount)} items entered queue</p>
+                </div>
+                <p className="text-sm font-semibold text-[var(--content-primary)]">{formatNumber(day.qtyPending)} qty</p>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      </div>
+
+      <ul className="space-y-3">
+        {items.map((item) => (
+          <li
+            key={item.id}
+            className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-base font-semibold text-[var(--content-primary)]">{item.customer_name}</p>
+                  <span className="rounded-full bg-[var(--bg-warning-subtle)] px-2.5 py-1 text-xs font-semibold text-[var(--content-warning)]">
+                    {pendingSourceLabel(item.source)}
+                  </span>
+                </div>
+                <p className="mt-1 font-mono text-xs text-[var(--content-tertiary)]">{item.order_number}</p>
+              </div>
+              <AgePill createdAt={item.created_at} />
+            </div>
+
+            <p className="mt-3 text-sm text-[var(--content-secondary)]">{item.item_name}</p>
+
+            <div className="mt-3 flex flex-wrap gap-2 text-sm text-[var(--content-secondary)]">
+              <span>
+                Qty <span className="font-mono font-bold text-[var(--content-primary)]">{formatNumber(item.qty_pending)}</span>
+              </span>
+              {item.note && (
+                <span className="inline-flex items-center gap-1 text-[var(--content-warning)]">
+                  <WarningCircle size={14} weight="fill" />
+                  {item.note}
+                </span>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
