@@ -123,11 +123,15 @@ function groupLabel(line: OpenPoDemandLine): string {
 }
 
 function linePoValue(line: OpenPoDemandLine): number {
-  return line.qty_po * (line.price_quoted ?? 0);
+  return line.qty_po * (line.price_quoted ?? line.price_system ?? 0);
 }
 
 function formatNumber(n: number): string {
   return n.toLocaleString('en-IN');
+}
+
+function countLabel(count: number, singular: string, plural = `${singular}s`): string {
+  return `${formatNumber(count)} ${count === 1 ? singular : plural}`;
 }
 
 function localDateKey(value: string): string {
@@ -228,9 +232,9 @@ function MetricCard({
           : 'bg-[var(--bg-secondary)] border-[var(--border-subtle)]';
 
   return (
-    <div className={`rounded-2xl border p-4 ${toneClass}`}>
+    <div className={`min-w-0 rounded-2xl border p-4 ${toneClass}`}>
       <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--content-tertiary)]">{label}</p>
-      <p className="mt-2 text-2xl font-bold text-[var(--content-primary)] tabular-nums">{value}</p>
+      <p className="mt-2 min-w-0 break-words text-[clamp(1.75rem,2.3vw,2rem)] font-bold leading-tight text-[var(--content-primary)] tabular-nums">{value}</p>
       <p className="mt-1 text-sm text-[var(--content-secondary)]">{hint}</p>
     </div>
   );
@@ -268,9 +272,10 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
 
   const [tab, setTab] = useState<TabId>('brand');
   const [repFilter, setRepFilter] = useState<string | null>(null);
+  const [selectedDemandDate, setSelectedDemandDate] = useState('');
 
   const { data: rawLines = [], isLoading: linesLoading, error: linesError } = useOpenPoDemandLines();
-  const { data: pendingItems = [], isLoading: pendingLoading } = usePendingItems({ status: 'pending' });
+  const { data: pendingItemsRaw = [], isLoading: pendingLoading } = usePendingItems({ status: 'pending' });
 
   const openLines = useMemo(() => {
     return rawLines.filter((row) => {
@@ -278,6 +283,23 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
       return o && OPEN_PO_WORKFLOW_STATUSES.has(o.workflow_status);
     });
   }, [rawLines]);
+
+  const demandDates = useMemo(() => {
+    const keys = new Set<string>();
+    for (const row of openLines) {
+      const order = normalizeEmbeddedOrder(row.orders);
+      if (order?.created_at) keys.add(localDateKey(order.created_at));
+    }
+    return [...keys].sort((a, b) => b.localeCompare(a));
+  }, [openLines]);
+
+  const demandLines = useMemo(() => {
+    if (!selectedDemandDate) return openLines;
+    return openLines.filter((row) => {
+      const order = normalizeEmbeddedOrder(row.orders);
+      return order?.created_at && localDateKey(order.created_at) === selectedDemandDate;
+    });
+  }, [openLines, selectedDemandDate]);
 
   const byBrand = useMemo<BrandSummary[]>(() => {
     const brandMap = new Map<
@@ -306,7 +328,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
       }
     >();
 
-    for (const row of openLines) {
+    for (const row of demandLines) {
       const order = normalizeEmbeddedOrder(row.orders);
       const label = groupLabel(row);
       const brand = brandMap.get(label) ?? {
@@ -381,7 +403,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
           .sort((a, b) => b.totalPo - a.totalPo),
       }))
       .sort((a, b) => b.totalPo - a.totalPo);
-  }, [openLines]);
+  }, [demandLines]);
 
   const bySku = useMemo<SkuSummary[]>(() => {
     const skuMap = new Map<
@@ -398,7 +420,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
       }
     >();
 
-    for (const row of openLines) {
+    for (const row of demandLines) {
       const order = normalizeEmbeddedOrder(row.orders);
       const prev = skuMap.get(row.item_id) ?? {
         item_id: row.item_id,
@@ -435,7 +457,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
         oldestCreatedAt: sku.oldestCreatedAt,
       }))
       .sort((a, b) => b.totalPo - a.totalPo);
-  }, [openLines]);
+  }, [demandLines]);
 
   const totals = useMemo(() => {
     let poPieces = 0;
@@ -443,7 +465,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
     const orderIds = new Set<number>();
     const customers = new Set<string>();
 
-    for (const row of openLines) {
+    for (const row of demandLines) {
       poPieces += row.qty_po;
       totalValue += linePoValue(row);
       orderIds.add(row.order_id);
@@ -452,7 +474,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
     }
 
     return {
-      lineCount: openLines.length,
+      lineCount: demandLines.length,
       poPieces,
       skuCount: bySku.length,
       brandCount: byBrand.length,
@@ -460,24 +482,29 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
       customerCount: customers.size,
       totalValue,
     };
-  }, [openLines, byBrand.length, bySku.length]);
+  }, [demandLines, byBrand.length, bySku.length]);
 
   const allReps = useMemo(() => {
     const names = new Set<string>();
-    for (const row of openLines) {
+    for (const row of demandLines) {
       const order = normalizeEmbeddedOrder(row.orders);
       if (order?.salesperson_name) names.add(order.salesperson_name);
     }
     return [...names].sort();
-  }, [openLines]);
+  }, [demandLines]);
 
   const filteredLines = useMemo(() => {
-    if (!repFilter) return openLines;
-    return openLines.filter((row) => {
+    if (!repFilter) return demandLines;
+    return demandLines.filter((row) => {
       const order = normalizeEmbeddedOrder(row.orders);
       return order?.salesperson_name === repFilter;
     });
-  }, [openLines, repFilter]);
+  }, [demandLines, repFilter]);
+
+  const pendingItems = useMemo(
+    () => pendingItemsRaw.filter((item) => item.source !== 'sales'),
+    [pendingItemsRaw],
+  );
 
   const pendingByDay = useMemo<PendingDayRow[]>(() => {
     const dayMap = new Map<string, { itemCount: number; qtyPending: number }>();
@@ -579,13 +606,73 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
           </button>
         </div>
 
-        <section className="rounded-[28px] border border-[var(--border-subtle)] bg-[linear-gradient(135deg,color-mix(in_srgb,var(--bg-accent-subtle)_80%,white),var(--bg-secondary)_55%,color-mix(in_srgb,var(--bg-warning-subtle)_55%,white))] p-4 shadow-sm sm:p-5">
+        <section className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-2xl border border-[var(--bg-accent)] bg-[color-mix(in_srgb,var(--bg-accent-subtle)_78%,white)] px-5 py-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">Total Items To Purchase</p>
             <p className="mt-1 text-4xl font-bold text-[var(--content-primary)] tabular-nums sm:text-5xl">
               {formatNumber(totalPurchaseQty)}
             </p>
           </div>
+          {totals.totalValue > 0 && (
+            <div className="rounded-2xl border border-[color-mix(in_srgb,var(--content-positive)_30%,var(--border-subtle))] bg-[var(--bg-positive-subtle)] px-5 py-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">Sales Loss</p>
+              <p className="mt-1 text-4xl font-bold tabular-nums text-[var(--content-positive)] sm:text-5xl">
+                {formatCurrency(totals.totalValue)}
+              </p>
+            </div>
+          )}
+        </section>
+
+        <section className="mt-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-[var(--content-primary)]">Filter by order date</p>
+              <p className="mt-1 text-sm text-[var(--content-tertiary)]">
+                Use this to see the brand-wise purchase demand for one day only.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
+                  Order date
+                </span>
+                <input
+                  type="date"
+                  value={selectedDemandDate}
+                  onChange={(event) => setSelectedDemandDate(event.target.value)}
+                  className="h-11 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--content-primary)]"
+                />
+              </label>
+              {selectedDemandDate && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedDemandDate('')}
+                  className="inline-flex h-11 items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 text-sm font-semibold text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]"
+                >
+                  Show all dates
+                </button>
+              )}
+            </div>
+          </div>
+
+          {demandDates.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {demandDates.slice(0, 7).map((dateKey) => (
+                <button
+                  key={dateKey}
+                  type="button"
+                  onClick={() => setSelectedDemandDate(dateKey)}
+                  className={`inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
+                    selectedDemandDate === dateKey
+                      ? 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+                      : 'border-[var(--border-subtle)] bg-[var(--bg-primary)] text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'
+                  }`}
+                >
+                  {formatShortDate(dateKey)}
+                </button>
+              ))}
+            </div>
+          )}
         </section>
 
         <div className="mt-4 flex flex-wrap items-center gap-2 font-ds-micro text-[var(--content-quaternary)]">
@@ -632,6 +719,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
               rows={byBrand}
               loading={linesLoading}
               error={linesError}
+              selectedDate={selectedDemandDate}
               onCopyAllBrands={handleCopyAllBrands}
               onCopyBrand={handleCopyBrand}
               copiedId={copiedId}
@@ -667,6 +755,7 @@ function BrandTab({
   rows,
   loading,
   error,
+  selectedDate,
   onCopyAllBrands,
   onCopyBrand,
   copiedId,
@@ -674,19 +763,26 @@ function BrandTab({
   rows: BrandSummary[];
   loading: boolean;
   error: Error | null;
+  selectedDate: string;
   onCopyAllBrands: () => void;
   onCopyBrand: (brand: BrandSummary) => void;
   copiedId: string;
 }) {
   if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading brands...</p>;
   if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load brand demand.</p>;
-  if (rows.length === 0) return <EmptyBlock text="No open PO demand on active orders." />;
+  if (rows.length === 0) {
+    return <EmptyBlock text={selectedDate ? `No purchase demand for ${formatShortDate(selectedDate)}.` : 'No open PO demand on active orders.'} />;
+  }
 
   return (
     <>
       <SectionCard
         title="Brand-wise split"
-        subtitle="Use this view to see each brand total and which items make up that brand total."
+        subtitle={
+          selectedDate
+            ? `Showing brand-wise purchase demand for ${formatShortDate(selectedDate)}.`
+            : 'Use this view to see each brand total and which items make up that brand total.'
+        }
       >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-[var(--content-secondary)]">
@@ -714,7 +810,7 @@ function BrandTab({
                   {brand.oldestCreatedAt && <AgePill createdAt={brand.oldestCreatedAt} />}
                 </div>
                 <p className="mt-1 text-sm text-[var(--content-secondary)]">
-                  {formatNumber(brand.totalPo)} qty to buy across {formatNumber(brand.distinctSkus)} items and {formatNumber(brand.customerCount)} customers
+                  {formatNumber(brand.totalPo)} qty to buy across {countLabel(brand.distinctSkus, 'item')} and {countLabel(brand.customerCount, 'customer')}
                 </p>
               </div>
               <CopyButton
@@ -726,14 +822,14 @@ function BrandTab({
               />
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="mt-4 grid grid-cols-2 gap-3">
               <MetricCard label="Qty To Buy" value={formatNumber(brand.totalPo)} hint="Main brand total" />
               <MetricCard label="Items" value={formatNumber(brand.distinctSkus)} hint="Distinct items in this brand" />
               <MetricCard label="Value" value={formatCurrency(brand.totalValue)} hint="Estimated buy value" tone="accent" />
               <MetricCard
                 label="Old 14d+"
                 value={formatNumber(brand.staleQty)}
-                hint={`${formatNumber(brand.staleLines)} old lines`}
+                hint={countLabel(brand.staleLines, 'old line', 'old lines')}
                 tone={brand.staleQty > 0 ? 'warning' : 'default'}
               />
             </div>
@@ -745,12 +841,12 @@ function BrandTab({
                 <span>Lines</span>
               </div>
               <div className="divide-y divide-[var(--border-subtle)] bg-[var(--bg-secondary)]">
-                {brand.skuRows.slice(0, 6).map((sku) => (
+                {brand.skuRows.map((sku) => (
                   <div key={sku.item_id} className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 px-4 py-3 text-sm">
                     <div className="min-w-0">
                       <p className="truncate font-medium text-[var(--content-primary)]">{sku.item_name}</p>
                       <p className="mt-1 text-xs text-[var(--content-tertiary)]">
-                        {formatCurrency(sku.totalValue)} · {formatNumber(sku.customerCount)} customers
+                        {formatCurrency(sku.totalValue)} · {countLabel(sku.customerCount, 'customer')}
                       </p>
                     </div>
                     <span className="font-mono font-semibold text-[var(--content-primary)]">{formatNumber(sku.totalPo)}</span>
@@ -759,12 +855,6 @@ function BrandTab({
                 ))}
               </div>
             </div>
-
-            {brand.skuRows.length > 6 && (
-              <p className="mt-3 text-sm text-[var(--content-tertiary)]">
-                +{formatNumber(brand.skuRows.length - 6)} more items available in the copy export for {brand.label}.
-              </p>
-            )}
           </section>
         ))}
       </div>
@@ -806,8 +896,8 @@ function SkuTab({
             <span>
               Value <span className="font-mono font-semibold text-[var(--content-accent)]">{formatCurrency(row.totalValue)}</span>
             </span>
-            <span>{formatNumber(row.lineCount)} order lines</span>
-            <span>{formatNumber(row.customerCount)} customers</span>
+            <span>{countLabel(row.lineCount, 'order line')}</span>
+            <span>{countLabel(row.customerCount, 'customer')}</span>
           </div>
         </li>
       ))}
@@ -952,7 +1042,7 @@ function PendingTab({
       <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
         <SectionCard
           title="Queue summary"
-          subtitle="This is the operational follow-up list. It is useful for tracking, but it is separate from the main quantity to buy."
+          subtitle="This is the operational follow-up list for billing and picking only. Sales mirror rows are excluded so the qty stays consistent with the main purchase total."
         >
           <div className="grid gap-3 sm:grid-cols-3">
             <MetricCard label="Queue Records" value={formatNumber(items.length)} hint="Current tracking records" tone="warning" />
@@ -971,22 +1061,25 @@ function PendingTab({
                 key={source.source}
                 className="inline-flex items-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-1 text-sm text-[var(--content-secondary)]"
               >
-                {pendingSourceLabel(source.source)}: {formatNumber(source.count)} items / {formatNumber(source.qty)} qty
+                {pendingSourceLabel(source.source)}: {countLabel(source.count, 'item')} / {formatNumber(source.qty)} qty
               </span>
             ))}
           </div>
         </SectionCard>
 
         <SectionCard
-          title="Queue added by day"
-          subtitle="See whether new records keep entering the queue every day."
+          title="Day-wise pending orders"
+          subtitle="See how many pending records and quantity were added each day."
         >
           <div className="space-y-3">
             {pendingByDay.map((day) => (
-              <div key={day.dateKey} className="flex items-center justify-between rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4">
+              <div
+                key={day.dateKey}
+                className="flex items-center justify-between rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4"
+              >
                 <div>
                   <p className="text-sm font-semibold text-[var(--content-primary)]">{formatShortDate(day.dateKey)}</p>
-                  <p className="text-xs text-[var(--content-tertiary)]">{formatNumber(day.itemCount)} items entered queue</p>
+                  <p className="text-xs text-[var(--content-tertiary)]">{countLabel(day.itemCount, 'item')} entered queue</p>
                 </div>
                 <p className="text-sm font-semibold text-[var(--content-primary)]">{formatNumber(day.qtyPending)} qty</p>
               </div>

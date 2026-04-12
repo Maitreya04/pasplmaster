@@ -18,6 +18,7 @@ export type OpenPoDemandLine = {
   qty_shippable: number;
   qty_requested: number;
   price_quoted: number | null;
+  price_system: number | null;
   orders: OpenPoDemandOrder | OpenPoDemandOrder[] | null;
   /** PostgREST may return a single object or a one-element array. */
   items:
@@ -64,6 +65,7 @@ export function useOpenPoDemandLines() {
           qty_shippable,
           qty_requested,
           price_quoted,
+          price_system,
           orders (
             order_number,
             customer_name,
