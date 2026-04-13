@@ -13,3 +13,4 @@ export { ToastContainer } from './Toast.tsx';
 export { FilterChip } from './FilterChip.tsx';
 export { ProgressBar } from './ProgressBar.tsx';
 export { SelectTrigger } from './SelectTrigger.tsx';
+export { LiveQrScanner } from './LiveQrScanner.tsx';

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -17,6 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   BigButton,
   BottomSheet,
+  LiveQrScanner,
   ProgressBar,
   Skeleton,
   StatusBadge,
@@ -24,18 +25,17 @@ import {
 import type { OrderItem, ScanResult } from '../../types';
 import { FLAG_REASONS, type FlagReason } from '../../utils/constants';
 import { PickCompleteScreen } from './PickCompleteScreen';
-import { imageToBase64 } from '../../lib/ocr/geminiOCR';
-import { verifyWithAI } from '../../lib/ocr/pickVerifier';
 import { pickQuantityTarget } from '../../lib/cartSupply';
 import { appHaptics } from '../../lib/haptics';
 import { sendInternalNotification } from '../../lib/pickerPush';
-
+import { matchQrPayload, qrExpectedCodes } from '../../lib/scanner/qrMatch';
 
 interface ItemMeta {
   mrp: number | null;
   main_group: string | null;
   parent_group: string | null;
   alias1: string | null;
+  alias: string | null;
 }
 type ItemMetaMap = Map<number, ItemMeta>;
 
@@ -53,8 +53,13 @@ interface PickItemLocal {
   orderItem: OrderItem;
   uiState: PickItemUiState;
   scanResult: ScanResult | null;
-  thumbnailUrl: string | null;
   alias1: string | null;
+}
+
+interface LiveScanSession {
+  orderItem: OrderItem;
+  previousUiState: PickItemUiState;
+  previousScanResult: ScanResult | null;
 }
 
 function sortByRack(items: OrderItem[]): OrderItem[] {
@@ -121,8 +126,6 @@ export default function PickPage(): React.JSX.Element | null {
     }
   }, [order?.workflow_status, isClaimedByMe, claim, claimError]);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   const [itemMeta, setItemMeta] = useState<ItemMetaMap>(new Map());
 
   // Prevent refetching item metadata on every order state change (like picks/scans)
@@ -136,7 +139,7 @@ export default function PickPage(): React.JSX.Element | null {
     const ids = itemIdsStr.split(',').map(Number);
     supabase
       .from('items')
-      .select('id,mrp,main_group,parent_group,alias1')
+      .select('id,mrp,main_group,parent_group,alias1,alias')
       .in('id', ids)
       .then(({ data }) => {
         if (!data) return;
@@ -147,6 +150,7 @@ export default function PickPage(): React.JSX.Element | null {
             main_group: row.main_group ?? null,
             parent_group: row.parent_group ?? null,
             alias1: row.alias1 ?? null,
+            alias: row.alias ?? null,
           });
         }
         setItemMeta(m);
@@ -157,24 +161,11 @@ export default function PickPage(): React.JSX.Element | null {
     new Map(),
   );
 
-  // Track localItems for unmount cleanup
-  const localItemsRef = useRef(localItems);
-  useEffect(() => {
-    localItemsRef.current = localItems;
-  }, [localItems]);
-
-  useEffect(() => {
-    return () => {
-      localItemsRef.current.forEach((item) => {
-        if (item.thumbnailUrl) URL.revokeObjectURL(item.thumbnailUrl);
-      });
-    };
-  }, []);
   const [flagTarget, setFlagTarget] = useState<number | null>(null);
   const [flagReason, setFlagReason] = useState<FlagReason | ''>('');
   const [flagNotes, setFlagNotes] = useState('');
   const [flagBoxPrice, setFlagBoxPrice] = useState('');
-  const [liveScanTarget, setLiveScanTarget] = useState<OrderItem | null>(null);
+  const [liveScanSession, setLiveScanSession] = useState<LiveScanSession | null>(null);
   const [showComplete, setShowComplete] = useState(false);
 
   const pickItems = useMemo(() => {
@@ -188,7 +179,6 @@ export default function PickPage(): React.JSX.Element | null {
           orderItem: oi,
           uiState: local.uiState ?? uiStateFromDb(oi),
           scanResult: local.scanResult ?? oi.scan_result,
-          thumbnailUrl: local.thumbnailUrl ?? null,
           alias1: meta?.alias1 ?? null,
         };
       }
@@ -196,7 +186,6 @@ export default function PickPage(): React.JSX.Element | null {
         orderItem: oi,
         uiState: uiStateFromDb(oi),
         scanResult: oi.scan_result,
-        thumbnailUrl: null,
         alias1: meta?.alias1 ?? null,
       };
     });
@@ -411,82 +400,82 @@ export default function PickPage(): React.JSX.Element | null {
   });
 
   const openLiveScan = useCallback((orderItem: OrderItem) => {
+    const current = localItems.get(orderItem.id);
+    const fallbackState = current?.uiState ?? uiStateFromDb(orderItem);
+    const fallbackScanResult = current?.scanResult ?? orderItem.scan_result;
+
     appHaptics.impactLight();
-    setLiveScanTarget(orderItem);
-    if (fileInputRef.current) {
-      fileInputRef.current.click();
-    }
-  }, []);
+    updateLocalItem(orderItem.id, { uiState: 'scanning' });
+    setLiveScanSession({
+      orderItem,
+      previousUiState: fallbackState,
+      previousScanResult: fallbackScanResult,
+    });
+  }, [localItems, updateLocalItem]);
 
   const closeLiveScan = useCallback(() => {
-    setLiveScanTarget(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  }, []);
+    setLiveScanSession((current) => {
+      if (!current) return null;
+      updateLocalItem(current.orderItem.id, {
+        uiState: current.previousUiState,
+        scanResult: current.previousScanResult,
+      });
+      return null;
+    });
+  }, [updateLocalItem]);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !liveScanTarget) return;
+  const handleQrDetected = useCallback((rawValue: string) => {
+    setLiveScanSession((current) => {
+      if (!current) return null;
 
-    const itemId = liveScanTarget.id;
-    
-    // Cleanup previous object URL to prevent memory leaks
-    const existing = localItems.get(itemId);
-    if (existing?.thumbnailUrl) {
-      URL.revokeObjectURL(existing.thumbnailUrl);
-    }
-
-    const thumbnailUrl = URL.createObjectURL(file);
-    updateLocalItem(itemId, { uiState: 'scanning', thumbnailUrl });
-
-    try {
-      const base64 = await imageToBase64(file);
-      const meta = itemMeta.get(liveScanTarget.item_id);
-      
-      const aiResult = await verifyWithAI(base64, {
-        name: liveScanTarget.item_name || '',
+      const meta = itemMeta.get(current.orderItem.item_id);
+      const match = matchQrPayload({
+        rawValue,
+        name: current.orderItem.item_name || '',
         alias1: meta?.alias1 ?? null,
-        mrp: meta?.mrp ?? undefined,
+        alias: meta?.alias ?? null,
+        itemAlias: current.orderItem.item_alias ?? null,
       });
 
       const result: ScanResult = {
-        isMatch: aiResult.match,
-        confidence: aiResult.confidence,
-        extractedCode: aiResult.extracted_code ?? undefined,
-        extractedDescription: aiResult.extracted_description ?? undefined,
-        reason: aiResult.reason,
-        scannedText: aiResult.extracted_description ?? '',
-        matchedAgainst: liveScanTarget.item_name || '',
-        matchStrategy: 'ai_verify',
+        isMatch: match.isMatch,
+        confidence: match.confidence,
+        extractedCode: match.extractedCode ?? undefined,
+        extractedDescription: match.extractedDescription ?? undefined,
+        reason: match.reason,
+        scannedText: rawValue,
+        matchedAgainst: match.matchedAgainst,
+        matchStrategy: match.matchStrategy,
         ocrExtracted: {
-          partNumber: aiResult.extracted_code ?? null,
-          mrp: null
+          partNumber: match.extractedCode ?? null,
+          mrp: meta?.mrp ?? null,
         },
-        method: 'ai_verify',
-        timestamp: new Date().toISOString()
+        method: 'qr_scan',
+        timestamp: new Date().toISOString(),
       };
 
-      let uiState: PickItemUiState = 'error';
-      if (result.isMatch) uiState = 'matched';
-      else if (result.confidence >= 35) uiState = 'warning';
+      const uiState: PickItemUiState = result.isMatch
+        ? 'matched'
+        : result.confidence >= 35
+          ? 'warning'
+          : 'error';
 
-      updateLocalItem(itemId, {
+      updateLocalItem(current.orderItem.id, {
         uiState,
         scanResult: result,
-        thumbnailUrl
       });
 
       saveScanResultMutation.mutate({
-        itemId,
-        scanResult: result
+        itemId: current.orderItem.id,
+        scanResult: result,
       });
-    } catch (err) {
-      console.error(err);
-      toast.error('Verification failed');
-      updateLocalItem(itemId, { uiState: 'pending' });
-    } finally {
-      closeLiveScan();
-    }
-  };
+
+      if (result.isMatch) appHaptics.success();
+      else appHaptics.warning();
+
+      return null;
+    });
+  }, [itemMeta, saveScanResultMutation, updateLocalItem]);
 
   const handlePick = useCallback(
     (itemId: number) => {
@@ -821,15 +810,23 @@ export default function PickPage(): React.JSX.Element | null {
         </div>
       </BottomSheet>
 
-      {/* Live scan file input */}
-      <input 
-        type="file" 
-        accept="image/*" 
-        capture="environment" 
-        ref={fileInputRef} 
-        className="hidden" 
-        onChange={handleFileChange} 
-      />
+      {liveScanSession && (
+        <LiveQrScanner
+          key={liveScanSession.orderItem.id}
+          title={liveScanSession.orderItem.item_name}
+          expectedCodes={qrExpectedCodes({
+            alias1: itemMeta.get(liveScanSession.orderItem.item_id)?.alias1 ?? null,
+            alias: itemMeta.get(liveScanSession.orderItem.item_id)?.alias ?? null,
+            itemAlias: liveScanSession.orderItem.item_alias ?? null,
+          })}
+          onClose={closeLiveScan}
+          onDetected={handleQrDetected}
+          onError={(message) => {
+            toast.error(message);
+            closeLiveScan();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -948,7 +945,7 @@ function PickItemCard({
             )}
             {item.uiState === 'scanning' && (
               <span className="text-xs text-[var(--content-warning)] animate-pulse">
-                Verifying with AI...
+                Scanning QR...
               </span>
             )}
             {item.uiState === 'matched' && item.scanResult && (
@@ -957,16 +954,6 @@ function PickItemCard({
               </span>
             )}
           </div>
-
-          {/* Thumbnail for scanned items */}
-          {item.thumbnailUrl && ['scanning', 'matched', 'warning', 'error'].includes(item.uiState) && (
-            <img
-              src={item.thumbnailUrl}
-              alt="Scan"
-              loading="lazy"
-              className="mt-2 h-12 rounded-lg object-cover"
-            />
-          )}
 
           {/* Scan Warning/Error Banner */}
           {item.uiState === 'warning' && item.scanResult && (
@@ -1047,7 +1034,7 @@ function PickItemCard({
             ) : (
               <>
                 <Camera size={20} weight="bold" />
-                {item.uiState === 'scanning' ? 'Verifying with AI...' : 'Scan Item'}
+                {item.uiState === 'scanning' ? 'Scanning QR...' : 'Scan Item'}
               </>
             )}
           </button>

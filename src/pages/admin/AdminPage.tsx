@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Upload, SignOut, ChartBar } from '@phosphor-icons/react';
+import { Upload, SignOut, ChartBar, Tag, Camera } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { NotificationDiagnosticsPanel } from '../../components/notifications/NotificationDiagnosticsPanel';
 
@@ -56,6 +56,38 @@ export default function AdminPage(): React.JSX.Element | null {
             <div className="text-left">
               <p className="font-semibold text-[var(--content-primary)]">Upload Data</p>
               <p className="text-sm text-[var(--content-tertiary)]">Import items, stock & customers</p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/admin/labels')}
+            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
+          >
+            <div className="w-12 h-12 rounded-xl bg-[var(--bg-warning-subtle)] flex items-center justify-center">
+              <Tag size={22} weight="regular" className="text-[var(--content-warning)]" />
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-[var(--content-primary)]">Label Studio</p>
+              <p className="text-sm text-[var(--content-tertiary)]">
+                Print A4 SKU labels with alias fallback
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/admin/pick-scan-lab')}
+            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
+          >
+            <div className="w-12 h-12 rounded-xl bg-[var(--bg-positive-subtle)] flex items-center justify-center">
+              <Camera size={22} weight="regular" className="text-[var(--content-positive)]" />
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-[var(--content-primary)]">Pick Scan Lab</p>
+              <p className="text-sm text-[var(--content-tertiary)]">
+                Test live QR picking against Alias 1 / Alias
+              </p>
             </div>
           </button>
         </div>

@@ -38,7 +38,9 @@ async function callGemini(model: string, imageBase64: string, expectedItem: any)
               text: `You are verifying a warehouse product pick.
 
 Expected item from order: "${expectedItem.name}"
-Expected alias code: "${expectedItem.alias1 || 'N/A'}"
+Expected scan code: "${expectedItem.pickCode || expectedItem.alias1 || expectedItem.alias || 'N/A'}"
+Preferred alias1 code: "${expectedItem.alias1 || 'N/A'}"
+Fallback alias code: "${expectedItem.alias || 'N/A'}"
 Expected MRP: "${expectedItem.mrp || 'N/A'}"
 
 Task:

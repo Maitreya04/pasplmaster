@@ -12,7 +12,13 @@ interface AIVerifyResult {
 
 export async function verifyWithAI(
   imageBase64: string,
-  expectedItem: { name: string; alias1?: string | null; mrp?: number },
+  expectedItem: {
+    name: string;
+    pickCode?: string | null;
+    alias1?: string | null;
+    alias?: string | null;
+    mrp?: number;
+  },
 ): Promise<AIVerifyResult> {
   try {
     const { data, error } = await supabase.functions.invoke('verify-item', {
@@ -38,4 +44,3 @@ export async function verifyWithAI(
     return { match: false, confidence: 0, reason: 'AI verification unavailable' };
   }
 }
-

@@ -27,7 +27,10 @@ const PickPage = lazy(() => import('./pages/picking/PickPage'));
 const AdminPage = lazy(() => import('./pages/admin/AdminPage'));
 const AdminPasscodePage = lazy(() => import('./pages/admin/AdminPasscodePage'));
 const UploadPage = lazy(() => import('./pages/admin/UploadPage'));
+const LabelStudioPage = lazy(() => import('./pages/admin/LabelStudioPage'));
+const PickScanLabPage = lazy(() => import('./pages/admin/PickScanLabPage'));
 const SupplyDemandPage = lazy(() => import('./pages/admin/SupplyDemandPage'));
+const SupplyDemandSkuDetailPage = lazy(() => import('./pages/admin/SupplyDemandSkuDetailPage'));
 
 const ROLE_HOME: Record<string, string> = {
   sales: '/sales',
@@ -169,11 +172,41 @@ export default function App(): React.JSX.Element | null {
           }
         />
         <Route
+          path="/admin/labels"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <LabelStudioPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/pick-scan-lab"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <PickScanLabPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
           path="/admin/supply"
           element={
             <RequireRole>
               <RequireAdminUnlock>
                 <SupplyDemandPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/supply/sku/:itemId"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <SupplyDemandSkuDetailPage />
               </RequireAdminUnlock>
             </RequireRole>
           }

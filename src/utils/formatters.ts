@@ -1,4 +1,5 @@
 import type { OrderItem } from '../types';
+import { orderItemPickCode } from './itemCodes';
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -6,12 +7,7 @@ function escapeRegExp(s: string): string {
 
 /** Same rule as New Order search rows: `alias1 ?? alias`, with snapshot fallback. */
 export function orderItemProductCode(item: OrderItem): string {
-  const a1 = item.catalog_alias1?.trim();
-  const ca = item.catalog_alias?.trim();
-  const frozen = item.item_alias?.trim();
-  if (a1) return a1;
-  if (ca) return ca;
-  return frozen ?? '';
+  return orderItemPickCode(item);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeftIcon,
@@ -67,6 +67,10 @@ type PendingDayRow = {
   itemCount: number;
   qtyPending: number;
 };
+
+function isTabId(value: string | null): value is TabId {
+  return value === 'brand' || value === 'sku' || value === 'lines' || value === 'pending';
+}
 
 function ageDays(createdAt: string): number {
   return Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000);
@@ -266,13 +270,14 @@ function EmptyBlock({ text }: { text: string }) {
 
 export default function SupplyDemandPage(): React.JSX.Element | null {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const toast = useToast();
   const { copy, copiedId } = useCopyToClipboard();
 
-  const [tab, setTab] = useState<TabId>('brand');
   const [repFilter, setRepFilter] = useState<string | null>(null);
-  const [selectedDemandDate, setSelectedDemandDate] = useState('');
+  const tab = isTabId(searchParams.get('tab')) ? searchParams.get('tab') : 'brand';
+  const selectedDemandDate = searchParams.get('date') ?? '';
 
   const { data: rawLines = [], isLoading: linesLoading, error: linesError } = useOpenPoDemandLines();
   const { data: pendingItemsRaw = [], isLoading: pendingLoading } = usePendingItems({ status: 'pending' });
@@ -580,6 +585,21 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
     );
   };
 
+  const updateSearchParams = (updates: { tab?: TabId; date?: string | null }) => {
+    const next = new URLSearchParams(searchParams);
+    if (updates.tab) next.set('tab', updates.tab);
+    if (updates.date) next.set('date', updates.date);
+    else if (updates.date === null) next.delete('date');
+    setSearchParams(next, { replace: true });
+  };
+
+  const openSkuDetail = (itemId: number, fromTab: 'brand' | 'sku') => {
+    const next = new URLSearchParams();
+    next.set('fromTab', fromTab);
+    if (selectedDemandDate) next.set('date', selectedDemandDate);
+    navigate(`/admin/supply/sku/${itemId}?${next.toString()}`);
+  };
+
   return (
     <div className="role-admin min-h-screen bg-[var(--bg-primary)]">
       <div className="mx-auto max-w-6xl px-4 pb-10 pt-4 lg:px-6">
@@ -639,14 +659,14 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
                 <input
                   type="date"
                   value={selectedDemandDate}
-                  onChange={(event) => setSelectedDemandDate(event.target.value)}
+                  onChange={(event) => updateSearchParams({ date: event.target.value || null })}
                   className="h-11 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--content-primary)]"
                 />
               </label>
               {selectedDemandDate && (
                 <button
                   type="button"
-                  onClick={() => setSelectedDemandDate('')}
+                  onClick={() => updateSearchParams({ date: null })}
                   className="inline-flex h-11 items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 text-sm font-semibold text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]"
                 >
                   Show all dates
@@ -661,7 +681,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
                 <button
                   key={dateKey}
                   type="button"
-                  onClick={() => setSelectedDemandDate(dateKey)}
+                  onClick={() => updateSearchParams({ date: dateKey })}
                   className={`inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
                     selectedDemandDate === dateKey
                       ? 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
@@ -700,7 +720,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
             <button
               key={id}
               type="button"
-              onClick={() => setTab(id)}
+              onClick={() => updateSearchParams({ tab: id })}
               className={`flex min-w-[7rem] flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2.5 text-sm font-semibold transition-colors ${
                 tab === id
                   ? 'border border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
@@ -722,10 +742,11 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
               selectedDate={selectedDemandDate}
               onCopyAllBrands={handleCopyAllBrands}
               onCopyBrand={handleCopyBrand}
+              onOpenSku={openSkuDetail}
               copiedId={copiedId}
             />
           )}
-          {tab === 'sku' && <SkuTab rows={bySku} loading={linesLoading} error={linesError} />}
+          {tab === 'sku' && <SkuTab rows={bySku} loading={linesLoading} error={linesError} onOpenSku={openSkuDetail} />}
           {tab === 'lines' && (
             <LinesTab
               lines={filteredLines}
@@ -758,6 +779,7 @@ function BrandTab({
   selectedDate,
   onCopyAllBrands,
   onCopyBrand,
+  onOpenSku,
   copiedId,
 }: {
   rows: BrandSummary[];
@@ -766,6 +788,7 @@ function BrandTab({
   selectedDate: string;
   onCopyAllBrands: () => void;
   onCopyBrand: (brand: BrandSummary) => void;
+  onOpenSku: (itemId: number, fromTab: 'brand' | 'sku') => void;
   copiedId: string;
 }) {
   if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading brands...</p>;
@@ -842,7 +865,12 @@ function BrandTab({
               </div>
               <div className="divide-y divide-[var(--border-subtle)] bg-[var(--bg-secondary)]">
                 {brand.skuRows.map((sku) => (
-                  <div key={sku.item_id} className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 px-4 py-3 text-sm">
+                  <button
+                    key={sku.item_id}
+                    type="button"
+                    onClick={() => onOpenSku(sku.item_id, 'brand')}
+                    className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] gap-3 px-4 py-3 text-left text-sm transition-colors hover:bg-[var(--bg-primary)]"
+                  >
                     <div className="min-w-0">
                       <p className="truncate font-medium text-[var(--content-primary)]">{sku.item_name}</p>
                       <p className="mt-1 text-xs text-[var(--content-tertiary)]">
@@ -851,7 +879,7 @@ function BrandTab({
                     </div>
                     <span className="font-mono font-semibold text-[var(--content-primary)]">{formatNumber(sku.totalPo)}</span>
                     <span className="font-mono text-[var(--content-secondary)]">{formatNumber(sku.lineCount)}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -866,10 +894,12 @@ function SkuTab({
   rows,
   loading,
   error,
+  onOpenSku,
 }: {
   rows: SkuSummary[];
   loading: boolean;
   error: Error | null;
+  onOpenSku: (itemId: number, fromTab: 'brand' | 'sku') => void;
 }) {
   if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading items...</p>;
   if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load item demand.</p>;
@@ -882,23 +912,29 @@ function SkuTab({
           key={row.item_id}
           className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-4"
         >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="line-clamp-2 text-base font-semibold text-[var(--content-primary)]">{row.item_name}</p>
-              <p className="mt-1 text-sm text-[var(--content-tertiary)]">{row.brandLabel}</p>
+          <button
+            type="button"
+            onClick={() => onOpenSku(row.item_id, 'sku')}
+            className="w-full text-left"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="line-clamp-2 text-base font-semibold text-[var(--content-primary)]">{row.item_name}</p>
+                <p className="mt-1 text-sm text-[var(--content-tertiary)]">{row.brandLabel}</p>
+              </div>
+              {row.oldestCreatedAt && <AgePill createdAt={row.oldestCreatedAt} />}
             </div>
-            {row.oldestCreatedAt && <AgePill createdAt={row.oldestCreatedAt} />}
-          </div>
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm text-[var(--content-secondary)]">
-            <span>
-              Qty to buy <span className="font-mono font-bold text-[var(--content-primary)]">{formatNumber(row.totalPo)}</span>
-            </span>
-            <span>
-              Value <span className="font-mono font-semibold text-[var(--content-accent)]">{formatCurrency(row.totalValue)}</span>
-            </span>
-            <span>{countLabel(row.lineCount, 'order line')}</span>
-            <span>{countLabel(row.customerCount, 'customer')}</span>
-          </div>
+            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm text-[var(--content-secondary)]">
+              <span>
+                Qty to buy <span className="font-mono font-bold text-[var(--content-primary)]">{formatNumber(row.totalPo)}</span>
+              </span>
+              <span>
+                Value <span className="font-mono font-semibold text-[var(--content-accent)]">{formatCurrency(row.totalValue)}</span>
+              </span>
+              <span>{countLabel(row.lineCount, 'order line')}</span>
+              <span>{countLabel(row.customerCount, 'customer')}</span>
+            </div>
+          </button>
         </li>
       ))}
     </ul>

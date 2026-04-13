@@ -138,7 +138,7 @@ export interface ScanResult {
     vehicleModel?: string | null;
   };
   signals?: ScanSignal[];
-  method?: 'local_match' | 'ai_verify' | 'manual';
+  method?: 'local_match' | 'ai_verify' | 'manual' | 'qr_scan';
   timestamp: string;
   extractedCode?: string;
   extractedDescription?: string;
