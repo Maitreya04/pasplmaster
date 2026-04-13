@@ -4,9 +4,11 @@ import {
   initializeItemScanIndex,
   resolveScannedCatalogItem,
   useItemScanIndexStore,
+  getScanCatalogItemById,
   type ScanCatalogItem,
   type ScanMatchSource,
 } from '../../stores/itemScanIndex';
+import { collectQrLookupCandidates, normalizeScanCode } from '../../lib/scanner/qrPayload';
 
 type BarcodeDetectorResult = {
   rawValue?: string | null;
@@ -136,19 +138,44 @@ export function LiveQrScanner({
   }, []);
 
   const handleResolvedScan = useCallback((rawValue: string) => {
+    const candidates = collectQrLookupCandidates(rawValue);
+    
+    let matchesPickItem = false;
+    let matchedBy: ScanMatchSource | null = null;
+    let lookupCode: string | null = null;
+
+    for (const code of candidates) {
+      if (pickItem.alias1 && normalizeScanCode(pickItem.alias1) === code) {
+        matchesPickItem = true; matchedBy = 'alias1'; lookupCode = code; break;
+      }
+      if (pickItem.alias && normalizeScanCode(pickItem.alias) === code) {
+        matchesPickItem = true; matchedBy = 'alias'; lookupCode = code; break;
+      }
+      if (pickItem.itemCode && normalizeScanCode(pickItem.itemCode) === code) {
+        matchesPickItem = true; matchedBy = 'item_code'; lookupCode = code; break;
+      }
+    }
+
     const lookup = resolveScannedCatalogItem(rawValue);
-    const matchesPickItem = lookup?.item.id === pickItem.itemId;
+
+    if (!matchesPickItem && lookup?.item.id === pickItem.itemId) {
+      matchesPickItem = true;
+      matchedBy = lookup.source;
+      lookupCode = lookup.code;
+    }
 
     const result: LiveQrScannerResolved = {
       rawValue,
-      matchedItem: lookup?.item ?? null,
-      matchedBy: lookup?.source ?? null,
+      matchedItem: matchesPickItem 
+        ? (getScanCatalogItemById(pickItem.itemId) ?? lookup?.item ?? null) 
+        : (lookup?.item ?? null),
+      matchedBy: matchesPickItem ? matchedBy : (lookup?.source ?? null),
       matchesPickItem,
-      lookupCode: lookup?.code ?? null,
-      reason: !lookup
-        ? 'QR decoded, but no catalog item matched alias1, alias, or item code.'
-        : matchesPickItem
-          ? `Verified against ${lookup.source}.`
+      lookupCode: matchesPickItem ? lookupCode : (lookup?.code ?? null),
+      reason: matchesPickItem
+        ? `Verified against ${matchedBy}.`
+        : !lookup
+          ? 'QR decoded, but no catalog item matched alias1, alias, or item code.'
           : `Scanned ${lookup.item.name}, but the picker is expected to verify ${pickItem.name}.`,
     };
 
