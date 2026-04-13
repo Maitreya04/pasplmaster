@@ -28,6 +28,49 @@ interface EditableItem extends OrderItem {
   qty_approved: number;
 }
 
+type FinalBillingLineState = {
+  qtyBilled: number;
+  qtyPending: number;
+  pendingSource: 'billing' | 'sales' | null;
+  pendingNote: string | null;
+  shouldFlagBillingPending: boolean;
+};
+
+function deriveFinalBillingLineState(
+  item: EditableItem,
+  isMarkedPending: boolean,
+): FinalBillingLineState {
+  const rawPending = Math.max(
+    Math.max(0, item.qty_po ?? 0),
+    Math.max(0, item.qty_requested - item.qty_approved),
+    isMarkedPending ? Math.max(0, item.qty_approved) : 0,
+  );
+  const qtyPending = Math.min(item.qty_requested, rawPending);
+  const qtyBilled = isMarkedPending
+    ? 0
+    : Math.max(0, Math.min(item.qty_approved, item.qty_requested - qtyPending));
+
+  if (qtyPending <= 0) {
+    return {
+      qtyBilled,
+      qtyPending: 0,
+      pendingSource: null,
+      pendingNote: null,
+      shouldFlagBillingPending: false,
+    };
+  }
+
+  return {
+    qtyBilled,
+    qtyPending,
+    pendingSource: isMarkedPending ? 'billing' : 'sales',
+    pendingNote: isMarkedPending
+      ? 'Marked pending by billing (no stock in Busy)'
+      : 'Purchase order qty from sales checkout',
+    shouldFlagBillingPending: isMarkedPending,
+  };
+}
+
 export default function ReviewPage(): React.JSX.Element | null {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -128,12 +171,13 @@ export default function ReviewPage(): React.JSX.Element | null {
     let qty = 0;
     let total = 0;
     for (const item of visibleItems) {
+      const finalState = deriveFinalBillingLineState(item, pendingIds.has(item.id));
       const price = item.price_quoted ?? item.price_system ?? 0;
-      qty += item.qty_approved;
-      total += item.qty_approved * price;
+      qty += finalState.qtyBilled;
+      total += finalState.qtyBilled * price;
     }
     return { totalQty: qty, grandTotal: total };
-  }, [visibleItems]);
+  }, [pendingIds, visibleItems]);
 
   const busyItemCount = visibleItems.length;
 
@@ -213,11 +257,26 @@ export default function ReviewPage(): React.JSX.Element | null {
       const reviewer = userName || 'Billing';
       const resolvingFlags = order.workflow_status === 'flagged';
       const approvedAt = new Date().toISOString();
+      const billingPendingItemIds: number[] = [];
+      const pendingRowsToInsert: Array<{
+        order_id: number;
+        order_number: string;
+        customer_id: number;
+        customer_name: string;
+        item_id: number;
+        item_name: string;
+        qty_pending: number;
+        source: 'billing' | 'sales';
+        created_by: string;
+        note: string;
+      }> = [];
 
       // Update each remaining item's qty_approved (and price / flags)
       for (const item of visibleItems) {
+        const finalState = deriveFinalBillingLineState(item, pendingIds.has(item.id));
         const update: Record<string, unknown> = {
-          qty_approved: item.qty_approved,
+          qty_approved: finalState.qtyBilled,
+          qty_po: finalState.qtyPending,
         };
         // Allow billing to override price when resolving flags
         if (typeof item.price_quoted === 'number') {
@@ -235,6 +294,25 @@ export default function ReviewPage(): React.JSX.Element | null {
           .from('order_items')
           .update(update)
           .eq('id', item.id);
+
+        if (finalState.qtyPending > 0 && finalState.pendingSource && finalState.pendingNote) {
+          pendingRowsToInsert.push({
+            order_id: order.id,
+            order_number: order.order_number,
+            customer_id: order.customer_id,
+            customer_name: order.customer_name,
+            item_id: item.item_id,
+            item_name: item.item_name,
+            qty_pending: finalState.qtyPending,
+            source: finalState.pendingSource,
+            created_by: reviewer,
+            note: finalState.pendingNote,
+          });
+        }
+
+        if (finalState.shouldFlagBillingPending) {
+          billingPendingItemIds.push(item.id);
+        }
       }
 
       // Delete removed items
@@ -242,39 +320,33 @@ export default function ReviewPage(): React.JSX.Element | null {
         await supabase.from('order_items').delete().eq('id', rid);
       }
 
-      // Create pending entries for items that billing marked as "no stock"
-      const pendingItemIds = Array.from(pendingIds).filter(
-        (id) => !removedIds.has(id),
-      );
+      const { error: resolvePendingError } = await supabase
+        .from('pending_items')
+        .update({
+          status: 'resolved',
+          resolved_at: approvedAt,
+          resolved_by: reviewer,
+        })
+        .eq('order_id', order.id)
+        .eq('status', 'pending');
+      if (resolvePendingError) throw resolvePendingError;
 
-      if (pendingItemIds.length > 0) {
-        const pendingRows = visibleItems
-          .filter((item) => pendingItemIds.includes(item.id))
-          .map((item) => ({
-            order_id: order.id,
-            order_number: order.order_number,
-            customer_id: order.customer_id,
-            customer_name: order.customer_name,
-            item_id: item.item_id,
-            item_name: item.item_name,
-            qty_pending: item.qty_approved,
-            source: 'billing' as const,
-            created_by: reviewer,
-            note: 'Marked pending by billing (no stock in Busy)',
-          }));
+      if (pendingRowsToInsert.length > 0) {
+        const { error: insertPendingError } = await supabase
+          .from('pending_items')
+          .insert(pendingRowsToInsert);
+        if (insertPendingError) throw insertPendingError;
+      }
 
-        if (pendingRows.length > 0) {
-          await supabase.from('pending_items').insert(pendingRows);
-
-          // Also mark these items as flagged (Out of Stock) so pickers see them as done + problem
-          await supabase
-            .from('order_items')
-            .update({
-              state: 'flagged',
-              flag_reason: 'Out of Stock (Billing)',
-            })
-            .in('id', pendingItemIds);
-        }
+      if (billingPendingItemIds.length > 0) {
+        const { error: flagPendingError } = await supabase
+          .from('order_items')
+          .update({
+            state: 'flagged',
+            flag_reason: 'Out of Stock (Billing)',
+          })
+          .in('id', billingPendingItemIds);
+        if (flagPendingError) throw flagPendingError;
       }
 
       if (!resolvingFlags) {
@@ -283,13 +355,16 @@ export default function ReviewPage(): React.JSX.Element | null {
           customerName: order.customer_name,
           businessName: import.meta.env.VITE_BUSINESS_DISPLAY_NAME,
           date: new Date(),
-          lines: visibleItems.map((item) => ({
-            itemId: item.item_id,
-            name: item.item_name,
-            qtyRequested: item.qty_requested,
-            qtyBilled: item.qty_approved,
-            qtyPending: Math.max(0, item.qty_requested - item.qty_approved),
-          })),
+          lines: visibleItems.map((item) => {
+            const finalState = deriveFinalBillingLineState(item, pendingIds.has(item.id));
+            return {
+              itemId: item.item_id,
+              name: item.item_name,
+              qtyRequested: item.qty_requested,
+              qtyBilled: finalState.qtyBilled,
+              qtyPending: finalState.qtyPending,
+            };
+          }),
         });
 
         const { data: customerUpdateRow, error: updateInsertError } = await supabase
@@ -368,6 +443,9 @@ export default function ReviewPage(): React.JSX.Element | null {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['pending-items'] });
+      queryClient.invalidateQueries({ queryKey: ['open-po-demand-lines'] });
+      queryClient.invalidateQueries({ queryKey: ['billing-customer-update', orderId] });
       toast.success(
         order?.workflow_status === 'flagged'
           ? 'Flags resolved and order marked completed'
@@ -574,10 +652,11 @@ export default function ReviewPage(): React.JSX.Element | null {
               <div className="space-y-3">
                 {visibleItems.map((item) => {
                   const price = item.price_quoted ?? item.price_system ?? 0;
-                  const lineTotal = item.qty_approved * price;
+                  const finalState = deriveFinalBillingLineState(item, pendingIds.has(item.id));
+                  const lineTotal = finalState.qtyBilled * price;
                   const isPending = pendingIds.has(item.id);
                   const shipCap = item.qty_shippable;
-                  const poGap = item.qty_po ?? 0;
+                  const poGap = finalState.qtyPending;
                   const showSplitLine =
                     poGap > 0 ||
                     (shipCap != null && shipCap < item.qty_requested);

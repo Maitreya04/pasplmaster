@@ -27,6 +27,21 @@ export type BillingCustomerUpdateSummary = {
   lines: BillingCustomerUpdateLineSummary[];
 };
 
+function normalizeLine(line: BillingCustomerUpdateLineInput): BillingCustomerUpdateLineInput {
+  const qtyRequested = Math.max(0, line.qtyRequested);
+  const qtyPending = Math.min(qtyRequested, Math.max(0, line.qtyPending));
+  const qtyBilled = Math.min(
+    Math.max(0, line.qtyBilled),
+    Math.max(0, qtyRequested - qtyPending),
+  );
+  return {
+    ...line,
+    qtyRequested,
+    qtyBilled,
+    qtyPending,
+  };
+}
+
 function classifyLine(line: BillingCustomerUpdateLineInput): BillingCustomerUpdateLineSummary['classification'] {
   if (line.qtyBilled > 0 && line.qtyPending > 0) return 'partial';
   if (line.qtyBilled > 0) return 'billed';
@@ -41,8 +56,9 @@ export function buildBillingCustomerUpdate(params: {
   lines: BillingCustomerUpdateLineInput[];
 }) {
   const { orderNumber, customerName, businessName, date, lines } = params;
+  const normalizedLines = lines.map(normalizeLine);
 
-  const shareLines: OrderCustomerShareLine[] = lines.map((line) => ({
+  const shareLines: OrderCustomerShareLine[] = normalizedLines.map((line) => ({
     name: line.name,
     qtyRequested: line.qtyRequested,
     qtyShip: Math.max(0, line.qtyBilled),
@@ -60,7 +76,7 @@ export function buildBillingCustomerUpdate(params: {
     order_number: orderNumber,
     customer_name: customerName,
     message_type: 'billed_pending_blocks',
-    lines: lines.map((line) => ({
+    lines: normalizedLines.map((line) => ({
       item_id: line.itemId,
       item_name: line.name,
       qty_requested: line.qtyRequested,

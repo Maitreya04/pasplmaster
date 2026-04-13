@@ -73,9 +73,15 @@ export function buildOrderCustomerMessage(params: {
   const dateStr = formatCustomerShareDate(date);
 
   const chunks: string[] = [];
+  const hasPending = lines.some((line) => (line.qtyPo ?? 0) > 0 || (line.qtyUnavailable ?? 0) > 0);
 
   chunks.push(`Hi ${customerName},`, '');
-  chunks.push(`${waBold('Order update:')} billed items as of ${waItalic(dateStr)}.`, '');
+  chunks.push(
+    hasPending
+      ? `${waBold('Order update:')} as of ${waItalic(dateStr)}.`
+      : `${waBold('Order update:')} billed items as of ${waItalic(dateStr)}.`,
+    '',
+  );
 
   if (lines.length === 0) {
     chunks.push('(No line items.)', '', 'Thank you.', `— ${signatureName}`);

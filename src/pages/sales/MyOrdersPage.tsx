@@ -74,8 +74,17 @@ type OrderSheetRow =
 
 function billedUnits(item: OrderItem, billingOos: boolean, pendingQtyTotal: number): number {
   if (billingOos) return 0;
-  if (item.qty_approved !== null && item.qty_approved !== undefined) return item.qty_approved;
-  if (pendingQtyTotal > 0) return Math.max(0, item.qty_requested - pendingQtyTotal);
+  const authoritativePendingQty = Math.min(
+    item.qty_requested,
+    Math.max(pendingQtyTotal, item.qty_po ?? 0),
+  );
+  if (item.qty_approved !== null && item.qty_approved !== undefined) {
+    return Math.max(
+      0,
+      Math.min(item.qty_approved, item.qty_requested - authoritativePendingQty),
+    );
+  }
+  if (authoritativePendingQty > 0) return Math.max(0, item.qty_requested - authoritativePendingQty);
   return item.qty_requested;
 }
 
