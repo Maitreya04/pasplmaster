@@ -81,21 +81,7 @@ function vibrate(pattern: number | number[]) {
   navigator.vibrate(pattern);
 }
 
-function getBrowserSupportMessage(): string {
-  if (!window.isSecureContext) {
-    return 'Live QR scanning needs a secure HTTPS session. Open the app from its normal secure link and try again.';
-  }
 
-  const ua = navigator.userAgent;
-  const isInAppBrowser =
-    /(FBAN|FBAV|Instagram|Line|LinkedInApp|Snapchat|TikTok|MicroMessenger|wv)/i.test(ua);
-
-  if (isInAppBrowser) {
-    return 'This in-app browser does not expose the fast camera QR detector. Open PASPL in Safari or Chrome directly, then try again.';
-  }
-
-  return 'This browser can open the app, but it does not expose the fast camera QR detector yet. Try the latest Safari or Chrome on your phone.';
-}
 
 export function LiveQrScanner({
   title,
