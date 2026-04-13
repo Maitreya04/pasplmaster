@@ -18,7 +18,7 @@ type PrintPreset = 'rack-strip' | 'compact' | 'full';
 type GroupFilter = 'unselected' | 'all' | string;
 
 const RACK_STRIP_HEIGHT_MM = 30;
-const RACK_STRIP_QR_SIZE_MM = 18;
+const RACK_STRIP_QR_SIZE_MM = 16;
 
 const PRINT_CSS = `
   @page {
@@ -69,10 +69,10 @@ const PRINT_CSS = `
 
   .rack-strip-shell {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 20mm;
-    gap: 3mm;
+    grid-template-columns: minmax(0, 1fr) 18mm;
+    gap: 2.5mm;
     height: 100%;
-    padding: 3mm 4mm;
+    padding: 3mm 3.5mm;
     align-items: stretch;
   }
 
@@ -85,9 +85,6 @@ const PRINT_CSS = `
   }
 
   .rack-strip-code {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     font-variant-ligatures: none;
   }
 
@@ -104,8 +101,8 @@ const PRINT_CSS = `
   }
 
   .rack-strip-qr {
-    width: 18mm;
-    height: 18mm;
+    width: 16mm;
+    height: 16mm;
   }
 
   .rack-strip-qr svg {
@@ -204,11 +201,12 @@ function presetDescription(preset: PrintPreset): string {
 
 function rackStripCodeStyle(code: string): CSSProperties {
   const length = code.trim().length;
-  if (length <= 12) return { fontSize: '10.4mm', letterSpacing: '-0.06em' };
-  if (length <= 14) return { fontSize: '9.4mm', letterSpacing: '-0.055em' };
-  if (length <= 16) return { fontSize: '8.5mm', letterSpacing: '-0.048em' };
-  if (length <= 18) return { fontSize: '7.5mm', letterSpacing: '-0.042em' };
-  return { fontSize: '6.6mm', letterSpacing: '-0.03em' };
+  if (length <= 12) return { fontSize: '10.2mm', letterSpacing: '-0.06em', lineHeight: 0.88 };
+  if (length <= 14) return { fontSize: '9.1mm', letterSpacing: '-0.055em', lineHeight: 0.88 };
+  if (length <= 16) return { fontSize: '8.2mm', letterSpacing: '-0.05em', lineHeight: 0.88 };
+  if (length <= 18) return { fontSize: '7.2mm', letterSpacing: '-0.045em', lineHeight: 0.88 };
+  if (length <= 20) return { fontSize: '6.4mm', letterSpacing: '-0.04em', lineHeight: 0.88 };
+  return { fontSize: '5.4mm', letterSpacing: '-0.03em', lineHeight: 0.84 };
 }
 
 function buildRecord(item: Item): LabelRecord | null {
@@ -722,6 +720,7 @@ export default function LabelStudioPage(): React.JSX.Element {
                   const isRackStrip = printPreset === 'rack-strip';
                   const showDescription = printPreset !== 'compact';
                   const showAlternateCode = printPreset === 'full' && Boolean(item.alternateCode);
+                  const wrapRackCode = item.pickCode.trim().length > 20;
 
                   return (
                     <article
@@ -739,7 +738,9 @@ export default function LabelStudioPage(): React.JSX.Element {
                           <div className="rack-strip-copy">
                             <div className="min-w-0">
                               <p
-                                className="rack-strip-code block min-w-0 font-sans font-black uppercase leading-[0.88] text-slate-900"
+                                className={`rack-strip-code block min-w-0 font-sans font-black uppercase text-slate-900 ${
+                                  wrapRackCode ? 'whitespace-normal break-all' : 'whitespace-nowrap'
+                                }`}
                                 style={rackStripCodeStyle(item.pickCode)}
                               >
                                 {item.pickCode}
@@ -750,7 +751,13 @@ export default function LabelStudioPage(): React.JSX.Element {
                                 </p>
                               )}
                               {showDescription && (
-                                <p className="rack-strip-description mt-[1.2mm] text-[3.8mm] font-semibold leading-tight text-slate-700">
+                                <p
+                                  className={`rack-strip-description text-slate-700 ${
+                                    wrapRackCode
+                                      ? 'mt-[0.7mm] text-[3.3mm] font-semibold leading-[1.02]'
+                                      : 'mt-[1.2mm] text-[3.8mm] font-semibold leading-tight'
+                                  }`}
+                                >
                                   {item.name}
                                 </p>
                               )}

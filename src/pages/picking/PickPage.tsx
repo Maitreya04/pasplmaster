@@ -28,16 +28,7 @@ import { PickCompleteScreen } from './PickCompleteScreen';
 import { pickQuantityTarget } from '../../lib/cartSupply';
 import { appHaptics } from '../../lib/haptics';
 import { sendInternalNotification } from '../../lib/pickerPush';
-import { matchQrPayload, qrExpectedCodes } from '../../lib/scanner/qrMatch';
-
-interface ItemMeta {
-  mrp: number | null;
-  main_group: string | null;
-  parent_group: string | null;
-  alias1: string | null;
-  alias: string | null;
-}
-type ItemMetaMap = Map<number, ItemMeta>;
+import type { LiveQrScannerResolved } from '../../components/shared/LiveQrScanner';
 
 type PickItemUiState =
   | 'pending'
@@ -126,37 +117,6 @@ export default function PickPage(): React.JSX.Element | null {
     }
   }, [order?.workflow_status, isClaimedByMe, claim, claimError]);
 
-  const [itemMeta, setItemMeta] = useState<ItemMetaMap>(new Map());
-
-  // Prevent refetching item metadata on every order state change (like picks/scans)
-  const itemIdsStr = useMemo(() => {
-    if (!order?.items) return '';
-    return [...new Set(order.items.map(oi => oi.item_id))].sort().join(',');
-  }, [order?.items]);
-
-  useEffect(() => {
-    if (!itemIdsStr) return;
-    const ids = itemIdsStr.split(',').map(Number);
-    supabase
-      .from('items')
-      .select('id,mrp,main_group,parent_group,alias1,alias')
-      .in('id', ids)
-      .then(({ data }) => {
-        if (!data) return;
-        const m: ItemMetaMap = new Map();
-        for (const row of data) {
-          m.set(row.id, {
-            mrp: row.mrp ?? null,
-            main_group: row.main_group ?? null,
-            parent_group: row.parent_group ?? null,
-            alias1: row.alias1 ?? null,
-            alias: row.alias ?? null,
-          });
-        }
-        setItemMeta(m);
-      });
-  }, [itemIdsStr]);
-
   const [localItems, setLocalItems] = useState<Map<number, Partial<PickItemLocal>>>(
     new Map(),
   );
@@ -173,23 +133,22 @@ export default function PickPage(): React.JSX.Element | null {
     const sorted = sortByRack(order.items);
     return sorted.map((oi): PickItemLocal => {
       const local = localItems.get(oi.id);
-      const meta = itemMeta.get(oi.item_id);
       if (local) {
         return {
           orderItem: oi,
           uiState: local.uiState ?? uiStateFromDb(oi),
           scanResult: local.scanResult ?? oi.scan_result,
-          alias1: meta?.alias1 ?? null,
+          alias1: oi.catalog_alias1 ?? null,
         };
       }
       return {
         orderItem: oi,
         uiState: uiStateFromDb(oi),
         scanResult: oi.scan_result,
-        alias1: meta?.alias1 ?? null,
+        alias1: oi.catalog_alias1 ?? null,
       };
     });
-  }, [itemMeta, localItems, order?.items]);
+  }, [localItems, order?.items]);
 
   const { active, done } = useMemo(() => partitionItems(pickItems), [pickItems]);
 
@@ -424,41 +383,32 @@ export default function PickPage(): React.JSX.Element | null {
     });
   }, [updateLocalItem]);
 
-  const handleQrDetected = useCallback((rawValue: string) => {
+  const handleScanResolved = useCallback((scan: LiveQrScannerResolved) => {
     setLiveScanSession((current) => {
       if (!current) return null;
 
-      const meta = itemMeta.get(current.orderItem.item_id);
-      const match = matchQrPayload({
-        rawValue,
-        name: current.orderItem.item_name || '',
-        alias1: meta?.alias1 ?? null,
-        alias: meta?.alias ?? null,
-        itemAlias: current.orderItem.item_alias ?? null,
-      });
-
       const result: ScanResult = {
-        isMatch: match.isMatch,
-        confidence: match.confidence,
-        extractedCode: match.extractedCode ?? undefined,
-        extractedDescription: match.extractedDescription ?? undefined,
-        reason: match.reason,
-        scannedText: rawValue,
-        matchedAgainst: match.matchedAgainst,
-        matchStrategy: match.matchStrategy,
+        isMatch: scan.matchesPickItem,
+        confidence: scan.matchedItem ? 100 : 0,
+        extractedCode: scan.lookupCode ?? undefined,
+        extractedDescription: scan.matchedItem?.name ?? undefined,
+        reason: scan.reason,
+        scannedText: scan.rawValue,
+        matchedAgainst: scan.matchedBy ?? current.orderItem.item_name,
+        matchStrategy: scan.matchesPickItem
+          ? 'qr_catalog_hit'
+          : scan.matchedItem
+            ? 'qr_expected_mismatch'
+            : 'qr_catalog_miss',
         ocrExtracted: {
-          partNumber: match.extractedCode ?? null,
-          mrp: meta?.mrp ?? null,
+          partNumber: scan.lookupCode ?? null,
+          mrp: null,
         },
         method: 'qr_scan',
         timestamp: new Date().toISOString(),
       };
 
-      const uiState: PickItemUiState = result.isMatch
-        ? 'matched'
-        : result.confidence >= 35
-          ? 'warning'
-          : 'error';
+      const uiState: PickItemUiState = result.isMatch ? 'matched' : 'error';
 
       updateLocalItem(current.orderItem.id, {
         uiState,
@@ -470,12 +420,15 @@ export default function PickPage(): React.JSX.Element | null {
         scanResult: result,
       });
 
-      if (result.isMatch) appHaptics.success();
-      else appHaptics.warning();
+      if (result.isMatch) {
+        appHaptics.success();
+      } else {
+        appHaptics.warning();
+      }
 
-      return null;
+      return result.isMatch ? null : current;
     });
-  }, [itemMeta, saveScanResultMutation, updateLocalItem]);
+  }, [saveScanResultMutation, updateLocalItem]);
 
   const handlePick = useCallback(
     (itemId: number) => {
@@ -814,13 +767,15 @@ export default function PickPage(): React.JSX.Element | null {
         <LiveQrScanner
           key={liveScanSession.orderItem.id}
           title={liveScanSession.orderItem.item_name}
-          expectedCodes={qrExpectedCodes({
-            alias1: itemMeta.get(liveScanSession.orderItem.item_id)?.alias1 ?? null,
-            alias: itemMeta.get(liveScanSession.orderItem.item_id)?.alias ?? null,
-            itemAlias: liveScanSession.orderItem.item_alias ?? null,
-          })}
+          pickItem={{
+            itemId: liveScanSession.orderItem.item_id,
+            name: liveScanSession.orderItem.item_name,
+            alias1: liveScanSession.orderItem.catalog_alias1 ?? null,
+            alias: liveScanSession.orderItem.catalog_alias ?? null,
+            itemCode: liveScanSession.orderItem.item_alias ?? null,
+          }}
           onClose={closeLiveScan}
-          onDetected={handleQrDetected}
+          onResolved={handleScanResolved}
           onError={(message) => {
             toast.error(message);
             closeLiveScan();

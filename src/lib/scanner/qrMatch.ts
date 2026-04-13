@@ -1,4 +1,5 @@
 import { firstAvailableCode } from '../../utils/itemCodes';
+import { collectQrLookupCandidates, normalizeScanCode } from './qrPayload';
 
 export interface QrMatchInput {
   rawValue: string;
@@ -18,68 +19,6 @@ export interface QrMatchResult {
   reason: string;
 }
 
-function normalizeCode(value: string | null | undefined): string {
-  return (value ?? '')
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '');
-}
-
-function extractJsonCode(value: string): string | null {
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>;
-    const candidateKeys = ['code', 'itemCode', 'alias', 'alias1', 'sku'];
-    for (const key of candidateKeys) {
-      const raw = parsed[key];
-      if (typeof raw === 'string' && raw.trim()) return raw.trim();
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-function extractUrlCodes(value: string): string[] {
-  try {
-    const url = new URL(value);
-    return ['code', 'item', 'sku', 'alias', 'alias1']
-      .map((key) => url.searchParams.get(key)?.trim() ?? '')
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-function extractPrefixedCode(value: string): string | null {
-  const separators = [':', '|', '='];
-  for (const separator of separators) {
-    const parts = value.split(separator);
-    if (parts.length !== 2) continue;
-    const [prefix, code] = parts;
-    if (!prefix || !code) continue;
-    if (['PASPL', 'SKU', 'ITEM', 'CODE'].includes(prefix.trim().toUpperCase())) {
-      return code.trim();
-    }
-  }
-  return null;
-}
-
-function collectDecodedCandidates(rawValue: string): string[] {
-  const trimmed = rawValue.trim();
-  const candidates = new Set<string>();
-  const add = (value: string | null | undefined) => {
-    const normalized = normalizeCode(value);
-    if (normalized) candidates.add(normalized);
-  };
-
-  add(trimmed);
-  add(extractJsonCode(trimmed));
-  add(extractPrefixedCode(trimmed));
-  for (const candidate of extractUrlCodes(trimmed)) add(candidate);
-
-  return [...candidates];
-}
-
 export function matchQrPayload({
   rawValue,
   name,
@@ -87,7 +26,7 @@ export function matchQrPayload({
   alias,
   itemAlias,
 }: QrMatchInput): QrMatchResult {
-  const decodedCandidates = collectDecodedCandidates(rawValue);
+  const decodedCandidates = collectQrLookupCandidates(rawValue);
   const expectedCodes = [
     { label: 'Alias 1', value: alias1 },
     { label: 'Alias', value: alias },
@@ -96,7 +35,7 @@ export function matchQrPayload({
     .map(({ label, value }) => ({
       label,
       raw: value?.trim() ?? '',
-      normalized: normalizeCode(value),
+      normalized: normalizeScanCode(value),
     }))
     .filter((entry) => entry.normalized);
 
@@ -136,7 +75,7 @@ export function matchQrPayload({
   return {
     isMatch: false,
     confidence: 0,
-    extractedCode: normalizeCode(rawValue) || primaryCode || null,
+    extractedCode: normalizeScanCode(rawValue) || primaryCode || null,
     extractedDescription: name,
     matchedAgainst: primaryCode || name,
     matchStrategy: 'qr_mismatch',

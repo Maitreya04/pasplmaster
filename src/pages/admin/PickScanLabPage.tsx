@@ -12,7 +12,7 @@ import { useToast } from '../../context/ToastContext';
 import { BigButton, LiveQrScanner, SearchInput, Skeleton } from '../../components/shared';
 import type { Item, ScanResult } from '../../types';
 import { appHaptics } from '../../lib/haptics';
-import { matchQrPayload, qrExpectedCodes } from '../../lib/scanner/qrMatch';
+import type { LiveQrScannerResolved } from '../../components/shared/LiveQrScanner';
 import { itemPickCode } from '../../utils/itemCodes';
 
 type ScanLabRecord = Item & {
@@ -77,40 +77,36 @@ export default function PickScanLabPage(): React.JSX.Element {
     setLiveTarget(null);
   }, []);
 
-  const handleDetected = useCallback((rawValue: string) => {
+  const handleScanResolved = useCallback((scan: LiveQrScannerResolved) => {
     setLiveTarget((current) => {
       if (!current) return null;
 
-      const match = matchQrPayload({
-        rawValue,
-        name: current.name,
-        alias1: current.alias1,
-        alias: current.alias,
-        itemAlias: null,
-      });
-
       const result: ScanResult = {
-        scannedText: rawValue,
-        confidence: match.confidence,
-        isMatch: match.isMatch,
-        matchedAgainst: match.matchedAgainst,
-        matchStrategy: match.matchStrategy,
+        scannedText: scan.rawValue,
+        confidence: scan.matchedItem ? 100 : 0,
+        isMatch: scan.matchesPickItem,
+        matchedAgainst: scan.matchedBy ?? current.name,
+        matchStrategy: scan.matchesPickItem
+          ? 'qr_catalog_hit'
+          : scan.matchedItem
+            ? 'qr_expected_mismatch'
+            : 'qr_catalog_miss',
         ocrExtracted: {
-          partNumber: match.extractedCode,
+          partNumber: scan.lookupCode,
           mrp: current.mrp ?? null,
         },
         method: 'qr_scan',
         timestamp: new Date().toISOString(),
-        extractedCode: match.extractedCode ?? undefined,
-        extractedDescription: match.extractedDescription ?? undefined,
-        reason: match.reason,
+        extractedCode: scan.lookupCode ?? undefined,
+        extractedDescription: scan.matchedItem?.name ?? undefined,
+        reason: scan.reason,
       };
 
       setLastResult({ item: current, result });
       if (result.isMatch) appHaptics.success();
       else appHaptics.warning();
 
-      return null;
+      return result.isMatch ? null : current;
     });
   }, []);
 
@@ -223,11 +219,9 @@ export default function PickScanLabPage(): React.JSX.Element {
                     <div className="min-w-0">
                       <p className="font-semibold text-[var(--content-primary)]">{item.name}</p>
                       <div className="mt-2 flex flex-wrap gap-2">
-                        {qrExpectedCodes({
-                          alias1: item.alias1,
-                          alias: item.alias,
-                          itemAlias: null,
-                        }).map((code) => (
+                        {[item.alias1, item.alias, item.pickCode]
+                          .filter((code, index, values): code is string => Boolean(code) && values.indexOf(code) === index)
+                          .map((code) => (
                           <span
                             key={code}
                             className="rounded-full bg-[var(--bg-tertiary)] px-3 py-1 font-mono text-xs text-[var(--content-secondary)]"
@@ -278,13 +272,15 @@ export default function PickScanLabPage(): React.JSX.Element {
         <LiveQrScanner
           key={liveTarget.id}
           title={liveTarget.name}
-          expectedCodes={qrExpectedCodes({
+          pickItem={{
+            itemId: liveTarget.id,
+            name: liveTarget.name,
             alias1: liveTarget.alias1,
             alias: liveTarget.alias,
-            itemAlias: null,
-          })}
+            itemCode: liveTarget.pickCode,
+          }}
           onClose={closeScan}
-          onDetected={handleDetected}
+          onResolved={handleScanResolved}
           onError={(message) => {
             toast.error(message);
             closeScan();

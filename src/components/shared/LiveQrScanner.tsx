@@ -1,5 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Lightning } from '@phosphor-icons/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CameraRotate, Lightning, WarningCircle } from '@phosphor-icons/react';
+import {
+  initializeItemScanIndex,
+  resolveScannedCatalogItem,
+  useItemScanIndexStore,
+  type ScanCatalogItem,
+  type ScanMatchSource,
+} from '../../stores/itemScanIndex';
 
 type BarcodeDetectorResult = {
   rawValue?: string | null;
@@ -10,6 +17,19 @@ type BarcodeDetectorLike = {
 };
 
 type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => BarcodeDetectorLike;
+type BarcodeDetectorStatic = BarcodeDetectorCtor & {
+  getSupportedFormats?: () => Promise<string[]>;
+};
+
+type ScannerEnginePath =
+  | { type: 'native'; detector: BarcodeDetectorLike }
+  | {
+      type: 'worker';
+      worker: Worker;
+      workerCanvas: HTMLCanvasElement;
+      workerCtx: CanvasRenderingContext2D;
+      pending: Set<number>;
+    };
 
 type CameraCapabilities = MediaTrackCapabilities & {
   torch?: boolean;
@@ -19,29 +39,93 @@ type CameraCapabilities = MediaTrackCapabilities & {
   };
 };
 
+export interface LiveQrScannerPickItem {
+  itemId: number;
+  name: string;
+  alias1?: string | null;
+  alias?: string | null;
+  itemCode?: string | null;
+}
+
+export interface LiveQrScannerResolved {
+  rawValue: string;
+  matchedItem: ScanCatalogItem | null;
+  matchedBy: ScanMatchSource | null;
+  matchesPickItem: boolean;
+  reason: string;
+  lookupCode: string | null;
+}
+
 interface LiveQrScannerProps {
-  title: string;
-  expectedCodes: string[];
+  title?: string;
+  pickItem: LiveQrScannerPickItem;
   onClose: () => void;
-  onDetected: (rawValue: string) => void;
+  onResolved: (result: LiveQrScannerResolved) => void;
   onError: (message: string) => void;
+}
+
+function uniqueCodes(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    output.push(trimmed);
+  }
+  return output;
+}
+
+function vibrate(pattern: number | number[]) {
+  if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
+  navigator.vibrate(pattern);
+}
+
+function getBrowserSupportMessage(): string {
+  if (!window.isSecureContext) {
+    return 'Live QR scanning needs a secure HTTPS session. Open the app from its normal secure link and try again.';
+  }
+
+  const ua = navigator.userAgent;
+  const isInAppBrowser =
+    /(FBAN|FBAV|Instagram|Line|LinkedInApp|Snapchat|TikTok|MicroMessenger|wv)/i.test(ua);
+
+  if (isInAppBrowser) {
+    return 'This in-app browser does not expose the fast camera QR detector. Open PASPL in Safari or Chrome directly, then try again.';
+  }
+
+  return 'This browser can open the app, but it does not expose the fast camera QR detector yet. Try the latest Safari or Chrome on your phone.';
 }
 
 export function LiveQrScanner({
   title,
-  expectedCodes,
+  pickItem,
   onClose,
-  onDetected,
+  onResolved,
   onError,
 }: LiveQrScannerProps): React.JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const detectorRef = useRef<BarcodeDetectorLike | null>(null);
+  const engineRef = useRef<ScannerEnginePath | null>(null);
   const scanTimerRef = useRef<number | null>(null);
+  const scanFrameRef = useRef<(() => Promise<void>) | null>(null);
   const completedRef = useRef(false);
-  const [status, setStatus] = useState('Starting camera...');
-  const [torchSupported, setTorchSupported] = useState(false);
-  const [torchEnabled, setTorchEnabled] = useState(false);
+  const lockedRef = useRef(false);
+  const [status, setStatus] = useState('Loading scanner...');
+  const [supportMessage, setSupportMessage] = useState<string | null>(null);
+  const [torchAvailable, setTorchAvailable] = useState(false);
+  const [torchActive, setTorchActive] = useState(false);
+  const [canReset, setCanReset] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [lastScan, setLastScan] = useState<LiveQrScannerResolved | null>(null);
+  const [flashColor, setFlashColor] = useState<'green' | 'red' | null>(null);
+  const scanIndexStatus = useItemScanIndexStore((state) => state.status);
+  const scanIndexError = useItemScanIndexStore((state) => state.error);
+
+  const expectedCodes = useMemo(
+    () => uniqueCodes([pickItem.alias1, pickItem.alias, pickItem.itemCode]),
+    [pickItem.alias1, pickItem.alias, pickItem.itemCode],
+  );
 
   const stopScanner = useCallback(() => {
     if (scanTimerRef.current !== null) {
@@ -52,12 +136,60 @@ export function LiveQrScanner({
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+    if (engineRef.current?.type === 'worker') {
+      engineRef.current.worker.terminate();
+    }
+    engineRef.current = null;
   }, []);
 
-  const handleClose = useCallback(() => {
-    stopScanner();
-    onClose();
-  }, [onClose, stopScanner]);
+  const flashViewport = useCallback((color: 'green' | 'red') => {
+    setFlashColor(color);
+    window.setTimeout(() => {
+      setFlashColor((current) => (current === color ? null : current));
+    }, 220);
+  }, []);
+
+  const handleResolvedScan = useCallback((rawValue: string) => {
+    const lookup = resolveScannedCatalogItem(rawValue);
+    const matchesPickItem = lookup?.item.id === pickItem.itemId;
+
+    const result: LiveQrScannerResolved = {
+      rawValue,
+      matchedItem: lookup?.item ?? null,
+      matchedBy: lookup?.source ?? null,
+      matchesPickItem,
+      lookupCode: lookup?.code ?? null,
+      reason: !lookup
+        ? 'QR decoded, but no catalog item matched alias1, alias, or item code.'
+        : matchesPickItem
+          ? `Verified against ${lookup.source}.`
+          : `Scanned ${lookup.item.name}, but the picker is expected to verify ${pickItem.name}.`,
+    };
+
+    setLastScan(result);
+    lockedRef.current = true;
+    setCanReset(false);
+    onResolved(result);
+
+    window.setTimeout(() => {
+      setCanReset(true);
+    }, 400);
+
+    if (matchesPickItem) {
+      completedRef.current = true;
+      stopScanner();
+      vibrate(100);
+      flashViewport('green');
+      setErrorMessage(null);
+      setStatus('Shelf verified');
+      return;
+    }
+
+    vibrate([100, 50, 100]);
+    flashViewport('red');
+    setErrorMessage(result.reason);
+    setStatus('Scan locked. Review the result and tap Scan Again.');
+  }, [flashViewport, onResolved, pickItem.itemId, pickItem.name, stopScanner]);
 
   const scheduleScan = useCallback((scan: () => Promise<void>) => {
     scanTimerRef.current = window.setTimeout(() => {
@@ -69,23 +201,38 @@ export function LiveQrScanner({
     let cancelled = false;
 
     const scanFrame = async () => {
-      if (cancelled || completedRef.current) return;
-      const detector = detectorRef.current;
+      if (cancelled || completedRef.current || lockedRef.current) return;
+      const engine = engineRef.current;
       const video = videoRef.current;
 
-      if (!detector || !video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      if (!engine || !video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
         scheduleScan(scanFrame);
         return;
       }
 
       try {
-        const barcodes = await detector.detect(video);
-        const qr = barcodes.find((code) => typeof code.rawValue === 'string' && code.rawValue.trim());
-        if (qr?.rawValue) {
-          completedRef.current = true;
-          stopScanner();
-          onDetected(qr.rawValue);
-          return;
+        if (engine.type === 'native') {
+          const barcodes = await engine.detector.detect(video);
+          const qr = barcodes.find((code) => typeof code.rawValue === 'string' && code.rawValue.trim());
+          if (qr?.rawValue) {
+            handleResolvedScan(qr.rawValue);
+            return;
+          }
+        } else if (engine.type === 'worker') {
+          if (engine.pending.size < 2) {
+            const { videoWidth, videoHeight } = video;
+            if (videoWidth > 0 && videoHeight > 0) {
+              if (engine.workerCanvas.width !== videoWidth || engine.workerCanvas.height !== videoHeight) {
+                engine.workerCanvas.width = videoWidth;
+                engine.workerCanvas.height = videoHeight;
+              }
+              engine.workerCtx.drawImage(video, 0, 0, videoWidth, videoHeight);
+              const imageData = engine.workerCtx.getImageData(0, 0, videoWidth, videoHeight);
+              const frameId = Date.now();
+              engine.pending.add(frameId);
+              engine.worker.postMessage({ type: 'scan', frameId, imageData }, [imageData.data.buffer]);
+            }
+          }
         }
       } catch (error) {
         console.error('QR scan failed:', error);
@@ -93,31 +240,73 @@ export function LiveQrScanner({
 
       scheduleScan(scanFrame);
     };
+    scanFrameRef.current = scanFrame;
 
     const startScanner = async () => {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        onError('Camera access is not available on this device');
-        return;
-      }
-
-      const Detector = (window as Window & typeof globalThis & {
-        BarcodeDetector?: BarcodeDetectorCtor;
-      }).BarcodeDetector;
-
-      if (!Detector) {
-        onError('This browser does not support fast live QR scanning yet');
-        return;
-      }
-
       try {
-        detectorRef.current = new Detector({ formats: ['qr_code'] });
+        setStatus('Loading item scan index...');
+        await initializeItemScanIndex();
+        if (cancelled) return;
+
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error('Camera access is not available on this device.');
+        }
+
+        const Detector = (window as Window & typeof globalThis & {
+          BarcodeDetector?: BarcodeDetectorStatic;
+        }).BarcodeDetector;
+
+        let useFallback = false;
+        if (Detector) {
+          const supportedFormats = await Detector.getSupportedFormats?.();
+          if (supportedFormats && !supportedFormats.includes('qr_code')) {
+            useFallback = true;
+          } else {
+            engineRef.current = { type: 'native', detector: new Detector({ formats: ['qr_code'] }) };
+          }
+        } else {
+          useFallback = true;
+        }
+
+        if (useFallback) {
+          const worker = new Worker(new URL('../../workers/qrScanner.worker', import.meta.url), { type: 'module' });
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          if (!ctx) {
+            setSupportMessage('Canvas 2D context is required for QR scanning.');
+            setStatus('Live QR is not available in this browser');
+            return;
+          }
+          engineRef.current = { type: 'worker', worker, workerCanvas: canvas, workerCtx: ctx, pending: new Set() };
+          
+          worker.onmessage = (event) => {
+            const data = event.data;
+            if (data.type === 'scan-result') {
+              const engine = engineRef.current;
+              if (engine?.type === 'worker') {
+                engine.pending.delete(data.frameId);
+              }
+              if (data.rawValue && !cancelled && !completedRef.current && !lockedRef.current) {
+                handleResolvedScan(data.rawValue);
+              }
+            } else if (data.type === 'error') {
+              console.error('QR Worker error:', data.message);
+              const engine = engineRef.current;
+              if (engine?.type === 'worker') {
+                engine.pending.clear();
+              }
+            }
+          };
+        }
+
+        setStatus('Starting camera...');
 
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
           },
         });
 
@@ -128,14 +317,17 @@ export function LiveQrScanner({
 
         streamRef.current = stream;
         const video = videoRef.current;
-        if (!video) return;
+        if (!video) {
+          throw new Error('Scanner video element is not available.');
+        }
 
         video.srcObject = stream;
+        video.setAttribute('playsinline', 'true');
         await video.play();
 
         const track = stream.getVideoTracks()[0];
         const capabilities = (track.getCapabilities?.() ?? {}) as CameraCapabilities;
-        setTorchSupported(Boolean(capabilities.torch));
+        setTorchAvailable(Boolean(capabilities.torch));
 
         try {
           const advanced: Record<string, unknown> = {
@@ -150,14 +342,16 @@ export function LiveQrScanner({
             advanced: [advanced as MediaTrackConstraintSet],
           });
         } catch {
-          // Best-effort tuning only.
+          // Best effort only.
         }
 
         setStatus('Point the QR inside the frame');
         scheduleScan(scanFrame);
       } catch (error) {
-        console.error('Camera start failed:', error);
-        onError('Could not start the back camera');
+        const message = error instanceof Error ? error.message : 'Could not start the QR scanner.';
+        setStatus('Scanner unavailable');
+        setErrorMessage(message);
+        onError(message);
       }
     };
 
@@ -165,24 +359,48 @@ export function LiveQrScanner({
 
     return () => {
       cancelled = true;
+      scanFrameRef.current = null;
       stopScanner();
     };
-  }, [onDetected, onError, scheduleScan, stopScanner]);
+  }, [handleResolvedScan, onError, scheduleScan, stopScanner]);
 
-  const toggleTorch = useCallback(async () => {
+  useEffect(() => {
+    if (scanIndexStatus !== 'error' || !scanIndexError) return;
+    setErrorMessage(scanIndexError);
+    setStatus('Scanner unavailable');
+  }, [scanIndexError, scanIndexStatus]);
+
+  const handleClose = useCallback(() => {
+    stopScanner();
+    onClose();
+  }, [onClose, stopScanner]);
+
+  const handleTorchToggle = useCallback(async () => {
     const track = streamRef.current?.getVideoTracks()[0];
     if (!track) return;
 
-    const nextValue = !torchEnabled;
+    const nextTorchState = !torchActive;
     try {
       await track.applyConstraints({
-        advanced: [{ torch: nextValue } as MediaTrackConstraintSet],
+        advanced: [{ torch: nextTorchState } as MediaTrackConstraintSet],
       });
-      setTorchEnabled(nextValue);
+      setTorchActive(nextTorchState);
     } catch {
-      setStatus('Torch control is not available on this camera');
+      setStatus('Torch control is not available on this camera.');
     }
-  }, [torchEnabled]);
+  }, [torchActive]);
+
+  const handleReset = useCallback(() => {
+    if (!canReset) return;
+    completedRef.current = false;
+    lockedRef.current = false;
+    setErrorMessage(null);
+    setLastScan(null);
+    setStatus('Point the QR inside the frame');
+    if (scanFrameRef.current) {
+      scheduleScan(scanFrameRef.current);
+    }
+  }, [canReset, scheduleScan]);
 
   return (
     <div className="fixed inset-0 z-[70] bg-slate-950/95 text-white">
@@ -190,10 +408,10 @@ export function LiveQrScanner({
         <div className="flex items-start justify-between gap-3 px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
-              Live QR Scan
+              Shelf Verification
             </p>
             <h2 className="mt-1 text-lg font-semibold leading-tight text-white">
-              {title}
+              {title ?? pickItem.name}
             </h2>
             <p className="mt-1 text-sm text-slate-300">{status}</p>
           </div>
@@ -208,16 +426,41 @@ export function LiveQrScanner({
 
         <div className="px-4">
           <div className="relative overflow-hidden rounded-[28px] border border-white/15 bg-black">
-            <video
-              ref={videoRef}
-              autoPlay
-              muted
-              playsInline
-              className="aspect-[3/4] w-full object-cover"
-            />
-            <div className="pointer-events-none absolute inset-0 p-5">
-              <div className="h-full rounded-[24px] border-2 border-emerald-400/90 shadow-[0_0_0_9999px_rgba(2,6,23,0.28)]" />
-            </div>
+            {supportMessage ? (
+              <div className="flex aspect-[3/4] w-full items-center justify-center bg-slate-950 p-5">
+                <div className="max-w-sm rounded-[24px] border border-amber-400/20 bg-amber-400/10 p-5 text-left">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200/80">
+                    Browser Limitation
+                  </p>
+                  <p className="mt-3 text-base font-semibold text-white">
+                    Fast live QR scanning is not available here
+                  </p>
+                  <p className="mt-2 text-sm leading-relaxed text-amber-50/90">
+                    {supportMessage}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="aspect-[3/4] w-full object-cover"
+                />
+                <div className="pointer-events-none absolute inset-0 p-5">
+                  <div className="h-full rounded-[24px] border-2 border-emerald-400/90 shadow-[0_0_0_9999px_rgba(2,6,23,0.28)]" />
+                </div>
+                {flashColor && (
+                  <div
+                    className={`pointer-events-none absolute inset-0 transition-opacity duration-200 ${
+                      flashColor === 'green' ? 'bg-emerald-400/30' : 'bg-red-500/25'
+                    }`}
+                  />
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -233,15 +476,46 @@ export function LiveQrScanner({
             ))}
           </div>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {errorMessage && (
+            <div className="rounded-2xl border border-red-400/25 bg-red-500/10 p-4 text-sm text-red-50">
+              <div className="flex items-start gap-3">
+                <WarningCircle size={18} weight="fill" className="mt-0.5 shrink-0 text-red-200" />
+                <div className="min-w-0">
+                  <p className="font-semibold text-white">Verification failed</p>
+                  <p className="mt-1 leading-relaxed">{errorMessage}</p>
+                  {lastScan?.matchedItem && (
+                    <p className="mt-2 text-xs text-red-100/90">
+                      Scanned item: {lastScan.matchedItem.name}
+                    </p>
+                  )}
+                  {lastScan?.rawValue && (
+                    <p className="mt-2 break-all font-mono text-xs text-red-100/90">
+                      Payload: {lastScan.rawValue}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <button
               type="button"
-              onClick={toggleTorch}
-              disabled={!torchSupported}
+              onClick={handleTorchToggle}
+              disabled={!torchAvailable || Boolean(supportMessage)}
               className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-white/10 text-sm font-semibold text-white disabled:opacity-40"
             >
               <Lightning size={18} weight="fill" />
-              {torchEnabled ? 'Torch On' : 'Torch Off'}
+              {torchActive ? 'Torch On' : 'Torch Off'}
+            </button>
+            <button
+              type="button"
+              onClick={handleReset}
+              disabled={!lockedRef.current || !canReset || Boolean(supportMessage)}
+              className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-white/10 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              <CameraRotate size={18} weight="bold" />
+              Scan Again
             </button>
             <button
               type="button"
@@ -256,7 +530,8 @@ export function LiveQrScanner({
             <p className="font-semibold text-white">Best results</p>
             <p className="mt-2 leading-relaxed">
               Keep the phone steady, fill the frame with the QR, and use the torch in dim aisles.
-              The scan matches only the expected Alias 1 or Alias, so the first exact decode wins.
+              The scan verifies the decoded code against the preloaded alias1, alias, and item code
+              maps, then checks that it matches the current pick item.
             </p>
           </div>
         </div>
