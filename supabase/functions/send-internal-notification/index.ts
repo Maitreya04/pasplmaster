@@ -40,6 +40,14 @@ interface PushSubscriptionRow {
   auth: string;
 }
 
+const SALES_NAME_ALIASES: Record<string, string> = {
+  rajuji: 'raju',
+  asadkhan: 'asad',
+  manishsharma: 'manish',
+  hardeepsingh: 'hardeep',
+  anandawasthi: 'awasthi',
+};
+
 async function getOrderSalespersonName(
   admin: SupabaseClient,
   orderId: number,
@@ -108,6 +116,12 @@ async function resolveSalesUserIds(
   admin: SupabaseClient,
   salespersonName: string,
 ): Promise<number[]> {
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const needleRaw = salespersonName.trim();
+  const needleBase = normalize(needleRaw);
+  const needle = SALES_NAME_ALIASES[needleBase] ?? needleBase;
+  if (!needle) return [];
+
   const { data, error } = await admin
     .from('users')
     .select('id, full_name, station_label')
@@ -115,13 +129,9 @@ async function resolveSalesUserIds(
     .eq('is_active', true);
   if (error) throw error;
   const list = data ?? [];
-  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const needleRaw = salespersonName.trim();
-  const needle = normalize(needleRaw);
   const exact = list.filter((u: { full_name?: string | null; station_label?: string | null }) => {
     const full = typeof u.full_name === 'string' ? normalize(u.full_name.trim()) : '';
     const station = typeof u.station_label === 'string' ? normalize(u.station_label.trim()) : '';
-    if (!needle) return false;
     return full === needle || station === needle;
   });
   if (exact.length > 0) {
@@ -130,13 +140,20 @@ async function resolveSalesUserIds(
   const fuzzy = list.filter((u: { full_name?: string | null; station_label?: string | null }) => {
     const full = typeof u.full_name === 'string' ? normalize(u.full_name.trim()) : '';
     const station = typeof u.station_label === 'string' ? normalize(u.station_label.trim()) : '';
-    if (!needle) return false;
-    return full.includes(needle) || needle.includes(full) || station.includes(needle) || needle.includes(station);
+    return (
+      full.includes(needle) ||
+      needle.includes(full) ||
+      station.includes(needle) ||
+      needle.includes(station)
+    );
   });
   if (fuzzy.length > 0) {
     return fuzzy.map((u: { id: number }) => u.id);
   }
-  return list.map((u: { id: number }) => u.id);
+  console.warn(
+    `send-internal-notification: no active sales user match for salesperson_name="${needleRaw}"`,
+  );
+  return [];
 }
 
 async function insertUserNotifications(
@@ -465,10 +482,7 @@ serve(async (req) => {
       const body = payload.messageBody.trim();
       const resolvedSalespersonName =
         (await getOrderSalespersonName(admin, payload.orderId)) ?? payload.salespersonName;
-      let salesIds = await resolveSalesUserIds(admin, resolvedSalespersonName);
-      if (salesIds.length === 0) {
-        salesIds = await fetchActiveUserIds(admin, 'sales');
-      }
+      const salesIds = await resolveSalesUserIds(admin, resolvedSalespersonName);
       const deepLink = `/sales/orders`;
       await insertUserNotifications(
         admin,
