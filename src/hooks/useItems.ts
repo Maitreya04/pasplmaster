@@ -1,4 +1,3 @@
-import { useEffect, useId } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { queryClient } from '../lib/queryClient';
@@ -8,7 +7,12 @@ const BATCH_SIZE = 1000;
 const ITEMS_SELECT =
   'id,name,alias,alias1,parent_group,main_group,item_category,sales_price,mrp,stock_qty,rack_no';
 
+/** How often to poll for changes (ms). Your MSSQL script runs every ~70s, so 30s polling
+ *  means at most a 30-second lag before the UI catches up. */
+const POLL_INTERVAL_MS = 30_000;
+
 export async function fetchAllItems(): Promise<Item[]> {
+  console.log('[useItems] fetching all items...', new Date().toLocaleTimeString());
   const { count, error: countErr } = await supabase
     .from('items')
     .select('id', { count: 'exact', head: true })
@@ -38,78 +42,25 @@ export async function fetchAllItems(): Promise<Item[]> {
       offset += data.length;
     }
   }
-  return allItems.slice(0, offset);
+  const final = allItems.slice(0, offset);
+  console.log('[useItems] fetched', final.length, 'items. Sample stock_qty:', final[0]?.stock_qty);
+  return final;
 }
 
 export const ITEMS_QUERY_KEY = ['items'] as const;
 
 export function useItems() {
-  const uid = useId();
-
-  useEffect(() => {
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    let pendingUpdates = new Map<number, Item>();
-    let hasInvalidate = false;
-
-    const applyUpdates = () => {
-      queryClient.setQueryData<Item[]>(ITEMS_QUERY_KEY, (oldData) => {
-        if (!oldData) return oldData;
-        if (hasInvalidate) {
-          void queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
-          return oldData;
-        }
-
-        if (pendingUpdates.size === 0) return oldData;
-
-        // Apply all updates in one go
-        const newData = [...oldData];
-        let changed = false;
-        for (let i = 0; i < newData.length; i++) {
-          const item = newData[i];
-          const update = pendingUpdates.get(item.id);
-          if (update) {
-            newData[i] = { ...item, ...update };
-            changed = true;
-          }
-        }
-
-        pendingUpdates.clear();
-        return changed ? newData : oldData;
-      });
-    };
-
-    const channel = supabase
-      .channel(`items-changes-${uid}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'items' },
-        (payload) => {
-          if (payload.eventType === 'UPDATE') {
-            const updatedItem = payload.new as Item;
-            pendingUpdates.set(updatedItem.id, updatedItem);
-          } else {
-            hasInvalidate = true;
-          }
-
-          if (debounceTimer) clearTimeout(debounceTimer);
-          debounceTimer = setTimeout(() => {
-            applyUpdates();
-            hasInvalidate = false;
-          }, 300); // 300ms batching window
-        }
-      )
-      .subscribe();
-
-    return () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      supabase.removeChannel(channel);
-    };
-  }, [uid]);
-
   return useQuery<Item[]>({
     queryKey: ITEMS_QUERY_KEY,
     queryFn: fetchAllItems,
-    staleTime: Number.POSITIVE_INFINITY,
+    staleTime: 0,
+    refetchInterval: POLL_INTERVAL_MS,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    // Disable structural sharing so React Query always returns a new array
+    // reference, forcing useMemo/search index to rebuild with fresh data.
+    structuralSharing: false,
   });
 }
 
@@ -118,6 +69,6 @@ export function prefetchItems() {
   void queryClient.prefetchQuery({
     queryKey: ITEMS_QUERY_KEY,
     queryFn: fetchAllItems,
-    staleTime: Number.POSITIVE_INFINITY,
+    staleTime: POLL_INTERVAL_MS,
   });
 }
