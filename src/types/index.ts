@@ -58,6 +58,7 @@ export interface Order {
   transport_id: number | null;
   transport_name: string | null;
   salesperson_name: string;
+  salesperson_user_id?: number | null;
   reviewer_name: string | null;
   picker_name: string | null;
   workflow_status: WorkflowStatus;

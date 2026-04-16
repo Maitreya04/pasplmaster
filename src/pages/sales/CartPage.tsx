@@ -856,7 +856,7 @@ export default function CartPage(): React.JSX.Element | null {
     setNotes,
   } = useCart();
   const toast = useToast();
-  const { userName } = useAuth();
+  const { userId, userName } = useAuth();
   const { data: transports = [] } = useTransports();
 
   const [submitSuccess, setSubmitSuccess] = useState<{
@@ -970,6 +970,7 @@ export default function CartPage(): React.JSX.Element | null {
         transport_id: transport?.id ?? null,
         transport_name: transport?.name ?? null,
         salesperson_name: userName,
+        salesperson_user_id: userId,
         priority,
         notes: notes.trim() || null,
         lines: items.map((ci) => ({

@@ -48,19 +48,31 @@ const SALES_NAME_ALIASES: Record<string, string> = {
   anandawasthi: 'awasthi',
 };
 
-async function getOrderSalespersonName(
+async function getOrderSalespersonTarget(
   admin: SupabaseClient,
   orderId: number,
-): Promise<string | null> {
+): Promise<{ userId: number | null; salespersonName: string | null }> {
   const { data, error } = await admin
     .from('orders')
-    .select('salesperson_name')
+    .select('salesperson_user_id, salesperson_name')
     .eq('id', orderId)
     .limit(1)
     .maybeSingle();
   if (error) throw error;
-  const name = (data as { salesperson_name?: string | null } | null)?.salesperson_name ?? null;
-  return typeof name === 'string' && name.trim().length > 0 ? name : null;
+  const row = (data as {
+    salesperson_user_id?: number | null;
+    salesperson_name?: string | null;
+  } | null) ?? null;
+  return {
+    userId:
+      typeof row?.salesperson_user_id === 'number' && Number.isFinite(row.salesperson_user_id)
+        ? row.salesperson_user_id
+        : null,
+    salespersonName:
+      typeof row?.salesperson_name === 'string' && row.salesperson_name.trim().length > 0
+        ? row.salesperson_name
+        : null,
+  };
 }
 
 const corsHeaders = {
@@ -386,10 +398,12 @@ serve(async (req) => {
       );
 
       // Also notify sales (billing is typically desktop-only).
-      const salespersonName = await getOrderSalespersonName(admin, payload.orderId);
-      const salesIds = salespersonName
-        ? await resolveSalesUserIds(admin, salespersonName)
-        : await fetchActiveUserIds(admin, 'sales');
+      const salesTarget = await getOrderSalespersonTarget(admin, payload.orderId);
+      const salesIds = salesTarget.userId
+        ? [salesTarget.userId]
+        : salesTarget.salespersonName
+          ? await resolveSalesUserIds(admin, salesTarget.salespersonName)
+          : await fetchActiveUserIds(admin, 'sales');
       const salesDeepLink = `/sales/orders`;
       await insertUserNotifications(
         admin,
@@ -407,7 +421,7 @@ serve(async (req) => {
             flagReason: payload.flagReason,
             pickerName: payload.pickerName ?? null,
             orderItemId: payload.orderItemId,
-            salespersonName: salespersonName,
+            salespersonName: salesTarget.salespersonName,
             deep_link: salesDeepLink,
           },
         })),
@@ -480,9 +494,11 @@ serve(async (req) => {
 
       const title = `Order update · ${payload.customerName}`;
       const body = payload.messageBody.trim();
-      const resolvedSalespersonName =
-        (await getOrderSalespersonName(admin, payload.orderId)) ?? payload.salespersonName;
-      const salesIds = await resolveSalesUserIds(admin, resolvedSalespersonName);
+      const salesTarget = await getOrderSalespersonTarget(admin, payload.orderId);
+      const resolvedSalespersonName = salesTarget.salespersonName ?? payload.salespersonName;
+      const salesIds = salesTarget.userId
+        ? [salesTarget.userId]
+        : await resolveSalesUserIds(admin, resolvedSalespersonName);
       const deepLink = `/sales/orders`;
       await insertUserNotifications(
         admin,
