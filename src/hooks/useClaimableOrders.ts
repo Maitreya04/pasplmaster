@@ -106,6 +106,25 @@ export function useClaimableOrders(
       );
 
       const orderIds = orders.map((o: Order) => o.id);
+      const customerIds = [...new Set(
+        orders
+          .map((o: Order) => o.customer_id)
+          .filter((id): id is number => typeof id === 'number'),
+      )];
+
+      const customerAddressMap = new Map<number, string | null>();
+      if (customerIds.length > 0) {
+        const { data: customers, error: customerError } = await supabase
+          .from('customers')
+          .select('id, address')
+          .in('id', customerIds);
+
+        if (customerError) throw customerError;
+
+        for (const customer of customers ?? []) {
+          customerAddressMap.set(customer.id, customer.address ?? null);
+        }
+      }
 
       // 2. Fetch active claims for these orders + stage, joined with user name
       const { data: claims, error: claimError } = await supabase
@@ -139,6 +158,10 @@ export function useClaimableOrders(
         const claimInfo = claimMap.get(order.id) ?? null;
         return {
           ...order,
+          customer_address:
+            typeof order.customer_id === 'number'
+              ? (customerAddressMap.get(order.customer_id) ?? null)
+              : null,
           claim_info: claimInfo,
           is_mine: claimInfo?.claimed_by_user_id === userId,
         };

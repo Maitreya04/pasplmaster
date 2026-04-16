@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CaretDown, CaretUp, Check, Copy, Package, Warning } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { useOrders } from '../../hooks/useOrders';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useBillingCustomerUpdate } from '../../hooks/useBillingCustomerUpdate';
@@ -10,11 +12,19 @@ import { Card, BottomSheet, StatusBadge, EmptyState, Skeleton } from '../../comp
 import type { Order, OrderItem, OrderWithItems, PendingItem } from '../../types';
 
 import { formatCurrency, formatTimeAgo } from '../../utils/formatters';
+import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 import {
   digitsOnlyMobile,
   whatsappPrefilledUrl,
   whatsappShareUrl,
 } from '../../lib/buildOrderCustomerMessage';
+import {
+  isPendingRecoveryActionable,
+  pendingRecoveryBadgeClasses,
+  pendingRecoveryHelpText,
+  pendingRecoveryLabel,
+} from '../../lib/pendingRecovery';
+import { supabase } from '../../lib/supabase/client';
 
 const BILLING_OOS_FLAG_REASON = 'Out of Stock (Billing)';
 const TEXT_STATUS_PARTIAL = 'text-[color:var(--content-warning-on-light)]';
@@ -105,6 +115,13 @@ function stockUiVariant(
   return 'partial';
 }
 
+function pendingRecoverySortKey(status: PendingItem['recovery_status']): number {
+  if (status === 'back_in_stock') return 0;
+  if (status === 'needs_checked') return 1;
+  if (status === 'waiting_stock') return 2;
+  return 3;
+}
+
 function sortKey(item: OrderItem, billingOos: boolean, pickerFlagged: boolean, pendingQtyTotal: number): number {
   const v = stockUiVariant(item, billingOos, pickerFlagged, pendingQtyTotal);
   return v === 'critical' ? 0 : v === 'partial' ? 1 : v === 'neutral' ? 2 : 3;
@@ -130,7 +147,9 @@ function mergeOrderLinesAndPending(
     let pendingExtra: PendingItem | null = null;
     let pendingQtyTotal = 0;
     if (arr?.length) {
-      pendingExtra = arr[0]!;
+      pendingExtra = [...arr].sort(
+        (a, b) => pendingRecoverySortKey(a.recovery_status) - pendingRecoverySortKey(b.recovery_status),
+      )[0]!;
       pendingQtyTotal = arr.reduce((s, p) => s + p.qty_pending, 0);
       for (const p of arr) consumed.add(p.id);
     }
@@ -183,6 +202,20 @@ function StatusTag({ variant, pickerFlagged }: { variant: StockUiVariant; picker
   );
 }
 
+function RecoveryStatusTag({
+  status,
+}: {
+  status: PendingItem['recovery_status'];
+}): React.JSX.Element {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center rounded px-1.5 py-px font-ds-micro font-semibold leading-tight ${pendingRecoveryBadgeClasses(status)}`}
+    >
+      {pendingRecoveryLabel(status)}
+    </span>
+  );
+}
+
 // ─── Single flat line row ─────────────────────────────────────
 
 function OrderLineRow({
@@ -196,6 +229,9 @@ function OrderLineRow({
   gap,
   billingOos,
   flagNotes,
+  recoveryStatus,
+  recoveryHelp,
+  actions,
 }: {
   name: string;
   variant: StockUiVariant;
@@ -207,6 +243,9 @@ function OrderLineRow({
   gap: number;
   billingOos: boolean;
   flagNotes?: string | null;
+  recoveryStatus?: PendingItem['recovery_status'] | null;
+  recoveryHelp?: string | null;
+  actions?: React.ReactNode;
 }): React.JSX.Element {
   const qtyColor =
     pickerFlagged
@@ -232,6 +271,12 @@ function OrderLineRow({
             <>
               {' '}
               <StatusTag variant={variant} pickerFlagged={pickerFlagged} />
+            </>
+          )}
+          {recoveryStatus && (
+            <>
+              {' '}
+              <RecoveryStatusTag status={recoveryStatus} />
             </>
           )}
         </div>
@@ -263,6 +308,10 @@ function OrderLineRow({
       {flagNotes && (
         <p className="text-xs text-[var(--content-tertiary)] leading-snug">Note: {flagNotes}</p>
       )}
+      {recoveryHelp && (
+        <p className="text-xs text-[var(--content-tertiary)] leading-snug">{recoveryHelp}</p>
+      )}
+      {actions ? <div className="flex flex-wrap gap-2 pt-1">{actions}</div> : null}
     </div>
   );
 }
@@ -317,6 +366,36 @@ function OrderCard({
   );
 }
 
+function RecoveryActionButton({
+  children,
+  onClick,
+  disabled,
+  variant = 'secondary',
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  variant?: 'primary' | 'secondary' | 'danger';
+}) {
+  const className =
+    variant === 'primary'
+      ? 'border-transparent bg-[var(--role-primary)] text-[var(--role-content)]'
+      : variant === 'danger'
+        ? 'border-[var(--border-negative)] bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]'
+        : 'border-[var(--border-opaque)] bg-[var(--bg-primary)] text-[var(--content-primary)]';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`rounded-lg border px-3 py-2 text-xs font-semibold disabled:opacity-50 ${className}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 // ─── Order detail sheet ───────────────────────────────────────
 
 function OrderDetailSheet({
@@ -328,6 +407,9 @@ function OrderDetailSheet({
   isOpen: boolean;
   onClose: () => void;
 }) {
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const { userId, userName } = useAuth();
   const { data: order, isLoading } = useOrderDetail(orderId);
   const { data: billingUpdate } = useBillingCustomerUpdate({
     orderId,
@@ -340,6 +422,43 @@ function OrderDetailSheet({
   });
   const [messageCopied, setMessageCopied] = useState(false);
   const [showMessagePreview, setShowMessagePreview] = useState(false);
+
+  const recoveryActionMutation = useMutation({
+    mutationFn: async ({
+      pendingItemId,
+      action,
+    }: {
+      pendingItemId: number;
+      action: 'send_to_billing' | 'keep_pending' | 'customer_declined';
+    }) => {
+      const { error } = await supabase.rpc('process_pending_recovery_action', {
+        p_pending_item_id: pendingItemId,
+        p_action: action,
+        p_actor_user_id: userId,
+        p_actor_name: userName,
+      });
+
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['pending-items'] });
+      queryClient.invalidateQueries({ queryKey: ['sales-pending-recovery'] });
+      queryClient.invalidateQueries({ queryKey: ['order'] });
+
+      if (vars.action === 'send_to_billing') {
+        toast.success('Sent back to billing for review');
+        return;
+      }
+      if (vars.action === 'keep_pending') {
+        toast.info('Left pending until the next stock/customer check');
+        return;
+      }
+      toast.info('Removed this pending line from follow-up');
+    },
+    onError: () => {
+      toast.error('Failed to update pending follow-up');
+    },
+  });
 
   const sheetRows = useMemo(
     () => mergeOrderLinesAndPending(order?.items, pending),
@@ -362,8 +481,37 @@ function OrderDetailSheet({
   const isRejected = order ? isWholeOrderRejected(order) : false;
   const rejectReason = formatRejectReason(order?.notes);
   const customerWhatsappDigits = normalizeWhatsappDigits(order?.customer_mobile);
-  const billingMessage = billingUpdate?.message_text?.trim() ?? '';
-  const billingSummaryLines = billingUpdate?.summary_json?.lines ?? [];
+  const liveBillingPreview = useMemo(() => {
+    if (!order || !billingUpdate) return null;
+    return buildBillingCustomerUpdate({
+      orderNumber: order.order_number,
+      customerName: order.customer_name,
+      businessName: import.meta.env.VITE_BUSINESS_DISPLAY_NAME,
+      date: billingDateStr ? new Date(billingDateStr) : new Date(),
+      lines: sheetRows
+        .filter((row): row is Extract<OrderSheetRow, { kind: 'line' }> => row.kind === 'line')
+        .map((row) => {
+          const billed = billedUnits(
+            row.item,
+            isBillingStockRejection(row.item),
+            row.pendingQtyTotal,
+          );
+          const authoritativePendingQty = Math.min(
+            row.item.qty_requested,
+            Math.max(row.pendingQtyTotal, row.item.qty_po ?? 0),
+          );
+          return {
+            itemId: row.item.item_id,
+            name: row.item.item_name,
+            qtyRequested: row.item.qty_requested,
+            qtyBilled: billed,
+            qtyPending: authoritativePendingQty,
+          };
+        }),
+    });
+  }, [billingDateStr, billingUpdate, order, sheetRows]);
+  const billingMessage = liveBillingPreview?.messageText ?? billingUpdate?.message_text?.trim() ?? '';
+  const billingSummaryLines = liveBillingPreview?.summary.lines ?? billingUpdate?.summary_json?.lines ?? [];
   const billedLineCount = billingSummaryLines.filter((line) => line.qty_billed > 0).length;
   const pendingLineCount = billingSummaryLines.filter((line) => line.qty_pending > 0).length;
   const billingUpdateTime = billingUpdate?.created_at
@@ -500,6 +648,49 @@ function OrderDetailSheet({
             {sheetRows.map((row) => {
               if (row.kind === 'pending_only') {
                 const pi = row.pi;
+                const isBusy =
+                  recoveryActionMutation.isPending &&
+                  recoveryActionMutation.variables?.pendingItemId === pi.id;
+                const recoveryActions = isPendingRecoveryActionable(pi.recovery_status) ? (
+                  <>
+                    <RecoveryActionButton
+                      variant="primary"
+                      disabled={isBusy}
+                      onClick={() =>
+                        recoveryActionMutation.mutate({
+                          pendingItemId: pi.id,
+                          action: 'send_to_billing',
+                        })
+                      }
+                    >
+                      Customer confirmed → send to billing
+                    </RecoveryActionButton>
+                    <RecoveryActionButton
+                      disabled={isBusy}
+                      onClick={() =>
+                        recoveryActionMutation.mutate({
+                          pendingItemId: pi.id,
+                          action: 'keep_pending',
+                        })
+                      }
+                    >
+                      Keep pending
+                    </RecoveryActionButton>
+                    <RecoveryActionButton
+                      variant="danger"
+                      disabled={isBusy}
+                      onClick={() =>
+                        recoveryActionMutation.mutate({
+                          pendingItemId: pi.id,
+                          action: 'customer_declined',
+                        })
+                      }
+                    >
+                      Customer no longer wants it
+                    </RecoveryActionButton>
+                  </>
+                ) : null;
+
                 return (
                   <OrderLineRow
                     key={`p-${pi.id}`}
@@ -512,6 +703,9 @@ function OrderDetailSheet({
                     gap={pi.qty_pending}
                     billingOos={false}
                     flagNotes={pi.note}
+                    recoveryStatus={pi.recovery_status}
+                    recoveryHelp={pendingRecoveryHelpText(pi.recovery_status)}
+                    actions={recoveryActions}
                   />
                 );
               }
@@ -525,6 +719,51 @@ function OrderDetailSheet({
               const lineTotal = price * billed;
               const gap = Math.max(0, item.qty_requested - billed);
               const v = stockUiVariant(item, billingOos, pickerFlagged, pendingQtyTotal);
+              const recoveryPending = row.pendingExtra;
+              const isBusy =
+                recoveryPending != null &&
+                recoveryActionMutation.isPending &&
+                recoveryActionMutation.variables?.pendingItemId === recoveryPending.id;
+              const recoveryActions =
+                recoveryPending && isPendingRecoveryActionable(recoveryPending.recovery_status) ? (
+                  <>
+                    <RecoveryActionButton
+                      variant="primary"
+                      disabled={isBusy}
+                      onClick={() =>
+                        recoveryActionMutation.mutate({
+                          pendingItemId: recoveryPending.id,
+                          action: 'send_to_billing',
+                        })
+                      }
+                    >
+                      Customer confirmed → send to billing
+                    </RecoveryActionButton>
+                    <RecoveryActionButton
+                      disabled={isBusy}
+                      onClick={() =>
+                        recoveryActionMutation.mutate({
+                          pendingItemId: recoveryPending.id,
+                          action: 'keep_pending',
+                        })
+                      }
+                    >
+                      Keep pending
+                    </RecoveryActionButton>
+                    <RecoveryActionButton
+                      variant="danger"
+                      disabled={isBusy}
+                      onClick={() =>
+                        recoveryActionMutation.mutate({
+                          pendingItemId: recoveryPending.id,
+                          action: 'customer_declined',
+                        })
+                      }
+                    >
+                      Customer no longer wants it
+                    </RecoveryActionButton>
+                  </>
+                ) : null;
 
               return (
                 <OrderLineRow
@@ -539,6 +778,11 @@ function OrderDetailSheet({
                   gap={gap}
                   billingOos={billingOos}
                   flagNotes={item.flag_notes}
+                  recoveryStatus={recoveryPending?.recovery_status ?? null}
+                  recoveryHelp={
+                    recoveryPending ? pendingRecoveryHelpText(recoveryPending.recovery_status) : null
+                  }
+                  actions={recoveryActions}
                 />
               );
             })}
@@ -578,10 +822,21 @@ export default function MyOrdersPage(): React.JSX.Element | null {
     const map = new Map<number, { id: number; label: string; created_at: string }>();
     for (const n of notifications) {
       if (n.read_at !== null) continue;
-      if (n.type !== 'order_update_for_sales' && n.type !== 'item_flagged_by_picker') continue;
+      if (
+        n.type !== 'order_update_for_sales' &&
+        n.type !== 'item_flagged_by_picker' &&
+        n.type !== 'pending_item_back_in_stock'
+      ) {
+        continue;
+      }
       if (typeof n.order_id !== 'number' || !Number.isFinite(n.order_id)) continue;
       const existing = map.get(n.order_id);
-      const label = n.type === 'item_flagged_by_picker' ? 'Flagged' : inferSalesUpdateLabel(n.body);
+      const label =
+        n.type === 'item_flagged_by_picker'
+          ? 'Flagged'
+          : n.type === 'pending_item_back_in_stock'
+            ? 'Back in stock'
+            : inferSalesUpdateLabel(n.body);
       if (!existing || new Date(n.created_at).getTime() > new Date(existing.created_at).getTime()) {
         map.set(n.order_id, { id: n.id, label, created_at: n.created_at });
       }
@@ -595,7 +850,11 @@ export default function MyOrdersPage(): React.JSX.Element | null {
       const toRead = notifications.filter((n) => {
         if (n.read_at !== null) return false;
         if (n.order_id !== orderId) return false;
-        return n.type === 'order_update_for_sales' || n.type === 'item_flagged_by_picker';
+        return (
+          n.type === 'order_update_for_sales' ||
+          n.type === 'item_flagged_by_picker' ||
+          n.type === 'pending_item_back_in_stock'
+        );
       });
       await Promise.allSettled(toRead.map((n) => markRead(n.id)));
     },

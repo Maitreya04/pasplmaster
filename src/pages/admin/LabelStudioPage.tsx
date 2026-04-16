@@ -201,12 +201,12 @@ function presetDescription(preset: PrintPreset): string {
 
 function rackStripCodeStyle(code: string): CSSProperties {
   const length = code.trim().length;
-  if (length <= 12) return { fontSize: '10.2mm', letterSpacing: '-0.06em', lineHeight: 0.88 };
-  if (length <= 14) return { fontSize: '9.1mm', letterSpacing: '-0.055em', lineHeight: 0.88 };
-  if (length <= 16) return { fontSize: '8.2mm', letterSpacing: '-0.05em', lineHeight: 0.88 };
-  if (length <= 18) return { fontSize: '7.2mm', letterSpacing: '-0.045em', lineHeight: 0.88 };
-  if (length <= 20) return { fontSize: '6.4mm', letterSpacing: '-0.04em', lineHeight: 0.88 };
-  return { fontSize: '5.4mm', letterSpacing: '-0.03em', lineHeight: 0.84 };
+  if (length <= 10) return { fontSize: '9.6mm', letterSpacing: '-0.06em', lineHeight: 0.88 };
+  if (length <= 12) return { fontSize: '8.4mm', letterSpacing: '-0.055em', lineHeight: 0.88 };
+  if (length <= 14) return { fontSize: '7.6mm', letterSpacing: '-0.05em', lineHeight: 0.88 };
+  if (length <= 17) return { fontSize: '6.7mm', letterSpacing: '-0.045em', lineHeight: 0.88 };
+  if (length <= 20) return { fontSize: '6.0mm', letterSpacing: '-0.04em', lineHeight: 0.88 };
+  return { fontSize: '5.0mm', letterSpacing: '-0.03em', lineHeight: 0.84 };
 }
 
 function buildRecord(item: Item): LabelRecord | null {
@@ -720,7 +720,7 @@ export default function LabelStudioPage(): React.JSX.Element {
                   const isRackStrip = printPreset === 'rack-strip';
                   const showDescription = printPreset !== 'compact';
                   const showAlternateCode = printPreset === 'full' && Boolean(item.alternateCode);
-                  const wrapRackCode = item.pickCode.trim().length > 20;
+                  const wrapRackCode = item.pickCode.trim().length > 12;
 
                   return (
                     <article

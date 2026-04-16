@@ -45,6 +45,10 @@ function OrderRow({
 }) {
   const isUrgent = order.priority === 'urgent';
   const hasSpecialRate = order.special_rate_line_count > 0;
+  const customerAddress = order.customer_address?.trim() ?? '';
+  const headerMeta = [order.order_number, order.salesperson_name].filter(Boolean).join(' · ');
+  const customerLocation = [order.customer_city, customerAddress].filter(Boolean).join(' · ');
+  const notePreview = order.notes?.trim() ?? '';
 
   return (
     <button
@@ -73,9 +77,24 @@ function OrderRow({
               {order.customer_name}
             </h3>
           </div>
-          <p className="text-xs text-[var(--content-tertiary)]">
-            {[order.order_number, order.customer_city, order.salesperson_name].filter(Boolean).join(' · ')}
-          </p>
+          {headerMeta && (
+            <p className="text-xs text-[var(--content-tertiary)]">
+              {headerMeta}
+            </p>
+          )}
+          {customerLocation && (
+            <p className="mt-1 line-clamp-2 text-sm text-[var(--content-tertiary)]">
+              {order.customer_city && (
+                <span className="font-medium text-[var(--content-secondary)]">
+                  {order.customer_city}
+                </span>
+              )}
+              {order.customer_city && customerAddress && (
+                <span className="px-1 text-[var(--content-quaternary)]">·</span>
+              )}
+              {customerAddress && <span>{customerAddress}</span>}
+            </p>
+          )}
         </div>
         <div className="text-right shrink-0">
           <p className={`text-sm font-mono font-semibold tabular-nums ${
@@ -94,6 +113,17 @@ function OrderRow({
           <p className="text-xs font-semibold text-[var(--content-warning)]">
             Quote locked on {order.special_rate_line_count} line{order.special_rate_line_count === 1 ? '' : 's'}
             {order.special_rate_qty > 0 ? ` · ${order.special_rate_qty} pcs` : ''} · check highlighted rate before billing in Busy
+          </p>
+        </div>
+      )}
+
+      {notePreview && (
+        <div className="mt-3 rounded-xl border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-3 py-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--content-accent)]">
+            Sales note
+          </p>
+          <p className="mt-1 text-xs leading-snug text-[var(--content-primary)] line-clamp-2 whitespace-pre-wrap">
+            {notePreview}
           </p>
         </div>
       )}

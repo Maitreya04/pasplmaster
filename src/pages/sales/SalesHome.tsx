@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
-import { PlusCircle, ListBullets } from '@phosphor-icons/react';
+import { PlusCircle, ListBullets, HourglassHigh } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { useSalesDashboard } from '../../hooks/useSalesDashboard';
+import { useSalesPendingRecovery } from '../../hooks/useSalesPendingRecovery';
 import { Card, Skeleton } from '../../components/shared';
 import type { Order } from '../../types';
 
@@ -229,6 +230,10 @@ function RecentOrderCard({ order }: { order: Order }) {
 export default function SalesHome(): React.JSX.Element | null {
   const { userName } = useAuth();
   const { data, isLoading } = useSalesDashboard(userName);
+  const { data: pendingRecovery = [] } = useSalesPendingRecovery(userName);
+  const actionableRecoveryCount = pendingRecovery.filter(
+    (item) => item.recovery_status === 'back_in_stock' || item.recovery_status === 'needs_checked',
+  ).length;
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--content-primary)]">
@@ -299,6 +304,21 @@ export default function SalesHome(): React.JSX.Element | null {
                   <ListBullets size={24} weight="duotone" className="text-[var(--role-content)]" />
                 </div>
                 <span className="font-semibold text-[var(--content-primary)]">My Orders</span>
+              </Card>
+            </Link>
+            <Link to="/sales/pending-recovery">
+              <Card pressable className="flex items-center gap-3 py-4">
+                <div className="w-10 h-10 rounded-xl bg-[var(--bg-warning-subtle)] flex items-center justify-center">
+                  <HourglassHigh size={24} weight="duotone" className="text-[var(--content-warning)]" />
+                </div>
+                <div className="min-w-0">
+                  <span className="block font-semibold text-[var(--content-primary)]">Pending Follow-up</span>
+                  <span className="block text-xs text-[var(--content-secondary)]">
+                    {actionableRecoveryCount > 0
+                      ? `${actionableRecoveryCount} action needed`
+                      : 'Track back-in-stock lines'}
+                  </span>
+                </div>
               </Card>
             </Link>
           </div>

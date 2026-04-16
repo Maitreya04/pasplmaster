@@ -31,6 +31,7 @@ type TabId = 'brand' | 'sku' | 'lines' | 'pending';
 type BrandSkuRow = {
   item_id: number;
   item_name: string;
+  item_alias: string | null;
   totalPo: number;
   totalValue: number;
   lineCount: number;
@@ -54,6 +55,7 @@ type BrandSummary = {
 type SkuSummary = {
   item_id: number;
   item_name: string;
+  item_alias: string | null;
   brandLabel: string;
   totalPo: number;
   totalValue: number;
@@ -156,16 +158,13 @@ function toTabSeparated(rows: Array<Array<string | number>>): string {
 
 function buildAllBrandCopy(rows: BrandSummary[]): string {
   return toTabSeparated([
-    ['Brand', 'Item', 'Qty To Buy', 'Estimated Buy Value', 'Order Lines', 'Customers', 'Oldest Age (days)'],
+    ['Brand', 'Description', 'Alias', 'Qty'],
     ...rows.flatMap((brand) =>
       brand.skuRows.map((sku) => [
         brand.label,
         sku.item_name,
+        sku.item_alias ?? '',
         sku.totalPo,
-        sku.totalValue,
-        sku.lineCount,
-        sku.customerCount,
-        sku.oldestCreatedAt ? ageDays(sku.oldestCreatedAt) : 0,
       ]),
     ),
   ]);
@@ -173,15 +172,11 @@ function buildAllBrandCopy(rows: BrandSummary[]): string {
 
 function buildSingleBrandCopy(brand: BrandSummary): string {
   return toTabSeparated([
-    ['Brand', 'Item', 'Qty To Buy', 'Estimated Buy Value', 'Order Lines', 'Customers', 'Oldest Age (days)'],
+    ['Description', 'Alias', 'Qty'],
     ...brand.skuRows.map((sku) => [
-      brand.label,
       sku.item_name,
+      sku.item_alias ?? '',
       sku.totalPo,
-      sku.totalValue,
-      sku.lineCount,
-      sku.customerCount,
-      sku.oldestCreatedAt ? ageDays(sku.oldestCreatedAt) : 0,
     ]),
   ]);
 }
@@ -323,6 +318,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
           {
             item_id: number;
             item_name: string;
+            item_alias: string | null;
             totalPo: number;
             totalValue: number;
             lineCount: number;
@@ -365,6 +361,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
       const sku = brand.skuMap.get(row.item_id) ?? {
         item_id: row.item_id,
         item_name: row.item_name,
+        item_alias: normalizeEmbeddedItem(row.items)?.alias ?? null,
         totalPo: 0,
         totalValue: 0,
         lineCount: 0,
@@ -399,6 +396,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
           .map((sku) => ({
             item_id: sku.item_id,
             item_name: sku.item_name,
+            item_alias: sku.item_alias,
             totalPo: sku.totalPo,
             totalValue: sku.totalValue,
             lineCount: sku.lineCount,
@@ -416,6 +414,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
       {
         item_id: number;
         item_name: string;
+        item_alias: string | null;
         brandLabel: string;
         totalPo: number;
         totalValue: number;
@@ -430,6 +429,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
       const prev = skuMap.get(row.item_id) ?? {
         item_id: row.item_id,
         item_name: row.item_name,
+        item_alias: normalizeEmbeddedItem(row.items)?.alias ?? null,
         brandLabel: groupLabel(row),
         totalPo: 0,
         totalValue: 0,
@@ -454,6 +454,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
       .map((sku) => ({
         item_id: sku.item_id,
         item_name: sku.item_name,
+        item_alias: sku.item_alias,
         brandLabel: sku.brandLabel,
         totalPo: sku.totalPo,
         totalValue: sku.totalValue,
@@ -873,6 +874,9 @@ function BrandTab({
                   >
                     <div className="min-w-0">
                       <p className="truncate font-medium text-[var(--content-primary)]">{sku.item_name}</p>
+                      {sku.item_alias && (
+                        <p className="mt-1 text-xs font-mono text-[var(--content-secondary)]">Alias: {sku.item_alias}</p>
+                      )}
                       <p className="mt-1 text-xs text-[var(--content-tertiary)]">
                         {formatCurrency(sku.totalValue)} · {countLabel(sku.customerCount, 'customer')}
                       </p>
@@ -920,6 +924,7 @@ function SkuTab({
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <p className="line-clamp-2 text-base font-semibold text-[var(--content-primary)]">{row.item_name}</p>
+                {row.item_alias && <p className="mt-1 text-xs font-mono text-[var(--content-secondary)]">Alias: {row.item_alias}</p>}
                 <p className="mt-1 text-sm text-[var(--content-tertiary)]">{row.brandLabel}</p>
               </div>
               {row.oldestCreatedAt && <AgePill createdAt={row.oldestCreatedAt} />}

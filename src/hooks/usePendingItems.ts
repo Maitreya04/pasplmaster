@@ -1,17 +1,44 @@
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useId } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
-import type { PendingItem, PendingItemStatus } from '../types';
+import type { PendingItem, PendingItemStatus, PendingRecoveryStatus } from '../types';
 
 interface UsePendingItemsOptions {
   status?: PendingItemStatus;
   orderId?: number | null;
   customerId?: number;
+  recoveryStatuses?: PendingRecoveryStatus[];
   enabled?: boolean;
 }
 
 export function usePendingItems(options?: UsePendingItemsOptions) {
   const opts = options ?? {};
   const enabled = opts.enabled ?? true;
+  const queryClient = useQueryClient();
+  const channelId = useId();
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const channel = supabase
+      .channel(`pending-items-${channelId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'pending_items',
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['pending-items'] });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [channelId, enabled, queryClient]);
 
   return useQuery<PendingItem[]>({
     queryKey: [
@@ -19,6 +46,7 @@ export function usePendingItems(options?: UsePendingItemsOptions) {
       opts.status ?? 'all',
       opts.orderId ?? 'all',
       opts.customerId ?? 'all',
+      opts.recoveryStatuses?.join(',') ?? 'all',
     ],
     queryFn: async () => {
       let q = supabase.from('pending_items').select('*').order('created_at', {
@@ -34,6 +62,9 @@ export function usePendingItems(options?: UsePendingItemsOptions) {
       if (opts.customerId) {
         q = q.eq('customer_id', opts.customerId);
       }
+      if (opts.recoveryStatuses?.length) {
+        q = q.in('recovery_status', opts.recoveryStatuses);
+      }
 
       const { data, error } = await q.returns<PendingItem[]>();
       if (error) throw error;
@@ -43,5 +74,4 @@ export function usePendingItems(options?: UsePendingItemsOptions) {
     enabled,
   });
 }
-
 

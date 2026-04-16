@@ -30,6 +30,50 @@ type BillingReportSnapshot = {
   items: OrderItem[];
 };
 
+type LiveQueueLineState = {
+  qtyBilled: number;
+  qtyPending: number;
+  pendingSource: 'billing' | 'sales' | null;
+  pendingNote: string | null;
+};
+
+function deriveLiveQueueLineState(
+  item: OrderItem,
+  approvedQty: number,
+  flag: { type: 'no_stock' | 'partial'; availableQty?: number } | undefined,
+): LiveQueueLineState {
+  const rawPending = Math.max(
+    Math.max(0, item.qty_po ?? 0),
+    Math.max(0, item.qty_requested - approvedQty),
+    flag?.type === 'no_stock' ? item.qty_requested : 0,
+  );
+  const qtyPending = Math.min(item.qty_requested, rawPending);
+  const qtyBilled = flag?.type === 'no_stock'
+    ? 0
+    : Math.max(0, Math.min(approvedQty, item.qty_requested - qtyPending));
+
+  if (qtyPending <= 0) {
+    return {
+      qtyBilled,
+      qtyPending: 0,
+      pendingSource: null,
+      pendingNote: null,
+    };
+  }
+
+  return {
+    qtyBilled,
+    qtyPending,
+    pendingSource: flag ? 'billing' : 'sales',
+    pendingNote:
+      flag?.type === 'no_stock'
+        ? 'No stock in Busy — fully pending'
+        : flag?.type === 'partial'
+          ? `Partial stock — ${qtyBilled} billed, ${qtyPending} pending`
+          : 'Purchase order qty from sales checkout',
+  };
+}
+
 function sortByUrgencyAndAge(orders: OrderWithClaimInfo[]): OrderWithClaimInfo[] {
   return [...orders].sort((a, b) => {
     if (a.priority === 'urgent' && b.priority !== 'urgent') return -1;
@@ -183,22 +227,38 @@ export default function LiveQueuePage() {
         else if (flag?.type === 'partial' && flag.availableQty != null) {
           approvedQty = flag.availableQty;
         }
-        return { item, approvedQty, flag };
+        const finalState = deriveLiveQueueLineState(item, approvedQty, flag);
+        return { item, approvedQty, flag, finalState };
       });
 
       // Parallel updates — sequential await per row was the main latency source (N round trips).
       const updateResponses = await Promise.all(
-        lineResults.map(({ item, approvedQty }) =>
-          supabase.from('order_items').update({ qty_approved: approvedQty }).eq('id', item.id),
+        lineResults.map(({ item, finalState }) =>
+          supabase
+            .from('order_items')
+            .update({ qty_approved: finalState.qtyBilled, qty_po: finalState.qtyPending })
+            .eq('id', item.id),
         ),
       );
       const updateError = updateResponses.find((r) => r.error)?.error;
       if (updateError) throw updateError;
 
+      const { error: resolvePendingError } = await supabase
+        .from('pending_items')
+        .update({
+          status: 'resolved',
+          resolved_at: new Date().toISOString(),
+          resolved_by: reviewer,
+        })
+        .eq('order_id', order.id)
+        .eq('status', 'pending');
+      if (resolvePendingError) throw resolvePendingError;
+
       const pendingRows = lineResults
-        .map(({ item, approvedQty, flag }) => {
-          const pendingQty = item.qty_requested - approvedQty;
-          if (pendingQty <= 0) return null;
+        .map(({ item, finalState }) => {
+          if (finalState.qtyPending <= 0 || !finalState.pendingSource || !finalState.pendingNote) {
+            return null;
+          }
           return {
             order_id: order.id,
             order_number: order.order_number,
@@ -206,13 +266,10 @@ export default function LiveQueuePage() {
             customer_name: order.customer_name,
             item_id: item.item_id,
             item_name: item.item_name,
-            qty_pending: pendingQty,
-            source: 'billing' as const,
+            qty_pending: finalState.qtyPending,
+            source: finalState.pendingSource,
             created_by: reviewer,
-            note:
-              flag?.type === 'no_stock'
-                ? 'No stock in Busy — fully pending'
-                : `Partial stock — ${approvedQty} billed, ${pendingQty} pending`,
+            note: finalState.pendingNote,
           };
         })
         .filter((row): row is NonNullable<typeof row> => row != null);
@@ -228,12 +285,12 @@ export default function LiveQueuePage() {
           customerName: order.customer_name,
           businessName: import.meta.env.VITE_BUSINESS_DISPLAY_NAME,
           date: new Date(),
-          lines: lineResults.map(({ item, approvedQty }) => ({
+          lines: lineResults.map(({ item, finalState }) => ({
             itemId: item.item_id,
             name: item.item_name,
             qtyRequested: item.qty_requested,
-            qtyBilled: approvedQty,
-            qtyPending: Math.max(0, item.qty_requested - approvedQty),
+            qtyBilled: finalState.qtyBilled,
+            qtyPending: finalState.qtyPending,
           })),
         });
 
@@ -441,6 +498,8 @@ export default function LiveQueuePage() {
           orderName={order.customer_name}
           orderNumber={order.order_number}
           salesperson={order.salesperson_name}
+          customerAddress={order.customer_address ?? null}
+          notes={order.notes}
           city={order.customer_city}
           itemCount={order.item_count}
           totalValue={order.total_value}

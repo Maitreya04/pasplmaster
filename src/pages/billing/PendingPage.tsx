@@ -5,6 +5,11 @@ import { usePendingItems } from '../../hooks/usePendingItems';
 import { Card, EmptyState, Skeleton } from '../../components/shared';
 import { formatTimeAgo } from '../../utils/formatters';
 import type { PendingItem } from '../../types';
+import {
+  pendingRecoveryBadgeClasses,
+  pendingRecoveryHelpText,
+  pendingRecoveryLabel,
+} from '../../lib/pendingRecovery';
 
 function PendingCard({ item }: { item: PendingItem }) {
   const navigate = useNavigate();
@@ -36,6 +41,11 @@ function PendingCard({ item }: { item: PendingItem }) {
               <HourglassHigh size={12} weight="bold" />
               Pending
             </div>
+            <div
+              className={`mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${pendingRecoveryBadgeClasses(item.recovery_status)}`}
+            >
+              {pendingRecoveryLabel(item.recovery_status)}
+            </div>
           </div>
         </div>
 
@@ -66,6 +76,9 @@ function PendingCard({ item }: { item: PendingItem }) {
             )}
           </div>
         </div>
+        <p className="text-xs text-[var(--content-tertiary)]">
+          {pendingRecoveryHelpText(item.recovery_status)}
+        </p>
       </div>
     </Card>
   );
@@ -136,4 +149,3 @@ export default function PendingPage(): React.JSX.Element | null {
     </div>
   );
 }
-

@@ -62,6 +62,23 @@ const SHORTHAND_MAP: Record<string, string> = {
   sup: 'suspension',
 };
 
+/** OCR and search should share the same brand-code prefixes for code detection. */
+export const BRAND_PREFIXES = [
+  'RTRO',
+  'MbCP',
+  'SBV',
+  'JH',
+  'PF',
+  'JV',
+  'AM',
+  'INEL',
+  'NCS',
+  'ASK',
+  'TIDC',
+  'GK',
+  'K',
+] as const;
+
 /**
  * Expands a single token using shorthand and abbreviation/misspelling maps (pasplv1-style).
  */

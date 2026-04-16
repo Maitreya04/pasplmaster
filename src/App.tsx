@@ -10,6 +10,7 @@ const SalesHome = lazy(() => import('./pages/sales/SalesHome'));
 const NewOrderPage = lazy(() => import('./pages/sales/NewOrderPage'));
 const CartPage = lazy(() => import('./pages/sales/CartPage'));
 const MyOrdersPage = lazy(() => import('./pages/sales/MyOrdersPage'));
+const PendingRecoveryPage = lazy(() => import('./pages/sales/PendingRecoveryPage'));
 
 const BillingLayout = lazy(() => import('./pages/billing/BillingLayout'));
 const DashboardPage = lazy(() => import('./pages/billing/DashboardPage'));
@@ -29,6 +30,7 @@ const AdminPasscodePage = lazy(() => import('./pages/admin/AdminPasscodePage'));
 const UploadPage = lazy(() => import('./pages/admin/UploadPage'));
 const LabelStudioPage = lazy(() => import('./pages/admin/LabelStudioPage'));
 const PickScanLabPage = lazy(() => import('./pages/admin/PickScanLabPage'));
+const OcrOrderLabPage = lazy(() => import('./pages/admin/OcrOrderLabPage'));
 const SupplyDemandPage = lazy(() => import('./pages/admin/SupplyDemandPage'));
 const SupplyDemandSkuDetailPage = lazy(() => import('./pages/admin/SupplyDemandSkuDetailPage'));
 
@@ -99,6 +101,7 @@ export default function App(): React.JSX.Element | null {
           <Route path="new" element={<NewOrderPage />} />
           <Route path="cart" element={<CartPage />} />
           <Route path="orders" element={<MyOrdersPage />} />
+          <Route path="pending-recovery" element={<PendingRecoveryPage />} />
         </Route>
 
         {/* Billing */}
@@ -187,6 +190,16 @@ export default function App(): React.JSX.Element | null {
             <RequireRole>
               <RequireAdminUnlock>
                 <PickScanLabPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/ocr-lab"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <OcrOrderLabPage />
               </RequireAdminUnlock>
             </RequireRole>
           }

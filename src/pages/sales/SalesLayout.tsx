@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
-import { House, PlusCircle, ListBullets } from '@phosphor-icons/react';
+import { House, PlusCircle, ListBullets, HourglassHigh } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
 import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
@@ -16,6 +16,7 @@ const preloadSalesHome = () => import('./SalesHome');
 const preloadNewOrder = () => import('./NewOrderPage');
 const preloadCart = () => import('./CartPage');
 const preloadMyOrders = () => import('./MyOrdersPage');
+const preloadPendingRecovery = () => import('./PendingRecoveryPage');
 
 const NAV_ITEMS: BottomNavItem[] = [
   { icon: House, label: 'Home', path: '/sales', preload: preloadSalesHome },
@@ -32,6 +33,12 @@ const NAV_ITEMS: BottomNavItem[] = [
     path: '/sales/orders',
     activeWeight: 'bold',
     preload: preloadMyOrders,
+  },
+  {
+    icon: HourglassHigh,
+    label: 'Pending',
+    path: '/sales/pending-recovery',
+    preload: preloadPendingRecovery,
   },
 ];
 

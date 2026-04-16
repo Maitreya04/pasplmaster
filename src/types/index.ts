@@ -54,6 +54,7 @@ export interface Order {
   customer_name: string;
   customer_mobile?: string | null;
   customer_city: string | null;
+  customer_address?: string | null;
   transport_id: number | null;
   transport_name: string | null;
   salesperson_name: string;
@@ -99,6 +100,11 @@ export interface OrderItem {
 }
 
 export type PendingItemStatus = 'pending' | 'resolved' | 'cancelled';
+export type PendingRecoveryStatus =
+  | 'waiting_stock'
+  | 'back_in_stock'
+  | 'needs_checked'
+  | 'reviewed';
 
 export interface PendingItem {
   id: number;
@@ -114,6 +120,10 @@ export interface PendingItem {
   created_at: string;
   note: string | null;
   status: PendingItemStatus;
+  recovery_status: PendingRecoveryStatus;
+  back_in_stock_at: string | null;
+  recovery_reviewed_at: string | null;
+  recovery_reviewed_by: string | null;
   resolved_at: string | null;
   resolved_by: string | null;
 }
@@ -166,7 +176,10 @@ export interface AuthState {
 // ─── Work Claims System Types ───────────────────────────────
 
 export type UserRole = 'sales' | 'billing' | 'picking' | 'admin';
-export type NotificationEventType = 'order_ready_to_pick';
+export type NotificationEventType =
+  | 'order_ready_to_pick'
+  | 'pending_item_back_in_stock'
+  | 'pending_item_ready_for_billing';
 
 export interface AppUser {
   id: number;

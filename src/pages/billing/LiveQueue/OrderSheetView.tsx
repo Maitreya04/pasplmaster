@@ -20,6 +20,8 @@ interface OrderSheetViewProps {
   orderName: string;
   orderNumber: string;
   salesperson: string | null;
+  customerAddress: string | null;
+  notes: string | null;
   city: string | null;
   itemCount: number;
   totalValue: number;
@@ -44,6 +46,8 @@ export function OrderSheetView({
   orderName,
   orderNumber,
   salesperson,
+  customerAddress,
+  notes,
   city,
   itemCount,
   totalValue,
@@ -62,6 +66,9 @@ export function OrderSheetView({
   onSkip,
 }: OrderSheetViewProps): ReactElement {
   const { copy } = useCopyToClipboard();
+  const headerMeta = [orderNumber, salesperson].filter(Boolean).join(' · ');
+  const customerLocation = [city, customerAddress?.trim()].filter(Boolean).join(' · ');
+  const trimmedNotes = notes?.trim() ?? '';
 
   const [copyState, setCopyState] = useState<CopyState>('ready');
   const [activeRow, setActiveRow] = useState<number | null>(null);
@@ -288,9 +295,24 @@ export function OrderSheetView({
                     {orderName}
                   </h1>
                 </div>
-                <p className="text-xs text-[var(--content-tertiary)]">
-                  {[orderNumber, city, salesperson].filter(Boolean).join(' · ')}
-                </p>
+                {headerMeta && (
+                  <p className="text-xs text-[var(--content-tertiary)]">
+                    {headerMeta}
+                  </p>
+                )}
+                {customerLocation && (
+                  <p className="mt-1 text-sm text-[var(--content-tertiary)] line-clamp-2">
+                    <span className="font-medium text-[var(--content-secondary)]">
+                      {city}
+                    </span>
+                    {city && customerAddress?.trim() && (
+                      <span className="px-1 text-[var(--content-quaternary)]">·</span>
+                    )}
+                    {customerAddress?.trim() && (
+                      <span>{customerAddress.trim()}</span>
+                    )}
+                  </p>
+                )}
               </div>
               <div className="text-right shrink-0">
                 <p className="text-base font-mono font-semibold text-[var(--content-primary)] tabular-nums">
@@ -309,6 +331,16 @@ export function OrderSheetView({
                 </p>
                 <p className="mt-1 text-xs text-[var(--content-warning)]">
                   Busy may default to book price after paste. Use the highlighted quoted rate shown on each line while billing.
+                </p>
+              </div>
+            )}
+            {trimmedNotes && (
+              <div className="mt-4 rounded-2xl border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--content-accent)]">
+                  Sales note for billing
+                </p>
+                <p className="mt-1 text-sm whitespace-pre-wrap text-[var(--content-primary)]">
+                  {trimmedNotes}
                 </p>
               </div>
             )}

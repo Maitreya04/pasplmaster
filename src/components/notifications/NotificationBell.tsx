@@ -29,6 +29,7 @@ function matchesRole(n: UserNotification, role: AppRole | null): boolean {
   if (!role) return true;
   if (role === 'sales') {
     if (n.type === 'order_update_for_sales') return true;
+    if (n.type === 'pending_item_back_in_stock') return true;
     if (n.type !== 'item_flagged_by_picker') return false;
     const dl = payloadDeepLink(n);
     if (dl?.startsWith('/billing')) return false;
@@ -36,6 +37,7 @@ function matchesRole(n: UserNotification, role: AppRole | null): boolean {
   }
   if (role === 'billing') {
     if (n.type === 'order_update_for_sales') return false;
+    if (n.type === 'pending_item_ready_for_billing') return true;
     if (n.type !== 'item_flagged_by_picker') return false;
     const dl = payloadDeepLink(n);
     if (dl?.startsWith('/sales')) return false;
@@ -58,6 +60,12 @@ function deepLinkFromPayload(n: UserNotification): string | null {
   }
   if (n.type === 'order_update_for_sales') {
     return '/sales/orders';
+  }
+  if (n.type === 'pending_item_back_in_stock') {
+    return '/sales/pending-recovery';
+  }
+  if (n.type === 'pending_item_ready_for_billing' && n.order_id) {
+    return `/billing/review/${n.order_id}`;
   }
   return null;
 }
@@ -115,6 +123,10 @@ function notificationTypeLabel(type: string): string {
       return 'Picker flag';
     case 'order_update_for_sales':
       return 'Order update';
+    case 'pending_item_back_in_stock':
+      return 'Back in stock';
+    case 'pending_item_ready_for_billing':
+      return 'Ready for billing';
     default:
       return type.replace(/_/g, ' ');
   }
