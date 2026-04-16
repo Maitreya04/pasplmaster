@@ -7,6 +7,7 @@
  */
 
 import type { Item } from '../../types';
+import { ABBREVIATIONS } from '../abbreviations';
 
 // ---------------------------------------------------------------------------
 // PrepItem — pre-processed per-item data
@@ -185,6 +186,13 @@ export function buildSearchIndex(items: Item[]): SearchIndex {
         allWords.add(`${m[1]}${m[2]}`);
         allWords.add(`${m[1]}0${m[2]}`);
         allWords.add(m[1]); // base word
+      }
+      // Expand catalog abbreviations (e.g. "bshoe" → "brake", "shoe")
+      const expanded = ABBREVIATIONS[w];
+      if (expanded) {
+        for (const part of expanded.split(/\s+/)) {
+          if (part) allWords.add(part);
+        }
       }
     }
 
