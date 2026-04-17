@@ -11,40 +11,101 @@ const ITEMS_SELECT =
  *  means at most a 30-second lag before the UI catches up. */
 const POLL_INTERVAL_MS = 30_000;
 
+let lastSyncTime: string | null = null;
+let cachedItems: Map<number, Item> = new Map();
+let isFirstFetch = true;
+let lastReturnedArray: Item[] = [];
+
 export async function fetchAllItems(): Promise<Item[]> {
-  console.log('[useItems] fetching all items...', new Date().toLocaleTimeString());
-  const { count, error: countErr } = await supabase
-    .from('items')
-    .select('id', { count: 'exact', head: true })
-    .eq('is_active', true);
+  // console.log('[useItems] polling... isFirstFetch:', isFirstFetch, 'lastSyncTime:', lastSyncTime);
 
-  if (countErr) throw countErr;
-  if (!count) return [];
+  let hasChanges = false;
 
-  const batches = Math.ceil(count / BATCH_SIZE);
-  const promises = Array.from({ length: batches }, (_, i) => {
-    const from = i * BATCH_SIZE;
-    return supabase
-      .from('items')
-      .select(ITEMS_SELECT)
-      .eq('is_active', true)
-      .range(from, from + BATCH_SIZE - 1)
-      .order('id');
-  });
+  if (isFirstFetch || !lastSyncTime) {
+    let allFetched = false;
+    let lastId = 0;
+    let localMaxDate = '1970-01-01T00:00:00Z';
+    
+    // Clear cache in case of forced refetch
+    cachedItems.clear();
 
-  const results = await Promise.all(promises);
-  const allItems: Item[] = new Array(count);
-  let offset = 0;
-  for (const { data, error } of results) {
-    if (error) throw error;
-    if (data) {
-      for (let i = 0; i < data.length; i++) allItems[offset + i] = data[i];
-      offset += data.length;
+    while (!allFetched) {
+      const { data, error } = await supabase
+        .from('items')
+        .select(ITEMS_SELECT + ',updated_at,is_active')
+        .eq('is_active', true)
+        .gt('id', lastId)
+        .order('id', { ascending: true })
+        .limit(1000);
+
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        allFetched = true;
+        break;
+      }
+
+      hasChanges = true;
+      for (const item of data) {
+        cachedItems.set(item.id, item);
+        if (item.updated_at && item.updated_at > localMaxDate) localMaxDate = item.updated_at;
+        lastId = item.id;
+      }
+      
+      if (data.length < 1000) {
+        allFetched = true;
+      }
+    }
+
+    lastSyncTime = localMaxDate;
+    isFirstFetch = false;
+  } else {
+    // Delta fetch
+    let allFetched = false;
+    let lastId = 0;
+    let localMaxDate = lastSyncTime;
+
+    while (!allFetched) {
+      const { data, error } = await supabase
+        .from('items')
+        .select(ITEMS_SELECT + ',updated_at,is_active')
+        .gt('updated_at', lastSyncTime)
+        .gt('id', lastId)
+        .order('id', { ascending: true })
+        .limit(1000);
+
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        allFetched = true;
+        break;
+      }
+
+      hasChanges = true;
+      for (const item of data) {
+        if (item.is_active === false) {
+          cachedItems.delete(item.id);
+        } else {
+          cachedItems.set(item.id, item);
+        }
+        if (item.updated_at && item.updated_at > localMaxDate) localMaxDate = item.updated_at;
+        lastId = item.id;
+      }
+      
+      if (data.length < 1000) {
+        allFetched = true;
+      }
+    }
+
+    if (hasChanges) {
+      lastSyncTime = localMaxDate;
     }
   }
-  const final = allItems.slice(0, offset);
-  console.log('[useItems] fetched', final.length, 'items. Sample stock_qty:', final[0]?.stock_qty);
-  return final;
+
+  if (hasChanges || lastReturnedArray.length === 0) {
+    lastReturnedArray = Array.from(cachedItems.values());
+    console.log(`[useItems] cache updated. Total active items: ${lastReturnedArray.length}`);
+  }
+
+  return lastReturnedArray;
 }
 
 export const ITEMS_QUERY_KEY = ['items'] as const;
