@@ -25,6 +25,11 @@ function OrderCard({
             {order.order_number}
           </span>
           <div className="flex items-center gap-2 shrink-0">
+            {order.order_kind === 'recovery' && (
+              <span className="text-xs font-semibold px-2 py-0.5 rounded bg-[var(--bg-accent-subtle)] text-[var(--bg-accent)]">
+                Recovery
+              </span>
+            )}
             {isOverdue && (
               <span className="text-xs font-medium px-2 py-0.5 rounded bg-[var(--bg-warning-subtle)] text-[var(--content-warning)]">
                 Since {formatOverdueDate(order.created_at)}

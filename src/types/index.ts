@@ -50,6 +50,7 @@ export type OrderItemState = 'pending' | 'picked' | 'flagged';
 export interface Order {
   id: number;
   order_number: string;
+  order_kind?: 'standard' | 'recovery';
   customer_id: number;
   customer_name: string;
   customer_mobile?: string | null;
@@ -107,6 +108,8 @@ export type PendingRecoveryStatus =
   | 'needs_checked'
   | 'reviewed';
 
+export type PendingRecoveryResponse = 'confirmed' | 'not_now' | 'declined';
+
 export interface PendingItem {
   id: number;
   order_id: number;
@@ -123,6 +126,11 @@ export interface PendingItem {
   status: PendingItemStatus;
   recovery_status: PendingRecoveryStatus;
   back_in_stock_at: string | null;
+  contacted_at?: string | null;
+  contacted_by?: string | null;
+  contacted_by_user_id?: number | null;
+  customer_response?: PendingRecoveryResponse | null;
+  recovery_order_id?: number | null;
   recovery_reviewed_at: string | null;
   recovery_reviewed_by: string | null;
   resolved_at: string | null;

@@ -20,13 +20,26 @@ import {
   BigButton,
   BottomSheet,
 } from '../../components/shared';
-import type { OrderItem } from '../../types';
+import type { OrderItem, PendingItem } from '../../types';
 import { formatCurrency, formatTimestamp } from '../../utils/formatters';
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 
 interface EditableItem extends OrderItem {
   qty_approved: number;
 }
+
+type PendingDraftRow = {
+  order_id: number;
+  order_number: string;
+  customer_id: number;
+  customer_name: string;
+  item_id: number;
+  item_name: string;
+  qty_pending: number;
+  source: 'billing' | 'sales';
+  created_by: string;
+  note: string;
+};
 
 type FinalBillingLineState = {
   qtyBilled: number;
@@ -258,18 +271,7 @@ export default function ReviewPage(): React.JSX.Element | null {
       const resolvingFlags = order.workflow_status === 'flagged';
       const approvedAt = new Date().toISOString();
       const billingPendingItemIds: number[] = [];
-      const pendingRowsToInsert: Array<{
-        order_id: number;
-        order_number: string;
-        customer_id: number;
-        customer_name: string;
-        item_id: number;
-        item_name: string;
-        qty_pending: number;
-        source: 'billing' | 'sales';
-        created_by: string;
-        note: string;
-      }> = [];
+      const pendingDraftsByItemId = new Map<number, PendingDraftRow>();
 
       // Update each remaining item's qty_approved (and price / flags)
       for (const item of visibleItems) {
@@ -296,7 +298,7 @@ export default function ReviewPage(): React.JSX.Element | null {
           .eq('id', item.id);
 
         if (finalState.qtyPending > 0 && finalState.pendingSource && finalState.pendingNote) {
-          pendingRowsToInsert.push({
+          pendingDraftsByItemId.set(item.item_id, {
             order_id: order.id,
             order_number: order.order_number,
             customer_id: order.customer_id,
@@ -320,16 +322,75 @@ export default function ReviewPage(): React.JSX.Element | null {
         await supabase.from('order_items').delete().eq('id', rid);
       }
 
-      const { error: resolvePendingError } = await supabase
+      const { data: existingPendingRows, error: existingPendingError } = await supabase
         .from('pending_items')
-        .update({
-          status: 'resolved',
-          resolved_at: approvedAt,
-          resolved_by: reviewer,
-        })
+        .select('*')
         .eq('order_id', order.id)
-        .eq('status', 'pending');
-      if (resolvePendingError) throw resolvePendingError;
+        .eq('status', 'pending')
+        .returns<PendingItem[]>();
+      if (existingPendingError) throw existingPendingError;
+
+      const pendingRowsByItemId = new Map<number, PendingItem[]>();
+      for (const row of existingPendingRows ?? []) {
+        if (row.item_id == null) continue;
+        const bucket = pendingRowsByItemId.get(row.item_id) ?? [];
+        bucket.push(row);
+        pendingRowsByItemId.set(row.item_id, bucket);
+      }
+
+      const pendingIdsToResolve = new Set<number>();
+      const pendingRowsToInsert: PendingDraftRow[] = [];
+
+      for (const [itemId, rows] of pendingRowsByItemId.entries()) {
+        const desired = pendingDraftsByItemId.get(itemId);
+        if (!desired) {
+          for (const row of rows) pendingIdsToResolve.add(row.id);
+          continue;
+        }
+
+        const sortedRows = [...rows].sort((a, b) => {
+          if (a.source === 'sales' && b.source !== 'sales') return -1;
+          if (b.source === 'sales' && a.source !== 'sales') return 1;
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        });
+
+        const primary = sortedRows[0]!;
+        const { error: updatePendingError } = await supabase
+          .from('pending_items')
+          .update({
+            qty_pending: desired.qty_pending,
+            source: primary.source === 'sales' ? 'sales' : desired.source,
+            note: desired.note,
+            status: 'pending',
+            resolved_at: null,
+            resolved_by: null,
+            recovery_status: primary.source === 'sales' ? 'reviewed' : primary.recovery_status,
+          })
+          .eq('id', primary.id);
+        if (updatePendingError) throw updatePendingError;
+
+        for (const duplicate of sortedRows.slice(1)) {
+          pendingIdsToResolve.add(duplicate.id);
+        }
+
+        pendingDraftsByItemId.delete(itemId);
+      }
+
+      for (const draft of pendingDraftsByItemId.values()) {
+        pendingRowsToInsert.push(draft);
+      }
+
+      if (pendingIdsToResolve.size > 0) {
+        const { error: resolvePendingError } = await supabase
+          .from('pending_items')
+          .update({
+            status: 'resolved',
+            resolved_at: approvedAt,
+            resolved_by: reviewer,
+          })
+          .in('id', [...pendingIdsToResolve]);
+        if (resolvePendingError) throw resolvePendingError;
+      }
 
       if (pendingRowsToInsert.length > 0) {
         const { error: insertPendingError } = await supabase
@@ -438,6 +499,22 @@ export default function ReviewPage(): React.JSX.Element | null {
         } catch (pushError) {
           console.error('Failed to send picker push notification', pushError);
         }
+      }
+
+      if (order.order_kind === 'recovery') {
+        const { error: resolveRecoveryError } = await supabase
+          .from('pending_items')
+          .update({
+            status: 'resolved',
+            resolved_at: approvedAt,
+            resolved_by: reviewer,
+            recovery_status: 'reviewed',
+            recovery_reviewed_at: approvedAt,
+            recovery_reviewed_by: reviewer,
+          })
+          .eq('recovery_order_id', order.id)
+          .eq('status', 'pending');
+        if (resolveRecoveryError) throw resolveRecoveryError;
       }
     },
     onSuccess: () => {
@@ -572,6 +649,11 @@ export default function ReviewPage(): React.JSX.Element | null {
                   <span className="font-mono text-[var(--content-secondary)]">
                     {order.order_number}
                   </span>
+                  {order.order_kind === 'recovery' && (
+                    <span className="inline-flex items-center rounded-full bg-[var(--bg-accent-subtle)] px-2.5 py-1 text-xs font-semibold text-[var(--bg-accent)]">
+                      Recovery
+                    </span>
+                  )}
                   <StatusBadge status={order.workflow_status} />
                   {order.priority === 'urgent' && (
                     <StatusBadge status="urgent" />
