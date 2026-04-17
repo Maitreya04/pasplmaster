@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase/client';
 import { queryClient } from '../lib/queryClient';
 import type { Item } from '../types';
 
-const BATCH_SIZE = 1000;
+
 const ITEMS_SELECT =
   'id,name,alias,alias1,parent_group,main_group,item_category,sales_price,mrp,stock_qty,rack_no';
 
@@ -30,13 +30,15 @@ export async function fetchAllItems(): Promise<Item[]> {
     cachedItems.clear();
 
     while (!allFetched) {
-      const { data, error } = await supabase
+      const { data: rawData, error } = await supabase
         .from('items')
         .select(ITEMS_SELECT + ',updated_at,is_active')
         .eq('is_active', true)
         .gt('id', lastId)
         .order('id', { ascending: true })
         .limit(1000);
+
+      const data = rawData as any as (Item & { updated_at: string })[];
 
       if (error) throw error;
       if (!data || data.length === 0) {
@@ -65,13 +67,15 @@ export async function fetchAllItems(): Promise<Item[]> {
     let localMaxDate = lastSyncTime;
 
     while (!allFetched) {
-      const { data, error } = await supabase
+      const { data: rawData, error } = await supabase
         .from('items')
         .select(ITEMS_SELECT + ',updated_at,is_active')
         .gt('updated_at', lastSyncTime)
         .gt('id', lastId)
         .order('id', { ascending: true })
         .limit(1000);
+
+      const data = rawData as any as (Item & { updated_at: string })[];
 
       if (error) throw error;
       if (!data || data.length === 0) {
