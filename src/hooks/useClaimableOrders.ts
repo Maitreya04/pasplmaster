@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useId } from 'react';
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
-import { queryClient } from '../lib/queryClient';
 import { useAuth } from '../context/AuthContext';
 import type { Order, ClaimStage, WorkflowStatus } from '../types';
 import {
@@ -66,7 +65,6 @@ export function useClaimableOrders(
   options: ClaimableOrdersOptions,
 ): UseClaimableOrdersReturn {
   const { userId } = useAuth();
-  const uid = useId();
   const { stage, workflowStatus, todayOnly } = options;
 
   // Stable query key

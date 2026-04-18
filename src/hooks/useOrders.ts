@@ -1,7 +1,5 @@
-import { useEffect, useId } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
-import { queryClient } from '../lib/queryClient';
 import type { Order, WorkflowStatus } from '../types';
 import {
   ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
@@ -41,7 +39,6 @@ function getTodayStartIso(): string {
 export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
   const opts: UseOrdersOptions =
     typeof options === 'string' ? { status: options } : options ?? {};
-  const uid = useId();
 
   const result = useQuery<Order[]>({
     queryKey: [

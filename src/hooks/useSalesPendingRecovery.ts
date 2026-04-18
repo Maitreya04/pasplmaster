@@ -1,5 +1,5 @@
-import { useEffect, useId, useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import type {
   PendingItem,
@@ -279,9 +279,6 @@ function buildParty(lines: SalesPendingRecoveryLine[]): SalesPendingRecoveryPart
 }
 
 export function useSalesPendingRecovery(userName: string | null) {
-  const queryClient = useQueryClient();
-  const channelId = useId();
-
   const query = useQuery<SalesPendingRecoveryLine[]>({
     queryKey: ['sales-pending-recovery', userName ?? 'unknown'],
     queryFn: async () => {

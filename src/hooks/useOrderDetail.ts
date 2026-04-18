@@ -1,5 +1,4 @@
-import { useEffect, useId } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import type { OrderItem, OrderWithItems } from '../types';
 
@@ -23,9 +22,6 @@ function mapOrderItemsWithCatalog(rows: OrderItemRow[] | null): OrderItem[] {
 }
 
 export function useOrderDetail(orderId: number | null) {
-  const queryClient = useQueryClient();
-  const uid = useId();
-
   return useQuery<OrderWithItems>({
     queryKey: ['order', orderId],
     queryFn: async () => {

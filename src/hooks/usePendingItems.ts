@@ -1,5 +1,4 @@
-import { useEffect, useId } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import type { PendingItem, PendingItemStatus, PendingRecoveryStatus } from '../types';
 
@@ -14,9 +13,6 @@ interface UsePendingItemsOptions {
 export function usePendingItems(options?: UsePendingItemsOptions) {
   const opts = options ?? {};
   const enabled = opts.enabled ?? true;
-  const queryClient = useQueryClient();
-  const channelId = useId();
-
   return useQuery<PendingItem[]>({
     queryKey: [
       'pending-items',
