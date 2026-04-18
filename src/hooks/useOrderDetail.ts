@@ -26,30 +26,6 @@ export function useOrderDetail(orderId: number | null) {
   const queryClient = useQueryClient();
   const uid = useId();
 
-  useEffect(() => {
-    if (orderId === null) return;
-
-    const channel = supabase
-      .channel(`order-items-${orderId}-${uid}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'order_items',
-          filter: `order_id=eq.${orderId}`,
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['order', orderId] });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [orderId, uid, queryClient]);
-
   return useQuery<OrderWithItems>({
     queryKey: ['order', orderId],
     queryFn: async () => {
@@ -104,5 +80,6 @@ export function useOrderDetail(orderId: number | null) {
     },
     enabled: orderId !== null,
     staleTime: 0,
+    refetchInterval: 30000,
   });
 }

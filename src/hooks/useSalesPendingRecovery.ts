@@ -282,40 +282,6 @@ export function useSalesPendingRecovery(userName: string | null) {
   const queryClient = useQueryClient();
   const channelId = useId();
 
-  useEffect(() => {
-    if (!userName) return;
-
-    const channel = supabase
-      .channel(`sales-pending-recovery-${channelId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'pending_items',
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['sales-pending-recovery'] });
-        },
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'items',
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['sales-pending-recovery'] });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [channelId, queryClient, userName]);
-
   const query = useQuery<SalesPendingRecoveryLine[]>({
     queryKey: ['sales-pending-recovery', userName ?? 'unknown'],
     queryFn: async () => {
@@ -426,6 +392,7 @@ export function useSalesPendingRecovery(userName: string | null) {
     },
     enabled: !!userName,
     staleTime: 0,
+    refetchInterval: 30000,
   });
 
   const parties = useMemo(() => {

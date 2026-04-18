@@ -100,42 +100,6 @@ export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
     refetchOnWindowFocus: true,
   });
 
-  // Realtime subscription: invalidate orders when table changes.
-  // Each hook instance gets a unique channel name to avoid collisions when
-  // multiple useOrders calls are active on the same page.
-  useEffect(() => {
-    const channel = supabase
-      .channel(`orders-changes-${uid}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders' },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['orders'] });
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'work_claims' },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['orders'] });
-          queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'order_items' },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['orders'] });
-          queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [uid]);
-
   return result;
 }
 

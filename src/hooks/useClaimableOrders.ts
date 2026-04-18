@@ -174,38 +174,6 @@ export function useClaimableOrders(
     refetchOnWindowFocus: true,
   });
 
-  // Realtime: orders changes
-  useEffect(() => {
-    const channel = supabase
-      .channel(`claimable-orders-${uid}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders' },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'work_claims' },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'order_items' },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [uid]);
-
   // Categorize orders
   const categorized = useMemo(() => {
     const all = result.data ?? [];

@@ -17,29 +17,6 @@ export function usePendingItems(options?: UsePendingItemsOptions) {
   const queryClient = useQueryClient();
   const channelId = useId();
 
-  useEffect(() => {
-    if (!enabled) return;
-
-    const channel = supabase
-      .channel(`pending-items-${channelId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'pending_items',
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ['pending-items'] });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [channelId, enabled, queryClient]);
-
   return useQuery<PendingItem[]>({
     queryKey: [
       'pending-items',
@@ -72,6 +49,7 @@ export function usePendingItems(options?: UsePendingItemsOptions) {
     },
     staleTime: 0,
     enabled,
+    refetchInterval: 30000,
   });
 }
 
