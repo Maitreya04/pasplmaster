@@ -27,6 +27,7 @@ export function SalesChromeProvider({ children }: { children: ReactNode }): Reac
   return <SalesChromeContext.Provider value={value}>{children}</SalesChromeContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useSalesChrome(): SalesChromeState {
   const ctx = useContext(SalesChromeContext);
   if (!ctx) {
@@ -34,4 +35,3 @@ export function useSalesChrome(): SalesChromeState {
   }
   return ctx;
 }
-

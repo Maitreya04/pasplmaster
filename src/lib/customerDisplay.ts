@@ -29,7 +29,11 @@ export function getCustomerSearchText(customer: Customer): string {
     .toLowerCase();
 }
 
-export function getCustomerSecondaryLine(customer: Customer, _duplicateNames: Set<string>): string | null {
+export function getCustomerSecondaryLine(
+  customer: Customer,
+  duplicateNames: Set<string>,
+): string | null {
+  void duplicateNames;
   return customer.city || null;
 }
 
@@ -39,6 +43,7 @@ export function getCustomerTertiaryLine(customer: Customer, duplicateNames: Set<
   return null;
 }
 
-export function getCustomerMetaParts(_customer: Customer): string[] {
+export function getCustomerMetaParts(customer: Customer): string[] {
+  void customer;
   return [];
 }

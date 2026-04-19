@@ -156,17 +156,26 @@ function CompactProcess({
   const isComplete = activeIndex >= items.length;
   const activeItem = isComplete ? null : items[activeIndex];
   const progress = items.length > 0 ? Math.min(activeIndex / items.length, 1) : 0;
-
-  // Track direction for animations
-  const prevIndexRef = useRef(activeIndex);
-  const direction = activeIndex >= prevIndexRef.current ? 'forward' : 'backward';
-  useEffect(() => {
-    prevIndexRef.current = activeIndex;
-  }, [activeIndex]);
+  const [direction, setDirection] = useState<'forward' | 'backward'>('forward');
 
   // Flash state — we re-key the flash bar each time a copy happens
   const [flashKey, setFlashKey] = useState(0);
   const [showFlash, setShowFlash] = useState(false);
+  const handleJump = useCallback(
+    (index: number) => {
+      setDirection(index < activeIndex ? 'backward' : 'forward');
+      onJump(index);
+    },
+    [activeIndex, onJump],
+  );
+  const handleAdvance = useCallback(() => {
+    setDirection('forward');
+    onAdvance();
+  }, [onAdvance]);
+  const handleFinish = useCallback(() => {
+    setDirection('forward');
+    onFinish();
+  }, [onFinish]);
 
   // Keyboard bindings
   const lastEnter = useRef(0);
@@ -182,31 +191,31 @@ function CompactProcess({
         e.preventDefault();
 
         if (e.shiftKey) {
-          onJump(activeIndex - 1);
+          handleJump(activeIndex - 1);
           return;
         }
 
         if (isComplete) {
-          onFinish();
+          handleFinish();
         } else if (activeItem) {
           const textToCopy = activeItem.item_alias || activeItem.item_name;
           copy(textToCopy, `compact-${activeItem.id}`);
           setFlashKey((k) => k + 1);
           setShowFlash(true);
           setTimeout(() => setShowFlash(false), 600);
-          onAdvance();
+          handleAdvance();
         }
       }
 
       if (e.key === 'Escape' && !isComplete) {
         e.preventDefault();
-        onAdvance(); // skip without copying
+        handleAdvance(); // skip without copying
       }
     };
 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isComplete, activeItem, copy, onAdvance, onJump, onFinish, activeIndex]);
+  }, [isComplete, activeItem, copy, handleAdvance, handleJump, handleFinish, activeIndex]);
 
   if (isComplete) {
     return (
@@ -228,7 +237,7 @@ function CompactProcess({
           <h2 className="text-xl font-bold text-[var(--content-primary)] mb-1">All Items Done</h2>
           <p className="text-xs text-[var(--content-secondary)] mb-6">Press Enter to finalize</p>
           <button
-            onClick={onFinish}
+            onClick={handleFinish}
             disabled={isSubmitting}
             className="w-full h-11 rounded-xl bg-[var(--bg-positive)] text-white text-sm font-bold hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 shadow-md flex items-center justify-center gap-2"
           >
@@ -358,7 +367,7 @@ function CompactProcess({
         {/* Mini nav */}
         <div className="px-4 pb-2.5 flex items-center justify-between">
           <button
-            onClick={() => onJump(activeIndex - 1)}
+            onClick={() => handleJump(activeIndex - 1)}
             disabled={activeIndex === 0}
             className="text-xs font-semibold text-[var(--content-tertiary)] hover:text-[var(--content-primary)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center gap-0.5"
           >
@@ -367,7 +376,7 @@ function CompactProcess({
           </button>
           <button
             onClick={() => {
-              onAdvance(); // skip without copy
+              handleAdvance(); // skip without copy
             }}
             className="text-xs font-semibold text-[var(--content-tertiary)] hover:text-[var(--content-primary)] transition-colors flex items-center gap-0.5"
           >
@@ -570,14 +579,8 @@ export default function CompactQueuePage() {
     [myActive, available, stale],
   );
 
-  const [currentOrderId, setCurrentOrderId] = useState<number | null>(null);
-
-  // Sync active order
-  useEffect(() => {
-    if (myActive.length > 0 && currentOrderId !== myActive[0].id) {
-      setCurrentOrderId(myActive[0].id);
-    }
-  }, [myActive, currentOrderId]);
+  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+  const currentOrderId = myActive[0]?.id ?? selectedOrderId;
 
   const activeInQueue = useMemo(() => {
     if (currentOrderId) {
@@ -623,7 +626,7 @@ export default function CompactQueuePage() {
         console.warn('Failed to release claim gracefully');
       }
     }
-    setCurrentOrderId(null);
+    setSelectedOrderId(null);
     claimAttempted.current = null;
     machine.reset();
   }, [claimId, userId, release, machine]);
@@ -771,7 +774,7 @@ export default function CompactQueuePage() {
             isUrgent={queue.some((o) => o.priority === 'urgent')}
             onStart={() => {
               if (activeInQueue) {
-                setCurrentOrderId(activeInQueue.id);
+                setSelectedOrderId(activeInQueue.id);
                 machine.startCommit();
               }
             }}

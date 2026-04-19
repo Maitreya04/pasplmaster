@@ -127,10 +127,11 @@ export default function PickPage(): React.JSX.Element | null {
   const [flagBoxPrice, setFlagBoxPrice] = useState('');
   const [liveScanSession, setLiveScanSession] = useState<LiveScanSession | null>(null);
   const [showComplete, setShowComplete] = useState(false);
+  const orderItems = order?.items;
 
   const pickItems = useMemo(() => {
-    if (!order?.items) return [];
-    const sorted = sortByRack(order.items);
+    if (!orderItems) return [];
+    const sorted = sortByRack(orderItems);
     return sorted.map((oi): PickItemLocal => {
       const local = localItems.get(oi.id);
       if (local) {
@@ -148,7 +149,7 @@ export default function PickPage(): React.JSX.Element | null {
         alias1: oi.catalog_alias1 ?? null,
       };
     });
-  }, [localItems, order?.items]);
+  }, [localItems, orderItems]);
 
   const { active, done } = useMemo(() => partitionItems(pickItems), [pickItems]);
 

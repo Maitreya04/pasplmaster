@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import type { Icon } from '@phosphor-icons/react';
 import { Link, useLocation } from 'react-router-dom';
 import { appHaptics } from '../../lib/haptics';
@@ -92,10 +92,8 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
   const location = useLocation();
   const currentFull = location.pathname + location.search;
   const [optimisticPath, setOptimisticPath] = useState<string | null>(null);
-
-  useEffect(() => {
-    setOptimisticPath(null);
-  }, [currentFull]);
+  const pendingOptimisticPath =
+    optimisticPath && optimisticPath !== currentFull ? optimisticPath : null;
 
   return (
     <nav
@@ -116,7 +114,7 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
           : item.path.includes('?')
             ? currentFull === item.path
             : location.pathname === item.path;
-        const isActive = optimisticPath ? item.path === optimisticPath : matchesLocation;
+        const isActive = pendingOptimisticPath ? item.path === pendingOptimisticPath : matchesLocation;
         const iconWeight = isActive ? (item.activeWeight ?? 'fill') : (item.inactiveWeight ?? 'regular');
 
         // Gate haptics on real navigation, not tab highlight. E.g. New Order tab stays active on

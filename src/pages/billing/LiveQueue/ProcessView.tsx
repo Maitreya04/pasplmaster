@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { useEffect, useRef, useState, useCallback, type ReactElement } from 'react';
 import { Copy, Check, CheckCircle, Warning, XCircle } from '@phosphor-icons/react';
 import type { OrderItem } from '../../../types';
 import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
@@ -19,7 +19,7 @@ interface ProcessViewProps {
   onFinish: () => void;
 }
 
-export function ProcessView({ orderName, items, activeIndex, isSubmitting, manualFlags, onAdvance, onJump, onFlag, onUnflag: _onUnflag, onFinish }: ProcessViewProps): ReactElement {
+export function ProcessView({ orderName, items, activeIndex, isSubmitting, manualFlags, onAdvance, onJump, onFlag, onFinish }: ProcessViewProps): ReactElement {
   const { copy, copiedId } = useCopyToClipboard();
   const isComplete = activeIndex >= items.length;
   
@@ -34,11 +34,15 @@ export function ProcessView({ orderName, items, activeIndex, isSubmitting, manua
   const [showFlagPanel, setShowFlagPanel] = useState(false);
   const [partialQty, setPartialQty] = useState('');
   const partialInputRef = useRef<HTMLInputElement>(null);
+  const [direction, setDirection] = useState<'forward' | 'backward'>('forward');
   
   // Reset flag panel when active item changes
   useEffect(() => {
-    setShowFlagPanel(false);
-    setPartialQty('');
+    const frame = requestAnimationFrame(() => {
+      setShowFlagPanel(false);
+      setPartialQty('');
+    });
+    return () => cancelAnimationFrame(frame);
   }, [activeIndex]);
 
   // Auto-focus partial input when panel opens
@@ -49,12 +53,21 @@ export function ProcessView({ orderName, items, activeIndex, isSubmitting, manua
     }
   }, [showFlagPanel]);
   
-  // Track direction for animations
-  const prevIndexRef = useRef(activeIndex);
-  const direction = activeIndex >= prevIndexRef.current ? 'forward' : 'backward';
-  useEffect(() => {
-    prevIndexRef.current = activeIndex;
-  }, [activeIndex]);
+  const handleJump = useCallback(
+    (index: number) => {
+      setDirection(index < activeIndex ? 'backward' : 'forward');
+      onJump(index);
+    },
+    [activeIndex, onJump],
+  );
+  const handleAdvance = useCallback(() => {
+    setDirection('forward');
+    onAdvance();
+  }, [onAdvance]);
+  const handleFinish = useCallback(() => {
+    setDirection('forward');
+    onFinish();
+  }, [onFinish]);
 
   // Keyboard bindings & debounce
   const lastEnter = useRef(0);
@@ -73,16 +86,16 @@ export function ProcessView({ orderName, items, activeIndex, isSubmitting, manua
         e.preventDefault();
         
         if (e.shiftKey) {
-           onJump(activeIndex - 1);
+           handleJump(activeIndex - 1);
            return;
         }
 
         if (isComplete) {
-          onFinish();
+          handleFinish();
         } else if (activeItem) {
           const textToCopy = activeItem.item_alias || activeItem.item_name;
           copy(textToCopy, `act-code-${activeItem.id}`);
-          onAdvance();
+          handleAdvance();
         }
       }
 
@@ -107,7 +120,7 @@ export function ProcessView({ orderName, items, activeIndex, isSubmitting, manua
     
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isComplete, activeItem, copy, onAdvance, onFinish, onJump, activeIndex, onFlag, showFlagPanel]);
+  }, [isComplete, activeItem, copy, handleAdvance, handleFinish, handleJump, activeIndex, onFlag, showFlagPanel]);
 
   return (
     <div className="density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col">
@@ -362,7 +375,7 @@ export function ProcessView({ orderName, items, activeIndex, isSubmitting, manua
                 return (
                  <div 
                    key={item.id} 
-                   onClick={() => onJump(originalIndex)}
+                   onClick={() => handleJump(originalIndex)}
                    className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer hover:opacity-100 hover:bg-[var(--bg-tertiary)] transition-all ${
                      isFlagged 
                        ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] opacity-90' 

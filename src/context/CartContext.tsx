@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useEffect,
-  useLayoutEffect,
   type ReactNode,
 } from 'react';
 import type { CartItem as CartItemType, Customer, Item, Transport } from '../types';
@@ -41,15 +40,31 @@ const CartContext = createContext<CartContextValue | null>(null);
 
 const DRAFT_SAVE_DEBOUNCE_MS = 500;
 
+function readInitialCartState(userName: string | null, userId: number | null) {
+  const draft = readCartDraft(userName, userId);
+  return {
+    items: draft?.items ?? [],
+    nextLineId: draft?.nextLineId ?? 1,
+    selectedCustomer: draft?.selectedCustomer ?? null,
+    selectedTransport: draft?.selectedTransport ?? null,
+    priority: draft?.priority ?? ('normal' as const),
+    notes: draft?.notes ?? '',
+  };
+}
+
 export function CartProvider({ children }: { children: ReactNode }): React.JSX.Element | null {
   const { userName, userId } = useAuth();
-  const [items, setItems] = useState<CartItemType[]>([]);
-  const nextLineIdRef = useRef(1);
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [selectedTransport, setSelectedTransport] = useState<Transport | null>(null);
-  const [priority, setPriority] = useState<'normal' | 'urgent'>('normal');
-  const [notes, setNotes] = useState('');
-  const [draftHydrated, setDraftHydrated] = useState(false);
+  const initialState = useMemo(() => readInitialCartState(userName, userId), [userName, userId]);
+  const [items, setItems] = useState<CartItemType[]>(() => initialState.items);
+  const nextLineIdRef = useRef(initialState.nextLineId);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(
+    () => initialState.selectedCustomer,
+  );
+  const [selectedTransport, setSelectedTransport] = useState<Transport | null>(
+    () => initialState.selectedTransport,
+  );
+  const [priority, setPriority] = useState<'normal' | 'urgent'>(() => initialState.priority);
+  const [notes, setNotes] = useState(() => initialState.notes);
 
   const addItem = useCallback(
     (item: Item, qty: number, specialRate: number | null = null) => {
@@ -86,30 +101,7 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
     setNotes('');
   }, [userName, userId]);
 
-  useLayoutEffect(() => {
-    setDraftHydrated(false);
-    const draft = readCartDraft(userName, userId);
-    if (draft) {
-      setItems(draft.items);
-      nextLineIdRef.current = draft.nextLineId;
-      setSelectedCustomer(draft.selectedCustomer);
-      setSelectedTransport(draft.selectedTransport);
-      setPriority(draft.priority);
-      setNotes(draft.notes);
-    } else {
-      setItems([]);
-      nextLineIdRef.current = 1;
-      setSelectedCustomer(null);
-      setSelectedTransport(null);
-      setPriority('normal');
-      setNotes('');
-    }
-    setDraftHydrated(true);
-  }, [userName, userId]);
-
   useEffect(() => {
-    if (!draftHydrated) return;
-
     const payload: CartDraftPayload = {
       items,
       nextLineId: nextLineIdRef.current,
@@ -125,7 +117,6 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
 
     return () => window.clearTimeout(t);
   }, [
-    draftHydrated,
     userName,
     userId,
     items,

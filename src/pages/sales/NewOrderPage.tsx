@@ -8,8 +8,6 @@ import {
   memo,
   useCallback,
   type TouchEvent as ReactTouchEvent,
-  type UIEvent as ReactUIEvent,
-  type WheelEvent as ReactWheelEvent,
   type ReactNode,
 } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -1719,12 +1717,16 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const { setSuppressTopBarActions } = useSalesChrome();
   const activeFilterCount = (selectedBrand ? 1 : 0) + (selectedGroup ? 1 : 0);
   const activeFilterSummary = [selectedBrand, selectedGroup].filter(Boolean).join(' · ');
+  const wantFocusFromLocation = (
+    location.state as { focusSearch?: boolean } | null | undefined
+  )?.focusSearch;
 
   useLayoutEffect(() => {
-    const wantFocus = (location.state as { focusSearch?: boolean } | null | undefined)?.focusSearch;
-    if (!wantFocus) return;
+    if (!wantFocusFromLocation) return;
 
-    setIsSearchFocused(true);
+    const focusStateFrame = requestAnimationFrame(() => {
+      setIsSearchFocused(true);
+    });
     focusGuardUntilRef.current = Date.now() + 900;
 
     const focusNow = () => {
@@ -1739,10 +1741,11 @@ export default function NewOrderPage(): React.JSX.Element | null {
     }, 320);
 
     return () => {
+      cancelAnimationFrame(focusStateFrame);
       window.clearTimeout(focusRetry);
       window.clearTimeout(clearStateTimer);
     };
-  }, [location.key, navigate]);
+  }, [location.key, wantFocusFromLocation, navigate]);
 
   useEffect(() => {
     setSuppressTopBarActions(isSearchMode);
@@ -1796,11 +1799,11 @@ export default function NewOrderPage(): React.JSX.Element | null {
     }
   }, [dismissSearchKeyboard]);
 
-  const handleScrollCapture = useCallback((_e: ReactUIEvent<HTMLDivElement>) => {
+  const handleScrollCapture = useCallback(() => {
     dismissSearchKeyboard();
   }, [dismissSearchKeyboard]);
 
-  const handleWheelCapture = useCallback((_e: ReactWheelEvent<HTMLDivElement>) => {
+  const handleWheelCapture = useCallback(() => {
     dismissSearchKeyboard();
   }, [dismissSearchKeyboard]);
 

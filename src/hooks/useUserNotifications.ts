@@ -39,7 +39,10 @@ export function useUserNotifications(userId: number | null) {
   }, [userId]);
 
   useEffect(() => {
-    void fetchNotifications();
+    const timer = window.setTimeout(() => {
+      void fetchNotifications();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchNotifications]);
 
   useEffect(() => {

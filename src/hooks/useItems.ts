@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase/client';
 import { queryClient } from '../lib/queryClient';
 import type { Item } from '../types';
 
+type ItemSyncRow = Item & { updated_at: string; is_active?: boolean | null };
 
 const ITEMS_SELECT =
   'id,name,alias,alias1,parent_group,main_group,item_category,sales_price,mrp,stock_qty,rack_no';
@@ -12,7 +13,7 @@ const ITEMS_SELECT =
 const POLL_INTERVAL_MS = 30_000;
 
 let lastSyncTime: string | null = null;
-let cachedItems: Map<number, Item> = new Map();
+const cachedItems: Map<number, Item> = new Map();
 let isFirstFetch = true;
 let lastReturnedArray: Item[] = [];
 
@@ -38,10 +39,10 @@ export async function fetchAllItems(): Promise<Item[]> {
         .order('id', { ascending: true })
         .limit(1000);
 
-      const data = rawData as any as (Item & { updated_at: string })[];
+      const data = (rawData ?? []) as unknown as ItemSyncRow[];
 
       if (error) throw error;
-      if (!data || data.length === 0) {
+      if (data.length === 0) {
         allFetched = true;
         break;
       }
@@ -75,10 +76,10 @@ export async function fetchAllItems(): Promise<Item[]> {
         .order('id', { ascending: true })
         .limit(1000);
 
-      const data = rawData as any as (Item & { updated_at: string })[];
+      const data = (rawData ?? []) as unknown as ItemSyncRow[];
 
       if (error) throw error;
-      if (!data || data.length === 0) {
+      if (data.length === 0) {
         allFetched = true;
         break;
       }

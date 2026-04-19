@@ -1,9 +1,23 @@
 import { ArrowLeft, CaretLeft, CaretRight, Check, MagnifyingGlass, Package, PencilSimple, X } from '@phosphor-icons/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { filterCatalog, itemStatusComplete } from './helpers';
 import type { OcrStageItem, OcrStageProduct } from './types';
 
 export function OcrLabEditDrawer({
+  ...props
+}: {
+  item: OcrStageItem;
+  itemIndex: number;
+  totalItems: number;
+  catalog: OcrStageProduct[];
+  onClose: () => void;
+  onConfirm: (product: OcrStageProduct | null, quantity: number) => void;
+  onNavigate: (direction: 'prev' | 'next') => void;
+}): React.JSX.Element {
+  return <OcrLabEditDrawerContent key={props.item.id} {...props} />;
+}
+
+function OcrLabEditDrawerContent({
   item,
   itemIndex,
   totalItems,
@@ -24,13 +38,6 @@ export function OcrLabEditDrawer({
   const [query, setQuery] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<OcrStageProduct | null>(item.matchedProduct);
   const [quantity, setQuantity] = useState(item.quantity);
-
-  useEffect(() => {
-    setSelectedProduct(item.matchedProduct);
-    setQuantity(item.quantity);
-    setIsSearching(false);
-    setQuery('');
-  }, [item.id, item.matchedProduct, item.quantity]);
 
   const filtered = useMemo(() => filterCatalog(catalog, query), [catalog, query]);
 

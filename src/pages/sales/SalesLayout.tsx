@@ -52,7 +52,7 @@ export default function SalesLayout(): React.JSX.Element | null {
 
   return (
     <SalesChromeProvider>
-      <CartProvider>
+      <CartProvider key={`${userId ?? 'anon'}:${userName ?? 'guest'}`}>
         <div className="role-sales min-h-screen bg-[var(--bg-primary)] relative">
           <SalesTopBar userId={userId} role={role} push={push} />
           <div className="pb-[6.5rem]">

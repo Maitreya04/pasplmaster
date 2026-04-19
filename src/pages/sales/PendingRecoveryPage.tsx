@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   CaretDown,
@@ -518,27 +518,51 @@ export default function PendingRecoveryPage(): React.JSX.Element | null {
   const [activePartyKey, setActivePartyKey] = useState<string | null>(null);
   const [sheetMode, setSheetMode] = useState<SheetMode>('overview');
   const [showWaiting, setShowWaiting] = useState(false);
-  const [responseSelections, setResponseSelections] = useState<Record<number, ResponseSelection>>({});
+  const [responseSelectionsByParty, setResponseSelectionsByParty] = useState<
+    Record<string, Record<number, ResponseSelection>>
+  >({});
 
   const activeParty = useMemo(
     () => parties.find((party) => party.key === activePartyKey) ?? null,
     [activePartyKey, parties],
   );
 
-  useEffect(() => {
-    if (!activeParty) return;
+  const defaultResponseSelections = useMemo(() => {
+    if (!activeParty) return {};
     const next: Record<number, ResponseSelection> = {};
     for (const line of [...activeParty.fullLines, ...activeParty.partialLines]) {
       next[line.id] = line.response_state ?? null;
     }
-    setResponseSelections(next);
+    return next;
   }, [activeParty]);
+
+  const responseSelections = activeParty
+    ? (responseSelectionsByParty[activeParty.key] ?? defaultResponseSelections)
+    : {};
+
+  const setResponseSelections = useCallback(
+    (
+      update:
+        | Record<number, ResponseSelection>
+        | ((prev: Record<number, ResponseSelection>) => Record<number, ResponseSelection>),
+    ) => {
+      if (!activeParty) return;
+      setResponseSelectionsByParty((prev) => {
+        const current = prev[activeParty.key] ?? defaultResponseSelections;
+        const next = typeof update === 'function' ? update(current) : update;
+        return {
+          ...prev,
+          [activeParty.key]: next,
+        };
+      });
+    },
+    [activeParty, defaultResponseSelections],
+  );
 
   const markContactedMutation = useMutation({
     mutationFn: async ({
       lineIds,
       resend,
-      partyKey: _partyKey,
     }: {
       lineIds: number[];
       resend: boolean;
@@ -654,7 +678,6 @@ export default function PendingRecoveryPage(): React.JSX.Element | null {
   const createRecoveryOrderMutation = useMutation({
     mutationFn: async ({
       pendingItemIds,
-      partyKey: _partyKey,
     }: {
       pendingItemIds: number[];
       partyKey: string;

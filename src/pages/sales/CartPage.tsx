@@ -703,12 +703,7 @@ const PurchaseOrderCard = memo(function PurchaseOrderCard({
   const startYRef = useRef<number | null>(null);
   const baseOffsetRef = useRef(0);
   const isHorizontalGestureRef = useRef(false);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setOffset(0);
-    }
-  }, [isOpen]);
+  const displayOffset = isDragging ? offset : (isOpen ? SWIPE_ACTION_WIDTH : 0);
 
   const closeActions = useCallback(() => {
     setOffset(0);
@@ -792,7 +787,7 @@ const PurchaseOrderCard = memo(function PurchaseOrderCard({
 
       <div
         className={`relative rounded-2xl border border-[color-mix(in_srgb,var(--border-warning)_42%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-4 py-3.5 ${isDragging ? '' : 'transition-transform duration-180 ease-out'} ${isOpen || isDragging ? 'z-10 shadow-[0_8px_20px_rgba(15,23,42,0.06)]' : ''}`}
-        style={{ transform: `translate3d(-${isDragging ? offset : (isOpen ? SWIPE_ACTION_WIDTH : 0)}px, 0, 0)` }}
+        style={{ transform: `translate3d(-${displayOffset}px, 0, 0)` }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -1034,6 +1029,11 @@ export default function CartPage(): React.JSX.Element | null {
     },
     onSuccess: (payload) => {
       clearCart();
+      setSummaryCopied(false);
+      if (summaryCopyTimeoutRef.current) {
+        clearTimeout(summaryCopyTimeoutRef.current);
+        summaryCopyTimeoutRef.current = null;
+      }
       setSubmitSuccess(payload);
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['pending-items'] });
@@ -1058,14 +1058,6 @@ export default function CartPage(): React.JSX.Element | null {
     appHaptics.impactMedium();
     submitMutation.mutate();
   };
-
-  useEffect(() => {
-    setSummaryCopied(false);
-    if (summaryCopyTimeoutRef.current) {
-      clearTimeout(summaryCopyTimeoutRef.current);
-      summaryCopyTimeoutRef.current = null;
-    }
-  }, [submitSuccess?.orderNumber]);
 
   useEffect(() => {
     return () => {
