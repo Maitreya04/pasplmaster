@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
+import { fetchLocationwiseStock, normalizeBusyCodes } from './useLocationwiseStock';
 import type {
   PendingItem,
   PendingRecoveryResponse,
@@ -17,6 +18,7 @@ type PendingRecoveryOrderRow = {
 
 type ItemStockRow = {
   id: number;
+  busy_code: number | null;
   stock_qty: number | null;
   sales_price: number | null;
   alias1: string | null;
@@ -337,7 +339,7 @@ export function useSalesPendingRecovery(userName: string | null) {
         itemIds.length > 0
           ? supabase
               .from('items')
-              .select('id, stock_qty, sales_price, alias1')
+              .select('id, busy_code, stock_qty, sales_price, alias1')
               .in('id', itemIds)
               .returns<ItemStockRow[]>()
           : Promise.resolve({ data: [], error: null }),
@@ -356,6 +358,11 @@ export function useSalesPendingRecovery(userName: string | null) {
       if (itemsError) throw formatPendingRecoveryError(itemsError);
       if (orderItemsError) throw formatPendingRecoveryError(orderItemsError);
 
+      const locationwiseStockByBusyCode =
+        items && items.length > 0
+          ? await fetchLocationwiseStock(normalizeBusyCodes(items.map((item) => item.busy_code)))
+          : {};
+
       const userKey = normalizeSalespersonKey(userName);
       const ownedOrders = new Map(
         (orders ?? [])
@@ -373,19 +380,25 @@ export function useSalesPendingRecovery(userName: string | null) {
 
       return pendingItems
         .filter((item) => ownedOrders.has(item.order_id))
-        .map((item) =>
-          normalizePendingItem(
+        .map((item) => {
+          const itemRow = typeof item.item_id === 'number' ? itemMap.get(item.item_id) : undefined;
+          const busyCode = itemRow?.busy_code == null ? NaN : Number(itemRow.busy_code);
+          const indoreStockQty = Number.isFinite(busyCode)
+            ? locationwiseStockByBusyCode[busyCode]?.mainStoreStockQty ?? itemRow?.stock_qty ?? null
+            : itemRow?.stock_qty ?? null;
+
+          return normalizePendingItem(
             item,
             ownedOrders.get(item.order_id),
             typeof item.customer_id === 'number' ? customerMap.get(item.customer_id) ?? null : null,
-            typeof item.item_id === 'number' ? itemMap.get(item.item_id)?.stock_qty ?? null : null,
+            indoreStockQty,
             typeof item.item_id === 'number'
               ? orderItemPriceMap.get(`${item.order_id}:${item.item_id}`) ?? null
               : null,
-            typeof item.item_id === 'number' ? itemMap.get(item.item_id)?.sales_price ?? null : null,
-            typeof item.item_id === 'number' ? itemMap.get(item.item_id)?.alias1 ?? null : null,
-          ),
-        );
+            itemRow?.sales_price ?? null,
+            itemRow?.alias1 ?? null,
+          );
+        });
     },
     enabled: !!userName,
     staleTime: 0,

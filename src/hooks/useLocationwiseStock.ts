@@ -7,7 +7,7 @@ export interface ItemLocationStock {
   mainStoreStockQty: number | null;
 }
 
-type StockLocationRow = {
+export type StockLocationRow = {
   busy_code: number | null;
   stock_location: string | null;
   stock_qty: number | null;
@@ -15,7 +15,7 @@ type StockLocationRow = {
 
 const POLL_INTERVAL_MS = 30_000;
 
-function normalizeBusyCodes(busyCodes: Array<number | null | undefined>): number[] {
+export function normalizeBusyCodes(busyCodes: Array<number | null | undefined>): number[] {
   return [...new Set(
     busyCodes
       .map((code) => (code == null ? null : Number(code)))
@@ -23,7 +23,7 @@ function normalizeBusyCodes(busyCodes: Array<number | null | undefined>): number
   )].sort((a, b) => a - b);
 }
 
-function normalizeLocationLabel(stockLocation: string | null | undefined): string | null {
+export function normalizeLocationLabel(stockLocation: string | null | undefined): string | null {
   const normalized = stockLocation?.trim().toLowerCase();
   if (!normalized) return null;
   if (normalized === 'jbp') return 'Jabalpur';
@@ -31,7 +31,9 @@ function normalizeLocationLabel(stockLocation: string | null | undefined): strin
   return stockLocation?.trim() ?? null;
 }
 
-async function fetchLocationwiseStock(busyCodes: number[]): Promise<Record<number, ItemLocationStock>> {
+export async function fetchLocationwiseStock(
+  busyCodes: number[],
+): Promise<Record<number, ItemLocationStock>> {
   if (busyCodes.length === 0) return {};
 
   const { data, error } = await supabase
