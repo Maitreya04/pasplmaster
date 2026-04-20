@@ -6,7 +6,7 @@ import type { Item } from '../types';
 type ItemSyncRow = Item & { updated_at: string; is_active?: boolean | null };
 
 const ITEMS_SELECT =
-  'id,name,alias,alias1,parent_group,main_group,item_category,sales_price,mrp,stock_qty,rack_no';
+  'id,name,alias,alias1,busy_code,parent_group,main_group,item_category,sales_price,mrp,stock_qty,rack_no';
 
 /** How often to poll for changes (ms). Your MSSQL script runs every ~70s, so 30s polling
  *  means at most a 30-second lag before the UI catches up. */

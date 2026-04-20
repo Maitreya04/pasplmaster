@@ -14,6 +14,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash, CurrencyInr, MagnifyingGlass, CaretLeft } from '@phosphor-icons/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
+import { useLocationwiseStock } from '../../hooks/useLocationwiseStock';
 import { useCart } from '../../context/CartContext';
 import { appHaptics } from '../../lib/haptics';
 import { useAuth } from '../../context/AuthContext';
@@ -50,7 +51,6 @@ import type { Item, Customer } from '../../types';
 import {
   formatStockQty,
   getStockTier,
-  stockPrimaryLabel,
   stockAfterOrderLine,
   type StockTier,
 } from '../../lib/stockDisplay';
@@ -1100,6 +1100,8 @@ interface ItemRowProps {
   pendingAddItemId: number | null;
   totalInOrderQty: number;
   price: number;
+  mainStoreStockQty?: number | null;
+  jabalpurStockQty?: number | null;
   hasSpecialLine: boolean;
   justAdded: boolean;
 }
@@ -1153,19 +1155,25 @@ function StockStatusDot({ tier }: { tier: StockTier }) {
   return <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden />;
 }
 
-/** Single-line stock while editing qty: avoids duplicating “X in stock” + a separate red warning. */
-function PendingItemStockLine({
+function LocationStockLine({
+  label,
   stockQty,
-  totalInOrderQty,
-  draftQty,
 }: {
+  label: string;
   stockQty: number | null | undefined;
-  totalInOrderQty: number;
-  draftQty: number;
 }) {
+  if (stockQty == null || !Number.isFinite(Number(stockQty))) return null;
+
   const tier = getStockTier(stockQty);
-  const primary = stockPrimaryLabel(stockQty, tier);
-  const primaryTextClass =
+  const dotClass =
+    tier === 'ok'
+      ? 'bg-[var(--content-signal-ok)]'
+      : tier === 'low'
+        ? 'bg-[var(--content-signal-low)]'
+        : tier === 'out'
+          ? 'bg-[var(--bg-negative)]'
+          : 'bg-[var(--content-quaternary)]';
+  const textClass =
     tier === 'ok'
       ? 'text-content-signal-ok'
       : tier === 'low'
@@ -1174,12 +1182,36 @@ function PendingItemStockLine({
           ? 'text-content-signal-out'
           : 'text-[var(--content-tertiary)]';
 
+  return (
+    <p className="flex min-w-0 items-center gap-1.5 font-ds-caption-size font-semibold leading-snug">
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden />
+      <span className={`min-w-0 ${textClass}`}>{formatStockQty(Number(stockQty))} in {label}</span>
+    </p>
+  );
+}
+
+/** Single-line stock while editing qty: avoids duplicating “X in stock” + a separate red warning. */
+function PendingItemStockLine({
+  stockQty,
+  totalInOrderQty,
+  draftQty,
+  mainStoreStockQty,
+  jabalpurStockQty,
+}: {
+  stockQty: number | null | undefined;
+  totalInOrderQty: number;
+  draftQty: number;
+  mainStoreStockQty?: number | null;
+  jabalpurStockQty?: number | null;
+}) {
+  const tier = getStockTier(stockQty);
+
   if (tier === 'unknown' || stockQty == null || !Number.isFinite(Number(stockQty))) {
     return (
-      <p className="flex min-w-0 items-center gap-1.5 font-ds-caption-size font-semibold leading-snug">
-        <StockStatusDot tier={tier} />
-        <span className={`min-w-0 ${primaryTextClass}`}>{primary}</span>
-      </p>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <LocationStockLine label="Indore" stockQty={mainStoreStockQty} />
+        <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
+      </div>
     );
   }
 
@@ -1200,13 +1232,17 @@ function PendingItemStockLine({
       </>
     );
     return (
-      <div
-        className="rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5"
-        role="status"
-      >
-        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 font-ds-caption-size font-semibold leading-snug">
-          {body}
-        </p>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <div
+          className="rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5"
+          role="status"
+        >
+          <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 font-ds-caption-size font-semibold leading-snug">
+            {body}
+          </p>
+        </div>
+        <LocationStockLine label="Indore" stockQty={mainStoreStockQty ?? stockQty} />
+        <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
       </div>
     );
   }
@@ -1226,7 +1262,7 @@ function PendingItemStockLine({
         className={
           overBy > 0
             ? 'min-w-0 text-[var(--content-warning)]'
-            : `min-w-0 ${primaryTextClass}`
+            : 'min-w-0 text-[var(--content-secondary)]'
         }
       >
         {formatStockQty(S)} in stock
@@ -1254,53 +1290,53 @@ function PendingItemStockLine({
 
   if (overBy > 0) {
     return (
-      <div
-        className="rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5"
-        role="status"
-      >
-        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 font-ds-caption-size font-semibold leading-snug">
-          {body}
-        </p>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <div
+          className="rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5"
+          role="status"
+        >
+          <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 font-ds-caption-size font-semibold leading-snug">
+            {body}
+          </p>
+        </div>
+        <LocationStockLine label="Indore" stockQty={mainStoreStockQty ?? stockQty} />
+        <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
       </div>
     );
   }
 
   return (
-    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 font-ds-caption-size font-semibold leading-snug">
-      {body}
-    </p>
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <LocationStockLine label="Indore" stockQty={mainStoreStockQty ?? stockQty} />
+      <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
+      <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 pt-0.5 font-ds-label-size font-medium leading-snug text-[var(--content-secondary)]">
+        {body}
+      </p>
+    </div>
   );
 }
 
 function ItemStockBlock({
   stockQty,
   totalInOrderQty,
+  mainStoreStockQty,
+  jabalpurStockQty,
 }: {
   stockQty: number | null | undefined;
   totalInOrderQty: number;
+  mainStoreStockQty?: number | null;
+  jabalpurStockQty?: number | null;
 }) {
   const tier = getStockTier(stockQty);
-  const primary = stockPrimaryLabel(stockQty, tier);
   const secondary =
     tier !== 'unknown' && tier !== 'out' && stockQty != null && Number.isFinite(Number(stockQty))
       ? stockAfterOrderLine(Number(stockQty), totalInOrderQty, tier)
       : null;
 
-  const primaryTextClass =
-    tier === 'ok'
-      ? 'text-content-signal-ok'
-      : tier === 'low'
-        ? 'text-content-signal-low'
-        : tier === 'out'
-          ? 'text-content-signal-out'
-          : 'text-[var(--content-tertiary)]';
-
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
-      <p className="flex min-w-0 items-center gap-1.5 font-ds-caption-size font-semibold leading-none">
-        <StockStatusDot tier={tier} />
-        <span className={`min-w-0 ${primaryTextClass}`}>{primary}</span>
-      </p>
+      <LocationStockLine label="Indore" stockQty={mainStoreStockQty ?? stockQty} />
+      <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
       {secondary &&
         (secondary.variant === 'shortfall' ? (
           <div className="mt-1 rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5">
@@ -1330,6 +1366,8 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   hasProductCode,
   price,
   totalInOrderQty,
+  mainStoreStockQty,
+  jabalpurStockQty,
   hasSpecialLine,
   onConfirmAdd,
   onConfirmSpecialRateAdd,
@@ -1342,6 +1380,8 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   hasProductCode: boolean;
   price: number;
   totalInOrderQty: number;
+  mainStoreStockQty?: number | null;
+  jabalpurStockQty?: number | null;
   hasSpecialLine: boolean;
   onConfirmAdd: (item: Item, qty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
@@ -1349,6 +1389,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
 }) {
   const qtyInputRef = useRef<HTMLInputElement | null>(null);
   const [draftQtyInput, setDraftQtyInput] = useState('1');
+  const resolvedMainStoreStockQty = mainStoreStockQty ?? item.stock_qty;
 
   const getDraftQty = useCallback(() => {
     const parsed = parseInt(draftQtyInput.trim(), 10);
@@ -1388,9 +1429,11 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
             {highlightText(item.name, query)}
           </p>
           <PendingItemStockLine
-            stockQty={item.stock_qty}
+            stockQty={resolvedMainStoreStockQty}
             totalInOrderQty={totalInOrderQty}
             draftQty={draftQty}
+            mainStoreStockQty={mainStoreStockQty}
+            jabalpurStockQty={jabalpurStockQty}
           />
         </div>
         <p className="shrink-0 pt-0.5 text-right font-mono font-ds-caption-size font-medium leading-none text-[var(--content-tertiary)]">
@@ -1481,6 +1524,8 @@ const ItemRow = memo(function ItemRow({
   pendingAddItemId,
   totalInOrderQty,
   price,
+  mainStoreStockQty,
+  jabalpurStockQty,
   hasSpecialLine,
   justAdded,
 }: ItemRowProps) {
@@ -1489,7 +1534,8 @@ const ItemRow = memo(function ItemRow({
   const productCode = (item.alias1 ?? item.alias ?? '').toString().trim();
   const productCodeValue = productCode || '—';
   const showQtyEditor = isPendingAdd;
-  const isOutOfStock = getStockTier(item.stock_qty) === 'out';
+  const resolvedMainStoreStockQty = mainStoreStockQty ?? item.stock_qty;
+  const isOutOfStock = getStockTier(resolvedMainStoreStockQty) === 'out';
 
   return (
     <li
@@ -1515,6 +1561,8 @@ const ItemRow = memo(function ItemRow({
           hasProductCode={!!productCode}
           price={price}
           totalInOrderQty={totalInOrderQty}
+          mainStoreStockQty={mainStoreStockQty}
+          jabalpurStockQty={jabalpurStockQty}
           hasSpecialLine={hasSpecialLine}
           onConfirmAdd={onConfirmAdd}
           onConfirmSpecialRateAdd={onConfirmSpecialRateAdd}
@@ -1537,7 +1585,12 @@ const ItemRow = memo(function ItemRow({
               {highlightText(item.name, query)}
             </p>
 
-            <ItemStockBlock stockQty={item.stock_qty} totalInOrderQty={totalInOrderQty} />
+            <ItemStockBlock
+              stockQty={resolvedMainStoreStockQty}
+              totalInOrderQty={totalInOrderQty}
+              mainStoreStockQty={mainStoreStockQty}
+              jabalpurStockQty={jabalpurStockQty}
+            />
 
             {justAdded && (
               <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -1583,6 +1636,8 @@ const ItemRow = memo(function ItemRow({
     prevProps.pendingAddItemId === nextProps.pendingAddItemId &&
     prevProps.totalInOrderQty === nextProps.totalInOrderQty &&
     prevProps.price === nextProps.price &&
+    prevProps.mainStoreStockQty === nextProps.mainStoreStockQty &&
+    prevProps.jabalpurStockQty === nextProps.jabalpurStockQty &&
     prevProps.hasSpecialLine === nextProps.hasSpecialLine &&
     prevProps.justAdded === nextProps.justAdded
   );
@@ -1602,6 +1657,8 @@ function ResultSection({
   pendingAddItemId,
   getTotalInOrderQty,
   getPrice,
+  getMainStoreStockQty,
+  getJabalpurStockQty,
   hasSpecialLine,
   isJustAdded,
 }: {
@@ -1615,6 +1672,8 @@ function ResultSection({
   pendingAddItemId: number | null;
   getTotalInOrderQty: (id: number) => number;
   getPrice: (item: Item) => number;
+  getMainStoreStockQty: (item: Item) => number | null | undefined;
+  getJabalpurStockQty: (item: Item) => number | null | undefined;
   hasSpecialLine: (id: number) => boolean;
   isJustAdded: (id: number) => boolean;
 }) {
@@ -1636,6 +1695,8 @@ function ResultSection({
             onCancelAdd={onCancelAdd}
             totalInOrderQty={getTotalInOrderQty(r.item.id)}
             price={getPrice(r.item)}
+            mainStoreStockQty={getMainStoreStockQty(r.item)}
+            jabalpurStockQty={getJabalpurStockQty(r.item)}
             hasSpecialLine={hasSpecialLine(r.item.id)}
             justAdded={isJustAdded(r.item.id)}
             onStartAdd={onStartAdd}
@@ -1844,6 +1905,12 @@ export default function NewOrderPage(): React.JSX.Element | null {
     return results;
   }, [deferredQuery, searchIndex, selectedBrand, selectedGroup]);
 
+  const visibleBusyCodes = useMemo(
+    () => searchResults.map((result) => result.item.busy_code),
+    [searchResults],
+  );
+  const { data: locationwiseStock = {} } = useLocationwiseStock(visibleBusyCodes);
+
 
   const cartQtyByItem = useMemo(() => {
     const totals = new Map<number, number>();
@@ -1863,6 +1930,16 @@ export default function NewOrderPage(): React.JSX.Element | null {
 
   const getTotalInOrderQty = (id: number) => cartQtyByItem.get(id) ?? 0;
   const getPrice = (item: Item) => item.sales_price;
+  const getMainStoreStockQty = (item: Item) => {
+    const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
+    if (!Number.isFinite(busyCode)) return item.stock_qty ?? null;
+    return locationwiseStock[busyCode]?.mainStoreStockQty ?? item.stock_qty ?? null;
+  };
+  const getJabalpurStockQty = (item: Item) => {
+    const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
+    if (!Number.isFinite(busyCode)) return null;
+    return locationwiseStock[busyCode]?.jabalpurStockQty ?? null;
+  };
   const hasSpecialLine = (id: number) => specialLineItemIds.has(id);
   const isJustAdded = (id: number) => recentlyAddedItemId === id;
 
@@ -2100,6 +2177,8 @@ export default function NewOrderPage(): React.JSX.Element | null {
               pendingAddItemId={pendingAddItemId}
               getTotalInOrderQty={getTotalInOrderQty}
               getPrice={getPrice}
+              getMainStoreStockQty={getMainStoreStockQty}
+              getJabalpurStockQty={getJabalpurStockQty}
               hasSpecialLine={hasSpecialLine}
               isJustAdded={isJustAdded}
             />

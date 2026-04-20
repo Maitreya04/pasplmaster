@@ -3,6 +3,7 @@ export interface Item {
   name: string;
   alias: string | null;
   alias1: string | null;
+  busy_code?: number | null;
   parent_group: string | null;
   main_group: string | null;
   item_category: string | null;
