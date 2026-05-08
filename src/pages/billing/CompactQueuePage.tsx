@@ -15,6 +15,7 @@ import {
   sendInternalNotification,
   sendPickerReadyNotification,
 } from '../../lib/pickerPush';
+import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
 import { buildSalesCommunicateDraft } from '../../lib/buildSalesCommunicateDraft';
 import { NotificationBell } from '../../components/notifications/NotificationBell';
 import { useRolePushNotifications } from '../../hooks/useRolePushNotifications';
@@ -671,12 +672,13 @@ export default function CompactQueuePage() {
       for (const item of finalItems) {
         const update: Record<string, unknown> = { qty_approved: item.approvedQty };
         if (item.decision === 'drop_entirely') update.qty_approved = 0;
-        await supabase.from('order_items').update(update).eq('id', item.id);
+        const { error: updateError } = await supabase.from('order_items').update(update).eq('id', item.id);
+        if (updateError) throw updateError;
 
         if (item.decision === 'bill_available_po_rest') {
           const pendingVal = item.qty_requested - item.approvedQty;
           if (pendingVal > 0) {
-            await supabase.from('pending_items').insert({
+            const { error: pendingError } = await supabase.from('pending_items').insert({
               order_id: order.id,
               order_number: order.order_number,
               customer_id: order.customer_id,
@@ -688,17 +690,18 @@ export default function CompactQueuePage() {
               created_by: reviewer,
               note: 'Marked pending by billing (no stock in Busy)',
             });
+            if (pendingError) throw pendingError;
           }
         }
       }
 
-      const { error: rpcError } = await supabase.rpc('complete_billing', {
-        p_order_id: order.id,
-        p_claim_id: claimId,
-        p_user_id: userId,
-        p_is_resolving_flags: false,
+      await completeBillingWithClaim({
+        orderId: order.id,
+        claimId,
+        userId,
+        claim,
+        isResolvingFlags: false,
       });
-      if (rpcError) throw rpcError;
 
       if (vars?.salesDraftText) {
         try {

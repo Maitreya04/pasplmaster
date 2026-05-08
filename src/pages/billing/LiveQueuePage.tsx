@@ -13,6 +13,7 @@ import {
   sendPickerReadyNotification,
 } from '../../lib/pickerPush';
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
+import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
 
 import { useBillingFlow } from '../../hooks/useBillingFlow';
 import { QueueView } from './LiveQueue/QueueView';
@@ -106,9 +107,11 @@ export default function LiveQueuePage() {
 
   const [currentOrderId, setCurrentOrderId] = useState<number | null>(null);
 
-  // Sync active order if we already have a claim
+  // Sync active order from myActive only when nothing is selected.
+  // This prevents jumping back to the previous order while queue data is catching up
+  // after approval/next transitions.
   useEffect(() => {
-    if (myActive.length > 0 && currentOrderId !== myActive[0].id) {
+    if (currentOrderId == null && myActive.length > 0) {
       setCurrentOrderId(myActive[0].id);
     }
   }, [myActive, currentOrderId]);
@@ -208,7 +211,7 @@ export default function LiveQueuePage() {
   // ── Complete Billing (Approve) — simplified from flags only ──
   const approveMutation = useMutation({
     mutationFn: async () => {
-      if (!order || !claimId || !userId) throw new Error('Cannot approve. Missing claim context.');
+      if (!order || !userId) throw new Error('Cannot approve. Missing billing context.');
       const reviewer = userName || 'Billing';
 
       const reportSnapshot: BillingReportSnapshot = {
@@ -307,15 +310,14 @@ export default function LiveQueuePage() {
 
       if (customerUpdateError) throw customerUpdateError;
 
-      // Execute complete_billing RPC
-      const { error: rpcError } = await supabase.rpc('complete_billing', {
-        p_order_id: order.id,
-        p_claim_id: claimId,
-        p_user_id: userId,
-        p_is_resolving_flags: false,
+      // Complete billing with claim retry so transient claim desync does not fail approval.
+      await completeBillingWithClaim({
+        orderId: order.id,
+        claimId,
+        userId,
+        claim,
+        isResolvingFlags: false,
       });
-
-      if (rpcError) throw rpcError;
 
       const approvedAt = new Date().toISOString();
       const notifyTasks: Promise<unknown>[] = [
@@ -513,7 +515,10 @@ export default function LiveQueuePage() {
           onFlagNoStock={flow.flagNoStock}
           onFlagPartial={flow.flagPartial}
           onClearFlag={flow.clearFlag}
-          onFinish={() => approveMutation.mutate()}
+          onFinish={() => {
+            if (!isClaimedByMe || approveMutation.isPending || rejectMutation.isPending) return;
+            approveMutation.mutate();
+          }}
           onReject={(reason) => rejectMutation.mutate(reason)}
           onSkip={handleSkip}
         />
