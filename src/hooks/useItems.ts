@@ -8,100 +8,76 @@ type ItemSyncRow = Item & { updated_at: string; is_active?: boolean | null };
 const ITEMS_SELECT =
   'id,name,alias,alias1,busy_code,parent_group,main_group,item_category,sales_price,mrp,stock_qty,rack_no';
 
-/** How often to poll for changes (ms). Your MSSQL script runs every ~70s, so 30s polling
- *  means at most a 30-second lag before the UI catches up. */
-const POLL_INTERVAL_MS = 30_000;
+/** Poll frequently so stock updates are reflected quickly in the billing UI. */
+const POLL_INTERVAL_MS = 10_000;
 
-let lastSyncTime: string | null = null;
 const cachedItems: Map<number, Item> = new Map();
-let isFirstFetch = true;
 let lastReturnedArray: Item[] = [];
 
+function hasItemChanged(prev: Item | undefined, next: ItemSyncRow): boolean {
+  if (!prev) return true;
+  return (
+    prev.id !== next.id ||
+    prev.name !== next.name ||
+    prev.alias !== next.alias ||
+    prev.alias1 !== next.alias1 ||
+    prev.busy_code !== next.busy_code ||
+    prev.parent_group !== next.parent_group ||
+    prev.main_group !== next.main_group ||
+    prev.item_category !== next.item_category ||
+    prev.sales_price !== next.sales_price ||
+    prev.mrp !== next.mrp ||
+    prev.stock_qty !== next.stock_qty ||
+    prev.rack_no !== next.rack_no
+  );
+}
+
 export async function fetchAllItems(): Promise<Item[]> {
-  // console.log('[useItems] polling... isFirstFetch:', isFirstFetch, 'lastSyncTime:', lastSyncTime);
-
+  // Always run a full active-items sync.
+  // Some upstream stock update paths can change stock_qty without bumping updated_at,
+  // which makes delta-sync by updated_at miss real inventory changes.
+  let allFetched = false;
+  let lastId = 0;
   let hasChanges = false;
+  const seenIds = new Set<number>();
 
-  if (isFirstFetch || !lastSyncTime) {
-    let allFetched = false;
-    let lastId = 0;
-    let localMaxDate = '1970-01-01T00:00:00Z';
-    
-    // Clear cache in case of forced refetch
-    cachedItems.clear();
+  while (!allFetched) {
+    const { data: rawData, error } = await supabase
+      .from('items')
+      .select(ITEMS_SELECT + ',updated_at,is_active')
+      .eq('is_active', true)
+      .gt('id', lastId)
+      .order('id', { ascending: true })
+      .limit(1000);
 
-    while (!allFetched) {
-      const { data: rawData, error } = await supabase
-        .from('items')
-        .select(ITEMS_SELECT + ',updated_at,is_active')
-        .eq('is_active', true)
-        .gt('id', lastId)
-        .order('id', { ascending: true })
-        .limit(1000);
+    const data = (rawData ?? []) as unknown as ItemSyncRow[];
 
-      const data = (rawData ?? []) as unknown as ItemSyncRow[];
-
-      if (error) throw error;
-      if (data.length === 0) {
-        allFetched = true;
-        break;
-      }
-
-      hasChanges = true;
-      for (const item of data) {
-        cachedItems.set(item.id, item);
-        if (item.updated_at && item.updated_at > localMaxDate) localMaxDate = item.updated_at;
-        lastId = item.id;
-      }
-      
-      if (data.length < 1000) {
-        allFetched = true;
-      }
+    if (error) throw error;
+    if (data.length === 0) {
+      allFetched = true;
+      break;
     }
 
-    lastSyncTime = localMaxDate;
-    isFirstFetch = false;
-  } else {
-    // Delta fetch
-    let allFetched = false;
-    let lastId = 0;
-    let localMaxDate = lastSyncTime;
-
-    while (!allFetched) {
-      const { data: rawData, error } = await supabase
-        .from('items')
-        .select(ITEMS_SELECT + ',updated_at,is_active')
-        .gt('updated_at', lastSyncTime)
-        .gt('id', lastId)
-        .order('id', { ascending: true })
-        .limit(1000);
-
-      const data = (rawData ?? []) as unknown as ItemSyncRow[];
-
-      if (error) throw error;
-      if (data.length === 0) {
-        allFetched = true;
-        break;
+    for (const item of data) {
+      seenIds.add(item.id);
+      const prev = cachedItems.get(item.id);
+      if (hasItemChanged(prev, item)) {
+        hasChanges = true;
       }
-
-      hasChanges = true;
-      for (const item of data) {
-        if (item.is_active === false) {
-          cachedItems.delete(item.id);
-        } else {
-          cachedItems.set(item.id, item);
-        }
-        if (item.updated_at && item.updated_at > localMaxDate) localMaxDate = item.updated_at;
-        lastId = item.id;
-      }
-      
-      if (data.length < 1000) {
-        allFetched = true;
-      }
+      cachedItems.set(item.id, item);
+      lastId = item.id;
     }
 
-    if (hasChanges) {
-      lastSyncTime = localMaxDate;
+    if (data.length < 1000) {
+      allFetched = true;
+    }
+  }
+
+  // Remove items that are no longer active/present.
+  for (const id of Array.from(cachedItems.keys())) {
+    if (!seenIds.has(id)) {
+      cachedItems.delete(id);
+      hasChanges = true;
     }
   }
 
