@@ -17,7 +17,8 @@ import { useItems } from '../../hooks/useItems';
 import { useLocationwiseStock } from '../../hooks/useLocationwiseStock';
 import { useCart } from '../../context/CartContext';
 import { appHaptics } from '../../lib/haptics';
-import { useAuth } from '../../context/AuthContext';
+import { useOrderAuthor } from '../../context/OrderAuthorContext';
+import { useOrderRoutes } from '../../context/OrderRoutesContext';
 import { useToast } from '../../context/ToastContext';
 import { useCustomers } from '../../hooks/useCustomers';
 import { usePendingItems } from '../../hooks/usePendingItems';
@@ -279,7 +280,7 @@ const TrendingAddControl = memo(function TrendingAddControl({
 });
 
 function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSearch }: SmartLandingProps) {
-  const { userName } = useAuth();
+  const { userName } = useOrderAuthor();
   const { data: customers = [] } = useCustomers();
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -1713,10 +1714,11 @@ function ResultSection({
 export default function NewOrderPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const location = useLocation();
+  const routes = useOrderRoutes();
   const goToCart = useCallback(() => {
     appHaptics.impactMedium();
-    navigate('/sales/cart');
-  }, [navigate]);
+    navigate(routes.cart);
+  }, [navigate, routes.cart]);
   const { data: items = [], isLoading: itemsLoading } = useItems();
   const {
     items: cartItems,

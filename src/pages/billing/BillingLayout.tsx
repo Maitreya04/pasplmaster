@@ -5,6 +5,7 @@ import {
   ClockCounterClockwise,
   HourglassHigh,
   Lightning,
+  PlusCircle,
 } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
@@ -19,6 +20,7 @@ const preloadNeedsReview = () => import('./NeedsReviewPage');
 const preloadPending = () => import('./PendingPage');
 const preloadHistory = () => import('./HistoryPage');
 const preloadLiveQueue = () => import('./LiveQueuePage');
+const preloadNewOrder = () => import('./BillingNewOrderLayout');
 
 const NAV_ITEMS: BottomNavItem[] = [
   { icon: SquaresFour, label: 'Dashboard', path: '/billing', preload: preloadDashboard },
@@ -27,6 +29,13 @@ const NAV_ITEMS: BottomNavItem[] = [
     label: 'Live Queue',
     path: '/billing/queue',
     preload: preloadLiveQueue,
+  },
+  {
+    icon: PlusCircle,
+    label: 'New Order',
+    path: '/billing/new-order',
+    match: (pathname: string) => pathname.startsWith('/billing/new-order'),
+    preload: preloadNewOrder,
   },
   {
     icon: ClipboardText,
@@ -82,10 +91,12 @@ export default function BillingLayout(): React.JSX.Element | null {
 
         {/* Content */}
         <main className="flex-1 pb-[6.5rem] lg:pb-0 flex flex-col min-w-0">
-          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-end gap-2 px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-sm">
-            <NotificationBell userId={userId} role={role} />
-            <PushAlertsCompact label="Billing alerts" push={push} />
-          </div>
+          {!location.pathname.startsWith('/billing/new-order') && (
+            <div className="lg:hidden sticky top-0 z-30 flex items-center justify-end gap-2 px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-sm">
+              <NotificationBell userId={userId} role={role} />
+              <PushAlertsCompact label="Billing alerts" push={push} />
+            </div>
+          )}
           <div className="flex-1 min-h-0">
             <Outlet />
           </div>

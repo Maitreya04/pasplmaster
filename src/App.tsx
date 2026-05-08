@@ -20,6 +20,7 @@ const HistoryPage = lazy(() => import('./pages/billing/HistoryPage'));
 const PendingPage = lazy(() => import('./pages/billing/PendingPage'));
 const LiveQueuePage = lazy(() => import('./pages/billing/LiveQueuePage'));
 const CompactQueuePage = lazy(() => import('./pages/billing/CompactQueuePage'));
+const BillingNewOrderLayout = lazy(() => import('./pages/billing/BillingNewOrderLayout'));
 
 const PickingLayout = lazy(() => import('./pages/picking/PickingLayout'));
 const QueuePage = lazy(() => import('./pages/picking/QueuePage'));
@@ -119,6 +120,11 @@ export default function App(): React.JSX.Element | null {
           <Route path="pending" element={<PendingPage />} />
           <Route path="review/:id" element={<ReviewPage />} />
           <Route path="history" element={<HistoryPage />} />
+          <Route path="new-order" element={<BillingNewOrderLayout />}>
+            <Route index element={<Navigate to="items" replace />} />
+            <Route path="items" element={<NewOrderPage />} />
+            <Route path="cart" element={<CartPage />} />
+          </Route>
         </Route>
 
         {/* Compact Companion — no layout chrome */}

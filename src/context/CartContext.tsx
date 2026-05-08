@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { CartItem as CartItemType, Customer, Item, Transport } from '../types';
-import { useAuth } from './AuthContext';
+import { useOrderAuthor } from './OrderAuthorContext';
 import {
   readCartDraft,
   writeCartDraft,
@@ -53,7 +53,7 @@ function readInitialCartState(userName: string | null, userId: number | null) {
 }
 
 export function CartProvider({ children }: { children: ReactNode }): React.JSX.Element | null {
-  const { userName, userId } = useAuth();
+  const { userName, userId } = useOrderAuthor();
   const initialState = useMemo(() => readInitialCartState(userName, userId), [userName, userId]);
   const [items, setItems] = useState<CartItemType[]>(() => initialState.items);
   const nextLineIdRef = useRef(initialState.nextLineId);

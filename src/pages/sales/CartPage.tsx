@@ -13,7 +13,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCart } from '../../context/CartContext';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
+import { useOrderAuthor } from '../../context/OrderAuthorContext';
+import { useOrderRoutes } from '../../context/OrderRoutesContext';
 import { useCustomers } from '../../hooks/useCustomers';
+import {
+  sendInternalNotification,
+  formatInternalNotificationError,
+} from '../../lib/pickerPush';
 import { ITEMS_QUERY_KEY } from '../../hooks/useItems';
 import { useTransports } from '../../hooks/useTransports';
 import { supabase } from '../../lib/supabase/client';
@@ -831,9 +837,10 @@ const PurchaseOrderCard = memo(function PurchaseOrderCard({
 // ---------------------------------------------------------------------------
 export default function CartPage(): React.JSX.Element | null {
   const navigate = useNavigate();
+  const routes = useOrderRoutes();
   const goToNewOrderWithSearchFocus = useCallback(() => {
-    navigate('/sales/new', { state: { focusSearch: true } });
-  }, [navigate]);
+    navigate(routes.items, { state: { focusSearch: true } });
+  }, [navigate, routes.items]);
   const queryClient = useQueryClient();
   const {
     items,
@@ -851,8 +858,10 @@ export default function CartPage(): React.JSX.Element | null {
     setNotes,
   } = useCart();
   const toast = useToast();
-  const { userId, userName } = useAuth();
+  const { userId, userName } = useOrderAuthor();
+  const { userId: authUserId, userName: authUserName } = useAuth();
   const { data: transports = [] } = useTransports();
+  const isOnBehalf = userId !== null && authUserId !== null && userId !== authUserId;
 
   const [submitSuccess, setSubmitSuccess] = useState<{
     orderNumber: string;
@@ -986,6 +995,7 @@ export default function CartPage(): React.JSX.Element | null {
         success?: boolean;
         error?: string;
         detail?: string;
+        order_id?: number;
         order_number?: string;
         lines?: Array<{
           name: string;
@@ -1021,6 +1031,23 @@ export default function CartPage(): React.JSX.Element | null {
         lines: linesForMessage,
         businessName,
       });
+
+      if (isOnBehalf && typeof result.order_id === 'number') {
+        const enteredBy = authUserName?.trim() ? authUserName.trim() : 'the billing team';
+        void sendInternalNotification({
+          eventType: 'order_update_for_sales',
+          orderId: result.order_id,
+          orderNumber,
+          customerName: customer.name,
+          salespersonName: userName,
+          messageBody: `New order ${orderNumber} for ${customer.name} entered on your behalf by ${enteredBy}.`,
+        }).catch((e) => {
+          console.error('order_created_on_behalf notification', e);
+          toast.error(
+            `Salesperson notification failed: ${formatInternalNotificationError(e)}`,
+          );
+        });
+      }
 
       return {
         orderNumber,
@@ -1092,7 +1119,7 @@ export default function CartPage(): React.JSX.Element | null {
           title="Order Submitted"
           onBack={() => {
             setSubmitSuccess(null);
-            navigate('/sales');
+            navigate(routes.home);
           }}
         />
         <div className="flex-1 flex flex-col p-6 pb-10 min-h-0">
@@ -1148,7 +1175,7 @@ export default function CartPage(): React.JSX.Element | null {
               variant="primary"
               onClick={() => {
                 setSubmitSuccess(null);
-                navigate('/sales/new');
+                navigate(routes.items);
               }}
             >
               Create Another
@@ -1163,7 +1190,7 @@ export default function CartPage(): React.JSX.Element | null {
     <div className="min-h-screen flex flex-col">
       <PageHeader
         title="Your Order"
-        onBack={() => navigate('/sales/new')}
+        onBack={() => navigate(routes.items)}
       />
 
       <div className={`flex-1 space-y-6 p-4 ${items.length > 0 ? 'pb-48' : ''}`}>
