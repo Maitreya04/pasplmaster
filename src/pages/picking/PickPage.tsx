@@ -79,6 +79,7 @@ interface PendingPackConfirmation {
 }
 
 const DUPLICATE_SCAN_WINDOW_MS = 1200;
+const MAX_AUTO_SCAN_QTY = 12;
 
 function sortByRack(items: OrderItem[]): OrderItem[] {
   return [...items].sort((a, b) => {
@@ -331,6 +332,8 @@ export default function PickPage(): React.JSX.Element | null {
   const [liveScanSession, setLiveScanSession] = useState<LiveScanSession | null>(null);
   const [pendingPackConfirmation, setPendingPackConfirmation] =
     useState<PendingPackConfirmation | null>(null);
+  const [manualQtyTargetItemId, setManualQtyTargetItemId] = useState<number | null>(null);
+  const [manualQtyInput, setManualQtyInput] = useState('1');
   const [showComplete, setShowComplete] = useState(false);
   const [scannerHint, setScannerHint] = useState<string | null>(null);
   const [lastScanMeta, setLastScanMeta] = useState<{
@@ -708,6 +711,10 @@ export default function PickPage(): React.JSX.Element | null {
             ? Number(packQty)
             : 1;
       const requiresBreakConfirmation = suggestedQty > remainingBeforeScan;
+      const requiresLargeQtyConfirmation =
+        suggestedQty > MAX_AUTO_SCAN_QTY && remainingBeforeScan > 1;
+      const requiresManualQtyConfirmation =
+        requiresBreakConfirmation || requiresLargeQtyConfirmation;
       const isPackMatch = Boolean(packPayload && matchedBusyCode);
       const isMatch = scan.matchesPickItem || isPackMatch;
       const matchStrategy = isPackMatch
@@ -741,14 +748,14 @@ export default function PickPage(): React.JSX.Element | null {
         timestamp: new Date().toISOString(),
         codeType: classified.kind,
         suggestedQty,
-        requiresBreakConfirmation,
+        requiresBreakConfirmation: requiresManualQtyConfirmation,
         lpnCode: lpnPayload?.lpnCode ?? null,
         packAssist: isPackMatch
           ? {
               packType: packPayload!.packType,
               packQty: suggestedQty,
               suggestedQty,
-              requiresBreakConfirmation,
+            requiresBreakConfirmation: requiresManualQtyConfirmation,
               busyCode: matchedBusyCode!,
             }
           : undefined,
@@ -766,7 +773,7 @@ export default function PickPage(): React.JSX.Element | null {
         scanResult: result,
       });
 
-      if (!result.isMatch || requiresBreakConfirmation) {
+      if (!result.isMatch || requiresManualQtyConfirmation) {
         itemTransitionMutation.mutate({
           transition: {
             kind: 'scan_saved',
@@ -776,16 +783,16 @@ export default function PickPage(): React.JSX.Element | null {
         });
       }
 
-      if (requiresBreakConfirmation) {
+      if (requiresManualQtyConfirmation) {
         setPendingPackConfirmation({
           orderItemId: current.orderItem.id,
           scanResult: result,
           suggestedQty,
-          targetQty,
+          targetQty: remainingBeforeScan,
         });
       }
 
-      if (result.isMatch && !requiresBreakConfirmation) {
+      if (result.isMatch && !requiresManualQtyConfirmation) {
         const nextPicked = Math.min(targetQty, existingPickedBefore + suggestedQty);
         const nextRemaining = Math.max(0, targetQty - nextPicked);
         const progressedResult: ScanResult = {
@@ -839,8 +846,9 @@ export default function PickPage(): React.JSX.Element | null {
     userName,
   ]);
 
-  const handlePick = useCallback(
-    (itemId: number) => {
+  const applyPickedQty = useCallback(
+    (itemId: number, qtyToApply: number) => {
+      if (!Number.isFinite(qtyToApply) || qtyToApply <= 0) return;
       appHaptics.impactMedium();
       const local = localItems.get(itemId);
       const orderItem = order?.items.find((oi) => oi.id === itemId);
@@ -850,7 +858,7 @@ export default function PickPage(): React.JSX.Element | null {
         targetQty,
         getPickedQtyFromResult(local?.scanResult ?? orderItem.scan_result),
       );
-      const nextPicked = Math.min(targetQty, existingPicked + 1);
+      const nextPicked = Math.min(targetQty, existingPicked + Math.floor(qtyToApply));
       const nextRemaining = Math.max(0, targetQty - nextPicked);
       const manualScanResult: ScanResult = local?.scanResult ?? {
         scannedText: 'MANUAL_PICK',
@@ -870,7 +878,7 @@ export default function PickPage(): React.JSX.Element | null {
       };
       const progressedResult: ScanResult = {
         ...manualScanResult,
-        suggestedQty: 1,
+        suggestedQty: Math.floor(qtyToApply),
         progress: {
           pickedQty: nextPicked,
           remainingQty: nextRemaining,
@@ -900,6 +908,13 @@ export default function PickPage(): React.JSX.Element | null {
       }
     },
     [itemTransitionMutation, localItems, order?.items, updateLocalItem, userId, userName],
+  );
+
+  const handlePick = useCallback(
+    (itemId: number) => {
+      applyPickedQty(itemId, 1);
+    },
+    [applyPickedQty],
   );
 
   const handleOverride = useCallback(
@@ -1392,12 +1407,21 @@ export default function PickPage(): React.JSX.Element | null {
                 </BigButton>
 
                 {/* Secondary actions */}
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   <button
                     onClick={() => handlePick(currentTarget.orderItem.id)}
                     className="h-11 rounded-xl bg-[var(--bg-tertiary)] text-sm font-medium text-[var(--content-secondary)]"
                   >
                     +1 manual
+                  </button>
+                  <button
+                    onClick={() => {
+                      setManualQtyTargetItemId(currentTarget.orderItem.id);
+                      setManualQtyInput('1');
+                    }}
+                    className="h-11 rounded-xl bg-[var(--bg-accent-subtle)] text-sm font-medium text-[var(--content-accent)]"
+                  >
+                    Enter qty
                   </button>
                   <button
                     onClick={() => handleOverride(currentTarget.orderItem.id)}
@@ -1638,14 +1662,13 @@ export default function PickPage(): React.JSX.Element | null {
       <BottomSheet
         isOpen={pendingPackConfirmation !== null}
         onClose={() => setPendingPackConfirmation(null)}
-        title="Break Pack Confirmation"
+        title="Qty Confirmation"
       >
         {pendingPackConfirmation && (
           <div className="space-y-4">
             <p className="text-sm text-[var(--content-secondary)]">
               This scan suggests picking {pendingPackConfirmation.suggestedQty} units while
-              this line target is {pendingPackConfirmation.targetQty}. Confirm if you are
-              breaking a pack and proceeding manually.
+              remaining qty is {pendingPackConfirmation.targetQty}. Confirm the qty before applying.
             </p>
             <div className="flex gap-2">
               <BigButton
@@ -1661,13 +1684,66 @@ export default function PickPage(): React.JSX.Element | null {
                   const pending = pendingPackConfirmation;
                   if (!pending) return;
                   setPendingPackConfirmation(null);
-                  handlePick(pending.orderItemId);
+                  applyPickedQty(pending.orderItemId, pending.suggestedQty);
                 }}
                 className="flex-1 bg-[var(--bg-warning)] text-[var(--content-primary)]"
               >
-                Confirm Break Pack
+                Apply Qty
+              </BigButton>
+              <BigButton
+                variant="primary"
+                onClick={() => {
+                  const pending = pendingPackConfirmation;
+                  if (!pending) return;
+                  setPendingPackConfirmation(null);
+                  setManualQtyTargetItemId(pending.orderItemId);
+                  setManualQtyInput(String(Math.max(1, pending.targetQty)));
+                }}
+                className="flex-1 bg-[var(--bg-accent)] text-[var(--content-on-color)]"
+              >
+                Enter Manually
               </BigButton>
             </div>
+          </div>
+        )}
+      </BottomSheet>
+
+      <BottomSheet
+        isOpen={manualQtyTargetItemId !== null}
+        onClose={() => setManualQtyTargetItemId(null)}
+        title="Enter Picked Qty"
+      >
+        {manualQtyTargetItemId !== null && (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--content-secondary)]">
+              For bulk lines without inner packs, enter the quantity picked in this action.
+            </p>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              value={manualQtyInput}
+              onChange={(e) => setManualQtyInput(e.target.value)}
+              className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3 text-[var(--content-primary)]"
+              placeholder="Enter qty"
+            />
+            <BigButton
+              variant="primary"
+              onClick={() => {
+                const parsed = Number(manualQtyInput);
+                if (!Number.isFinite(parsed) || parsed <= 0) {
+                  toast.error('Enter a valid quantity');
+                  return;
+                }
+                applyPickedQty(manualQtyTargetItemId, Math.floor(parsed));
+                setManualQtyTargetItemId(null);
+                setManualQtyInput('1');
+              }}
+              className="bg-[var(--bg-accent)] text-[var(--content-on-color)]"
+            >
+              Apply Picked Qty
+            </BigButton>
           </div>
         )}
       </BottomSheet>
