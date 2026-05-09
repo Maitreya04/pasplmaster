@@ -49,6 +49,8 @@ type FinalBillingLineState = {
   shouldFlagBillingPending: boolean;
 };
 
+type PriceResolutionChoice = 'accept_box_price' | 'override_invoice_price';
+
 function deriveFinalBillingLineState(
   item: EditableItem,
   isMarkedPending: boolean,
@@ -112,6 +114,9 @@ export default function ReviewPage(): React.JSX.Element | null {
   const [pendingIds, setPendingIds] = useState<Set<number>>(new Set());
   const [rejectSheetOpen, setRejectSheetOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  const [priceResolutionByItemId, setPriceResolutionByItemId] = useState<
+    Record<number, PriceResolutionChoice | null>
+  >({});
   const rejectNavigateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sync items from order when loaded
@@ -143,6 +148,13 @@ export default function ReviewPage(): React.JSX.Element | null {
                   i.flag_reason === 'Out of Stock (Billing)'),
             )
             .map((i) => i.id),
+        ),
+      );
+      setPriceResolutionByItemId(
+        Object.fromEntries(
+          order.items
+            .filter((i) => i.flag_reason === 'Price Mismatch')
+            .map((i) => [i.id, null]),
         ),
       );
     }
@@ -178,6 +190,16 @@ export default function ReviewPage(): React.JSX.Element | null {
   const readyToBillCount = useMemo(
     () => Math.max(0, visibleItems.length - pendingCount - priceMismatchCount),
     [visibleItems.length, pendingCount, priceMismatchCount],
+  );
+
+  const unresolvedPriceMismatchCount = useMemo(
+    () =>
+      visibleItems.filter(
+        (item) =>
+          item.flag_reason === 'Price Mismatch' &&
+          !priceResolutionByItemId[item.id],
+      ).length,
+    [priceResolutionByItemId, visibleItems],
   );
 
   const { totalQty, grandTotal } = useMemo(() => {
@@ -264,11 +286,32 @@ export default function ReviewPage(): React.JSX.Element | null {
     );
   }, []);
 
+  const choosePriceResolution = useCallback(
+    (item: EditableItem, choice: PriceResolutionChoice) => {
+      setPriceResolutionByItemId((prev) => ({ ...prev, [item.id]: choice }));
+      if (choice === 'accept_box_price' && typeof item.flag_box_price === 'number') {
+        updatePrice(item.id, item.flag_box_price);
+      }
+    },
+    [updatePrice],
+  );
+
   const approveMutation = useMutation({
     mutationFn: async () => {
       if (!order) throw new Error('No order');
       const reviewer = userName || 'Billing';
       const resolvingFlags = order.workflow_status === 'flagged';
+      if (resolvingFlags) {
+        const unresolved = visibleItems.find(
+          (item) =>
+            item.state === 'flagged' &&
+            item.flag_reason === 'Price Mismatch' &&
+            !priceResolutionByItemId[item.id],
+        );
+        if (unresolved) {
+          throw new Error('Resolve all price mismatch lines before completing billing.');
+        }
+      }
       const approvedAt = new Date().toISOString();
       const billingPendingItemIds: number[] = [];
       const pendingDraftsByItemId = new Map<number, PendingDraftRow>();
@@ -530,8 +573,12 @@ export default function ReviewPage(): React.JSX.Element | null {
       );
       navigate('/billing');
     },
-    onError: () => {
-      toast.error('Failed to approve order');
+    onError: (err) => {
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Failed to approve order';
+      toast.error(message);
     },
   });
 
@@ -788,6 +835,12 @@ export default function ReviewPage(): React.JSX.Element | null {
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-xs text-[var(--content-secondary)]">
+                                System price:
+                              </span>
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--bg-tertiary)] text-[var(--content-secondary)] border border-[var(--border-subtle)]">
+                                ₹{(item.price_system ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                              </span>
+                              <span className="text-xs text-[var(--content-secondary)]">
                                 Invoice price (per unit):
                               </span>
                               <div className="flex items-center gap-1">
@@ -808,6 +861,36 @@ export default function ReviewPage(): React.JSX.Element | null {
                                 />
                               </div>
                             </div>
+                            {item.flag_reason === 'Price Mismatch' && (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    choosePriceResolution(item, 'accept_box_price')
+                                  }
+                                  className={`inline-flex items-center gap-1 h-7 pl-2 pr-3 rounded-full text-xs border ${
+                                    priceResolutionByItemId[item.id] === 'accept_box_price'
+                                      ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border-[var(--border-positive)]'
+                                      : 'bg-[var(--bg-secondary)] text-[var(--content-secondary)] border-[var(--border-subtle)]'
+                                  }`}
+                                >
+                                  Accept box price
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    choosePriceResolution(item, 'override_invoice_price')
+                                  }
+                                  className={`inline-flex items-center gap-1 h-7 pl-2 pr-3 rounded-full text-xs border ${
+                                    priceResolutionByItemId[item.id] === 'override_invoice_price'
+                                      ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border-[var(--border-positive)]'
+                                      : 'bg-[var(--bg-secondary)] text-[var(--content-secondary)] border-[var(--border-subtle)]'
+                                  }`}
+                                >
+                                  Keep override
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -900,6 +983,17 @@ export default function ReviewPage(): React.JSX.Element | null {
                       {priceMismatchCount}
                     </span>
                   </div>
+                  {unresolvedPriceMismatchCount > 0 && (
+                    <div className="flex items-center justify-between">
+                      <div className="inline-flex items-center gap-2">
+                        <Warning size={16} weight="bold" className="text-[var(--content-negative)]" />
+                        <span>Price mismatches unresolved</span>
+                      </div>
+                      <span className="font-mono font-semibold text-[var(--content-negative)]">
+                        {unresolvedPriceMismatchCount}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between">
                     <div className="inline-flex items-center gap-2">
                       <Hourglass size={16} weight="bold" className="text-[var(--content-secondary)]" />
@@ -949,6 +1043,10 @@ export default function ReviewPage(): React.JSX.Element | null {
                 variant="primary"
                 onClick={() => approveMutation.mutate()}
                 loading={approveMutation.isPending}
+                disabled={
+                  order.workflow_status === 'flagged' &&
+                  unresolvedPriceMismatchCount > 0
+                }
                 className={`sm:flex-[2] hover:opacity-90 ${
                   order.workflow_status === 'flagged'
                     ? 'bg-[var(--bg-warning)]'

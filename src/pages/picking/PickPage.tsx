@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle,
   Flag,
@@ -29,6 +29,18 @@ import { pickQuantityTarget } from '../../lib/cartSupply';
 import { appHaptics } from '../../lib/haptics';
 import { sendInternalNotification } from '../../lib/pickerPush';
 import type { LiveQrScannerResolved } from '../../components/shared/LiveQrScanner';
+import {
+  PACK_DEFINITIONS_QUERY_KEY,
+  fetchItemPackDefinitions,
+} from '../../lib/packLpn';
+import {
+  collectQrLookupCandidates,
+  parsePackPickPayload,
+} from '../../lib/scanner/qrPayload';
+import {
+  defaultPickItemTransitionAdapter,
+  type PickItemTransition,
+} from '../../lib/picking/itemTransitionAdapter';
 
 type PickItemUiState =
   | 'pending'
@@ -51,6 +63,13 @@ interface LiveScanSession {
   orderItem: OrderItem;
   previousUiState: PickItemUiState;
   previousScanResult: ScanResult | null;
+}
+
+interface PendingPackConfirmation {
+  orderItemId: number;
+  scanResult: ScanResult;
+  suggestedQty: number;
+  targetQty: number;
 }
 
 function sortByRack(items: OrderItem[]): OrderItem[] {
@@ -94,12 +113,36 @@ function uiStateFromDb(oi: OrderItem): PickItemUiState {
   return 'pending';
 }
 
+function deriveBusyCodeCandidates(item: OrderItem): number[] {
+  const candidates = [
+    item.item_alias,
+    item.catalog_alias,
+    item.catalog_alias1,
+  ];
+  const values = new Set<number>();
+  for (const value of candidates) {
+    if (!value) continue;
+    const digits = value.replace(/[^\d]/g, '');
+    if (!digits) continue;
+    const parsed = Number(digits);
+    if (Number.isFinite(parsed) && parsed > 0) values.add(parsed);
+  }
+  return [...values];
+}
+
+function buildPriceMismatchNotes(rawNotes: string, boxPrice: number): string {
+  const base = rawNotes.trim();
+  const structured = `Price mismatch detected at picking. Box price ₹${boxPrice.toFixed(2)}.`;
+  return base ? `${structured} Picker note: ${base}` : structured;
+}
+
 export default function PickPage(): React.JSX.Element | null {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
   const { userName, userId } = useAuth();
+  const transitionAdapter = defaultPickItemTransitionAdapter;
 
   const orderId = id ? parseInt(id, 10) : null;
   const { data: order, isLoading, error } = useOrderDetail(orderId);
@@ -126,8 +169,20 @@ export default function PickPage(): React.JSX.Element | null {
   const [flagNotes, setFlagNotes] = useState('');
   const [flagBoxPrice, setFlagBoxPrice] = useState('');
   const [liveScanSession, setLiveScanSession] = useState<LiveScanSession | null>(null);
+  const [pendingPackConfirmation, setPendingPackConfirmation] =
+    useState<PendingPackConfirmation | null>(null);
   const [showComplete, setShowComplete] = useState(false);
   const orderItems = order?.items;
+
+  const { data: packDefinitions = [] } = useQuery({
+    queryKey: PACK_DEFINITIONS_QUERY_KEY,
+    queryFn: fetchItemPackDefinitions,
+    staleTime: 5 * 60 * 1000,
+  });
+  const packDefinitionByBusyCode = useMemo(
+    () => new Map(packDefinitions.map((row) => [row.busy_code, row])),
+    [packDefinitions],
+  );
 
   const pickItems = useMemo(() => {
     if (!orderItems) return [];
@@ -170,6 +225,22 @@ export default function PickPage(): React.JSX.Element | null {
 
   const allDone = counts.remaining === 0 && counts.total > 0;
   const hasFlagged = counts.flagged > 0;
+  const visibility = useMemo(() => {
+    let packAssisted = 0;
+    let manual = 0;
+    const reasonCounts = new Map<string, number>();
+    for (const pi of pickItems) {
+      if (pi.scanResult?.packAssist) packAssisted += 1;
+      if (pi.scanResult?.operatorContext?.source === 'manual') manual += 1;
+      const reason = pi.orderItem.flag_reason;
+      if (reason) reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+    }
+    return {
+      packAssisted,
+      manual,
+      reasonBadges: [...reasonCounts.entries()],
+    };
+  }, [pickItems]);
 
   const updateLocalItem = useCallback(
     (itemId: number, update: Partial<PickItemLocal>) => {
@@ -185,51 +256,24 @@ export default function PickPage(): React.JSX.Element | null {
 
   /* ─── Mutations ──────────────────────────────────────────── */
 
-  const pickItemMutation = useMutation({
-    mutationFn: async (itemId: number) => {
-      const { error } = await supabase
-        .from('order_items')
-        .update({ state: 'picked' })
-        .eq('id', itemId);
-      if (error) throw error;
-    },
-    onMutate: (itemId) => {
-      updateLocalItem(itemId, { uiState: 'picked' });
-    },
-    onError: (_err, itemId) => {
-      updateLocalItem(itemId, { uiState: 'pending' });
-      toast.error('Failed to mark item as picked');
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
-    },
-  });
-
-  const flagItemMutation = useMutation({
+  const itemTransitionMutation = useMutation({
     mutationFn: async ({
-      itemId,
-      reason,
-      notes,
-      boxPrice,
+      transition,
+      optimisticState,
     }: {
-      itemId: number;
-      reason: FlagReason;
-      notes: string;
-      boxPrice: number | null;
+      transition: PickItemTransition;
+      optimisticState?: PickItemUiState;
     }) => {
-      if (!order) throw new Error('No order');
-      const { error } = await supabase
-        .from('order_items')
-        .update({
-          state: 'flagged',
-          flag_reason: reason,
-          flag_notes: notes || null,
-          flag_box_price: boxPrice,
-        })
-        .eq('id', itemId);
-      if (error) throw error;
+      const itemId = transition.itemId;
+      const previous = localItems.get(itemId) ?? null;
+      if (optimisticState) {
+        updateLocalItem(itemId, { uiState: optimisticState });
+      }
+      await transitionAdapter.applyTransition(transition);
 
-      // If picker flags "Out of Stock", also create a pending_items entry
+      if (!order || transition.kind !== 'flagged') return { itemId, previous };
+      const { reason, notes, boxPrice } = transition;
+
       if (reason === 'Out of Stock') {
         const target = order.items.find((oi) => oi.id === itemId);
         if (target) {
@@ -275,41 +319,29 @@ export default function PickPage(): React.JSX.Element | null {
             flagReason: reason,
             pickerName: userName,
             orderItemId: itemId,
+            flagNotes: notes,
+            flagBoxPrice: boxPrice,
           });
         } catch {
           /* silent */
         }
       }
+      return { itemId, previous };
     },
-    onMutate: ({ itemId }) => {
-      updateLocalItem(itemId, { uiState: 'flagged' });
-    },
-    onError: (_err, { itemId }) => {
-      updateLocalItem(itemId, { uiState: 'pending' });
-      toast.error('Failed to flag item');
+    onError: (_err, vars) => {
+      const itemId = vars.transition.itemId;
+      const previous = localItems.get(itemId);
+      updateLocalItem(itemId, { uiState: previous?.uiState ?? 'pending' });
+      if (vars.transition.kind === 'flagged') {
+        toast.error('Failed to flag item');
+      } else if (vars.transition.kind === 'picked') {
+        toast.error('Failed to mark item as picked');
+      } else {
+        toast.error('Failed to save scan result');
+      }
     },
     onSuccess: () => {
-      setFlagTarget(null);
-      setFlagReason('');
-      setFlagNotes('');
-      setFlagBoxPrice('');
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
-    },
-  });
-
-  const saveScanResultMutation = useMutation({
-    mutationFn: async ({
-      itemId,
-      scanResult,
-    }: {
-      itemId: number;
-      scanResult: ScanResult;
-    }) => {
-      const { error } = await supabase
-        .from('order_items')
-        .update({ scan_result: scanResult as unknown as Record<string, unknown> })
-        .eq('id', itemId);
-      if (error) throw error;
     },
   });
 
@@ -387,26 +419,68 @@ export default function PickPage(): React.JSX.Element | null {
   const handleScanResolved = useCallback((scan: LiveQrScannerResolved) => {
     setLiveScanSession((current) => {
       if (!current) return null;
-
-      const result: ScanResult = {
-        isMatch: scan.matchesPickItem,
-        confidence: scan.matchedItem ? 100 : 0,
-        extractedCode: scan.lookupCode ?? undefined,
-        extractedDescription: scan.matchedItem?.name ?? undefined,
-        reason: scan.reason,
-        scannedText: scan.rawValue,
-        matchedAgainst: scan.matchedBy ?? current.orderItem.item_name,
-        matchStrategy: scan.matchesPickItem
+      const targetQty = pickQuantityTarget(current.orderItem);
+      const lookupCandidates = collectQrLookupCandidates(scan.rawValue);
+      const packPayload = parsePackPickPayload(scan.rawValue);
+      const busyCodeCandidates = deriveBusyCodeCandidates(current.orderItem);
+      const matchedBusyCode =
+        packPayload && busyCodeCandidates.includes(packPayload.busyCode)
+          ? packPayload.busyCode
+          : null;
+      const packDefinition = matchedBusyCode
+        ? packDefinitionByBusyCode.get(matchedBusyCode)
+        : null;
+      const packQty =
+        packPayload?.packType === 'inner'
+          ? packDefinition?.inner_pack_qty ?? null
+          : packPayload?.packType === 'outer'
+            ? packDefinition?.outer_pack_qty ?? null
+            : null;
+      const suggestedQty = Number.isFinite(packQty) && (packQty ?? 0) > 0 ? Number(packQty) : 1;
+      const requiresBreakConfirmation = suggestedQty > targetQty;
+      const isPackMatch = Boolean(packPayload && matchedBusyCode && packDefinition);
+      const isMatch = scan.matchesPickItem || isPackMatch;
+      const matchStrategy = isPackMatch
+        ? 'pack_qr_match'
+        : scan.matchesPickItem
           ? 'qr_catalog_hit'
           : scan.matchedItem
             ? 'qr_expected_mismatch'
-            : 'qr_catalog_miss',
+            : 'qr_catalog_miss';
+
+      const result: ScanResult = {
+        isMatch,
+        confidence: isMatch ? 100 : 0,
+        extractedCode: scan.lookupCode ?? lookupCandidates[0],
+        extractedDescription: scan.matchedItem?.name ?? undefined,
+        reason: isPackMatch
+          ? requiresBreakConfirmation
+            ? `Pack scan (${packPayload?.packType}) suggests ${suggestedQty} units. Confirm break-pack for target ${targetQty}.`
+            : `Pack scan (${packPayload?.packType}) verified for ${suggestedQty} units.`
+          : scan.reason,
+        scannedText: scan.rawValue,
+        matchedAgainst: scan.matchedBy ?? current.orderItem.item_name,
+        matchStrategy,
         ocrExtracted: {
           partNumber: scan.lookupCode ?? null,
           mrp: null,
         },
         method: 'qr_scan',
         timestamp: new Date().toISOString(),
+        packAssist: isPackMatch
+          ? {
+              packType: packPayload!.packType,
+              packQty: suggestedQty,
+              suggestedQty,
+              requiresBreakConfirmation,
+              busyCode: matchedBusyCode!,
+            }
+          : undefined,
+        operatorContext: {
+          pickerName: userName,
+          pickerUserId: userId,
+          source: 'scanner',
+        },
       };
 
       const uiState: PickItemUiState = result.isMatch ? 'matched' : 'error';
@@ -416,12 +490,24 @@ export default function PickPage(): React.JSX.Element | null {
         scanResult: result,
       });
 
-      saveScanResultMutation.mutate({
-        itemId: current.orderItem.id,
-        scanResult: result,
+      itemTransitionMutation.mutate({
+        transition: {
+          kind: 'scan_saved',
+          itemId: current.orderItem.id,
+          scanResult: result,
+        },
       });
 
-      if (result.isMatch) {
+      if (requiresBreakConfirmation) {
+        setPendingPackConfirmation({
+          orderItemId: current.orderItem.id,
+          scanResult: result,
+          suggestedQty,
+          targetQty,
+        });
+      }
+
+      if (result.isMatch && !requiresBreakConfirmation) {
         appHaptics.success();
       } else {
         appHaptics.warning();
@@ -429,23 +515,77 @@ export default function PickPage(): React.JSX.Element | null {
 
       return result.isMatch ? null : current;
     });
-  }, [saveScanResultMutation, updateLocalItem]);
+  }, [
+    itemTransitionMutation,
+    packDefinitionByBusyCode,
+    updateLocalItem,
+    userId,
+    userName,
+  ]);
 
   const handlePick = useCallback(
     (itemId: number) => {
       appHaptics.impactMedium();
-      pickItemMutation.mutate(itemId);
+      const local = localItems.get(itemId);
+      const manualScanResult: ScanResult = local?.scanResult ?? {
+        scannedText: 'MANUAL_PICK',
+        confidence: 100,
+        isMatch: true,
+        matchedAgainst: 'manual',
+        matchStrategy: 'manual_pick',
+        ocrExtracted: { partNumber: null, mrp: null },
+        method: 'manual',
+        timestamp: new Date().toISOString(),
+        reason: 'Manual pick confirmation',
+        operatorContext: {
+          pickerName: userName,
+          pickerUserId: userId,
+          source: 'manual',
+        },
+      };
+      itemTransitionMutation.mutate({
+        transition: {
+          kind: 'picked',
+          itemId,
+          scanResult: manualScanResult,
+        },
+        optimisticState: 'picked',
+      });
     },
-    [pickItemMutation],
+    [itemTransitionMutation, localItems, userId, userName],
   );
 
   const handleOverride = useCallback(
     (itemId: number) => {
       appHaptics.impactMedium();
       updateLocalItem(itemId, { uiState: 'overridden' });
-      pickItemMutation.mutate(itemId);
+      const local = localItems.get(itemId);
+      const manualScanResult: ScanResult = local?.scanResult ?? {
+        scannedText: 'MANUAL_OVERRIDE',
+        confidence: 70,
+        isMatch: false,
+        matchedAgainst: 'manual',
+        matchStrategy: 'manual_override',
+        ocrExtracted: { partNumber: null, mrp: null },
+        method: 'manual',
+        timestamp: new Date().toISOString(),
+        reason: 'Picker override after scan mismatch',
+        operatorContext: {
+          pickerName: userName,
+          pickerUserId: userId,
+          source: 'manual',
+        },
+      };
+      itemTransitionMutation.mutate({
+        transition: {
+          kind: 'picked',
+          itemId,
+          scanResult: manualScanResult,
+        },
+        optimisticState: 'overridden',
+      });
     },
-    [updateLocalItem, pickItemMutation],
+    [updateLocalItem, itemTransitionMutation, localItems, userId, userName],
   );
 
   const handleFlag = useCallback(() => {
@@ -464,23 +604,49 @@ export default function PickPage(): React.JSX.Element | null {
         return;
       }
       appHaptics.impactMedium();
-      flagItemMutation.mutate({
-        itemId: flagTarget,
-        reason: flagReason,
-        notes: flagNotes,
-        boxPrice: parsed,
+      itemTransitionMutation.mutate({
+        transition: {
+          kind: 'flagged',
+          itemId: flagTarget,
+          reason: flagReason,
+          notes: buildPriceMismatchNotes(flagNotes, parsed),
+          boxPrice: parsed,
+          scanResult: localItems.get(flagTarget)?.scanResult ?? null,
+        },
+        optimisticState: 'flagged',
       });
+      setFlagTarget(null);
+      setFlagReason('');
+      setFlagNotes('');
+      setFlagBoxPrice('');
       return;
     }
 
     appHaptics.impactMedium();
-    flagItemMutation.mutate({
-      itemId: flagTarget,
-      reason: flagReason,
-      notes: flagNotes,
-      boxPrice: null,
+    itemTransitionMutation.mutate({
+      transition: {
+        kind: 'flagged',
+        itemId: flagTarget,
+        reason: flagReason,
+        notes: flagNotes.trim() || null,
+        boxPrice: null,
+        scanResult: localItems.get(flagTarget)?.scanResult ?? null,
+      },
+      optimisticState: 'flagged',
     });
-  }, [flagTarget, flagReason, flagNotes, flagBoxPrice, flagItemMutation, toast]);
+    setFlagTarget(null);
+    setFlagReason('');
+    setFlagNotes('');
+    setFlagBoxPrice('');
+  }, [
+    flagTarget,
+    flagReason,
+    flagNotes,
+    flagBoxPrice,
+    itemTransitionMutation,
+    localItems,
+    toast,
+  ]);
 
   if (!orderId) {
     navigate('/picking');
@@ -586,6 +752,22 @@ export default function PickPage(): React.JSX.Element | null {
           ]}
           total={counts.total}
         />
+        <div className="flex flex-wrap gap-2 text-[11px] text-[var(--content-tertiary)]">
+          <span className="px-2 py-0.5 rounded-full bg-[var(--bg-tertiary)]">
+            Pack-assisted: {visibility.packAssisted}
+          </span>
+          <span className="px-2 py-0.5 rounded-full bg-[var(--bg-tertiary)]">
+            Manual: {visibility.manual}
+          </span>
+          {visibility.reasonBadges.map(([reason, total]) => (
+            <span
+              key={reason}
+              className="px-2 py-0.5 rounded-full bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]"
+            >
+              {reason}: {total}
+            </span>
+          ))}
+        </div>
       </header>
 
       {/* Active items */}
@@ -755,13 +937,50 @@ export default function PickPage(): React.JSX.Element | null {
               !flagReason ||
               (flagReason === 'Price Mismatch' && !flagBoxPrice.trim())
             }
-            loading={flagItemMutation.isPending}
+            loading={itemTransitionMutation.isPending}
             className="bg-[var(--bg-negative)] text-[var(--content-on-color)]"
           >
             <Flag size={18} weight="fill" />
             Flag Item
           </BigButton>
         </div>
+      </BottomSheet>
+
+      <BottomSheet
+        isOpen={pendingPackConfirmation !== null}
+        onClose={() => setPendingPackConfirmation(null)}
+        title="Break Pack Confirmation"
+      >
+        {pendingPackConfirmation && (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--content-secondary)]">
+              This scan suggests picking {pendingPackConfirmation.suggestedQty} units while
+              this line target is {pendingPackConfirmation.targetQty}. Confirm if you are
+              breaking a pack and proceeding manually.
+            </p>
+            <div className="flex gap-2">
+              <BigButton
+                variant="secondary"
+                onClick={() => setPendingPackConfirmation(null)}
+                className="flex-1"
+              >
+                Cancel
+              </BigButton>
+              <BigButton
+                variant="primary"
+                onClick={() => {
+                  const pending = pendingPackConfirmation;
+                  if (!pending) return;
+                  setPendingPackConfirmation(null);
+                  handlePick(pending.orderItemId);
+                }}
+                className="flex-1 bg-[var(--bg-warning)] text-[var(--content-primary)]"
+              >
+                Confirm Break Pack
+              </BigButton>
+            </div>
+          </div>
+        )}
       </BottomSheet>
 
       {liveScanSession && (
@@ -880,8 +1099,13 @@ function PickItemCard({
           )}
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <span className="text-xs font-semibold text-[var(--content-secondary)] bg-[var(--bg-tertiary)] px-2 py-0.5 rounded-md">
-              0 / {pickQuantityTarget(oi)} Picked
+              {isDone ? pickQuantityTarget(oi) : 0} / {pickQuantityTarget(oi)} Picked
             </span>
+            {item.scanResult?.packAssist && (
+              <span className="text-xs font-semibold text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] px-2 py-0.5 rounded-md">
+                {item.scanResult.packAssist.packType} pack ({item.scanResult.packAssist.suggestedQty})
+              </span>
+            )}
             {item.uiState === 'flagged' && (
               <div className="flex flex-wrap gap-1">
                 {oi.flag_reason && (

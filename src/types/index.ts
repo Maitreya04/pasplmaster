@@ -163,6 +163,18 @@ export interface ScanResult {
   extractedCode?: string;
   extractedDescription?: string;
   reason?: string;
+  packAssist?: {
+    packType: 'inner' | 'outer';
+    packQty: number;
+    suggestedQty: number;
+    requiresBreakConfirmation: boolean;
+    busyCode: number;
+  };
+  operatorContext?: {
+    pickerName: string | null;
+    pickerUserId: number | null;
+    source: 'manual' | 'scanner';
+  };
 }
 
 export interface OrderWithItems extends Order {

@@ -19,6 +19,8 @@ export type ItemFlaggedPayload = {
   flagReason: string;
   pickerName: string | null;
   orderItemId: number;
+  flagNotes?: string | null;
+  flagBoxPrice?: number | null;
 };
 
 export type OrderUpdateForSalesPayload = {

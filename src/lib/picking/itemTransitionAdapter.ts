@@ -1,0 +1,62 @@
+import { supabase } from '../supabase/client';
+import type { FlagReason } from '../../utils/constants';
+import type { ScanResult } from '../../types';
+
+export type PickItemTransition =
+  | {
+      kind: 'picked';
+      itemId: number;
+      scanResult?: ScanResult | null;
+    }
+  | {
+      kind: 'scan_saved';
+      itemId: number;
+      scanResult: ScanResult;
+    }
+  | {
+      kind: 'flagged';
+      itemId: number;
+      reason: FlagReason;
+      notes: string | null;
+      boxPrice: number | null;
+      scanResult?: ScanResult | null;
+    };
+
+export interface PickItemTransitionAdapter {
+  applyTransition(input: PickItemTransition): Promise<void>;
+}
+
+function toUpdatePayload(input: PickItemTransition): Record<string, unknown> {
+  switch (input.kind) {
+    case 'picked':
+      return {
+        state: 'picked',
+        scan_result: (input.scanResult ?? null) as unknown as Record<string, unknown> | null,
+      };
+    case 'scan_saved':
+      return {
+        scan_result: input.scanResult as unknown as Record<string, unknown>,
+      };
+    case 'flagged':
+      return {
+        state: 'flagged',
+        flag_reason: input.reason,
+        flag_notes: input.notes,
+        flag_box_price: input.boxPrice,
+        scan_result: (input.scanResult ?? null) as unknown as Record<string, unknown> | null,
+      };
+  }
+}
+
+class SupabasePickItemTransitionAdapter implements PickItemTransitionAdapter {
+  async applyTransition(input: PickItemTransition): Promise<void> {
+    const { error } = await supabase
+      .from('order_items')
+      .update(toUpdatePayload(input))
+      .eq('id', input.itemId);
+    if (error) throw error;
+  }
+}
+
+export const defaultPickItemTransitionAdapter: PickItemTransitionAdapter =
+  new SupabasePickItemTransitionAdapter();
