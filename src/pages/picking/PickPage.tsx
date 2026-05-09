@@ -428,6 +428,16 @@ export default function PickPage(): React.JSX.Element | null {
     return currentTiers.reduce((sum, t) => sum + t.scanned, 0);
   }, [currentTiers]);
 
+  const currentAliasForVerification = useMemo(() => {
+    if (!currentTarget) return null;
+    return (
+      currentTarget.orderItem.catalog_alias1 ??
+      currentTarget.orderItem.catalog_alias ??
+      currentTarget.orderItem.item_alias ??
+      null
+    );
+  }, [currentTarget]);
+
   const counts = useMemo(() => {
     let picked = 0;
     let flagged = 0;
@@ -1110,6 +1120,14 @@ export default function PickPage(): React.JSX.Element | null {
 
               {/* Hero quantity: always show remaining to pick */}
               <div className="pt-4 pb-3">
+                <div className="mb-2 rounded-lg border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">
+                    Label Verify (Alias 1)
+                  </p>
+                  <p className="font-mono text-base font-bold text-[var(--content-primary)] leading-tight break-all whitespace-normal">
+                    {currentAliasForVerification ?? 'No alias available'}
+                  </p>
+                </div>
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mb-1">
                   Remaining qty
                 </p>
@@ -1208,12 +1226,22 @@ export default function PickPage(): React.JSX.Element | null {
               <div className="ds-card p-4 space-y-3">
                 {/* Scan progress header */}
                 <div className="flex items-center justify-between">
-                  <p className="font-mono font-bold text-xs text-[var(--content-primary)]">
-                    {currentTarget.orderItem.item_alias ?? currentTarget.orderItem.item_id}
-                  </p>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono font-bold text-xs text-[var(--content-primary)]">
+                      {currentTarget.orderItem.item_alias ?? currentTarget.orderItem.item_id}
+                    </p>
+                    <div className="mt-1 rounded-md border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-2 py-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">
+                        Alias 1
+                      </p>
+                      <p className="font-mono text-xs font-bold text-[var(--content-primary)] leading-tight break-all whitespace-normal">
+                        {currentAliasForVerification ?? 'N/A'}
+                      </p>
+                    </div>
+                  </div>
                   <button
                     onClick={closeLiveScan}
-                    className="text-xs text-[var(--content-tertiary)]"
+                    className="text-xs text-[var(--content-tertiary)] ml-2 shrink-0"
                   >
                     Cancel
                   </button>
