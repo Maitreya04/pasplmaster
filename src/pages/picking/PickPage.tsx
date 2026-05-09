@@ -5,7 +5,6 @@ import {
   CheckCircle,
   Flag,
   CaretLeft,
-  MapPin,
   Warning,
   Camera,
 } from '@phosphor-icons/react';
@@ -34,8 +33,9 @@ import {
   fetchItemPackDefinitions,
 } from '../../lib/packLpn';
 import {
-  collectQrLookupCandidates,
+  classifyScanPayload,
   parsePackPickPayload,
+  parseLpnPickPayload,
 } from '../../lib/scanner/qrPayload';
 import {
   defaultPickItemTransitionAdapter,
@@ -56,7 +56,6 @@ interface PickItemLocal {
   orderItem: OrderItem;
   uiState: PickItemUiState;
   scanResult: ScanResult | null;
-  alias1: string | null;
 }
 
 interface LiveScanSession {
@@ -71,6 +70,8 @@ interface PendingPackConfirmation {
   suggestedQty: number;
   targetQty: number;
 }
+
+const DUPLICATE_SCAN_WINDOW_MS = 1200;
 
 function sortByRack(items: OrderItem[]): OrderItem[] {
   return [...items].sort((a, b) => {
@@ -181,6 +182,11 @@ export default function PickPage(): React.JSX.Element | null {
   const [pendingPackConfirmation, setPendingPackConfirmation] =
     useState<PendingPackConfirmation | null>(null);
   const [showComplete, setShowComplete] = useState(false);
+  const [scannerHint, setScannerHint] = useState<string | null>(null);
+  const [lastScanMeta, setLastScanMeta] = useState<{
+    rawValue: string;
+    at: number;
+  } | null>(null);
   const orderItems = order?.items;
 
   const { data: packDefinitions = [] } = useQuery({
@@ -203,19 +209,19 @@ export default function PickPage(): React.JSX.Element | null {
           orderItem: oi,
           uiState: local.uiState ?? uiStateFromDb(oi),
           scanResult: local.scanResult ?? oi.scan_result,
-          alias1: oi.catalog_alias1 ?? null,
         };
       }
       return {
         orderItem: oi,
         uiState: uiStateFromDb(oi),
         scanResult: oi.scan_result,
-        alias1: oi.catalog_alias1 ?? null,
       };
     });
   }, [localItems, orderItems]);
 
   const { active, done } = useMemo(() => partitionItems(pickItems), [pickItems]);
+  const currentTarget = active[0] ?? null;
+  const upNext = active.slice(1, 5);
 
   const counts = useMemo(() => {
     let picked = 0;
@@ -428,9 +434,21 @@ export default function PickPage(): React.JSX.Element | null {
   const handleScanResolved = useCallback((scan: LiveQrScannerResolved) => {
     setLiveScanSession((current) => {
       if (!current) return null;
+      const now = Date.now();
+      if (
+        lastScanMeta &&
+        lastScanMeta.rawValue === scan.rawValue &&
+        now - lastScanMeta.at < DUPLICATE_SCAN_WINDOW_MS
+      ) {
+        setScannerHint('Duplicate scan ignored. Keep moving to the next label.');
+        return current;
+      }
+      setLastScanMeta({ rawValue: scan.rawValue, at: now });
       const targetQty = pickQuantityTarget(current.orderItem);
-      const lookupCandidates = collectQrLookupCandidates(scan.rawValue);
+      const classified = classifyScanPayload(scan.rawValue);
+      const lookupCandidates = classified.normalizedCandidates;
       const packPayload = parsePackPickPayload(scan.rawValue);
+      const lpnPayload = parseLpnPickPayload(scan.rawValue);
       const busyCodeCandidates = deriveBusyCodeCandidates(current.orderItem);
       const matchedBusyCode =
         packPayload && busyCodeCandidates.includes(packPayload.busyCode)
@@ -445,7 +463,13 @@ export default function PickPage(): React.JSX.Element | null {
           : packPayload?.packType === 'outer'
             ? packDefinition?.outer_pack_qty ?? null
             : null;
-      const suggestedQty = Number.isFinite(packQty) && (packQty ?? 0) > 0 ? Number(packQty) : 1;
+      const lpnSuggested = lpnPayload?.remainingQty ?? null;
+      const suggestedQty =
+        classified.kind === 'lpn' && Number.isFinite(lpnSuggested)
+          ? Math.max(1, Number(lpnSuggested))
+          : Number.isFinite(packQty) && (packQty ?? 0) > 0
+            ? Number(packQty)
+            : 1;
       const requiresBreakConfirmation = suggestedQty > targetQty;
       const isPackMatch = Boolean(packPayload && matchedBusyCode && packDefinition);
       const isMatch = scan.matchesPickItem || isPackMatch;
@@ -466,6 +490,8 @@ export default function PickPage(): React.JSX.Element | null {
           ? requiresBreakConfirmation
             ? `Pack scan (${packPayload?.packType}) suggests ${suggestedQty} units. Confirm break-pack for target ${targetQty}.`
             : `Pack scan (${packPayload?.packType}) verified for ${suggestedQty} units.`
+          : classified.kind === 'lpn'
+            ? `LPN scan ${lpnPayload?.lpnCode ?? ''} suggests ${suggestedQty} units.`
           : scan.reason,
         scannedText: scan.rawValue,
         matchedAgainst: scan.matchedBy ?? current.orderItem.item_name,
@@ -476,6 +502,10 @@ export default function PickPage(): React.JSX.Element | null {
         },
         method: 'qr_scan',
         timestamp: new Date().toISOString(),
+        codeType: classified.kind,
+        suggestedQty,
+        requiresBreakConfirmation,
+        lpnCode: lpnPayload?.lpnCode ?? null,
         packAssist: isPackMatch
           ? {
               packType: packPayload!.packType,
@@ -518,6 +548,7 @@ export default function PickPage(): React.JSX.Element | null {
 
       if (result.isMatch && !requiresBreakConfirmation) {
         appHaptics.success();
+        setScannerHint(`Matched ${classified.kind.toUpperCase()} scan. Suggested qty ${suggestedQty}.`);
       } else {
         appHaptics.warning();
       }
@@ -525,6 +556,7 @@ export default function PickPage(): React.JSX.Element | null {
       return result.isMatch ? null : current;
     });
   }, [
+    lastScanMeta,
     itemTransitionMutation,
     packDefinitionByBusyCode,
     updateLocalItem,
@@ -779,65 +811,116 @@ export default function PickPage(): React.JSX.Element | null {
         </div>
       </header>
 
-      {/* Active items */}
-      <div className="px-4 pt-3 space-y-2">
-        {active.map((pi, idx) => (
-          <PickItemCard
-            key={pi.orderItem.id}
-            item={pi}
-            isNext={idx === 0}
-            onPick={() => handlePick(pi.orderItem.id)}
-            onFlag={() => {
-              setFlagTarget(pi.orderItem.id);
-              setFlagReason('');
-              setFlagNotes('');
-              setFlagBoxPrice('');
-            }}
-            onScan={() => openLiveScan(pi.orderItem)}
-            onOverride={() => handleOverride(pi.orderItem.id)}
-          />
-        ))}
-      </div>
-
-      {/* Done items — compact */}
-      {done.length > 0 && (
-        <div className="px-4 pt-6">
-          <p className="text-xs font-semibold text-[var(--content-tertiary)] uppercase tracking-wider mb-2">
-            Done ({done.length})
-          </p>
-          <div className="space-y-1">
-            {done.map((pi) => {
-              const oi = pi.orderItem;
-              const isFlagged = pi.uiState === 'flagged';
-              return (
-                <div
-                  key={oi.id}
-                  className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-faint)]"
-                >
-                  {isFlagged ? (
-                    <Flag size={16} weight="fill" className="shrink-0 text-[var(--content-negative)]" />
-                  ) : (
-                    <CheckCircle size={16} weight="fill" className={`shrink-0 ${
-                      pi.uiState === 'overridden' ? 'text-[var(--content-warning)]' : 'text-[var(--content-positive)]'
-                    }`} />
-                  )}
-                  <span className="flex-1 text-sm text-[var(--content-secondary)] truncate">
-                    {oi.item_name}
-                  </span>
-                  <span className="text-xs text-[var(--content-tertiary)] tabular-nums shrink-0">
-                    Qty {pickQuantityTarget(oi)}
-                  </span>
-                  {oi.rack_no && (
-                    <span className="text-xs text-[var(--content-quaternary)] font-mono shrink-0">
-                      {oi.rack_no}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
+      <div className="px-4 pt-3 space-y-4">
+        {currentTarget ? (
+          <div className="rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-accent)] p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs uppercase tracking-wider text-[var(--content-tertiary)] font-semibold">
+                  Current Target
+                </p>
+                <p className="font-semibold text-[var(--content-primary)] leading-snug">
+                  {currentTarget.orderItem.item_name}
+                </p>
+                <p className="text-xs text-[var(--content-secondary)] mt-1">
+                  Rack: {currentTarget.orderItem.rack_no ?? 'No rack'} · Qty target {pickQuantityTarget(currentTarget.orderItem)}
+                </p>
+                {currentTarget.scanResult?.packAssist && (
+                  <p className="text-xs text-[var(--content-warning)] mt-1">
+                    Pack assist: {currentTarget.scanResult.packAssist.packType} ({currentTarget.scanResult.packAssist.suggestedQty})
+                  </p>
+                )}
+              </div>
+              <span className="text-xs px-2 py-1 rounded-full bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]">
+                {active.length} remaining
+              </span>
+            </div>
+            {scannerHint && (
+              <p className="text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] rounded-lg px-2 py-1">
+                {scannerHint}
+              </p>
+            )}
+            <BigButton
+              variant="primary"
+              onClick={() => openLiveScan(currentTarget.orderItem)}
+              className="bg-[var(--bg-positive)] text-[var(--content-on-color)]"
+            >
+              <Camera size={20} weight="bold" />
+              Scan Current Item
+            </BigButton>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                onClick={() => handlePick(currentTarget.orderItem.id)}
+                className="h-11 rounded-xl bg-[var(--bg-tertiary)] text-sm font-medium text-[var(--content-secondary)]"
+              >
+                Confirm
+              </button>
+              <button
+                onClick={() => handleOverride(currentTarget.orderItem.id)}
+                className="h-11 rounded-xl bg-[var(--bg-warning-subtle)] text-sm font-medium text-[var(--content-warning)]"
+              >
+                Override
+              </button>
+              <button
+                onClick={() => {
+                  setFlagTarget(currentTarget.orderItem.id);
+                  setFlagReason('');
+                  setFlagNotes('');
+                  setFlagBoxPrice('');
+                }}
+                className="h-11 rounded-xl bg-[var(--bg-negative-subtle)] text-sm font-medium text-[var(--content-negative)]"
+              >
+                Flag
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="rounded-2xl bg-[var(--bg-secondary)] p-4 text-sm text-[var(--content-secondary)]">
+            No pending pick lines.
+          </div>
+        )}
+
+        {upNext.length > 0 && (
+          <div className="rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] p-3">
+            <p className="text-xs uppercase tracking-wider text-[var(--content-tertiary)] font-semibold mb-2">
+              Up Next
+            </p>
+            <div className="space-y-1.5">
+              {upNext.map((pi) => (
+                <div key={pi.orderItem.id} className="flex items-center gap-2 text-sm">
+                  <span className="font-mono text-[var(--content-warning)] min-w-12">
+                    {pi.orderItem.rack_no ?? '--'}
+                  </span>
+                  <span className="flex-1 truncate text-[var(--content-secondary)]">
+                    {pi.orderItem.item_name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {done.length > 0 && (
+          <div className="rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-faint)] p-3">
+            <p className="text-xs uppercase tracking-wider text-[var(--content-tertiary)] font-semibold mb-2">
+              Done ({done.length})
+            </p>
+            <div className="space-y-1">
+              {done.map((pi) => (
+                <div key={pi.orderItem.id} className="flex items-center gap-2 text-xs text-[var(--content-secondary)]">
+                  {pi.uiState === 'flagged' ? (
+                    <Flag size={14} weight="fill" className="text-[var(--content-negative)]" />
+                  ) : (
+                    <CheckCircle size={14} weight="fill" className="text-[var(--content-positive)]" />
+                  )}
+                  <span className="flex-1 truncate">{pi.orderItem.item_name}</span>
+                  <span className="font-mono">{pi.orderItem.rack_no ?? '--'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Complete button */}
       {allDone && (
@@ -1002,6 +1085,7 @@ export default function PickPage(): React.JSX.Element | null {
             alias1: liveScanSession.orderItem.catalog_alias1 ?? null,
             alias: liveScanSession.orderItem.catalog_alias ?? null,
             itemCode: liveScanSession.orderItem.item_alias ?? null,
+            busyCode: deriveBusyCodeCandidates(liveScanSession.orderItem)[0] ?? null,
           }}
           onClose={closeLiveScan}
           onResolved={handleScanResolved}
@@ -1012,275 +1096,6 @@ export default function PickPage(): React.JSX.Element | null {
             closeLiveScan();
           }}
         />
-      )}
-    </div>
-  );
-}
-
-/* ─── PickItemCard ──────────────────────────────────────────── */
-
-function PickItemCard({
-  item,
-  isNext = false,
-  onPick,
-  onFlag,
-  onScan,
-  onOverride,
-}: {
-  item: PickItemLocal;
-  isNext?: boolean;
-  onPick: () => void;
-  onFlag: () => void;
-  onScan: () => void;
-  onOverride: () => void;
-}) {
-  const oi = item.orderItem;
-  const isDone =
-    item.uiState === 'picked' ||
-    item.uiState === 'flagged' ||
-    item.uiState === 'overridden';
-
-  const borderColor: Record<PickItemUiState, string> = {
-    pending: 'border-transparent',
-    scanning: 'border-[var(--border-warning)] animate-pulse',
-    matched: 'border-[var(--bg-positive)]',
-    warning: 'border-[var(--border-warning)]',
-    error: 'border-[var(--bg-negative)]',
-    picked: 'border-[var(--bg-positive)]',
-    flagged: 'border-[var(--bg-negative)]',
-    overridden: 'border-[var(--border-warning)]',
-  };
-
-  return (
-    <div
-      className={`
-        rounded-2xl p-4 border-l-4 ${borderColor[item.uiState]}
-        ${isNext ? 'bg-[var(--bg-accent-subtle)] ring-1 ring-[var(--border-accent)]' : 'bg-[var(--bg-secondary)]'}
-        transition-all duration-200
-      `}
-    >
-      {/* NEXT badge */}
-      {isNext && !isDone && (
-        <div className="flex items-center gap-1.5 mb-2">
-          <span className="text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[var(--bg-accent)] text-[var(--content-on-color)]">
-            Next
-          </span>
-        </div>
-      )}
-
-      <div className="flex items-start gap-3">
-        {/* Rack location — bigger for current (isNext) item */}
-        <div className={`shrink-0 text-center ${isNext ? 'w-20' : 'w-16'}`}>
-          {oi.rack_no ? (
-            <div className={`flex flex-col items-center ${isNext ? 'bg-[var(--bg-warning-subtle)] rounded-xl py-2 px-1' : ''}`}>
-              <MapPin
-                size={isNext ? 20 : 16}
-                weight="fill"
-                className="text-[var(--content-warning)] mb-0.5"
-              />
-              <span className={`text-[var(--content-warning)] font-mono font-bold leading-tight ${isNext ? 'text-xl' : 'text-base'}`}>
-                {oi.rack_no}
-              </span>
-            </div>
-          ) : (
-            <span className="text-xs text-[var(--content-disabled)]">
-              No rack
-            </span>
-          )}
-        </div>
-
-        {/* Item info */}
-        <div className="flex-1 min-w-0">
-          <p className={`font-medium text-[var(--content-primary)] leading-snug ${isNext ? 'text-base' : 'text-sm'}`}>
-            {oi.item_name}
-          </p>
-          {(oi.item_alias || item.alias1) && (
-            <div className="flex flex-wrap gap-1 mt-0.5">
-              {oi.item_alias && (
-                <span className="text-xs text-[var(--content-tertiary)] font-mono bg-[var(--bg-tertiary)] px-2 py-0.5 rounded-md">
-                  Code: {oi.item_alias}
-                </span>
-              )}
-              {item.alias1 && (
-                <span className="text-xs text-[var(--content-tertiary)] font-mono bg-[var(--bg-tertiary)] px-2 py-0.5 rounded-md">
-                  Alias 1: {item.alias1}
-                </span>
-              )}
-            </div>
-          )}
-          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-            <span className="text-xs font-semibold text-[var(--content-secondary)] bg-[var(--bg-tertiary)] px-2 py-0.5 rounded-md">
-              {isDone ? pickQuantityTarget(oi) : 0} / {pickQuantityTarget(oi)} Picked
-            </span>
-            {item.scanResult?.packAssist && (
-              <span className="text-xs font-semibold text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] px-2 py-0.5 rounded-md">
-                {item.scanResult.packAssist.packType} pack ({item.scanResult.packAssist.suggestedQty})
-              </span>
-            )}
-            {item.uiState === 'flagged' && (
-              <div className="flex flex-wrap gap-1">
-                {oi.flag_reason && (
-                  <span className="text-xs text-[var(--content-negative)]">{oi.flag_reason}</span>
-                )}
-                {typeof oi.flag_box_price === 'number' &&
-                  !Number.isNaN(oi.flag_box_price) && (
-                    <span className="text-xs text-[var(--content-negative)]">
-                      Box price:{' '}
-                      ₹
-                      {oi.flag_box_price.toLocaleString('en-IN', {
-                        maximumFractionDigits: 2,
-                      })}
-                    </span>
-                  )}
-              </div>
-            )}
-            {item.uiState === 'scanning' && (
-              <span className="text-xs text-[var(--content-warning)] animate-pulse">
-                Scanning QR...
-              </span>
-            )}
-            {item.uiState === 'matched' && item.scanResult && (
-              <span className="text-xs text-[var(--content-positive)] truncate max-w-[200px] flex items-center gap-1">
-                ✓ Verified {item.scanResult.extractedCode && `- ${item.scanResult.extractedCode}`} {item.scanResult.reason && `- ${item.scanResult.reason}`}
-              </span>
-            )}
-          </div>
-
-          {/* Scan Warning/Error Banner */}
-          {item.uiState === 'warning' && item.scanResult && (
-            <div className="mt-2 text-xs text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2 rounded-xl flex items-start gap-1.5 border border-[var(--border-warning)]/20">
-              <Warning size={16} weight="bold" className="shrink-0 mt-0.5" />
-              <span className="leading-tight">
-                <span className="font-semibold block mb-0.5 text-[var(--content-warning)]">Verification Warning</span>
-                {item.scanResult.reason || 'Item mismatch'}
-                {item.scanResult.extractedDescription && (
-                  <span className="block mt-1 text-[var(--content-tertiary)]">
-                    Read: {item.scanResult.extractedDescription}
-                  </span>
-                )}
-              </span>
-            </div>
-          )}
-          {item.uiState === 'error' && item.scanResult && (
-            <div className="mt-2 text-xs text-[var(--content-negative)] bg-[var(--bg-negative-subtle)] px-3 py-2 rounded-xl flex items-start gap-1.5 border border-[var(--border-negative)]/20">
-              <Warning size={16} weight="bold" className="shrink-0 mt-0.5" />
-              <span className="leading-tight">
-                <span className="font-semibold block mb-0.5 text-[var(--content-negative)]">Verification Failed</span>
-                {item.scanResult.reason || 'Item mismatch or barcode not recognized'}
-                {item.scanResult.extractedDescription && (
-                  <span className="block mt-1 text-[var(--content-tertiary)]">
-                    Read: {item.scanResult.extractedDescription}
-                  </span>
-                )}
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Action buttons — dynamic flow emphasizing scanning */}
-      {!isDone && (
-        <div className="mt-3 space-y-2">
-          {/* Primary Action Button */}
-          <button
-            onClick={() => {
-              if (['matched', 'warning'].includes(item.uiState)) {
-                onPick();
-              } else if (item.uiState === 'error') {
-                onOverride();
-              } else {
-                onScan();
-              }
-            }}
-            disabled={item.uiState === 'scanning'}
-            className={`
-              w-full flex items-center justify-center gap-2
-              rounded-xl font-bold
-              active:scale-[0.98] transition-all duration-150
-              ${isNext
-                ? ['error', 'warning'].includes(item.uiState)
-                  ? 'h-14 text-base bg-[var(--bg-warning)] text-[var(--content-primary)] shadow-sm shadow-[var(--bg-warning)]/20'
-                  : 'h-14 text-base bg-[var(--bg-positive)] text-[var(--content-on-color)] shadow-sm shadow-[var(--bg-positive)]/20'
-                : ['error', 'warning'].includes(item.uiState)
-                  ? 'h-12 text-sm bg-[var(--bg-warning-subtle)] text-[var(--content-warning)]'
-                  : 'h-12 text-sm bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
-              }
-            `}
-          >
-            {item.uiState === 'matched' ? (
-              <>
-                <CheckCircle size={20} weight="bold" />
-                Confirm Picked
-              </>
-            ) : item.uiState === 'warning' ? (
-              <>
-                <CheckCircle size={20} weight="bold" />
-                Confirm
-              </>
-            ) : item.uiState === 'error' ? (
-              <>
-                <Warning size={20} weight="bold" />
-                Confirm anyway
-              </>
-            ) : (
-              <>
-                <Camera size={20} weight="bold" />
-                {item.uiState === 'scanning' ? 'Scanning QR...' : 'Scan Item'}
-              </>
-            )}
-          </button>
-
-          {/* Secondary Actions */}
-          <div className="flex items-center gap-2">
-            {['matched', 'warning', 'error'].includes(item.uiState) && (
-              <button
-                onClick={onScan}
-                className="
-                  flex-1 h-11 flex items-center justify-center gap-1.5
-                  rounded-xl bg-[var(--bg-tertiary)]
-                  text-[var(--content-secondary)] text-sm font-medium
-                  active:scale-95 transition-transform duration-100
-                "
-              >
-                <Camera size={18} weight="bold" />
-                Rescan
-              </button>
-            )}
-
-            <button
-              onClick={onPick}
-              disabled={item.uiState === 'scanning'}
-              className="
-                flex-1 h-11 flex items-center justify-center gap-1.5
-                rounded-xl bg-[var(--bg-tertiary)]
-                text-[var(--content-secondary)] text-sm font-medium
-                active:scale-95 transition-transform duration-100
-                disabled:opacity-50
-              "
-              aria-label="Manual Pick"
-            >
-              <CheckCircle size={18} weight="bold" />
-              Manual Pick
-            </button>
-
-            <button
-              onClick={() => {
-                appHaptics.warning();
-                onFlag();
-              }}
-              className="
-                flex-1 h-11 flex items-center justify-center gap-1.5
-                rounded-xl bg-[var(--bg-negative-subtle)]
-                text-[var(--content-negative)] text-sm font-medium
-                active:scale-95 transition-transform duration-100
-              "
-              aria-label="Flag item"
-            >
-              <Flag size={16} weight="bold" />
-              Flag
-            </button>
-          </div>
-        </div>
       )}
     </div>
   );

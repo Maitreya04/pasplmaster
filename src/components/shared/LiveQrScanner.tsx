@@ -8,7 +8,10 @@ import {
   type ScanCatalogItem,
   type ScanMatchSource,
 } from '../../stores/itemScanIndex';
-import { collectQrLookupCandidates, normalizeScanCode, parsePackPickPayload } from '../../lib/scanner/qrPayload';
+import {
+  classifyScanPayload,
+  normalizeScanCode,
+} from '../../lib/scanner/qrPayload';
 
 type BarcodeDetectorResult = {
   rawValue?: string | null;
@@ -61,6 +64,10 @@ export interface LiveQrScannerResolved {
   matchesPickItem: boolean;
   reason: string;
   lookupCode: string | null;
+  codeType: 'pack' | 'lpn' | 'sku' | 'unknown';
+  suggestedQty: number;
+  requiresBreakConfirmation: boolean;
+  lpnCode?: string | null;
 }
 
 interface LiveQrScannerProps {
@@ -158,8 +165,10 @@ export function LiveQrScanner({
   }, []);
 
   const handleResolvedScan = useCallback((rawValue: string) => {
-    const candidates = collectQrLookupCandidates(rawValue);
-    const packPayload = parsePackPickPayload(rawValue);
+    const classified = classifyScanPayload(rawValue);
+    const candidates = classified.normalizedCandidates;
+    const packPayload = classified.packPayload;
+    const lpnPayload = classified.lpnPayload;
     
     let matchesPickItem = false;
     let matchedBy: ScanMatchSource | null = null;
@@ -199,6 +208,17 @@ export function LiveQrScanner({
       matchedBy: matchesPickItem ? matchedBy : (lookup?.source ?? null),
       matchesPickItem,
       lookupCode: matchesPickItem ? lookupCode : (lookup?.code ?? null),
+      codeType: classified.kind,
+      suggestedQty:
+        classified.kind === 'pack'
+          ? packPayload?.packType === 'outer'
+            ? 5
+            : 1
+          : classified.kind === 'lpn'
+            ? Math.max(1, lpnPayload?.remainingQty ?? 1)
+            : 1,
+      requiresBreakConfirmation: false,
+      lpnCode: lpnPayload?.lpnCode ?? null,
       reason: matchesPickItem
         ? matchedBy === 'pack'
           ? `Verified reusable ${packPayload?.packType} pack QR.`
