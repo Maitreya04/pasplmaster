@@ -169,6 +169,9 @@ const PRINT_CSS = `
   .pack-strip-code {
     font-variant-ligatures: none;
     letter-spacing: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .pack-strip-name {
@@ -348,13 +351,14 @@ function rackStripCodeStyle(code: string): CSSProperties {
 
 function packStripCodeStyle(code: string): CSSProperties {
   const length = code.trim().length;
-  if (length <= 10) return { fontSize: '10.2mm', letterSpacing: 0, lineHeight: 0.84 };
-  if (length <= 12) return { fontSize: '9.4mm', letterSpacing: 0, lineHeight: 0.84 };
-  if (length <= 14) return { fontSize: '8.6mm', letterSpacing: 0, lineHeight: 0.84 };
-  if (length <= 17) return { fontSize: '7.8mm', letterSpacing: 0, lineHeight: 0.84 };
-  if (length <= 20) return { fontSize: '7.1mm', letterSpacing: 0, lineHeight: 0.84 };
-  if (length <= 24) return { fontSize: '6.4mm', letterSpacing: 0, lineHeight: 0.84 };
-  return { fontSize: '5.6mm', letterSpacing: 0, lineHeight: 0.84 };
+  if (length <= 10) return { fontSize: '10.2mm', letterSpacing: 0, lineHeight: 0.84, whiteSpace: 'nowrap' };
+  if (length <= 12) return { fontSize: '9.4mm', letterSpacing: 0, lineHeight: 0.84, whiteSpace: 'nowrap' };
+  if (length <= 14) return { fontSize: '8.6mm', letterSpacing: 0, lineHeight: 0.84, whiteSpace: 'nowrap' };
+  if (length <= 17) return { fontSize: '7.8mm', letterSpacing: 0, lineHeight: 0.84, whiteSpace: 'nowrap' };
+  if (length <= 20) return { fontSize: '6.6mm', letterSpacing: 0, lineHeight: 0.84, whiteSpace: 'nowrap' };
+  if (length <= 26) return { fontSize: '5.4mm', letterSpacing: 0, lineHeight: 0.82 };
+  if (length <= 34) return { fontSize: '4.45mm', letterSpacing: 0, lineHeight: 0.82 };
+  return { fontSize: '3.8mm', letterSpacing: 0, lineHeight: 0.82 };
 }
 
 function packStripPayloadKey(busyCode: number, packType: PackType): string {
@@ -1241,6 +1245,7 @@ export default function LabelStudioPage(): React.JSX.Element {
                     busyCode != null && outerPackQty
                       ? packStripPayloadKey(busyCode, 'outer')
                       : null;
+                  const showPackStripName = item.pickCode.trim().length <= 22;
 
                   return (
                     <article
@@ -1263,14 +1268,16 @@ export default function LabelStudioPage(): React.JSX.Element {
                         <div className="pack-strip-shell">
                           <div className="pack-strip-copy">
                             <p
-                              className="pack-strip-code block min-w-0 truncate font-sans font-black uppercase text-slate-950"
+                              className="pack-strip-code block min-w-0 font-sans font-black uppercase text-slate-950"
                               style={packStripCodeStyle(item.pickCode)}
                             >
                               {item.pickCode}
                             </p>
-                            <p className="pack-strip-name text-[2.25mm] font-black leading-none text-slate-500">
-                              {item.name}
-                            </p>
+                            {showPackStripName && (
+                              <p className="pack-strip-name text-[2.25mm] font-black leading-none text-slate-500">
+                                {item.name}
+                              </p>
+                            )}
                           </div>
 
                           <div className="pack-strip-qr-row">
