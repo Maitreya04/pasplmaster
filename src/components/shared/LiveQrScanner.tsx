@@ -23,6 +23,10 @@ type BarcodeDetectorStatic = BarcodeDetectorCtor & {
   getSupportedFormats?: () => Promise<string[]>;
 };
 
+const SCAN_LOOP_DELAY_MS = 90;
+const AUTO_RETRY_DELAY_MS = 1000;
+const RESET_COOLDOWN_MS = 350;
+
 type ScannerEnginePath =
   | { type: 'native'; detector: BarcodeDetectorLike }
   | {
@@ -144,9 +148,13 @@ export function LiveQrScanner({
   }, []);
 
   const scheduleScan = useCallback((scan: () => Promise<void>) => {
+    if (scanTimerRef.current !== null) {
+      window.clearTimeout(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
     scanTimerRef.current = window.setTimeout(() => {
       void scan();
-    }, 90);
+    }, SCAN_LOOP_DELAY_MS);
   }, []);
 
   const handleResolvedScan = useCallback((rawValue: string) => {
@@ -207,7 +215,7 @@ export function LiveQrScanner({
 
     window.setTimeout(() => {
       setCanReset(true);
-    }, 400);
+    }, RESET_COOLDOWN_MS);
 
     if (matchesPickItem) {
       completedRef.current = true;
@@ -222,16 +230,21 @@ export function LiveQrScanner({
     vibrate([100, 50, 100]);
     flashViewport('red');
     setErrorMessage(result.reason);
-    setStatus('Verification failed. Trying again...');
+    setStatus(`Verification failed. Retrying in ${AUTO_RETRY_DELAY_MS / 1000}s...`);
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
     retryTimerRef.current = window.setTimeout(() => {
       retryTimerRef.current = null;
       lockedRef.current = false;
       setCanReset(true);
+      setErrorMessage(null);
       setStatus('Point the QR inside the frame');
       if (scanFrameRef.current) {
         scheduleScan(scanFrameRef.current);
       }
-    }, 900);
+    }, AUTO_RETRY_DELAY_MS);
   }, [
     flashViewport,
     onResolved,

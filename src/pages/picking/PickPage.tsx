@@ -136,6 +136,15 @@ function buildPriceMismatchNotes(rawNotes: string, boxPrice: number): string {
   return base ? `${structured} Picker note: ${base}` : structured;
 }
 
+function isBenignScannerAbort(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  return (
+    normalized.includes('operation was aborted') ||
+    normalized.includes('the operation was aborted') ||
+    normalized.includes('aborted')
+  );
+}
+
 export default function PickPage(): React.JSX.Element | null {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -997,7 +1006,9 @@ export default function PickPage(): React.JSX.Element | null {
           onClose={closeLiveScan}
           onResolved={handleScanResolved}
           onError={(message) => {
-            toast.error(message);
+            if (!isBenignScannerAbort(message)) {
+              toast.error(message);
+            }
             closeLiveScan();
           }}
         />
