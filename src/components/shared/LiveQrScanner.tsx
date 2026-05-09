@@ -90,6 +90,18 @@ function uniqueCodes(values: Array<string | null | undefined>): string[] {
   return output;
 }
 
+function extractNumericCandidates(values: Array<string | null | undefined>): number[] {
+  const out = new Set<number>();
+  for (const value of values) {
+    if (!value) continue;
+    const digits = value.replace(/[^\d]/g, '');
+    if (!digits) continue;
+    const parsed = Number(digits);
+    if (Number.isFinite(parsed) && parsed > 0) out.add(parsed);
+  }
+  return [...out];
+}
+
 function vibrate(pattern: number | number[]) {
   if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
   navigator.vibrate(pattern);
@@ -174,7 +186,14 @@ export function LiveQrScanner({
     let matchedBy: ScanMatchSource | null = null;
     let lookupCode: string | null = null;
 
-    if (packPayload && pickItem.busyCode != null && Number(pickItem.busyCode) === packPayload.busyCode) {
+    const busyCodeCandidates = extractNumericCandidates([
+      pickItem.alias1,
+      pickItem.alias,
+      pickItem.itemCode,
+      pickItem.busyCode != null ? String(pickItem.busyCode) : null,
+    ]);
+
+    if (packPayload && busyCodeCandidates.includes(packPayload.busyCode)) {
       matchesPickItem = true;
       matchedBy = 'pack';
       lookupCode = String(packPayload.busyCode);
@@ -211,9 +230,7 @@ export function LiveQrScanner({
       codeType: classified.kind,
       suggestedQty:
         classified.kind === 'pack'
-          ? packPayload?.packType === 'outer'
-            ? 5
-            : 1
+          ? 1
           : classified.kind === 'lpn'
             ? Math.max(1, lpnPayload?.remainingQty ?? 1)
             : 1,

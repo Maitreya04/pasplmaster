@@ -679,14 +679,19 @@ export default function PickPage(): React.JSX.Element | null {
             ? packDefinition?.outer_pack_qty ?? null
             : null;
       const lpnSuggested = lpnPayload?.remainingQty ?? null;
+      const existingPickedBefore = Math.min(
+        targetQty,
+        getPickedQtyFromResult(current.previousScanResult),
+      );
+      const remainingBeforeScan = Math.max(0, targetQty - existingPickedBefore);
       const suggestedQty =
         classified.kind === 'lpn' && Number.isFinite(lpnSuggested)
           ? Math.max(1, Number(lpnSuggested))
           : Number.isFinite(packQty) && (packQty ?? 0) > 0
             ? Number(packQty)
             : 1;
-      const requiresBreakConfirmation = suggestedQty > targetQty;
-      const isPackMatch = Boolean(packPayload && matchedBusyCode && packDefinition);
+      const requiresBreakConfirmation = suggestedQty > remainingBeforeScan;
+      const isPackMatch = Boolean(packPayload && matchedBusyCode);
       const isMatch = scan.matchesPickItem || isPackMatch;
       const matchStrategy = isPackMatch
         ? 'pack_qr_match'
@@ -764,11 +769,7 @@ export default function PickPage(): React.JSX.Element | null {
       }
 
       if (result.isMatch && !requiresBreakConfirmation) {
-        const existingPicked = Math.min(
-          targetQty,
-          getPickedQtyFromResult(current.previousScanResult),
-        );
-        const nextPicked = Math.min(targetQty, existingPicked + suggestedQty);
+        const nextPicked = Math.min(targetQty, existingPickedBefore + suggestedQty);
         const nextRemaining = Math.max(0, targetQty - nextPicked);
         const progressedResult: ScanResult = {
           ...result,
