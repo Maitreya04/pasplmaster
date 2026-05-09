@@ -97,6 +97,7 @@ export function LiveQrScanner({
   const streamRef = useRef<MediaStream | null>(null);
   const engineRef = useRef<ScannerEnginePath | null>(null);
   const scanTimerRef = useRef<number | null>(null);
+  const retryTimerRef = useRef<number | null>(null);
   const scanFrameRef = useRef<(() => Promise<void>) | null>(null);
   const completedRef = useRef(false);
   const lockedRef = useRef(false);
@@ -121,6 +122,10 @@ export function LiveQrScanner({
       window.clearTimeout(scanTimerRef.current);
       scanTimerRef.current = null;
     }
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -136,6 +141,12 @@ export function LiveQrScanner({
     window.setTimeout(() => {
       setFlashColor((current) => (current === color ? null : current));
     }, 220);
+  }, []);
+
+  const scheduleScan = useCallback((scan: () => Promise<void>) => {
+    scanTimerRef.current = window.setTimeout(() => {
+      void scan();
+    }, 90);
   }, []);
 
   const handleResolvedScan = useCallback((rawValue: string) => {
@@ -211,7 +222,16 @@ export function LiveQrScanner({
     vibrate([100, 50, 100]);
     flashViewport('red');
     setErrorMessage(result.reason);
-    setStatus('Scan locked. Review the result and tap Scan Again.');
+    setStatus('Verification failed. Trying again...');
+    retryTimerRef.current = window.setTimeout(() => {
+      retryTimerRef.current = null;
+      lockedRef.current = false;
+      setCanReset(true);
+      setStatus('Point the QR inside the frame');
+      if (scanFrameRef.current) {
+        scheduleScan(scanFrameRef.current);
+      }
+    }, 900);
   }, [
     flashViewport,
     onResolved,
@@ -221,14 +241,9 @@ export function LiveQrScanner({
     pickItem.itemCode,
     pickItem.itemId,
     pickItem.name,
+    scheduleScan,
     stopScanner,
   ]);
-
-  const scheduleScan = useCallback((scan: () => Promise<void>) => {
-    scanTimerRef.current = window.setTimeout(() => {
-      void scan();
-    }, 90);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -425,6 +440,10 @@ export function LiveQrScanner({
 
   const handleReset = useCallback(() => {
     if (!canReset) return;
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
     completedRef.current = false;
     lockedRef.current = false;
     setErrorMessage(null);
