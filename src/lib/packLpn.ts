@@ -6,6 +6,8 @@ import type {
   LicensePlatePackType,
 } from '../types';
 
+export type { ItemPackDefinition };
+
 export const PACK_DEFINITIONS_QUERY_KEY = ['item-pack-definitions'] as const;
 
 export interface CreateLicensePlateBatchRow {

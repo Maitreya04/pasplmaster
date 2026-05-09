@@ -167,6 +167,11 @@ export interface ScanResult {
   suggestedQty?: number;
   requiresBreakConfirmation?: boolean;
   lpnCode?: string | null;
+  progress?: {
+    pickedQty: number;
+    remainingQty: number;
+    targetQty: number;
+  };
   packAssist?: {
     packType: 'inner' | 'outer';
     packQty: number;

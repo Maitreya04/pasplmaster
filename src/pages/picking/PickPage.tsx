@@ -7,6 +7,12 @@ import {
   CaretLeft,
   Warning,
   Camera,
+  MapPin,
+  Package,
+  Cube,
+  StackSimple,
+  ArrowRight,
+  Check,
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
@@ -31,6 +37,7 @@ import type { LiveQrScannerResolved } from '../../components/shared/LiveQrScanne
 import {
   PACK_DEFINITIONS_QUERY_KEY,
   fetchItemPackDefinitions,
+  type ItemPackDefinition,
 } from '../../lib/packLpn';
 import {
   classifyScanPayload,
@@ -146,6 +153,145 @@ function isBenignScannerAbort(message: string): boolean {
   );
 }
 
+function getPickedQtyFromResult(result: ScanResult | null | undefined): number {
+  return Math.max(0, result?.progress?.pickedQty ?? 0);
+}
+
+interface PackBreakdown {
+  outerQty: number;
+  outerPcs: number;
+  innerQty: number;
+  innerPcs: number;
+  looseQty: number;
+  totalPcs: number;
+  hasOuter: boolean;
+  hasInner: boolean;
+  hasLoose: boolean;
+}
+
+function computePackBreakdown(
+  targetQty: number,
+  packDef: ItemPackDefinition | null | undefined,
+): PackBreakdown {
+  const outerSize = packDef?.outer_pack_qty ?? 0;
+  const innerSize = packDef?.inner_pack_qty ?? 0;
+
+  let remaining = targetQty;
+  let outerQty = 0;
+  let innerQty = 0;
+  let looseQty = 0;
+
+  if (outerSize > 0) {
+    outerQty = Math.floor(remaining / outerSize);
+    remaining = remaining % outerSize;
+  }
+  if (innerSize > 0) {
+    innerQty = Math.floor(remaining / innerSize);
+    remaining = remaining % innerSize;
+  }
+  looseQty = remaining;
+
+  return {
+    outerQty,
+    outerPcs: outerQty * outerSize,
+    innerQty,
+    innerPcs: innerQty * innerSize,
+    looseQty,
+    totalPcs: targetQty,
+    hasOuter: outerSize > 0,
+    hasInner: innerSize > 0,
+    hasLoose: looseQty > 0 || (outerSize === 0 && innerSize === 0),
+  };
+}
+
+type ScanTier = 'outer' | 'inner' | 'loose';
+type TierState = 'waiting' | 'active' | 'done';
+
+interface TierProgress {
+  tier: ScanTier;
+  label: string;
+  icon: React.ComponentType<{ size?: number; weight?: 'fill' | 'regular' | 'bold' }>;
+  target: number;
+  scanned: number;
+  state: TierState;
+  packSize: number;
+}
+
+function computeTierProgress(
+  breakdown: PackBreakdown,
+  pickedQty: number,
+  packDef: ItemPackDefinition | null | undefined,
+): TierProgress[] {
+  const outerSize = packDef?.outer_pack_qty ?? 0;
+  const innerSize = packDef?.inner_pack_qty ?? 0;
+
+  const tiers: TierProgress[] = [];
+  let remaining = pickedQty;
+
+  // Outer tier
+  if (breakdown.hasOuter && breakdown.outerQty > 0) {
+    const outerScanned = Math.min(breakdown.outerQty, Math.floor(remaining / outerSize));
+    remaining -= outerScanned * outerSize;
+    tiers.push({
+      tier: 'outer',
+      label: 'Master box',
+      icon: Package,
+      target: breakdown.outerQty,
+      scanned: outerScanned,
+      state: outerScanned >= breakdown.outerQty ? 'done' : tiers.length === 0 ? 'active' : 'waiting',
+      packSize: outerSize,
+    });
+  }
+
+  // Inner tier
+  if (breakdown.hasInner && breakdown.innerQty > 0) {
+    const innerScanned = Math.min(breakdown.innerQty, Math.floor(remaining / innerSize));
+    remaining -= innerScanned * innerSize;
+    const outerDone = !tiers.length || tiers[0].state === 'done';
+    tiers.push({
+      tier: 'inner',
+      label: 'Inner box',
+      icon: Cube,
+      target: breakdown.innerQty,
+      scanned: innerScanned,
+      state: innerScanned >= breakdown.innerQty ? 'done' : outerDone ? 'active' : 'waiting',
+      packSize: innerSize,
+    });
+  }
+
+  // Loose tier
+  if (breakdown.looseQty > 0) {
+    const looseScanned = Math.min(breakdown.looseQty, remaining);
+    const priorDone = tiers.every((t) => t.state === 'done');
+    tiers.push({
+      tier: 'loose',
+      label: 'Loose piece',
+      icon: StackSimple,
+      target: breakdown.looseQty,
+      scanned: looseScanned,
+      state: looseScanned >= breakdown.looseQty ? 'done' : priorDone ? 'active' : 'waiting',
+      packSize: 1,
+    });
+  }
+
+  // If no pack definitions exist, show a single loose tier
+  if (tiers.length === 0) {
+    const looseTarget = breakdown.totalPcs;
+    const looseScanned = Math.min(looseTarget, pickedQty);
+    tiers.push({
+      tier: 'loose',
+      label: 'Pieces',
+      icon: StackSimple,
+      target: looseTarget,
+      scanned: looseScanned,
+      state: looseScanned >= looseTarget ? 'done' : 'active',
+      packSize: 1,
+    });
+  }
+
+  return tiers;
+}
+
 export default function PickPage(): React.JSX.Element | null {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -222,6 +368,66 @@ export default function PickPage(): React.JSX.Element | null {
   const { active, done } = useMemo(() => partitionItems(pickItems), [pickItems]);
   const currentTarget = active[0] ?? null;
   const upNext = active.slice(1, 5);
+
+  // Get pack definition for current target
+  const currentPackDef = useMemo(() => {
+    if (!currentTarget) return null;
+    const busyCodes = deriveBusyCodeCandidates(currentTarget.orderItem);
+    for (const code of busyCodes) {
+      const def = packDefinitionByBusyCode.get(code);
+      if (def) return def;
+    }
+    return null;
+  }, [currentTarget, packDefinitionByBusyCode]);
+
+  const currentTargetProgress = useMemo(() => {
+    if (!currentTarget) return null;
+    const targetQty = pickQuantityTarget(currentTarget.orderItem);
+    const pickedQty = Math.min(
+      targetQty,
+      getPickedQtyFromResult(currentTarget.scanResult),
+    );
+    return {
+      targetQty,
+      pickedQty,
+      remainingQty: Math.max(0, targetQty - pickedQty),
+    };
+  }, [currentTarget]);
+
+  // Pack breakdown for current target
+  const currentBreakdown = useMemo(() => {
+    if (!currentTargetProgress) return null;
+    return computePackBreakdown(currentTargetProgress.targetQty, currentPackDef);
+  }, [currentTargetProgress, currentPackDef]);
+
+  // Tier progress for scanning state
+  const currentTiers = useMemo(() => {
+    if (!currentBreakdown || !currentTargetProgress) return [];
+    return computeTierProgress(
+      currentBreakdown,
+      currentTargetProgress.pickedQty,
+      currentPackDef,
+    );
+  }, [currentBreakdown, currentTargetProgress, currentPackDef]);
+
+  // Active tier for scanner hint
+  const activeTier = useMemo(
+    () => currentTiers.find((t) => t.state === 'active') ?? null,
+    [currentTiers],
+  );
+
+  // Total scans remaining
+  const totalScansRemaining = useMemo(() => {
+    return currentTiers.reduce((sum, t) => sum + Math.max(0, t.target - t.scanned), 0);
+  }, [currentTiers]);
+
+  const totalScansTotal = useMemo(() => {
+    return currentTiers.reduce((sum, t) => sum + t.target, 0);
+  }, [currentTiers]);
+
+  const totalScansDone = useMemo(() => {
+    return currentTiers.reduce((sum, t) => sum + t.scanned, 0);
+  }, [currentTiers]);
 
   const counts = useMemo(() => {
     let picked = 0;
@@ -529,13 +735,15 @@ export default function PickPage(): React.JSX.Element | null {
         scanResult: result,
       });
 
-      itemTransitionMutation.mutate({
-        transition: {
-          kind: 'scan_saved',
-          itemId: current.orderItem.id,
-          scanResult: result,
-        },
-      });
+      if (!result.isMatch || requiresBreakConfirmation) {
+        itemTransitionMutation.mutate({
+          transition: {
+            kind: 'scan_saved',
+            itemId: current.orderItem.id,
+            scanResult: result,
+          },
+        });
+      }
 
       if (requiresBreakConfirmation) {
         setPendingPackConfirmation({
@@ -547,8 +755,47 @@ export default function PickPage(): React.JSX.Element | null {
       }
 
       if (result.isMatch && !requiresBreakConfirmation) {
+        const existingPicked = Math.min(
+          targetQty,
+          getPickedQtyFromResult(current.scanResult),
+        );
+        const nextPicked = Math.min(targetQty, existingPicked + suggestedQty);
+        const nextRemaining = Math.max(0, targetQty - nextPicked);
+        const progressedResult: ScanResult = {
+          ...result,
+          progress: {
+            pickedQty: nextPicked,
+            remainingQty: nextRemaining,
+            targetQty,
+          },
+        };
+        updateLocalItem(current.orderItem.id, {
+          scanResult: progressedResult,
+          uiState: nextRemaining === 0 ? 'picked' : 'matched',
+        });
+        itemTransitionMutation.mutate({
+          transition: {
+            kind: 'scan_saved',
+            itemId: current.orderItem.id,
+            scanResult: progressedResult,
+          },
+        });
+        if (nextRemaining === 0) {
+          itemTransitionMutation.mutate({
+            transition: {
+              kind: 'picked',
+              itemId: current.orderItem.id,
+              scanResult: progressedResult,
+            },
+            optimisticState: 'picked',
+          });
+        }
         appHaptics.success();
-        setScannerHint(`Matched ${classified.kind.toUpperCase()} scan. Suggested qty ${suggestedQty}.`);
+        setScannerHint(
+          nextRemaining === 0
+            ? `Completed ${current.orderItem.item_name}.`
+            : `Matched ${classified.kind.toUpperCase()} scan. ${nextRemaining} remaining.`,
+        );
       } else {
         appHaptics.warning();
       }
@@ -568,6 +815,15 @@ export default function PickPage(): React.JSX.Element | null {
     (itemId: number) => {
       appHaptics.impactMedium();
       const local = localItems.get(itemId);
+      const orderItem = order?.items.find((oi) => oi.id === itemId);
+      if (!orderItem) return;
+      const targetQty = pickQuantityTarget(orderItem);
+      const existingPicked = Math.min(
+        targetQty,
+        getPickedQtyFromResult(local?.scanResult ?? orderItem.scan_result),
+      );
+      const nextPicked = Math.min(targetQty, existingPicked + 1);
+      const nextRemaining = Math.max(0, targetQty - nextPicked);
       const manualScanResult: ScanResult = local?.scanResult ?? {
         scannedText: 'MANUAL_PICK',
         confidence: 100,
@@ -584,16 +840,38 @@ export default function PickPage(): React.JSX.Element | null {
           source: 'manual',
         },
       };
+      const progressedResult: ScanResult = {
+        ...manualScanResult,
+        suggestedQty: 1,
+        progress: {
+          pickedQty: nextPicked,
+          remainingQty: nextRemaining,
+          targetQty,
+        },
+      };
       itemTransitionMutation.mutate({
         transition: {
-          kind: 'picked',
+          kind: 'scan_saved',
           itemId,
-          scanResult: manualScanResult,
+          scanResult: progressedResult,
         },
-        optimisticState: 'picked',
       });
+      updateLocalItem(itemId, {
+        scanResult: progressedResult,
+        uiState: nextRemaining === 0 ? 'picked' : 'matched',
+      });
+      if (nextRemaining === 0) {
+        itemTransitionMutation.mutate({
+          transition: {
+            kind: 'picked',
+            itemId,
+            scanResult: progressedResult,
+          },
+          optimisticState: 'picked',
+        });
+      }
     },
-    [itemTransitionMutation, localItems, userId, userName],
+    [itemTransitionMutation, localItems, order?.items, updateLocalItem, userId, userName],
   );
 
   const handleOverride = useCallback(
@@ -813,86 +1091,323 @@ export default function PickPage(): React.JSX.Element | null {
 
       <div className="px-4 pt-3 space-y-4">
         {currentTarget ? (
-          <div className="rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-accent)] p-4 space-y-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-xs uppercase tracking-wider text-[var(--content-tertiary)] font-semibold">
-                  Current Target
+          <>
+            {/* ─── HERO SECTION: Item + Qty ─── */}
+            <div className="ds-card p-4">
+              {/* Item header with SKU */}
+              <div className="flex items-start justify-between gap-3 pb-3 border-b border-[var(--border-faint)]">
+                <div className="min-w-0 flex-1">
+                  <p className="font-mono font-bold text-sm text-[var(--content-primary)]">
+                    {currentTarget.orderItem.item_alias ?? currentTarget.orderItem.item_id}
+                  </p>
+                  <p className="text-[var(--content-secondary)] text-sm mt-0.5 line-clamp-2">
+                    {currentTarget.orderItem.item_name}
+                  </p>
+                </div>
+                <span className="text-xs px-2 py-1 rounded-full bg-[var(--bg-tertiary)] text-[var(--content-tertiary)] shrink-0">
+                  {counts.picked + counts.flagged + 1} of {counts.total}
+                </span>
+              </div>
+
+              {/* Hero quantity */}
+              <div className="pt-4 pb-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mb-1">
+                  Pick qty
                 </p>
-                <p className="font-semibold text-[var(--content-primary)] leading-snug">
-                  {currentTarget.orderItem.item_name}
-                </p>
-                <p className="text-xs text-[var(--content-secondary)] mt-1">
-                  Rack: {currentTarget.orderItem.rack_no ?? 'No rack'} · Qty target {pickQuantityTarget(currentTarget.orderItem)}
-                </p>
-                {currentTarget.scanResult?.packAssist && (
-                  <p className="text-xs text-[var(--content-warning)] mt-1">
-                    Pack assist: {currentTarget.scanResult.packAssist.packType} ({currentTarget.scanResult.packAssist.suggestedQty})
+                <div className="flex items-baseline gap-1">
+                  <span className="font-mono font-bold text-[52px] leading-none text-[var(--content-primary)]">
+                    {currentTargetProgress?.targetQty ?? 0}
+                  </span>
+                  <span className="text-sm font-medium text-[var(--content-tertiary)]">pcs</span>
+                </div>
+
+                {/* Pack breakdown cards */}
+                {currentBreakdown && (currentBreakdown.hasOuter || currentBreakdown.hasInner) && (
+                  <div className="flex gap-2 mt-3">
+                    {/* Outer/Master card */}
+                    {currentBreakdown.hasOuter && (
+                      <div
+                        className={`flex-1 rounded-xl p-2.5 border-[1.5px] ${
+                          currentBreakdown.outerQty === 0
+                            ? 'opacity-35 bg-[var(--bg-accent-subtle)] border-[var(--border-accent)]'
+                            : 'bg-[var(--bg-accent-subtle)] border-[var(--border-accent)]'
+                        }`}
+                      >
+                        <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">
+                          Master
+                        </p>
+                        <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-accent)]">
+                          {currentBreakdown.outerQty}
+                        </p>
+                        <p className="text-[9px] font-medium text-[var(--content-accent)]">
+                          ×{currentPackDef?.outer_pack_qty ?? 0} ea
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Inner card */}
+                    {currentBreakdown.hasInner && (
+                      <div
+                        className={`flex-1 rounded-xl p-2.5 border-[1.5px] ${
+                          currentBreakdown.innerQty === 0
+                            ? 'opacity-35 bg-[var(--bg-positive-subtle)] border-[var(--border-positive)]'
+                            : 'bg-[var(--bg-positive-subtle)] border-[var(--border-positive)]'
+                        }`}
+                      >
+                        <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-positive)]">
+                          Inner
+                        </p>
+                        <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-positive)]">
+                          {currentBreakdown.innerQty}
+                        </p>
+                        <p className="text-[9px] font-medium text-[var(--content-positive)]">
+                          ×{currentPackDef?.inner_pack_qty ?? 0} = {currentBreakdown.innerPcs}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Loose card */}
+                    <div
+                      className={`flex-1 rounded-xl p-2.5 border-[1.5px] ${
+                        currentBreakdown.looseQty === 0
+                          ? 'opacity-35 bg-[var(--bg-tertiary)] border-[var(--border-subtle)]'
+                          : 'bg-[var(--bg-tertiary)] border-[var(--border-subtle)]'
+                      }`}
+                    >
+                      <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                        Loose
+                      </p>
+                      <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-secondary)]">
+                        {currentBreakdown.looseQty}
+                      </p>
+                      <p className="text-[9px] font-medium text-[var(--content-tertiary)]">
+                        + {currentBreakdown.looseQty} pcs
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Location strip */}
+              <div className="flex items-center gap-2 bg-[var(--bg-tertiary)] rounded-lg px-3 py-2">
+                <MapPin size={16} weight="fill" className="text-[var(--content-tertiary)] shrink-0" />
+                <span className="text-[11px] text-[var(--content-tertiary)]">Location</span>
+                <span className="font-mono font-bold text-sm text-[var(--content-primary)] ml-auto">
+                  {currentTarget.orderItem.rack_no ?? '—'}
+                </span>
+              </div>
+            </div>
+
+            {/* ─── SCANNING SECTION ─── */}
+            {liveScanSession ? (
+              /* Active scanning state - show tier progress */
+              <div className="ds-card p-4 space-y-3">
+                {/* Scan progress header */}
+                <div className="flex items-center justify-between">
+                  <p className="font-mono font-bold text-xs text-[var(--content-primary)]">
+                    {currentTarget.orderItem.item_alias ?? currentTarget.orderItem.item_id}
+                  </p>
+                  <button
+                    onClick={closeLiveScan}
+                    className="text-xs text-[var(--content-tertiary)]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                {/* Progress bar */}
+                <div className="space-y-1">
+                  <div className="h-1 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[var(--bg-positive)] rounded-full transition-all duration-300"
+                      style={{ width: `${totalScansTotal > 0 ? (totalScansDone / totalScansTotal) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-[var(--content-tertiary)]">
+                    {totalScansDone} of {totalScansTotal} scans
+                  </p>
+                </div>
+
+                {/* Tier rows */}
+                <div className="space-y-2">
+                  {currentTiers.map((tier) => {
+                    const TierIcon = tier.icon;
+                    const isActive = tier.state === 'active';
+                    const isDone = tier.state === 'done';
+                    const isWaiting = tier.state === 'waiting';
+
+                    return (
+                      <div
+                        key={tier.tier}
+                        className={`flex items-center gap-3 rounded-xl border-[1.5px] p-3 transition-all ${
+                          isDone
+                            ? 'bg-[var(--bg-positive-subtle)] border-[var(--border-positive)]'
+                            : isActive
+                              ? 'bg-[var(--bg-secondary)] border-[var(--border-selected)]'
+                              : 'bg-[var(--bg-secondary)] border-[var(--border-subtle)] opacity-40'
+                        }`}
+                      >
+                        {/* Icon */}
+                        <div
+                          className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                            isDone
+                              ? 'bg-[var(--bg-positive-subtle)]'
+                              : tier.tier === 'outer'
+                                ? 'bg-[var(--bg-accent-subtle)]'
+                                : tier.tier === 'inner'
+                                  ? 'bg-[var(--bg-positive-subtle)]'
+                                  : 'bg-[var(--bg-tertiary)]'
+                          }`}
+                        >
+                          {isDone ? (
+                            <Check size={18} weight="bold" className="text-[var(--content-positive)]" />
+                          ) : (
+                            <TierIcon
+                              size={18}
+                              weight="fill"
+                              className={
+                                tier.tier === 'outer'
+                                  ? 'text-[var(--content-accent)]'
+                                  : tier.tier === 'inner'
+                                    ? 'text-[var(--content-positive)]'
+                                    : 'text-[var(--content-tertiary)]'
+                              }
+                            />
+                          )}
+                        </div>
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                            {tier.label}
+                          </p>
+                          <p className={`font-mono font-bold text-xl leading-tight ${isDone ? 'text-[var(--content-positive)]' : 'text-[var(--content-primary)]'}`}>
+                            {tier.scanned}
+                            <span className="text-sm text-[var(--content-tertiary)]"> / {tier.target}</span>
+                          </p>
+                          {isActive && (
+                            <p className="text-[10px] text-[var(--content-tertiary)]">
+                              scan {tier.label.toLowerCase()} QR
+                            </p>
+                          )}
+                          {isDone && (
+                            <p className="text-[10px] text-[var(--content-positive)]">done</p>
+                          )}
+                        </div>
+
+                        {/* Status dot */}
+                        <div
+                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                            isDone
+                              ? 'bg-[var(--bg-positive)]'
+                              : isActive
+                                ? 'bg-[var(--content-primary)]'
+                                : 'bg-[var(--border-subtle)]'
+                          }`}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Scanner hint zone */}
+                <div className="border-[1.5px] border-dashed border-[var(--border-selected)] rounded-2xl p-5 flex flex-col items-center gap-2">
+                  <Camera size={32} weight="regular" className="text-[var(--content-primary)]" />
+                  <p className="font-semibold text-sm text-[var(--content-primary)]">
+                    {activeTier ? `Scan ${activeTier.label.toLowerCase()}` : 'All scans complete'}
+                  </p>
+                  <p className="text-[11px] text-[var(--content-tertiary)] text-center">
+                    {activeTier
+                      ? `Point camera at the QR on the ${activeTier.label.toLowerCase()} label`
+                      : 'Ready to complete this line'}
+                  </p>
+                </div>
+
+                {scannerHint && (
+                  <p className="text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] rounded-lg px-3 py-2">
+                    {scannerHint}
                   </p>
                 )}
               </div>
-              <span className="text-xs px-2 py-1 rounded-full bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]">
-                {active.length} remaining
-              </span>
-            </div>
-            {scannerHint && (
-              <p className="text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] rounded-lg px-2 py-1">
-                {scannerHint}
-              </p>
+            ) : (
+              /* Not scanning - show CTA */
+              <div className="space-y-3">
+                <BigButton
+                  variant="primary"
+                  onClick={() => openLiveScan(currentTarget.orderItem)}
+                  className="bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)]"
+                >
+                  <Camera size={20} weight="bold" />
+                  Start scanning
+                </BigButton>
+
+                {/* Secondary actions */}
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => handlePick(currentTarget.orderItem.id)}
+                    className="h-11 rounded-xl bg-[var(--bg-tertiary)] text-sm font-medium text-[var(--content-secondary)]"
+                  >
+                    +1 manual
+                  </button>
+                  <button
+                    onClick={() => handleOverride(currentTarget.orderItem.id)}
+                    className="h-11 rounded-xl bg-[var(--bg-warning-subtle)] text-sm font-medium text-[var(--content-warning)]"
+                  >
+                    Override
+                  </button>
+                  <button
+                    onClick={() => {
+                      setFlagTarget(currentTarget.orderItem.id);
+                      setFlagReason('');
+                      setFlagNotes('');
+                      setFlagBoxPrice('');
+                    }}
+                    className="h-11 rounded-xl bg-[var(--bg-negative-subtle)] text-sm font-medium text-[var(--content-negative)]"
+                  >
+                    Flag
+                  </button>
+                </div>
+
+                {scannerHint && (
+                  <p className="text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] rounded-lg px-3 py-2">
+                    {scannerHint}
+                  </p>
+                )}
+              </div>
             )}
-            <BigButton
-              variant="primary"
-              onClick={() => openLiveScan(currentTarget.orderItem)}
-              className="bg-[var(--bg-positive)] text-[var(--content-on-color)]"
-            >
-              <Camera size={20} weight="bold" />
-              Scan Current Item
-            </BigButton>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                onClick={() => handlePick(currentTarget.orderItem.id)}
-                className="h-11 rounded-xl bg-[var(--bg-tertiary)] text-sm font-medium text-[var(--content-secondary)]"
-              >
-                Confirm
-              </button>
-              <button
-                onClick={() => handleOverride(currentTarget.orderItem.id)}
-                className="h-11 rounded-xl bg-[var(--bg-warning-subtle)] text-sm font-medium text-[var(--content-warning)]"
-              >
-                Override
-              </button>
-              <button
-                onClick={() => {
-                  setFlagTarget(currentTarget.orderItem.id);
-                  setFlagReason('');
-                  setFlagNotes('');
-                  setFlagBoxPrice('');
-                }}
-                className="h-11 rounded-xl bg-[var(--bg-negative-subtle)] text-sm font-medium text-[var(--content-negative)]"
-              >
-                Flag
-              </button>
-            </div>
-          </div>
+          </>
         ) : (
-          <div className="rounded-2xl bg-[var(--bg-secondary)] p-4 text-sm text-[var(--content-secondary)]">
-            No pending pick lines.
+          <div className="ds-card p-6 text-center">
+            <div className="w-14 h-14 bg-[var(--bg-positive-subtle)] rounded-full flex items-center justify-center mx-auto mb-3">
+              <CheckCircle size={28} weight="fill" className="text-[var(--content-positive)]" />
+            </div>
+            <p className="font-semibold text-[var(--content-primary)]">All items processed</p>
+            <p className="text-sm text-[var(--content-tertiary)] mt-1">
+              {counts.picked} picked, {counts.flagged} flagged
+            </p>
           </div>
         )}
 
         {upNext.length > 0 && (
-          <div className="rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] p-3">
-            <p className="text-xs uppercase tracking-wider text-[var(--content-tertiary)] font-semibold mb-2">
-              Up Next
-            </p>
+          <div className="ds-card p-3">
+            <p className="ds-label mb-2">Up Next</p>
             <div className="space-y-1.5">
-              {upNext.map((pi) => (
-                <div key={pi.orderItem.id} className="flex items-center gap-2 text-sm">
-                  <span className="font-mono text-[var(--content-warning)] min-w-12">
-                    {pi.orderItem.rack_no ?? '--'}
+              {upNext.map((pi, idx) => (
+                <div
+                  key={pi.orderItem.id}
+                  className="flex items-center gap-3 py-1.5"
+                >
+                  <span className="w-5 h-5 rounded-full bg-[var(--bg-tertiary)] flex items-center justify-center text-[10px] font-semibold text-[var(--content-tertiary)] shrink-0">
+                    {idx + 2}
                   </span>
-                  <span className="flex-1 truncate text-[var(--content-secondary)]">
+                  <span className="font-mono text-xs text-[var(--content-warning)] min-w-14 shrink-0">
+                    {pi.orderItem.rack_no ?? '—'}
+                  </span>
+                  <span className="flex-1 truncate text-sm text-[var(--content-secondary)]">
                     {pi.orderItem.item_name}
+                  </span>
+                  <span className="font-mono text-xs text-[var(--content-tertiary)] shrink-0">
+                    ×{pickQuantityTarget(pi.orderItem)}
                   </span>
                 </div>
               ))}
@@ -901,22 +1416,30 @@ export default function PickPage(): React.JSX.Element | null {
         )}
 
         {done.length > 0 && (
-          <div className="rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-faint)] p-3">
-            <p className="text-xs uppercase tracking-wider text-[var(--content-tertiary)] font-semibold mb-2">
-              Done ({done.length})
-            </p>
+          <div className="ds-card p-3">
+            <p className="ds-label mb-2">Completed ({done.length})</p>
             <div className="space-y-1">
-              {done.map((pi) => (
-                <div key={pi.orderItem.id} className="flex items-center gap-2 text-xs text-[var(--content-secondary)]">
+              {done.slice(0, 8).map((pi) => (
+                <div
+                  key={pi.orderItem.id}
+                  className="flex items-center gap-2 py-1 text-xs text-[var(--content-tertiary)]"
+                >
                   {pi.uiState === 'flagged' ? (
-                    <Flag size={14} weight="fill" className="text-[var(--content-negative)]" />
+                    <Flag size={14} weight="fill" className="text-[var(--content-negative)] shrink-0" />
                   ) : (
-                    <CheckCircle size={14} weight="fill" className="text-[var(--content-positive)]" />
+                    <CheckCircle size={14} weight="fill" className="text-[var(--content-positive)] shrink-0" />
                   )}
                   <span className="flex-1 truncate">{pi.orderItem.item_name}</span>
-                  <span className="font-mono">{pi.orderItem.rack_no ?? '--'}</span>
+                  <span className="font-mono text-[var(--content-quaternary)]">
+                    {pi.orderItem.rack_no ?? '—'}
+                  </span>
                 </div>
               ))}
+              {done.length > 8 && (
+                <p className="text-[10px] text-[var(--content-quaternary)] text-center pt-1">
+                  +{done.length - 8} more
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -924,7 +1447,31 @@ export default function PickPage(): React.JSX.Element | null {
 
       {/* Complete button */}
       {allDone && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-[var(--bg-primary)] border-t border-[var(--border-subtle)]">
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-[var(--bg-primary)] border-t border-[var(--border-subtle)] space-y-3">
+          {/* Summary receipt */}
+          <div className="bg-[var(--bg-tertiary)] rounded-xl p-3 space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-[var(--content-tertiary)]">Items picked</span>
+              <span className="font-mono font-bold text-[var(--content-positive)]">
+                {counts.picked}
+              </span>
+            </div>
+            {counts.flagged > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-[var(--content-tertiary)]">Items flagged</span>
+                <span className="font-mono font-bold text-[var(--content-negative)]">
+                  {counts.flagged}
+                </span>
+              </div>
+            )}
+            <div className="flex justify-between text-sm pt-2 border-t border-[var(--border-faint)]">
+              <span className="text-[var(--content-secondary)] font-medium">Total confirmed</span>
+              <span className="font-mono font-bold text-[var(--content-primary)]">
+                {counts.total} items
+              </span>
+            </div>
+          </div>
+
           <BigButton
             variant="primary"
             onClick={() => {
@@ -945,7 +1492,7 @@ export default function PickPage(): React.JSX.Element | null {
               </>
             ) : (
               <>
-                <CheckCircle size={20} weight="bold" />
+                <ArrowRight size={20} weight="bold" />
                 Complete Order
               </>
             )}
