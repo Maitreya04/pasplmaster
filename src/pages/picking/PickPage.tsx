@@ -348,6 +348,13 @@ export default function PickPage(): React.JSX.Element | null {
     () => new Map(packDefinitions.map((row) => [row.busy_code, row])),
     [packDefinitions],
   );
+  const packDefinitionByItemId = useMemo(() => {
+    const map = new Map<number, ItemPackDefinition>();
+    for (const row of packDefinitions) {
+      if (row.item_id_snapshot != null) map.set(row.item_id_snapshot, row);
+    }
+    return map;
+  }, [packDefinitions]);
 
   const pickItems = useMemo(() => {
     if (!orderItems) return [];
@@ -665,13 +672,23 @@ export default function PickPage(): React.JSX.Element | null {
       const packPayload = parsePackPickPayload(scan.rawValue);
       const lpnPayload = parseLpnPickPayload(scan.rawValue);
       const busyCodeCandidates = deriveBusyCodeCandidates(current.orderItem);
-      const matchedBusyCode =
-        packPayload && busyCodeCandidates.includes(packPayload.busyCode)
-          ? packPayload.busyCode
-          : null;
-      const packDefinition = matchedBusyCode
-        ? packDefinitionByBusyCode.get(matchedBusyCode)
+      const packDefinitionByPayload = packPayload
+        ? packDefinitionByBusyCode.get(packPayload.busyCode) ?? null
         : null;
+      const packDefinitionByCurrentItem = packDefinitionByItemId.get(current.orderItem.item_id) ?? null;
+      const payloadMatchesCurrentItem = Boolean(
+        packPayload &&
+          (
+            busyCodeCandidates.includes(packPayload.busyCode) ||
+            (packDefinitionByPayload?.item_id_snapshot != null &&
+              packDefinitionByPayload.item_id_snapshot === current.orderItem.item_id) ||
+            (packDefinitionByCurrentItem != null &&
+              packDefinitionByCurrentItem.busy_code === packPayload.busyCode)
+          ),
+      );
+      const matchedBusyCode =
+        packPayload && payloadMatchesCurrentItem ? packPayload.busyCode : null;
+      const packDefinition = packDefinitionByPayload;
       const packQty =
         packPayload?.packType === 'inner'
           ? packDefinition?.inner_pack_qty ?? null
@@ -816,6 +833,7 @@ export default function PickPage(): React.JSX.Element | null {
     lastScanMeta,
     itemTransitionMutation,
     packDefinitionByBusyCode,
+    packDefinitionByItemId,
     updateLocalItem,
     userId,
     userName,
