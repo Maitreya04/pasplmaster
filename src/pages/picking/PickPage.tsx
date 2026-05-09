@@ -670,6 +670,46 @@ export default function PickPage(): React.JSX.Element | null {
       }
       setLastScanMeta({ rawValue: scan.rawValue, at: now });
       const targetQty = pickQuantityTarget(current.orderItem);
+      if (targetQty <= 0) {
+        const zeroQtyResult: ScanResult = {
+          isMatch: false,
+          confidence: 0,
+          extractedCode: scan.lookupCode ?? undefined,
+          extractedDescription: scan.matchedItem?.name ?? undefined,
+          reason: 'Line has 0 target qty. Manual qty entry or flag is required.',
+          scannedText: scan.rawValue,
+          matchedAgainst: scan.matchedBy ?? current.orderItem.item_name,
+          matchStrategy: 'zero_target_guard',
+          ocrExtracted: {
+            partNumber: scan.lookupCode ?? null,
+            mrp: null,
+          },
+          method: 'qr_scan',
+          timestamp: new Date().toISOString(),
+          codeType: classifyScanPayload(scan.rawValue).kind,
+          suggestedQty: 0,
+          requiresBreakConfirmation: false,
+          operatorContext: {
+            pickerName: userName,
+            pickerUserId: userId,
+            source: 'scanner',
+          },
+        };
+        updateLocalItem(current.orderItem.id, {
+          uiState: 'warning',
+          scanResult: zeroQtyResult,
+        });
+        itemTransitionMutation.mutate({
+          transition: {
+            kind: 'scan_saved',
+            itemId: current.orderItem.id,
+            scanResult: zeroQtyResult,
+          },
+        });
+        appHaptics.warning();
+        setScannerHint('This line has target qty 0. Enter qty manually or flag it. It will not auto-skip.');
+        return null;
+      }
       const classified = classifyScanPayload(scan.rawValue);
       const lookupCandidates = classified.normalizedCandidates;
       const packPayload = parsePackPickPayload(scan.rawValue);
@@ -854,6 +894,10 @@ export default function PickPage(): React.JSX.Element | null {
       const orderItem = order?.items.find((oi) => oi.id === itemId);
       if (!orderItem) return;
       const targetQty = pickQuantityTarget(orderItem);
+      if (targetQty <= 0) {
+        toast.error('Cannot auto-apply on a 0 qty line. Use Enter qty or flag this line.');
+        return;
+      }
       const existingPicked = Math.min(
         targetQty,
         getPickedQtyFromResult(local?.scanResult ?? orderItem.scan_result),
@@ -1175,6 +1219,16 @@ export default function PickPage(): React.JSX.Element | null {
                   <p className="text-xs text-[var(--content-secondary)] mt-1">
                     Picked {currentTargetProgress.pickedQty} of {currentTargetProgress.targetQty}
                   </p>
+                )}
+                {currentTargetProgress?.targetQty === 0 && (
+                  <div className="mt-2 rounded-lg border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2">
+                    <p className="text-xs font-semibold text-[var(--content-warning-on-light)]">
+                      Qty target is 0. This line will not auto-complete.
+                    </p>
+                    <p className="text-[11px] text-[var(--content-warning-on-light)] mt-0.5">
+                      Use Enter qty for bulk/manual picking or Flag to route for review.
+                    </p>
+                  </div>
                 )}
 
                 {/* Pack breakdown cards */}
