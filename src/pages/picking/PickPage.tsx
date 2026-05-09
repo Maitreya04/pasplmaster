@@ -210,7 +210,11 @@ type TierState = 'waiting' | 'active' | 'done';
 interface TierProgress {
   tier: ScanTier;
   label: string;
-  icon: React.ComponentType<{ size?: number; weight?: 'fill' | 'regular' | 'bold' }>;
+  icon: React.ComponentType<{
+    size?: number;
+    weight?: 'fill' | 'regular' | 'bold';
+    className?: string;
+  }>;
   target: number;
   scanned: number;
   state: TierState;
@@ -415,11 +419,6 @@ export default function PickPage(): React.JSX.Element | null {
     () => currentTiers.find((t) => t.state === 'active') ?? null,
     [currentTiers],
   );
-
-  // Total scans remaining
-  const totalScansRemaining = useMemo(() => {
-    return currentTiers.reduce((sum, t) => sum + Math.max(0, t.target - t.scanned), 0);
-  }, [currentTiers]);
 
   const totalScansTotal = useMemo(() => {
     return currentTiers.reduce((sum, t) => sum + t.target, 0);
@@ -757,7 +756,7 @@ export default function PickPage(): React.JSX.Element | null {
       if (result.isMatch && !requiresBreakConfirmation) {
         const existingPicked = Math.min(
           targetQty,
-          getPickedQtyFromResult(current.scanResult),
+          getPickedQtyFromResult(current.previousScanResult),
         );
         const nextPicked = Math.min(targetQty, existingPicked + suggestedQty);
         const nextRemaining = Math.max(0, targetQty - nextPicked);
@@ -1234,7 +1233,6 @@ export default function PickPage(): React.JSX.Element | null {
                     const TierIcon = tier.icon;
                     const isActive = tier.state === 'active';
                     const isDone = tier.state === 'done';
-                    const isWaiting = tier.state === 'waiting';
 
                     return (
                       <div
