@@ -1108,17 +1108,22 @@ export default function PickPage(): React.JSX.Element | null {
                 </span>
               </div>
 
-              {/* Hero quantity */}
+              {/* Hero quantity: always show remaining to pick */}
               <div className="pt-4 pb-3">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mb-1">
-                  Pick qty
+                  Remaining qty
                 </p>
                 <div className="flex items-baseline gap-1">
                   <span className="font-mono font-bold text-[52px] leading-none text-[var(--content-primary)]">
-                    {currentTargetProgress?.targetQty ?? 0}
+                    {currentTargetProgress?.remainingQty ?? 0}
                   </span>
                   <span className="text-sm font-medium text-[var(--content-tertiary)]">pcs</span>
                 </div>
+                {currentTargetProgress && (
+                  <p className="text-xs text-[var(--content-secondary)] mt-1">
+                    Picked {currentTargetProgress.pickedQty} of {currentTargetProgress.targetQty}
+                  </p>
+                )}
 
                 {/* Pack breakdown cards */}
                 {currentBreakdown && (currentBreakdown.hasOuter || currentBreakdown.hasInner) && (
