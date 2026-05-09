@@ -1,5 +1,6 @@
 import { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import {
   Camera,
   CaretLeft,
@@ -10,14 +11,32 @@ import {
 import { useItems } from '../../hooks/useItems';
 import { useToast } from '../../context/ToastContext';
 import { BigButton, LiveQrScanner, SearchInput, Skeleton } from '../../components/shared';
-import type { Item, ScanResult } from '../../types';
+import type { Item, ItemPackDefinition, LicensePlatePackType, ScanResult } from '../../types';
 import { appHaptics } from '../../lib/haptics';
 import type { LiveQrScannerResolved } from '../../components/shared/LiveQrScanner';
 import { itemPickCode } from '../../utils/itemCodes';
+import {
+  fetchItemPackDefinitions,
+  PACK_DEFINITIONS_QUERY_KEY,
+} from '../../lib/packLpn';
+import { parsePackPickPayload } from '../../lib/scanner/qrPayload';
 
 type ScanLabRecord = Item & {
   pickCode: string;
 };
+
+interface ScanLabQuantityResult {
+  scanKind: 'sku' | 'pack' | 'unknown';
+  packType: LicensePlatePackType | null;
+  packQty: number | null;
+  qtyAdded: number;
+  targetQty: number;
+  totalBefore: number;
+  totalAfter: number;
+  remainingBefore: number;
+  remainingAfter: number;
+  requiresBreakConfirmation: boolean;
+}
 
 function buildScanLabRecord(item: Item): ScanLabRecord | null {
   const pickCode = itemPickCode(item);
@@ -42,15 +61,92 @@ function matchesQuery(item: ScanLabRecord, query: string): boolean {
   return haystack.includes(query);
 }
 
+function packQtyForType(
+  definition: ItemPackDefinition | null | undefined,
+  packType: LicensePlatePackType,
+): number | null {
+  return packType === 'inner'
+    ? definition?.inner_pack_qty ?? null
+    : definition?.outer_pack_qty ?? null;
+}
+
+function packPayload(busyCode: number, packType: LicensePlatePackType): string {
+  return `PASPL-PACK:${busyCode}:${packType}`;
+}
+
+function buildQuantityResult({
+  item,
+  rawValue,
+  isMatch,
+  targetQty,
+  totalBefore,
+  packDefinition,
+}: {
+  item: ScanLabRecord;
+  rawValue: string;
+  isMatch: boolean;
+  targetQty: number;
+  totalBefore: number;
+  packDefinition: ItemPackDefinition | null | undefined;
+}): ScanLabQuantityResult {
+  const remainingBefore = Math.max(0, targetQty - totalBefore);
+  const pack = parsePackPickPayload(rawValue);
+
+  if (pack) {
+    const packQty = packQtyForType(packDefinition, pack.packType);
+    const packMatchesItem = item.busy_code != null && Number(item.busy_code) === pack.busyCode;
+    const canAddPack = isMatch && packMatchesItem && packQty != null && packQty > 1 && remainingBefore > 0;
+    const requiresBreakConfirmation = Boolean(canAddPack && packQty > remainingBefore);
+    const qtyAdded = canAddPack && !requiresBreakConfirmation ? packQty : 0;
+    const totalAfter = totalBefore + qtyAdded;
+
+    return {
+      scanKind: 'pack',
+      packType: pack.packType,
+      packQty,
+      qtyAdded,
+      targetQty,
+      totalBefore,
+      totalAfter,
+      remainingBefore,
+      remainingAfter: Math.max(0, targetQty - totalAfter),
+      requiresBreakConfirmation,
+    };
+  }
+
+  const qtyAdded = isMatch && remainingBefore > 0 ? 1 : 0;
+  const totalAfter = totalBefore + qtyAdded;
+
+  return {
+    scanKind: isMatch ? 'sku' : 'unknown',
+    packType: null,
+    packQty: null,
+    qtyAdded,
+    targetQty,
+    totalBefore,
+    totalAfter,
+    remainingBefore,
+    remainingAfter: Math.max(0, targetQty - totalAfter),
+    requiresBreakConfirmation: false,
+  };
+}
+
 export default function PickScanLabPage(): React.JSX.Element {
   const navigate = useNavigate();
   const toast = useToast();
   const { data: items = [], isLoading, error, refetch, isFetching } = useItems();
+  const { data: packDefinitions = [] } = useQuery({
+    queryKey: PACK_DEFINITIONS_QUERY_KEY,
+    queryFn: fetchItemPackDefinitions,
+  });
   const [query, setQuery] = useState('');
   const [liveTarget, setLiveTarget] = useState<ScanLabRecord | null>(null);
+  const [targetQty, setTargetQty] = useState(40);
+  const [simulatedPickedQty, setSimulatedPickedQty] = useState(0);
   const [lastResult, setLastResult] = useState<{
     item: ScanLabRecord;
     result: ScanResult;
+    quantity: ScanLabQuantityResult;
   } | null>(null);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
 
@@ -58,6 +154,12 @@ export default function PickScanLabPage(): React.JSX.Element {
     () => items.map(buildScanLabRecord).filter((item): item is ScanLabRecord => item !== null),
     [items],
   );
+
+  const packDefinitionByBusyCode = useMemo(() => {
+    const map = new Map<number, ItemPackDefinition>();
+    for (const definition of packDefinitions) map.set(Number(definition.busy_code), definition);
+    return map;
+  }, [packDefinitions]);
 
   const filteredItems = useMemo(
     () =>
@@ -80,6 +182,16 @@ export default function PickScanLabPage(): React.JSX.Element {
   const handleScanResolved = useCallback((scan: LiveQrScannerResolved) => {
     setLiveTarget((current) => {
       if (!current) return null;
+      const packDefinition =
+        current.busy_code == null ? null : packDefinitionByBusyCode.get(Number(current.busy_code));
+      const quantity = buildQuantityResult({
+        item: current,
+        rawValue: scan.rawValue,
+        isMatch: scan.matchesPickItem,
+        targetQty,
+        totalBefore: simulatedPickedQty,
+        packDefinition,
+      });
 
       const result: ScanResult = {
         scannedText: scan.rawValue,
@@ -102,13 +214,16 @@ export default function PickScanLabPage(): React.JSX.Element {
         reason: scan.reason,
       };
 
-      setLastResult({ item: current, result });
+      setLastResult({ item: current, result, quantity });
+      if (quantity.qtyAdded > 0) {
+        setSimulatedPickedQty(quantity.totalAfter);
+      }
       if (result.isMatch) appHaptics.success();
       else appHaptics.warning();
 
       return result.isMatch ? null : current;
     });
-  }, []);
+  }, [packDefinitionByBusyCode, simulatedPickedQty, targetQty]);
 
   return (
     <div className="role-admin min-h-screen bg-[var(--bg-primary)]">
@@ -134,10 +249,65 @@ export default function PickScanLabPage(): React.JSX.Element {
               How To Test
             </p>
             <div className="mt-3 space-y-3 text-sm text-[var(--content-secondary)]">
-              <p>1. Print a label from Label Studio or use any QR that encodes the item&apos;s Alias 1 or Alias.</p>
-              <p>2. Search the SKU below and tap `Test Scan`.</p>
-              <p>3. Try normal light, then dim light with torch, then step back to test distance.</p>
-              <p>4. A perfect scan should decode once and match instantly without OCR or network delay.</p>
+              <p>1. Print the 35mm pack strip from Label Studio.</p>
+              <p>2. Set a target quantity here, then search the SKU and tap `Test Scan`.</p>
+              <p>3. Scan ITEM, INNER, and MASTER. The lab will show the decoded payload and simulated quantity added.</p>
+              <p>4. If a pack is larger than remaining qty, the lab flags the same break-confirmation case as picking.</p>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <label className="space-y-1">
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
+                  Target Qty
+                </span>
+                <input
+                  type="number"
+                  min="1"
+                  inputMode="numeric"
+                  value={targetQty}
+                  onChange={(event) => {
+                    const next = Math.max(1, Math.floor(Number(event.target.value) || 1));
+                    setTargetQty(next);
+                    setSimulatedPickedQty((current) => Math.min(current, next));
+                  }}
+                  className="h-11 w-full rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 font-mono text-sm text-[var(--content-primary)]"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
+                  Picked So Far
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  inputMode="numeric"
+                  value={simulatedPickedQty}
+                  onChange={(event) => {
+                    const next = Math.max(0, Math.floor(Number(event.target.value) || 0));
+                    setSimulatedPickedQty(Math.min(next, targetQty));
+                  }}
+                  className="h-11 w-full rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 font-mono text-sm text-[var(--content-primary)]"
+                />
+              </label>
+              <div className="space-y-1">
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
+                  Remaining
+                </span>
+                <div className="flex h-11 items-center justify-between rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3">
+                  <span className="font-mono text-sm font-semibold text-[var(--content-primary)]">
+                    {Math.max(0, targetQty - simulatedPickedQty)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSimulatedPickedQty(0);
+                      setLastResult(null);
+                    }}
+                    className="text-xs font-semibold text-[var(--content-accent)]"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -168,6 +338,48 @@ export default function PickScanLabPage(): React.JSX.Element {
                     <p>Reason: {lastResult.result.reason ?? 'No reason recorded'}</p>
                     <p>Confidence: {lastResult.result.confidence}%</p>
                     <p>Strategy: {lastResult.result.matchStrategy}</p>
+                  </div>
+                  <div className="mt-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+                    <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
+                          Scan Kind
+                        </p>
+                        <p className="mt-1 font-mono font-semibold uppercase text-[var(--content-primary)]">
+                          {lastResult.quantity.scanKind}
+                          {lastResult.quantity.packType ? `:${lastResult.quantity.packType}` : ''}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
+                          Pack Qty
+                        </p>
+                        <p className="mt-1 font-mono font-semibold text-[var(--content-primary)]">
+                          {lastResult.quantity.packQty ?? '-'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
+                          Qty Added
+                        </p>
+                        <p className="mt-1 font-mono font-semibold text-[var(--content-primary)]">
+                          {lastResult.quantity.qtyAdded}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
+                          Remaining
+                        </p>
+                        <p className="mt-1 font-mono font-semibold text-[var(--content-primary)]">
+                          {lastResult.quantity.remainingBefore} → {lastResult.quantity.remainingAfter}
+                        </p>
+                      </div>
+                    </div>
+                    {lastResult.quantity.requiresBreakConfirmation && (
+                      <p className="mt-3 rounded-xl bg-[var(--bg-warning-subtle)] px-3 py-2 text-sm font-semibold text-[var(--content-warning)]">
+                        This pack is bigger than the remaining quantity. Picking would ask for break-pack confirmation.
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -210,59 +422,110 @@ export default function PickScanLabPage(): React.JSX.Element {
                 No testable items found. Try a broader search or make sure the item has Alias 1 or Alias.
               </div>
             ) : (
-              filteredItems.map((item) => (
-                <article
-                  key={item.id}
-                  className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4"
-                >
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="min-w-0">
-                      <p className="font-semibold text-[var(--content-primary)]">{item.name}</p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {[item.alias1, item.alias, item.pickCode]
-                          .filter((code, index, values): code is string => Boolean(code) && values.indexOf(code) === index)
-                          .map((code) => (
-                          <span
-                            key={code}
-                            className="rounded-full bg-[var(--bg-tertiary)] px-3 py-1 font-mono text-xs text-[var(--content-secondary)]"
+              filteredItems.map((item) => {
+                const busyCode = item.busy_code == null ? null : Number(item.busy_code);
+                const packDefinition = busyCode == null ? null : packDefinitionByBusyCode.get(busyCode);
+                const innerPayload =
+                  busyCode != null && packDefinition?.inner_pack_qty
+                    ? packPayload(busyCode, 'inner')
+                    : null;
+                const outerPayload =
+                  busyCode != null && packDefinition?.outer_pack_qty
+                    ? packPayload(busyCode, 'outer')
+                    : null;
+
+                return (
+                  <article
+                    key={item.id}
+                    className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4"
+                  >
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-[var(--content-primary)]">{item.name}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {[item.alias1, item.alias, item.pickCode]
+                            .filter((code, index, values): code is string => Boolean(code) && values.indexOf(code) === index)
+                            .map((code) => (
+                            <span
+                              key={code}
+                              className="rounded-full bg-[var(--bg-tertiary)] px-3 py-1 font-mono text-xs text-[var(--content-secondary)]"
+                            >
+                              {code}
+                            </span>
+                          ))}
+                          {item.rack_no && (
+                            <span className="rounded-full bg-[var(--bg-warning-subtle)] px-3 py-1 text-xs text-[var(--content-warning)]">
+                              Rack {item.rack_no}
+                            </span>
+                          )}
+                          {packDefinition?.inner_pack_qty && (
+                            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                              Inner {packDefinition.inner_pack_qty}
+                            </span>
+                          )}
+                          {packDefinition?.outer_pack_qty && (
+                            <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-800">
+                              Master {packDefinition.outer_pack_qty}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard
+                              .writeText(item.pickCode)
+                              .then(() => toast.success('Pick code copied'))
+                              .catch(() => toast.error('Could not copy pick code'));
+                          }}
+                          className="flex h-11 items-center justify-center gap-2 rounded-2xl bg-[var(--bg-tertiary)] px-4 text-sm font-medium text-[var(--content-secondary)]"
+                        >
+                          <ClipboardText size={18} weight="regular" />
+                          Copy Code
+                        </button>
+                        {innerPayload && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard
+                                .writeText(innerPayload)
+                                .then(() => toast.success('Inner pack payload copied'))
+                                .catch(() => toast.error('Could not copy pack payload'));
+                            }}
+                            className="flex h-11 items-center justify-center rounded-2xl bg-emerald-100 px-4 text-sm font-semibold text-emerald-800"
                           >
-                            {code}
-                          </span>
-                        ))}
-                        {item.rack_no && (
-                          <span className="rounded-full bg-[var(--bg-warning-subtle)] px-3 py-1 text-xs text-[var(--content-warning)]">
-                            Rack {item.rack_no}
-                          </span>
+                            Copy Inner
+                          </button>
                         )}
+                        {outerPayload && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard
+                                .writeText(outerPayload)
+                                .then(() => toast.success('Master pack payload copied'))
+                                .catch(() => toast.error('Could not copy pack payload'));
+                            }}
+                            className="flex h-11 items-center justify-center rounded-2xl bg-sky-100 px-4 text-sm font-semibold text-sky-800"
+                          >
+                            Copy Master
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => startScan(item)}
+                          className="flex h-11 items-center justify-center gap-2 rounded-2xl bg-[var(--bg-positive)] px-4 text-sm font-semibold text-[var(--content-on-color)]"
+                        >
+                          <Camera size={18} weight="bold" />
+                          Test Scan
+                        </button>
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard
-                            .writeText(item.pickCode)
-                            .then(() => toast.success('Pick code copied'))
-                            .catch(() => toast.error('Could not copy pick code'));
-                        }}
-                        className="flex h-11 items-center justify-center gap-2 rounded-2xl bg-[var(--bg-tertiary)] px-4 text-sm font-medium text-[var(--content-secondary)]"
-                      >
-                        <ClipboardText size={18} weight="regular" />
-                        Copy Code
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => startScan(item)}
-                        className="flex h-11 items-center justify-center gap-2 rounded-2xl bg-[var(--bg-positive)] px-4 text-sm font-semibold text-[var(--content-on-color)]"
-                      >
-                        <Camera size={18} weight="bold" />
-                        Test Scan
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              ))
+                  </article>
+                );
+              })
             )}
           </div>
         )}
@@ -278,6 +541,7 @@ export default function PickScanLabPage(): React.JSX.Element {
             alias1: liveTarget.alias1,
             alias: liveTarget.alias,
             itemCode: liveTarget.pickCode,
+            busyCode: liveTarget.busy_code ?? null,
           }}
           onClose={closeScan}
           onResolved={handleScanResolved}

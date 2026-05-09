@@ -20,7 +20,7 @@ type LabelRecord = Item & {
 
 type SortMode = 'group-rack-code' | 'code-rack';
 type PreviewScope = 'filtered' | 'selected';
-type PrintPreset = 'rack-strip' | 'compact' | 'full';
+type PrintPreset = 'pack-strip' | 'rack-strip' | 'compact' | 'full';
 type GroupFilter = 'unselected' | 'all' | string;
 type LabelMode = 'sku' | 'pack';
 type PackType = 'inner' | 'outer';
@@ -42,6 +42,7 @@ interface GeneratedPackPickLabel {
 
 const RACK_STRIP_HEIGHT_MM = 30;
 const RACK_STRIP_QR_SIZE_MM = 16;
+const PACK_STRIP_HEIGHT_MM = 35;
 
 const PRINT_CSS = `
   @page {
@@ -86,6 +87,12 @@ const PRINT_CSS = `
     .a4-label-card[data-preset="rack-strip"] {
       min-height: 30mm;
       height: 30mm;
+      padding: 0;
+    }
+
+    .a4-label-card[data-preset="pack-strip"] {
+      min-height: 35mm;
+      height: 35mm;
       padding: 0;
     }
   }
@@ -139,6 +146,93 @@ const PRINT_CSS = `
     display: block;
     width: 100%;
     height: 100%;
+    shape-rendering: crispEdges;
+  }
+
+  .pack-strip-shell {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) 21.4mm;
+    gap: 0.8mm;
+    height: 100%;
+    padding: 1.4mm 2.2mm 1.6mm;
+    align-items: stretch;
+  }
+
+  .pack-strip-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .pack-strip-code {
+    font-variant-ligatures: none;
+    letter-spacing: 0;
+  }
+
+  .pack-strip-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-transform: uppercase;
+  }
+
+  .pack-strip-qr-row {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 1.6mm;
+    align-items: end;
+    justify-content: stretch;
+  }
+
+  .pack-strip-block {
+    display: grid;
+    grid-template-rows: 5.4mm 16mm;
+    min-width: 0;
+    height: 21.4mm;
+    border: 0.25mm solid #cbd5e1;
+    background: #ffffff;
+    overflow: hidden;
+  }
+
+  .pack-strip-block-title {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 1mm;
+    font-size: 3.1mm;
+    line-height: 1;
+    font-weight: 900;
+    letter-spacing: 0;
+    color: #0f172a;
+  }
+
+  .pack-strip-block-title[data-tone="item"] {
+    background: #f1f5f9;
+  }
+
+  .pack-strip-block-title[data-tone="inner"] {
+    background: #bbf7d0;
+  }
+
+  .pack-strip-block-title[data-tone="master"] {
+    background: #bfdbfe;
+  }
+
+  .pack-strip-qr {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.45mm;
+    background: #ffffff;
+  }
+
+  .pack-strip-qr svg {
+    display: block;
+    width: 15mm;
+    height: 15mm;
     shape-rendering: crispEdges;
   }
 `;
@@ -235,6 +329,7 @@ function buildManifestCsv(items: LabelRecord[]): string {
 }
 
 function presetDescription(preset: PrintPreset): string {
+  if (preset === 'pack-strip') return '35mm item-code strip with item, inner, and master QRs';
   if (preset === 'rack-strip') return '1.2 inch rack strip with bold name + big code';
   if (preset === 'compact') return 'Rack + canonical code only';
   if (preset === 'full') return 'Rack + canonical code + alternate code + description';
@@ -249,6 +344,21 @@ function rackStripCodeStyle(code: string): CSSProperties {
   if (length <= 17) return { fontSize: '6.7mm', letterSpacing: '-0.045em', lineHeight: 0.88 };
   if (length <= 20) return { fontSize: '6.0mm', letterSpacing: '-0.04em', lineHeight: 0.88 };
   return { fontSize: '5.0mm', letterSpacing: '-0.03em', lineHeight: 0.84 };
+}
+
+function packStripCodeStyle(code: string): CSSProperties {
+  const length = code.trim().length;
+  if (length <= 10) return { fontSize: '10.2mm', letterSpacing: 0, lineHeight: 0.84 };
+  if (length <= 12) return { fontSize: '9.4mm', letterSpacing: 0, lineHeight: 0.84 };
+  if (length <= 14) return { fontSize: '8.6mm', letterSpacing: 0, lineHeight: 0.84 };
+  if (length <= 17) return { fontSize: '7.8mm', letterSpacing: 0, lineHeight: 0.84 };
+  if (length <= 20) return { fontSize: '7.1mm', letterSpacing: 0, lineHeight: 0.84 };
+  if (length <= 24) return { fontSize: '6.4mm', letterSpacing: 0, lineHeight: 0.84 };
+  return { fontSize: '5.6mm', letterSpacing: 0, lineHeight: 0.84 };
+}
+
+function packStripPayloadKey(busyCode: number, packType: PackType): string {
+  return packPickPayload(busyCode, packType);
 }
 
 function buildRecord(item: Item): LabelRecord | null {
@@ -278,12 +388,13 @@ export default function LabelStudioPage(): React.JSX.Element {
   const [groupFilter, setGroupFilter] = useState<GroupFilter>('unselected');
   const [sortMode, setSortMode] = useState<SortMode>('group-rack-code');
   const [previewScope, setPreviewScope] = useState<PreviewScope>('filtered');
-  const [printPreset, setPrintPreset] = useState<PrintPreset>('rack-strip');
+  const [printPreset, setPrintPreset] = useState<PrintPreset>('pack-strip');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [qrByItemId, setQrByItemId] = useState<Record<number, string>>({});
   const [packCounts, setPackCounts] = useState<Record<string, number>>({});
   const [generatedPackLabels, setGeneratedPackLabels] = useState<GeneratedPackPickLabel[]>([]);
   const [qrByPackLabelKey, setQrByPackLabelKey] = useState<Record<string, string>>({});
+  const [qrByPackStripPayload, setQrByPackStripPayload] = useState<Record<string, string>>({});
 
   const labelableItems = useMemo<LabelRecord[]>(
     () =>
@@ -355,6 +466,21 @@ export default function LabelStudioPage(): React.JSX.Element {
     return filteredItems;
   }, [filteredItems, previewScope, selectedItems]);
 
+  const packStripPayloads = useMemo(() => {
+    if (labelMode !== 'sku' || printPreset !== 'pack-strip') return [];
+
+    const payloads = new Set<string>();
+    for (const item of previewItems) {
+      if (item.busy_code == null) continue;
+      const busyCode = Number(item.busy_code);
+      const def = packDefinitionByBusyCode.get(busyCode);
+      if (def?.inner_pack_qty) payloads.add(packStripPayloadKey(busyCode, 'inner'));
+      if (def?.outer_pack_qty) payloads.add(packStripPayloadKey(busyCode, 'outer'));
+    }
+
+    return Array.from(payloads);
+  }, [labelMode, packDefinitionByBusyCode, previewItems, printPreset]);
+
   const packLabelRows = useMemo<PackLabelRequestRow[]>(() => {
     const rows: PackLabelRequestRow[] = [];
     for (const item of packFilteredItems) {
@@ -387,7 +513,7 @@ export default function LabelStudioPage(): React.JSX.Element {
       pendingItems.map(async (item) => {
         const svgMarkup = await QRCode.toString(item.pickCode, {
           errorCorrectionLevel: 'M',
-          margin: 0,
+          margin: 1,
           type: 'svg',
           color: {
             dark: '#111827',
@@ -414,6 +540,40 @@ export default function LabelStudioPage(): React.JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
+    const pendingPayloads = packStripPayloads.filter((payload) => !qrByPackStripPayload[payload]);
+    if (pendingPayloads.length === 0) return;
+
+    void Promise.all(
+      pendingPayloads.map(async (payload) => {
+        const svgMarkup = await QRCode.toString(payload, {
+          errorCorrectionLevel: 'M',
+          margin: 1,
+          type: 'svg',
+          color: {
+            dark: '#111827',
+            light: '#ffffff',
+          },
+        });
+        return [payload, svgMarkup.replace('<svg', '<svg shape-rendering="crispEdges"')] as const;
+      }),
+    ).then((entries) => {
+      if (cancelled) return;
+      startTransition(() => {
+        setQrByPackStripPayload((current) => {
+          const next = { ...current };
+          for (const [payload, dataUrl] of entries) next[payload] = dataUrl;
+          return next;
+        });
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [packStripPayloads, qrByPackStripPayload]);
+
+  useEffect(() => {
+    let cancelled = false;
     const pendingLabels = generatedPackLabels.filter((label) => !qrByPackLabelKey[label.key]);
     if (pendingLabels.length === 0) return;
 
@@ -421,7 +581,7 @@ export default function LabelStudioPage(): React.JSX.Element {
       pendingLabels.map(async (label) => {
         const svgMarkup = await QRCode.toString(label.qr_payload, {
           errorCorrectionLevel: 'M',
-          margin: 0,
+          margin: 1,
           type: 'svg',
           color: {
             dark: '#111827',
@@ -722,6 +882,7 @@ export default function LabelStudioPage(): React.JSX.Element {
                   disabled={labelMode === 'pack'}
                   className="min-h-11 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--content-primary)]"
                 >
+                  <option value="pack-strip">Pack strip 35mm</option>
                   <option value="rack-strip">Rack strip 1.2in</option>
                   <option value="compact">Canonical code only</option>
                   <option value="full">Canonical + alternate + description</option>
@@ -1063,23 +1224,101 @@ export default function LabelStudioPage(): React.JSX.Element {
               <div className="a4-label-sheet mt-4 grid gap-4 sm:grid-cols-2" data-preset={printPreset}>
                 {previewItems.map((item) => {
                   const qrMarkup = qrByItemId[item.id];
+                  const isPackStrip = printPreset === 'pack-strip';
                   const isRackStrip = printPreset === 'rack-strip';
                   const showDescription = printPreset !== 'compact';
                   const showAlternateCode = printPreset === 'full' && Boolean(item.alternateCode);
                   const wrapRackCode = item.pickCode.trim().length > 12;
+                  const busyCode = item.busy_code == null ? null : Number(item.busy_code);
+                  const packDefinition = busyCode == null ? null : packDefinitionByBusyCode.get(busyCode);
+                  const innerPackQty = packDefinition?.inner_pack_qty ?? null;
+                  const outerPackQty = packDefinition?.outer_pack_qty ?? null;
+                  const innerPayload =
+                    busyCode != null && innerPackQty
+                      ? packStripPayloadKey(busyCode, 'inner')
+                      : null;
+                  const outerPayload =
+                    busyCode != null && outerPackQty
+                      ? packStripPayloadKey(busyCode, 'outer')
+                      : null;
 
                   return (
                     <article
                       key={item.id}
                       data-preset={printPreset}
                       className={`a4-label-card border border-[var(--border-opaque)] bg-white text-slate-900 shadow-sm ${
-                        isRackStrip ? 'rounded-none' : 'rounded-3xl'
+                        isPackStrip || isRackStrip ? 'rounded-none' : 'rounded-3xl'
                       } ${
-                        isRackStrip ? 'overflow-hidden' : 'p-4'
+                        isPackStrip || isRackStrip ? 'overflow-hidden' : 'p-4'
                       }`}
-                      style={isRackStrip ? { height: `${RACK_STRIP_HEIGHT_MM}mm` } : undefined}
+                      style={
+                        isPackStrip
+                          ? { height: `${PACK_STRIP_HEIGHT_MM}mm` }
+                          : isRackStrip
+                            ? { height: `${RACK_STRIP_HEIGHT_MM}mm` }
+                            : undefined
+                      }
                     >
-                      {isRackStrip ? (
+                      {isPackStrip ? (
+                        <div className="pack-strip-shell">
+                          <div className="pack-strip-copy">
+                            <p
+                              className="pack-strip-code block min-w-0 truncate font-sans font-black uppercase text-slate-950"
+                              style={packStripCodeStyle(item.pickCode)}
+                            >
+                              {item.pickCode}
+                            </p>
+                            <p className="pack-strip-name text-[2.25mm] font-black leading-none text-slate-500">
+                              {item.name}
+                            </p>
+                          </div>
+
+                          <div className="pack-strip-qr-row">
+                            <div className="pack-strip-block">
+                              <div className="pack-strip-block-title" data-tone="item">
+                                ITEM
+                              </div>
+                              <div className="pack-strip-qr" aria-label={`QR for ${item.pickCode}`} role="img">
+                                {qrMarkup ? (
+                                  <span dangerouslySetInnerHTML={{ __html: qrMarkup }} />
+                              ) : (
+                                  <span className="text-[2mm] font-semibold text-slate-500">QR</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {innerPayload && (
+                              <div className="pack-strip-block">
+                                <div className="pack-strip-block-title" data-tone="inner">
+                                  {innerPackQty}
+                                </div>
+                                <div className="pack-strip-qr" aria-label={`QR for ${innerPayload}`} role="img">
+                                  {qrByPackStripPayload[innerPayload] ? (
+                                    <span dangerouslySetInnerHTML={{ __html: qrByPackStripPayload[innerPayload] }} />
+                                  ) : (
+                                    <span className="text-[2mm] font-semibold text-slate-500">QR</span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {outerPayload && (
+                              <div className="pack-strip-block">
+                                <div className="pack-strip-block-title" data-tone="master">
+                                  {outerPackQty}
+                                </div>
+                                <div className="pack-strip-qr" aria-label={`QR for ${outerPayload}`} role="img">
+                                  {qrByPackStripPayload[outerPayload] ? (
+                                    <span dangerouslySetInnerHTML={{ __html: qrByPackStripPayload[outerPayload] }} />
+                                  ) : (
+                                    <span className="text-[2mm] font-semibold text-slate-500">QR</span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : isRackStrip ? (
                         <div className="rack-strip-shell">
                           <div className="rack-strip-copy">
                             <div className="min-w-0">

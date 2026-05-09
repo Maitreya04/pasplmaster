@@ -8,7 +8,7 @@ import {
   type ScanCatalogItem,
   type ScanMatchSource,
 } from '../../stores/itemScanIndex';
-import { collectQrLookupCandidates, normalizeScanCode } from '../../lib/scanner/qrPayload';
+import { collectQrLookupCandidates, normalizeScanCode, parsePackPickPayload } from '../../lib/scanner/qrPayload';
 
 type BarcodeDetectorResult = {
   rawValue?: string | null;
@@ -47,6 +47,7 @@ export interface LiveQrScannerPickItem {
   alias1?: string | null;
   alias?: string | null;
   itemCode?: string | null;
+  busyCode?: number | null;
 }
 
 export interface LiveQrScannerResolved {
@@ -139,20 +140,27 @@ export function LiveQrScanner({
 
   const handleResolvedScan = useCallback((rawValue: string) => {
     const candidates = collectQrLookupCandidates(rawValue);
+    const packPayload = parsePackPickPayload(rawValue);
     
     let matchesPickItem = false;
     let matchedBy: ScanMatchSource | null = null;
     let lookupCode: string | null = null;
 
-    for (const code of candidates) {
-      if (pickItem.alias1 && normalizeScanCode(pickItem.alias1) === code) {
-        matchesPickItem = true; matchedBy = 'alias1'; lookupCode = code; break;
-      }
-      if (pickItem.alias && normalizeScanCode(pickItem.alias) === code) {
-        matchesPickItem = true; matchedBy = 'alias'; lookupCode = code; break;
-      }
-      if (pickItem.itemCode && normalizeScanCode(pickItem.itemCode) === code) {
-        matchesPickItem = true; matchedBy = 'item_code'; lookupCode = code; break;
+    if (packPayload && pickItem.busyCode != null && Number(pickItem.busyCode) === packPayload.busyCode) {
+      matchesPickItem = true;
+      matchedBy = 'pack';
+      lookupCode = String(packPayload.busyCode);
+    } else {
+      for (const code of candidates) {
+        if (pickItem.alias1 && normalizeScanCode(pickItem.alias1) === code) {
+          matchesPickItem = true; matchedBy = 'alias1'; lookupCode = code; break;
+        }
+        if (pickItem.alias && normalizeScanCode(pickItem.alias) === code) {
+          matchesPickItem = true; matchedBy = 'alias'; lookupCode = code; break;
+        }
+        if (pickItem.itemCode && normalizeScanCode(pickItem.itemCode) === code) {
+          matchesPickItem = true; matchedBy = 'item_code'; lookupCode = code; break;
+        }
       }
     }
 
@@ -173,7 +181,9 @@ export function LiveQrScanner({
       matchesPickItem,
       lookupCode: matchesPickItem ? lookupCode : (lookup?.code ?? null),
       reason: matchesPickItem
-        ? `Verified against ${matchedBy}.`
+        ? matchedBy === 'pack'
+          ? `Verified reusable ${packPayload?.packType} pack QR.`
+          : `Verified against ${matchedBy}.`
         : !lookup
           ? 'QR decoded, but no catalog item matched alias1, alias, or item code.'
           : `Scanned ${lookup.item.name}, but the picker is expected to verify ${pickItem.name}.`,
@@ -202,7 +212,17 @@ export function LiveQrScanner({
     flashViewport('red');
     setErrorMessage(result.reason);
     setStatus('Scan locked. Review the result and tap Scan Again.');
-  }, [flashViewport, onResolved, pickItem.itemId, pickItem.name, stopScanner]);
+  }, [
+    flashViewport,
+    onResolved,
+    pickItem.alias,
+    pickItem.alias1,
+    pickItem.busyCode,
+    pickItem.itemCode,
+    pickItem.itemId,
+    pickItem.name,
+    stopScanner,
+  ]);
 
   const scheduleScan = useCallback((scan: () => Promise<void>) => {
     scanTimerRef.current = window.setTimeout(() => {

@@ -9,7 +9,7 @@ export interface ScanCatalogItem extends Item {
   itemCode: string;
 }
 
-export type ScanMatchSource = 'alias1' | 'alias' | 'item_code';
+export type ScanMatchSource = 'alias1' | 'alias' | 'item_code' | 'pack';
 
 export interface ScanLookupResult {
   code: string;
