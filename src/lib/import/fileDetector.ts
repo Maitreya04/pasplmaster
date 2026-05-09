@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 export type DetectedFileType =
   | 'items_price'
   | 'items_stock'
+  | 'item_pack_definitions'
   | 'customers'
   | 'sales_plan'
   | 'sales_history'
@@ -41,6 +42,15 @@ function hasCustomerColumns(headers: string[]): boolean {
   );
 }
 
+function hasPackDefinitionColumns(headers: string[]): boolean {
+  const set = new Set(headers.map(h => h.toLowerCase()));
+  return (
+    (set.has('itemname') || set.has('item name') || set.has('name')) &&
+    (set.has('mast.box') || set.has('master box') || set.has('outer box')) &&
+    (set.has('inner.box') || set.has('inner box'))
+  );
+}
+
 export function detectFileType(workbook: XLSX.WorkBook): DetectionResult {
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const data: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
@@ -53,6 +63,14 @@ export function detectFileType(workbook: XLSX.WorkBook): DetectionResult {
     r.some(h => /sales\s*price/i.test(String(h)) || /^price$/i.test(String(h).trim()));
   for (let i = 0; i < scanLimit; i++) {
     const row = getStringRow(data, i);
+    if (hasPackDefinitionColumns(row)) {
+      return {
+        type: 'item_pack_definitions',
+        label: 'Item Pack Definitions',
+        rowCount: countDataRows(data, i + 1),
+        headerRowIndex: i,
+      };
+    }
     if ((row.includes('Name') || hasNameLike(row)) && (row.includes('Sales Price') || hasSalesPrice(row))) {
       return {
         type: 'items_price',

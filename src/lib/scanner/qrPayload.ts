@@ -5,6 +5,67 @@ export function normalizeScanCode(value: string | null | undefined): string {
     .replace(/[^A-Z0-9]/g, '');
 }
 
+export function parseLpnPayload(rawValue: string | null | undefined): string | null {
+  const trimmed = rawValue?.trim();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    const type = typeof parsed.type === 'string' ? parsed.type.trim().toUpperCase() : '';
+    const lpn = typeof parsed.lpn === 'string' ? parsed.lpn.trim().toUpperCase() : '';
+    if (type === 'PASPL_LPN' && lpn) return lpn;
+  } catch {
+    // Plain QR payloads are expected for most labels.
+  }
+
+  const prefixed = trimmed.match(/^(?:PASPL-LPN|LPN)\s*:\s*(.+)$/i);
+  if (!prefixed?.[1]) return null;
+
+  const lpn = prefixed[1].trim().toUpperCase();
+  return /^LP-[A-Z0-9]+$/.test(lpn) ? lpn : null;
+}
+
+export interface PackPickPayload {
+  busyCode: number;
+  packType: 'inner' | 'outer';
+}
+
+export function parsePackPickPayload(rawValue: string | null | undefined): PackPickPayload | null {
+  const trimmed = rawValue?.trim();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    const type = typeof parsed.type === 'string' ? parsed.type.trim().toUpperCase() : '';
+    const rawBusyCode = parsed.busy_code ?? parsed.busyCode;
+    const busyCode =
+      typeof rawBusyCode === 'number'
+        ? rawBusyCode
+        : typeof rawBusyCode === 'string'
+          ? Number(rawBusyCode.trim())
+          : NaN;
+    const packType = typeof parsed.pack_type === 'string'
+      ? parsed.pack_type.trim().toLowerCase()
+      : typeof parsed.packType === 'string'
+        ? parsed.packType.trim().toLowerCase()
+        : '';
+
+    if ((type === 'PASPL_PACK' || type === 'PACK_PICK') && Number.isFinite(busyCode)) {
+      if (packType === 'inner' || packType === 'outer') return { busyCode, packType };
+    }
+  } catch {
+    // Plain QR payloads are expected for reusable pack labels.
+  }
+
+  const prefixed = trimmed.match(/^(?:PASPL-PACK|PACK)\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*:\s*(inner|outer)$/i);
+  if (!prefixed?.[1] || !prefixed[2]) return null;
+
+  return {
+    busyCode: Number(prefixed[1]),
+    packType: prefixed[2].toLowerCase() as 'inner' | 'outer',
+  };
+}
+
 function extractJsonCode(value: string): string | null {
   try {
     const parsed = JSON.parse(value) as Record<string, unknown>;

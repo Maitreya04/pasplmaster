@@ -257,6 +257,66 @@ export interface PushCapabilityState {
   error: string | null;
 }
 
+export interface ItemPackDefinition {
+  busy_code: number;
+  item_id_snapshot: number | null;
+  item_name_snapshot: string;
+  inner_pack_qty: number | null;
+  outer_pack_qty: number | null;
+  source_file: string | null;
+  updated_at: string;
+}
+
+export interface LicensePlateBatch {
+  id: number;
+  batch_code: string;
+  created_by_user_id: number | null;
+  created_by_name: string | null;
+  created_at?: string;
+  printed_at?: string | null;
+}
+
+export type LicensePlatePackType = 'inner' | 'outer';
+export type LicensePlateStatus = 'available' | 'opened' | 'depleted' | 'voided';
+
+export interface LicensePlate {
+  id?: number;
+  lpn_code: string;
+  batch_id: number | null;
+  batch_code?: string;
+  busy_code: number;
+  item_id_snapshot: number | null;
+  item_name_snapshot: string;
+  pack_type: LicensePlatePackType;
+  pack_qty: number;
+  remaining_qty: number;
+  status: LicensePlateStatus;
+  created_at?: string;
+  printed_at?: string | null;
+  opened_at?: string | null;
+  depleted_at?: string | null;
+  voided_at?: string | null;
+}
+
+export type PickScanKind = 'sku' | 'lpn' | 'pack' | 'manual';
+export type PickScanConsumption = 'full' | 'partial' | 'adjustment';
+
+export interface OrderItemPickScan {
+  id: number;
+  order_id: number;
+  order_item_id: number;
+  busy_code: number | null;
+  scan_kind: PickScanKind;
+  consumption: PickScanConsumption;
+  lpn_id: number | null;
+  qty_delta: number;
+  qr_payload: string | null;
+  reason: string | null;
+  picker_user_id: number | null;
+  claim_id: number | null;
+  created_at: string;
+}
+
 export interface PickerPushPayload {
   type: NotificationEventType;
   orderId: number;

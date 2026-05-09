@@ -16,10 +16,12 @@ import { detectFileType, type DetectionResult } from '../../lib/import/fileDetec
 import { importItems, type ImportProgress } from '../../lib/import/itemImporter';
 import { importCustomers } from '../../lib/import/customerImporter';
 import { importStock } from '../../lib/import/stockImporter';
+import { importPackDefinitions } from '../../lib/import/packDefinitionsImporter';
 import { importSalesTargets } from '../../lib/import/salesTargetsImporter';
 import { importSalesHistory } from '../../lib/import/salesHistoryImporter';
 import { queryClient } from '../../lib/queryClient';
 import { ITEMS_QUERY_KEY } from '../../hooks/useItems';
+import { PACK_DEFINITIONS_QUERY_KEY } from '../../lib/packLpn';
 
 type UploadState = 'idle' | 'detected' | 'uploading' | 'done' | 'error';
 
@@ -62,7 +64,7 @@ export default function UploadPage(): React.JSX.Element | null {
       setDetection(result);
       if (result.type === 'unknown') {
         setState('error');
-        setErrorMsg('Could not identify this file. Expected a Price List, Customer List, Stock file, or Sales Plan.');
+        setErrorMsg('Could not identify this file. Expected a Price List, Customer List, Stock file, Pack Definitions file, or Sales Plan.');
       } else {
         setState('detected');
       }
@@ -89,6 +91,8 @@ export default function UploadPage(): React.JSX.Element | null {
         result = await importItems(workbook, fileName, detection.headerRowIndex, setProgress);
       } else if (detection.type === 'items_stock') {
         result = await importStock(workbook, fileName, detection.headerRowIndex, setProgress);
+      } else if (detection.type === 'item_pack_definitions') {
+        result = await importPackDefinitions(workbook, fileName, detection.headerRowIndex, setProgress);
       } else if (detection.type === 'sales_plan') {
         result = await importSalesTargets(workbook, fileName, setProgress);
       } else if (detection.type === 'sales_history') {
@@ -101,6 +105,9 @@ export default function UploadPage(): React.JSX.Element | null {
       // Invalidate items cache so New Order / search see updated list after item or stock import
       if (detection.type === 'items_price' || detection.type === 'items_stock') {
         void queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
+      }
+      if (detection.type === 'item_pack_definitions') {
+        void queryClient.invalidateQueries({ queryKey: PACK_DEFINITIONS_QUERY_KEY });
       }
 
       // Invalidate dashboard + smart suggestions when targets or sales history change
@@ -123,6 +130,8 @@ export default function UploadPage(): React.JSX.Element | null {
         toast.success(
           detection.type === 'sales_plan'
             ? `Import complete! ${result.processed.toLocaleString()} targets imported.`
+            : detection.type === 'item_pack_definitions'
+              ? `Import complete! ${result.processed.toLocaleString()} pack definitions mapped (${result.newCount} new, ${result.updatedCount} updated).`
             : `Import complete! ${result.processed.toLocaleString()} rows imported (${result.newCount} new, ${result.updatedCount} updated).`,
         );
       }
@@ -158,8 +167,8 @@ export default function UploadPage(): React.JSX.Element | null {
             Back
           </button>
           <h1 className="text-2xl font-bold text-[var(--content-primary)]">Upload Data</h1>
-          <p className="text-sm text-[var(--content-tertiary)] mt-1">
-            Import Excel files for items, stock, customers, sales targets &amp; sales history
+            <p className="text-sm text-[var(--content-tertiary)] mt-1">
+            Import Excel files for items, stock, pack definitions, customers, sales targets &amp; sales history
           </p>
         </div>
 
@@ -200,6 +209,8 @@ export default function UploadPage(): React.JSX.Element | null {
                   <p className="text-sm text-[var(--content-tertiary)] mt-1">
                     {detection.type === 'sales_plan'
                       ? 'Imports from 4WF and 2Wf sheets'
+                      : detection.type === 'item_pack_definitions'
+                        ? 'Maps Itemname to live Busy Code, then imports inner/master box quantities'
                       : `${detection.rowCount.toLocaleString()} data rows detected`}
                   </p>
                 </div>
@@ -259,6 +270,8 @@ export default function UploadPage(): React.JSX.Element | null {
                   <p className="text-sm text-[var(--content-tertiary)] mt-1">
                     {detection?.type === 'sales_plan'
                       ? `Targets imported: ${progress.processed.toLocaleString()}`
+                      : detection?.type === 'item_pack_definitions'
+                        ? `Pack definitions mapped: ${progress.processed.toLocaleString()}`
                       : `Total rows successfully imported: ${progress.processed.toLocaleString()}`}
                   </p>
                   {detection?.type !== 'sales_plan' && (
