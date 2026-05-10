@@ -360,7 +360,8 @@ export default function PickPage(): React.JSX.Element | null {
   // skippedIds: items the picker chose to come back to. Sorted to the end of
   // the queue so the natural rack-order keeps leading the route.
   const [skippedIds, setSkippedIds] = useState<Set<number>>(new Set());
-  // Scanner mode: 'rack' opens the camera to verify a rack QR; 'item' opens
+  // Scanner mode: 'rack' opens the camera for bin license plate (location /
+  // ITEM / pack QR); 'item' opens it for box picks.
   // it to scan box / pack / LPN labels.
   const [scannerMode, setScannerMode] = useState<'rack' | 'item'>('item');
   // celebrating: the just-completed item gets a 700ms green dwell before the
@@ -931,29 +932,48 @@ export default function PickPage(): React.JSX.Element | null {
       setLastScanMeta({ rawValue: scan.rawValue, at: now });
 
       // ─── Rack-gate (gate 1) ───
-      // In rack mode, the only payload we accept is a rack QR. Anything else
-      // (item, pack, LPN) is rejected with a hint so the picker knows to look
-      // for the shelf label, not the box label.
+      // Warehouses print a "license plate" on the bin: big location text plus
+      // ITEM / pack QRs. Those payloads classify as sku|pack|lpn — not the
+      // dedicated PASPL_RACK format. We accept:
+      //   (a) rack-location QR (RACK:… / PASPL_RACK) matching rack_no;
+      //   (b) ITEM or pack QR that matches this line (LiveQrScanner sets matchesPickItem);
+      //   (c) any decoded token matching rack_no (location string inside the QR).
       if (scannerMode === 'rack') {
         const classified = classifyScanPayload(scan.rawValue);
-        if (classified.kind !== 'rack' || !classified.rackPayload) {
-          setScannerHint('That looks like a box label. Scan the rack QR on the shelf.');
-          appHaptics.warning();
-          return current;
-        }
         const expectedRack = current.orderItem.rack_no;
-        const scannedCode = classified.rackPayload.rackCode;
-        if (!rackCodesMatch(scannedCode, expectedRack)) {
+
+        let gateOk = false;
+        if (classified.kind === 'rack' && classified.rackPayload) {
+          const scannedCode = classified.rackPayload.rackCode;
+          if (!rackCodesMatch(scannedCode, expectedRack)) {
+            setScannerHint(
+              `Wrong shelf — scanned ${scannedCode}, expected ${expectedRack ?? '—'}. Walk to the right rack.`,
+            );
+            appHaptics.warning();
+            return current;
+          }
+          gateOk = true;
+        } else if (scan.matchesPickItem) {
+          gateOk = true;
+        } else if (
+          expectedRack &&
+          classified.normalizedCandidates.some((c) => rackCodesMatch(c, expectedRack))
+        ) {
+          gateOk = true;
+        }
+
+        if (!gateOk) {
           setScannerHint(
-            `Wrong shelf — scanned ${scannedCode}, expected ${expectedRack ?? '—'}. Walk to the right rack.`,
+            expectedRack
+              ? 'Scan the bin license plate: ITEM or pack QR for this product, or a location QR that matches this rack. If it still fails, check order rack_no matches the big code on the label.'
+              : 'Scan the bin license plate (ITEM or pack QR) for this line.',
           );
           appHaptics.warning();
           return current;
         }
+
         markRackVerified(current.orderItem.id, 'scan');
         setScannerHint(null);
-        // Restore the prior visual state and close the scanner; the verified
-        // state will render with its blur→sharp reveal animation.
         updateLocalItem(current.orderItem.id, {
           uiState: current.previousUiState,
           scanResult: current.previousScanResult,
@@ -1670,7 +1690,7 @@ export default function PickPage(): React.JSX.Element | null {
                 </p>
                 {isAwaitingRack && (
                   <p className="text-[11px] text-[var(--content-tertiary)] mt-2">
-                    Hold to verify without scanning if no rack QR
+                    Hold to verify without scanning if the label won’t scan
                   </p>
                 )}
               </button>
@@ -1789,7 +1809,7 @@ export default function PickPage(): React.JSX.Element | null {
                   className="bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)]"
                 >
                   <Camera size={20} weight="bold" />
-                  Scan rack QR to unlock pick
+                  Scan bin label to unlock pick
                 </BigButton>
                 {scannerHint && (
                   <p className="text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] rounded-lg px-3 py-2">
