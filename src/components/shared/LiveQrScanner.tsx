@@ -64,7 +64,7 @@ export interface LiveQrScannerResolved {
   matchesPickItem: boolean;
   reason: string;
   lookupCode: string | null;
-  codeType: 'pack' | 'lpn' | 'sku' | 'unknown';
+  codeType: 'rack' | 'pack' | 'lpn' | 'sku' | 'unknown';
   suggestedQty: number;
   requiresBreakConfirmation: boolean;
   lpnCode?: string | null;

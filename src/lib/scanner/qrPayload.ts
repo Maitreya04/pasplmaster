@@ -36,7 +36,12 @@ export interface LpnPickPayload {
   remainingQty: number | null;
 }
 
-export type ScanPayloadKind = 'pack' | 'lpn' | 'sku' | 'unknown';
+export interface RackPayload {
+  /** Normalized rack code as printed on the shelf, preserving dashes (e.g. "A-12"). */
+  rackCode: string;
+}
+
+export type ScanPayloadKind = 'rack' | 'pack' | 'lpn' | 'sku' | 'unknown';
 
 export interface ClassifiedScanPayload {
   kind: ScanPayloadKind;
@@ -44,6 +49,54 @@ export interface ClassifiedScanPayload {
   normalizedCandidates: string[];
   packPayload?: PackPickPayload;
   lpnPayload?: LpnPickPayload;
+  rackPayload?: RackPayload;
+}
+
+/** Normalise a rack code: uppercase, single dash, no whitespace. */
+function normalizeRackCode(value: string): string {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[^A-Z0-9-]/g, '');
+}
+
+/**
+ * Detect a rack/bin "license plate" QR. Two payload conventions are supported:
+ *   - JSON: `{ "type": "PASPL_RACK", "rack": "A-12" }`
+ *   - Prefixed string: `RACK:A-12`, `RACK-A-12`, `R:A-12`, `BIN:A-12`
+ * Returns null for everything else so this can sit alongside SKU/pack/LPN payloads
+ * without false-positive matches.
+ */
+export function parseRackPayload(rawValue: string | null | undefined): RackPayload | null {
+  const trimmed = rawValue?.trim();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    const type = typeof parsed.type === 'string' ? parsed.type.trim().toUpperCase() : '';
+    const rack = typeof parsed.rack === 'string'
+      ? parsed.rack
+      : typeof parsed.rack_no === 'string'
+        ? parsed.rack_no
+        : typeof parsed.location === 'string'
+          ? parsed.location
+          : '';
+    if ((type === 'PASPL_RACK' || type === 'RACK' || type === 'BIN') && rack) {
+      const code = normalizeRackCode(rack);
+      if (code) return { rackCode: code };
+    }
+  } catch {
+    // Plain QR payloads are expected for printed rack labels.
+  }
+
+  const prefixed = trimmed.match(/^(?:RACK|BIN|R)[\s:-]+([A-Z0-9][A-Z0-9-]*)$/i);
+  if (prefixed?.[1]) {
+    const code = normalizeRackCode(prefixed[1]);
+    if (code) return { rackCode: code };
+  }
+
+  return null;
 }
 
 export function parsePackPickPayload(rawValue: string | null | undefined): PackPickPayload | null {
@@ -182,10 +235,20 @@ export function collectQrLookupCandidates(rawValue: string): string[] {
 }
 
 export function classifyScanPayload(rawValue: string): ClassifiedScanPayload {
+  const rackPayload = parseRackPayload(rawValue);
   const packPayload = parsePackPickPayload(rawValue);
   const lpnPayload = parseLpnPickPayload(rawValue);
   const normalizedCandidates = collectQrLookupCandidates(rawValue);
 
+  // Rack wins: the prefix is unambiguous and shouldn't be mis-classified as SKU.
+  if (rackPayload) {
+    return {
+      kind: 'rack',
+      rawValue,
+      normalizedCandidates,
+      rackPayload,
+    };
+  }
   if (packPayload) {
     return {
       kind: 'pack',
@@ -214,4 +277,22 @@ export function classifyScanPayload(rawValue: string): ClassifiedScanPayload {
     rawValue,
     normalizedCandidates: [],
   };
+}
+
+/**
+ * Compare a scanned rack code to the rack stored on an order item.
+ * Both are normalised to uppercase alphanumerics + dashes, so "a 12" matches "A-12"
+ * the same way "A12" does.
+ */
+export function rackCodesMatch(
+  scanned: string | null | undefined,
+  expected: string | null | undefined,
+): boolean {
+  if (!scanned || !expected) return false;
+  const a = normalizeRackCode(scanned);
+  const b = normalizeRackCode(expected);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // Tolerate dash-omitted variants: "A12" vs "A-12".
+  return a.replace(/-/g, '') === b.replace(/-/g, '');
 }

@@ -39,6 +39,16 @@ function timeAgo(dateStr: string | null): string {
   return `${days}d ago`;
 }
 
+function shortAge(dateStr: string | null | undefined): string {
+  if (!dateStr) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.max(0, Math.floor(diff / 60_000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h`;
+}
+
 function sortOrders(orders: OrderWithClaimInfo[]): OrderWithClaimInfo[] {
   return [...orders].sort((a, b) => {
     if (a.priority === 'urgent' && b.priority !== 'urgent') return -1;
@@ -76,6 +86,13 @@ export default function QueuePage(): React.JSX.Element | null {
     () => sortOrders([...available, ...stale]),
     [available, stale],
   );
+
+  const queueHeadline = useMemo(() => {
+    const orders = availableOrders.length;
+    const items = availableOrders.reduce((sum, o) => sum + (o.item_count ?? 0), 0);
+    const urgent = availableOrders.filter((o) => o.priority === 'urgent').length;
+    return { orders, items, urgent };
+  }, [availableOrders]);
 
   const clearNotificationIntent = useCallback(() => {
     navigate('/picking', { replace: true });
@@ -337,14 +354,28 @@ export default function QueuePage(): React.JSX.Element | null {
 
         {/* Available Orders */}
         <section>
-          <h2 className="text-sm font-semibold text-[var(--content-tertiary)] uppercase tracking-wider mb-3">
-            Available Orders
-            {availableOrders.length > 0 && (
-              <span className="ml-2 text-[var(--content-secondary)]">
-                ({availableOrders.length})
-              </span>
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-sm font-semibold text-[var(--content-tertiary)] uppercase tracking-wider">
+              Available Orders
+              {availableOrders.length > 0 && (
+                <span className="ml-2 text-[var(--content-secondary)]">
+                  ({availableOrders.length})
+                </span>
+              )}
+            </h2>
+            {queueHeadline.orders > 0 && (
+              <p className="text-xs text-[var(--content-tertiary)] tabular-nums">
+                {queueHeadline.orders} order{queueHeadline.orders === 1 ? '' : 's'}
+                {' · '}
+                {queueHeadline.items} item{queueHeadline.items === 1 ? '' : 's'} ready
+                {queueHeadline.urgent > 0 && (
+                  <span className="ml-1 text-[var(--content-negative)] font-semibold">
+                    · {queueHeadline.urgent} urgent
+                  </span>
+                )}
+              </p>
             )}
-          </h2>
+          </div>
 
           {isLoading ? (
             <div className="space-y-3">
@@ -383,30 +414,38 @@ export default function QueuePage(): React.JSX.Element | null {
               </span>
             </h2>
             <div className="space-y-2">
-              {otherActive.map((order) => (
-                <Card key={order.id} className="flex items-center gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="font-mono font-semibold text-sm text-[var(--content-primary)]">
-                        {order.order_number}
-                      </span>
-                      {order.priority === 'urgent' && <StatusBadge status="urgent" />}
-                      <StatusBadge status="picking" />
+              {otherActive.map((order) => {
+                const since = shortAge(order.claim_info?.claimed_at ?? order.approved_at);
+                return (
+                  <Card key={order.id} className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="font-mono font-semibold text-sm text-[var(--content-primary)]">
+                          {order.order_number}
+                        </span>
+                        {order.priority === 'urgent' && <StatusBadge status="urgent" />}
+                        <StatusBadge status="picking" />
+                      </div>
+                      <p className="text-sm text-[var(--content-secondary)] truncate">
+                        {order.customer_name}
+                      </p>
                     </div>
-                    <p className="text-sm text-[var(--content-secondary)] truncate">
-                      {order.customer_name}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-xs text-[var(--content-tertiary)]">
-                      {order.claim_info?.claimed_by_name || order.picker_name}
-                    </p>
-                    <p className="text-xs text-[var(--content-quaternary)]">
-                      {order.item_count} items
-                    </p>
-                  </div>
-                </Card>
-              ))}
+                    <div className="text-right shrink-0">
+                      <p className="text-xs text-[var(--content-tertiary)] flex items-center gap-1 justify-end">
+                        <span>{order.claim_info?.claimed_by_name || order.picker_name}</span>
+                        {since && (
+                          <span className="text-[var(--content-quaternary)]">
+                            · since {since}
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs text-[var(--content-quaternary)] tabular-nums">
+                        {order.item_count} items
+                      </p>
+                    </div>
+                  </Card>
+                );
+              })}
             </div>
           </section>
         )}

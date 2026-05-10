@@ -305,6 +305,65 @@ select {
   animation: shake 400ms ease-in-out;
 }
 
+/* ─── Pick flow motion ───
+   Tuned per the redesign: card swaps between stops use an iOS-feel ease,
+   the rack-verify "veil" reveals via blur+opacity, toasts ride down from the top.
+   Keep durations tight (≤320ms) so warehouse pace isn't slowed by motion. */
+@keyframes pick-stop-enter {
+  from { transform: translateX(24px); opacity: 0; filter: blur(2px); }
+  to { transform: translateX(0); opacity: 1; filter: blur(0); }
+}
+
+.animate-pick-stop-enter {
+  animation: pick-stop-enter 250ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes pick-veil-reveal {
+  from { filter: blur(6px); opacity: 0.55; }
+  to { filter: blur(0); opacity: 1; }
+}
+
+.animate-pick-veil-reveal {
+  animation: pick-veil-reveal 200ms ease-out;
+}
+
+@keyframes pick-celebrate {
+  0% { transform: scale(0.96); opacity: 0; }
+  60% { transform: scale(1.02); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.animate-pick-celebrate {
+  animation: pick-celebrate 280ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+@keyframes undo-toast-enter {
+  from { transform: translateY(-12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.animate-undo-toast-enter {
+  animation: undo-toast-enter 220ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@keyframes pick-active-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.animate-pick-active-pulse {
+  animation: pick-active-pulse 1.2s ease-in-out infinite;
+}
+
+/* Press-feedback for big tappable surfaces (Emil: 0.97 scale on :active). */
+.pick-pressable {
+  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.pick-pressable:active {
+  transform: scale(0.97);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    DESIGN SYSTEM UTILITIES
    ═══════════════════════════════════════════════════════════════ */

@@ -163,7 +163,7 @@ export interface ScanResult {
   extractedCode?: string;
   extractedDescription?: string;
   reason?: string;
-  codeType?: 'pack' | 'lpn' | 'sku' | 'unknown';
+  codeType?: 'rack' | 'pack' | 'lpn' | 'sku' | 'unknown';
   suggestedQty?: number;
   requiresBreakConfirmation?: boolean;
   lpnCode?: string | null;

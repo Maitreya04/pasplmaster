@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -8,11 +8,11 @@ import {
   Warning,
   Camera,
   MapPin,
-  Package,
-  Cube,
-  StackSimple,
   ArrowRight,
   Check,
+  ListChecks,
+  ArrowUp,
+  ArrowCounterClockwise,
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
@@ -27,9 +27,10 @@ import {
   Skeleton,
   StatusBadge,
 } from '../../components/shared';
-import type { OrderItem, ScanResult } from '../../types';
+import type { OrderItem, OrderItemState, ScanResult } from '../../types';
 import { FLAG_REASONS, type FlagReason } from '../../utils/constants';
 import { PickCompleteScreen } from './PickCompleteScreen';
+import { QueueSheet, type QueueSheetRow } from './QueueSheet';
 import { pickQuantityTarget } from '../../lib/cartSupply';
 import { appHaptics } from '../../lib/haptics';
 import { sendInternalNotification } from '../../lib/pickerPush';
@@ -43,6 +44,7 @@ import {
   classifyScanPayload,
   parsePackPickPayload,
   parseLpnPickPayload,
+  rackCodesMatch,
 } from '../../lib/scanner/qrPayload';
 import {
   defaultPickItemTransitionAdapter,
@@ -80,6 +82,105 @@ interface PendingPackConfirmation {
 
 const DUPLICATE_SCAN_WINDOW_MS = 1200;
 const MAX_AUTO_SCAN_QTY = 12;
+
+// ─── Pick flow constants ───
+// 700ms green-dwell after a line completes — long enough for the picker to
+// register the win, short enough to keep warehouse pace.
+const CELEBRATE_DURATION_MS = 700;
+// 5s undo window. Slips happen; mistakes get flagged. Five seconds is the
+// sweet spot we tested behaviourally — long enough to react, short enough
+// not to slow the next pick.
+const UNDO_DURATION_MS = 5000;
+// 600ms long-press to mark a rack verified without scanning. Norman's
+// "deliberate confirmation" for a constraint bypass — pickers shouldn't
+// trip into this by accident.
+const RACK_LONG_PRESS_MS = 600;
+
+const RACK_VERIFY_STORAGE_KEY = 'paspl.pick.rackVerified.v1';
+const SKIPPED_STORAGE_KEY = 'paspl.pick.skipped.v1';
+const BRIEF_ACK_STORAGE_KEY = 'paspl.pick.briefAck.v1';
+
+function readIdSet(storageKey: string, orderId: number | null): Set<number> {
+  if (!orderId || typeof window === 'undefined') return new Set();
+  try {
+    const raw = window.sessionStorage.getItem(`${storageKey}:${orderId}`);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((v): v is number => typeof v === 'number'));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeIdSet(storageKey: string, orderId: number | null, ids: Set<number>): void {
+  if (!orderId || typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(`${storageKey}:${orderId}`, JSON.stringify([...ids]));
+  } catch {
+    // Quota / private mode — best-effort persistence.
+  }
+}
+
+function readBriefAck(orderId: number | null): boolean {
+  if (!orderId || typeof window === 'undefined') return false;
+  return window.sessionStorage.getItem(`${BRIEF_ACK_STORAGE_KEY}:${orderId}`) === '1';
+}
+
+function writeBriefAck(orderId: number | null, ack: boolean): void {
+  if (!orderId || typeof window === 'undefined') return;
+  if (ack) {
+    window.sessionStorage.setItem(`${BRIEF_ACK_STORAGE_KEY}:${orderId}`, '1');
+  } else {
+    window.sessionStorage.removeItem(`${BRIEF_ACK_STORAGE_KEY}:${orderId}`);
+  }
+}
+
+interface CelebratingState {
+  itemId: number;
+  expiresAt: number;
+}
+
+interface UndoSnapshot {
+  itemId: number;
+  itemName: string;
+  itemCode: string | null;
+  previousScanResult: ScanResult | null;
+  previousState: OrderItemState;
+  expiresAt: number;
+}
+
+interface PackSplitText {
+  /** Human-readable line, e.g. "Pick 2 inner packs + 12 loose". Empty if not applicable. */
+  text: string;
+  /** True when the breakdown actually has multiple tiers. */
+  hasMultipleTiers: boolean;
+}
+
+function describePackSplit(
+  breakdown: PackBreakdown | null,
+  packDef: ItemPackDefinition | null | undefined,
+): PackSplitText {
+  if (!breakdown) return { text: '', hasMultipleTiers: false };
+  const parts: string[] = [];
+  if (breakdown.hasOuter && breakdown.outerQty > 0) {
+    const size = packDef?.outer_pack_qty ?? 0;
+    parts.push(
+      `${breakdown.outerQty} master${breakdown.outerQty === 1 ? '' : 's'}${size ? ` (×${size})` : ''}`,
+    );
+  }
+  if (breakdown.hasInner && breakdown.innerQty > 0) {
+    const size = packDef?.inner_pack_qty ?? 0;
+    parts.push(
+      `${breakdown.innerQty} inner${breakdown.innerQty === 1 ? '' : 's'}${size ? ` (×${size})` : ''}`,
+    );
+  }
+  if (breakdown.looseQty > 0) {
+    parts.push(`${breakdown.looseQty} loose`);
+  }
+  if (parts.length === 0) return { text: '', hasMultipleTiers: false };
+  return { text: `Pick ${parts.join(' + ')}`, hasMultipleTiers: parts.length > 1 };
+}
 
 function sortByRack(items: OrderItem[]): OrderItem[] {
   return [...items].sort((a, b) => {
@@ -205,98 +306,6 @@ function computePackBreakdown(
   };
 }
 
-type ScanTier = 'outer' | 'inner' | 'loose';
-type TierState = 'waiting' | 'active' | 'done';
-
-interface TierProgress {
-  tier: ScanTier;
-  label: string;
-  icon: React.ComponentType<{
-    size?: number;
-    weight?: 'fill' | 'regular' | 'bold';
-    className?: string;
-  }>;
-  target: number;
-  scanned: number;
-  state: TierState;
-  packSize: number;
-}
-
-function computeTierProgress(
-  breakdown: PackBreakdown,
-  pickedQty: number,
-  packDef: ItemPackDefinition | null | undefined,
-): TierProgress[] {
-  const outerSize = packDef?.outer_pack_qty ?? 0;
-  const innerSize = packDef?.inner_pack_qty ?? 0;
-
-  const tiers: TierProgress[] = [];
-  let remaining = pickedQty;
-
-  // Outer tier
-  if (breakdown.hasOuter && breakdown.outerQty > 0) {
-    const outerScanned = Math.min(breakdown.outerQty, Math.floor(remaining / outerSize));
-    remaining -= outerScanned * outerSize;
-    tiers.push({
-      tier: 'outer',
-      label: 'Master box',
-      icon: Package,
-      target: breakdown.outerQty,
-      scanned: outerScanned,
-      state: outerScanned >= breakdown.outerQty ? 'done' : tiers.length === 0 ? 'active' : 'waiting',
-      packSize: outerSize,
-    });
-  }
-
-  // Inner tier
-  if (breakdown.hasInner && breakdown.innerQty > 0) {
-    const innerScanned = Math.min(breakdown.innerQty, Math.floor(remaining / innerSize));
-    remaining -= innerScanned * innerSize;
-    const outerDone = !tiers.length || tiers[0].state === 'done';
-    tiers.push({
-      tier: 'inner',
-      label: 'Inner box',
-      icon: Cube,
-      target: breakdown.innerQty,
-      scanned: innerScanned,
-      state: innerScanned >= breakdown.innerQty ? 'done' : outerDone ? 'active' : 'waiting',
-      packSize: innerSize,
-    });
-  }
-
-  // Loose tier
-  if (breakdown.looseQty > 0) {
-    const looseScanned = Math.min(breakdown.looseQty, remaining);
-    const priorDone = tiers.every((t) => t.state === 'done');
-    tiers.push({
-      tier: 'loose',
-      label: 'Loose piece',
-      icon: StackSimple,
-      target: breakdown.looseQty,
-      scanned: looseScanned,
-      state: looseScanned >= breakdown.looseQty ? 'done' : priorDone ? 'active' : 'waiting',
-      packSize: 1,
-    });
-  }
-
-  // If no pack definitions exist, show a single loose tier
-  if (tiers.length === 0) {
-    const looseTarget = breakdown.totalPcs;
-    const looseScanned = Math.min(looseTarget, pickedQty);
-    tiers.push({
-      tier: 'loose',
-      label: 'Pieces',
-      icon: StackSimple,
-      target: looseTarget,
-      scanned: looseScanned,
-      state: looseScanned >= looseTarget ? 'done' : 'active',
-      packSize: 1,
-    });
-  }
-
-  return tiers;
-}
-
 export default function PickPage(): React.JSX.Element | null {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -340,7 +349,67 @@ export default function PickPage(): React.JSX.Element | null {
     rawValue: string;
     at: number;
   } | null>(null);
+
+  // ─── Phase machine state ───
+  // briefAcknowledged: has the picker dismissed the pre-start "trip summary"?
+  // Persisted per-order so a refresh mid-pick doesn't re-prompt.
+  const [briefAcknowledged, setBriefAcknowledged] = useState(false);
+  // rackVerifiedIds: items whose rack the picker has confirmed (scanned QR or
+  // long-press override). This is the gate-1 "I'm physically here" signal.
+  const [rackVerifiedIds, setRackVerifiedIds] = useState<Set<number>>(new Set());
+  // skippedIds: items the picker chose to come back to. Sorted to the end of
+  // the queue so the natural rack-order keeps leading the route.
+  const [skippedIds, setSkippedIds] = useState<Set<number>>(new Set());
+  // Scanner mode: 'rack' opens the camera to verify a rack QR; 'item' opens
+  // it to scan box / pack / LPN labels.
+  const [scannerMode, setScannerMode] = useState<'rack' | 'item'>('item');
+  // celebrating: the just-completed item gets a 700ms green dwell before the
+  // next stop slides in. Norman: feedback must be visible enough to register.
+  const [celebrating, setCelebrating] = useState<CelebratingState | null>(null);
+  // undoSnapshot: 5s window to revert the last completion. Captures the prior
+  // scan_result + state so we can roll back both DB and local UI cleanly.
+  const [undoSnapshot, setUndoSnapshot] = useState<UndoSnapshot | null>(null);
+  const [queueSheetOpen, setQueueSheetOpen] = useState(false);
+
   const orderItems = order?.items;
+
+  // Hydrate per-order state from sessionStorage so a refresh doesn't force the
+  // picker to re-scan racks or re-acknowledge the brief mid-flow.
+  useEffect(() => {
+    if (!orderId) return;
+    setRackVerifiedIds(readIdSet(RACK_VERIFY_STORAGE_KEY, orderId));
+    setSkippedIds(readIdSet(SKIPPED_STORAGE_KEY, orderId));
+    setBriefAcknowledged(readBriefAck(orderId));
+  }, [orderId]);
+
+  useEffect(() => {
+    writeIdSet(RACK_VERIFY_STORAGE_KEY, orderId, rackVerifiedIds);
+  }, [orderId, rackVerifiedIds]);
+
+  useEffect(() => {
+    writeIdSet(SKIPPED_STORAGE_KEY, orderId, skippedIds);
+  }, [orderId, skippedIds]);
+
+  useEffect(() => {
+    writeBriefAck(orderId, briefAcknowledged);
+  }, [orderId, briefAcknowledged]);
+
+  // Drive the celebrate window to clear itself; render falls back to the next
+  // stop the moment we clear, so the slide-in animation triggers naturally.
+  useEffect(() => {
+    if (!celebrating) return;
+    const remaining = Math.max(0, celebrating.expiresAt - Date.now());
+    const t = setTimeout(() => setCelebrating(null), remaining);
+    return () => clearTimeout(t);
+  }, [celebrating]);
+
+  // Auto-dismiss the undo toast after its window.
+  useEffect(() => {
+    if (!undoSnapshot) return;
+    const remaining = Math.max(0, undoSnapshot.expiresAt - Date.now());
+    const t = setTimeout(() => setUndoSnapshot(null), remaining);
+    return () => clearTimeout(t);
+  }, [undoSnapshot]);
 
   const { data: packDefinitions = [] } = useQuery({
     queryKey: PACK_DEFINITIONS_QUERY_KEY,
@@ -380,8 +449,21 @@ export default function PickPage(): React.JSX.Element | null {
   }, [localItems, orderItems]);
 
   const { active, done } = useMemo(() => partitionItems(pickItems), [pickItems]);
-  const currentTarget = active[0] ?? null;
-  const upNext = active.slice(1, 5);
+
+  // Re-order active so skipped items go to the end while preserving rack order
+  // within each group. Norman: "natural mapping" — the queue follows the walk,
+  // skips peel off to the back like a postman re-attempting delivery.
+  const orderedActive = useMemo(() => {
+    if (skippedIds.size === 0) return active;
+    return [...active].sort((a, b) => {
+      const aSkip = skippedIds.has(a.orderItem.id) ? 1 : 0;
+      const bSkip = skippedIds.has(b.orderItem.id) ? 1 : 0;
+      return aSkip - bSkip;
+    });
+  }, [active, skippedIds]);
+
+  const currentTarget = orderedActive[0] ?? null;
+  const upNextOne = orderedActive[1] ?? null;
 
   // Get pack definition for current target
   const currentPackDef = useMemo(() => {
@@ -414,30 +496,6 @@ export default function PickPage(): React.JSX.Element | null {
     return computePackBreakdown(currentTargetProgress.targetQty, currentPackDef);
   }, [currentTargetProgress, currentPackDef]);
 
-  // Tier progress for scanning state
-  const currentTiers = useMemo(() => {
-    if (!currentBreakdown || !currentTargetProgress) return [];
-    return computeTierProgress(
-      currentBreakdown,
-      currentTargetProgress.pickedQty,
-      currentPackDef,
-    );
-  }, [currentBreakdown, currentTargetProgress, currentPackDef]);
-
-  // Active tier for scanner hint
-  const activeTier = useMemo(
-    () => currentTiers.find((t) => t.state === 'active') ?? null,
-    [currentTiers],
-  );
-
-  const totalScansTotal = useMemo(() => {
-    return currentTiers.reduce((sum, t) => sum + t.target, 0);
-  }, [currentTiers]);
-
-  const totalScansDone = useMemo(() => {
-    return currentTiers.reduce((sum, t) => sum + t.scanned, 0);
-  }, [currentTiers]);
-
   const currentAliasForVerification = useMemo(() => {
     if (!currentTarget) return null;
     return (
@@ -447,6 +505,69 @@ export default function PickPage(): React.JSX.Element | null {
       null
     );
   }, [currentTarget]);
+
+  // Render-time English description of the recommended pack split (e.g. "Pick 2
+  // inner packs + 12 loose"). The tile breakdown stays as the secondary view.
+  const currentSplitText = useMemo(
+    () => describePackSplit(currentBreakdown, currentPackDef),
+    [currentBreakdown, currentPackDef],
+  );
+
+  // The just-completed item we render during `celebrating` lives in `done`, not
+  // `active`. Look it up so the green-dwell card can show its actual contents.
+  const celebratingItem = useMemo(() => {
+    if (!celebrating) return null;
+    return order?.items.find((oi) => oi.id === celebrating.itemId) ?? null;
+  }, [celebrating, order?.items]);
+
+  // Group the trip-summary view's racks by rack_no so the brief reads as a route,
+  // not a list of items. Items without a rack go into a "—" group at the end.
+  const briefRacks = useMemo(() => {
+    if (!order?.items) return [] as { rack: string | null; lines: number; pieces: number }[];
+    const sorted = sortByRack(order.items);
+    const map = new Map<string, { rack: string | null; lines: number; pieces: number }>();
+    for (const item of sorted) {
+      const key = item.rack_no ?? '—';
+      const target = pickQuantityTarget(item);
+      const entry = map.get(key) ?? { rack: item.rack_no ?? null, lines: 0, pieces: 0 };
+      entry.lines += 1;
+      entry.pieces += target;
+      map.set(key, entry);
+    }
+    return [...map.values()];
+  }, [order?.items]);
+
+  const briefTotals = useMemo(() => {
+    const lines = order?.items?.length ?? 0;
+    const pieces = order?.items?.reduce((sum, oi) => sum + pickQuantityTarget(oi), 0) ?? 0;
+    return { lines, pieces };
+  }, [order?.items]);
+
+  // Build the QueueSheet view-model in one place.
+  const queueSheetRows: QueueSheetRow[] = useMemo(() => {
+    const rows: QueueSheetRow[] = [];
+    for (const pi of pickItems) {
+      const isCurrent = currentTarget?.orderItem.id === pi.orderItem.id;
+      const status: QueueSheetRow['status'] = isCurrent
+        ? 'now'
+        : pi.uiState === 'picked' || pi.uiState === 'overridden'
+          ? 'picked'
+          : pi.uiState === 'flagged'
+            ? 'flagged'
+            : skippedIds.has(pi.orderItem.id)
+              ? 'skipped'
+              : 'next';
+      rows.push({
+        itemId: pi.orderItem.id,
+        rackNo: pi.orderItem.rack_no,
+        itemCode: pi.orderItem.item_alias ?? null,
+        itemName: pi.orderItem.item_name,
+        targetQty: pickQuantityTarget(pi.orderItem),
+        status,
+      });
+    }
+    return rows;
+  }, [pickItems, currentTarget, skippedIds]);
 
   const counts = useMemo(() => {
     let picked = 0;
@@ -493,6 +614,98 @@ export default function PickPage(): React.JSX.Element | null {
     },
     [],
   );
+
+  /**
+   * Mark a rack verified for the current item. Triggered either by a successful
+   * rack QR scan, or by long-pressing the rack number when no QR is available
+   * yet — the constraint-bypass case Norman would call a "deliberate override".
+   */
+  const markRackVerified = useCallback(
+    (itemId: number, source: 'scan' | 'override') => {
+      setRackVerifiedIds((prev) => {
+        if (prev.has(itemId)) return prev;
+        const next = new Set(prev);
+        next.add(itemId);
+        return next;
+      });
+      appHaptics.success();
+      if (source === 'override') {
+        setScannerHint('Rack marked verified manually. Pick carefully.');
+      }
+    },
+    [],
+  );
+
+  /** Add an item to the "skipped" set so it sorts to the end of the queue. */
+  const skipItem = useCallback((itemId: number, _reason: string) => {
+    void _reason; // reason currently surfaces via toast/log only.
+    setSkippedIds((prev) => {
+      const next = new Set(prev);
+      next.add(itemId);
+      return next;
+    });
+    appHaptics.impactLight();
+    toast.info('Skipped — will return at the end of the queue.');
+  }, [toast]);
+
+  // ─── Long-press override for missing rack QRs ───
+  // Hold the rack number for ~600ms when there's no QR on the shelf yet. The
+  // delay is intentional: Norman's "deliberate confirmation" pattern.
+  const rackPressTimerRef = useRef<number | null>(null);
+  const rackPressedTargetRef = useRef<number | null>(null);
+
+  const startRackLongPress = useCallback(
+    (itemId: number) => {
+      rackPressedTargetRef.current = itemId;
+      if (rackPressTimerRef.current) window.clearTimeout(rackPressTimerRef.current);
+      rackPressTimerRef.current = window.setTimeout(() => {
+        if (rackPressedTargetRef.current === itemId) {
+          markRackVerified(itemId, 'override');
+        }
+      }, RACK_LONG_PRESS_MS);
+    },
+    [markRackVerified],
+  );
+
+  const cancelRackLongPress = useCallback(() => {
+    if (rackPressTimerRef.current) {
+      window.clearTimeout(rackPressTimerRef.current);
+      rackPressTimerRef.current = null;
+    }
+    rackPressedTargetRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (rackPressTimerRef.current) window.clearTimeout(rackPressTimerRef.current);
+    };
+  }, []);
+
+  // ─── Phase derivation ───
+  // Single source of truth for what we render. Order matters: complete > brief
+  // > celebrating > awaiting_rack > verified.
+  type PickPhase =
+    | { kind: 'brief' }
+    | { kind: 'awaiting_rack'; itemId: number }
+    | { kind: 'verified'; itemId: number }
+    | { kind: 'celebrating'; itemId: number }
+    | { kind: 'complete' };
+
+  const phase: PickPhase = useMemo(() => {
+    if (!currentTarget) return { kind: 'complete' };
+    // Show celebrating until the dwell expires, even when DB has already moved
+    // the item to done. This is what gives the picker the 700ms "I won" beat.
+    if (celebrating) return { kind: 'celebrating', itemId: celebrating.itemId };
+    // Brief shows once per session per order, only on a clean start. Mid-pick
+    // refreshes don't re-prompt because briefAcknowledged is in sessionStorage.
+    if (!briefAcknowledged && counts.picked + counts.flagged === 0) {
+      return { kind: 'brief' };
+    }
+    if (rackVerifiedIds.has(currentTarget.orderItem.id)) {
+      return { kind: 'verified', itemId: currentTarget.orderItem.id };
+    }
+    return { kind: 'awaiting_rack', itemId: currentTarget.orderItem.id };
+  }, [currentTarget, celebrating, briefAcknowledged, counts.picked, counts.flagged, rackVerifiedIds]);
 
   /* ─── Mutations ──────────────────────────────────────────── */
 
@@ -631,19 +844,66 @@ export default function PickPage(): React.JSX.Element | null {
     },
   });
 
-  const openLiveScan = useCallback((orderItem: OrderItem) => {
-    const current = localItems.get(orderItem.id);
-    const fallbackState = current?.uiState ?? uiStateFromDb(orderItem);
-    const fallbackScanResult = current?.scanResult ?? orderItem.scan_result;
+  const openLiveScan = useCallback(
+    (orderItem: OrderItem, mode: 'rack' | 'item' = 'item') => {
+      const current = localItems.get(orderItem.id);
+      const fallbackState = current?.uiState ?? uiStateFromDb(orderItem);
+      const fallbackScanResult = current?.scanResult ?? orderItem.scan_result;
 
-    appHaptics.impactLight();
-    updateLocalItem(orderItem.id, { uiState: 'scanning' });
-    setLiveScanSession({
-      orderItem,
-      previousUiState: fallbackState,
-      previousScanResult: fallbackScanResult,
-    });
-  }, [localItems, updateLocalItem]);
+      appHaptics.impactLight();
+      setScannerMode(mode);
+      setScannerHint(null);
+      // Only flip to 'scanning' visually for item-mode scans. Rack scans should
+      // not disturb the gate-1 layout — the picker is just verifying location.
+      if (mode === 'item') {
+        updateLocalItem(orderItem.id, { uiState: 'scanning' });
+      }
+      setLiveScanSession({
+        orderItem,
+        previousUiState: fallbackState,
+        previousScanResult: fallbackScanResult,
+      });
+    },
+    [localItems, updateLocalItem],
+  );
+
+  /**
+   * Roll back the last completed line within the undo window. Restores both the
+   * DB `state` and the prior `scan_result` (so progress, suggestedQty, etc. are
+   * exactly as they were one tick before completion).
+   */
+  const revertLastPick = useCallback(async () => {
+    const snapshot = undoSnapshot;
+    if (!snapshot) return;
+    setUndoSnapshot(null);
+    setCelebrating(null);
+    try {
+      const { error } = await supabase
+        .from('order_items')
+        .update({
+          state: snapshot.previousState,
+          scan_result: (snapshot.previousScanResult ?? null) as unknown as Record<string, unknown> | null,
+        })
+        .eq('id', snapshot.itemId);
+      if (error) throw error;
+      updateLocalItem(snapshot.itemId, {
+        uiState:
+          snapshot.previousState === 'picked'
+            ? 'picked'
+            : snapshot.previousState === 'flagged'
+              ? 'flagged'
+              : snapshot.previousScanResult?.isMatch
+                ? 'matched'
+                : 'pending',
+        scanResult: snapshot.previousScanResult,
+      });
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      appHaptics.impactLight();
+      toast.info(`Undid ${snapshot.itemName}. Pick it again or skip.`);
+    } catch {
+      toast.error('Could not undo. Refresh and try again.');
+    }
+  }, [orderId, queryClient, toast, undoSnapshot, updateLocalItem]);
 
   const closeLiveScan = useCallback(() => {
     setLiveScanSession((current) => {
@@ -669,6 +929,38 @@ export default function PickPage(): React.JSX.Element | null {
         return current;
       }
       setLastScanMeta({ rawValue: scan.rawValue, at: now });
+
+      // ─── Rack-gate (gate 1) ───
+      // In rack mode, the only payload we accept is a rack QR. Anything else
+      // (item, pack, LPN) is rejected with a hint so the picker knows to look
+      // for the shelf label, not the box label.
+      if (scannerMode === 'rack') {
+        const classified = classifyScanPayload(scan.rawValue);
+        if (classified.kind !== 'rack' || !classified.rackPayload) {
+          setScannerHint('That looks like a box label. Scan the rack QR on the shelf.');
+          appHaptics.warning();
+          return current;
+        }
+        const expectedRack = current.orderItem.rack_no;
+        const scannedCode = classified.rackPayload.rackCode;
+        if (!rackCodesMatch(scannedCode, expectedRack)) {
+          setScannerHint(
+            `Wrong shelf — scanned ${scannedCode}, expected ${expectedRack ?? '—'}. Walk to the right rack.`,
+          );
+          appHaptics.warning();
+          return current;
+        }
+        markRackVerified(current.orderItem.id, 'scan');
+        setScannerHint(null);
+        // Restore the prior visual state and close the scanner; the verified
+        // state will render with its blur→sharp reveal animation.
+        updateLocalItem(current.orderItem.id, {
+          uiState: current.previousUiState,
+          scanResult: current.previousScanResult,
+        });
+        return null;
+      }
+
       const targetQty = pickQuantityTarget(current.orderItem);
       if (targetQty <= 0) {
         const zeroQtyResult: ScanResult = {
@@ -863,6 +1155,20 @@ export default function PickPage(): React.JSX.Element | null {
             },
             optimisticState: 'picked',
           });
+          // Mirror applyPickedQty: snapshot for undo + start the green dwell so
+          // the auto-advance lands on the next stop with motion, not a jump cut.
+          setUndoSnapshot({
+            itemId: current.orderItem.id,
+            itemName: current.orderItem.item_name,
+            itemCode: current.orderItem.item_alias ?? null,
+            previousScanResult: current.previousScanResult,
+            previousState: 'pending',
+            expiresAt: Date.now() + UNDO_DURATION_MS,
+          });
+          setCelebrating({
+            itemId: current.orderItem.id,
+            expiresAt: Date.now() + CELEBRATE_DURATION_MS,
+          });
         }
         appHaptics.success();
         setScannerHint(
@@ -879,8 +1185,10 @@ export default function PickPage(): React.JSX.Element | null {
   }, [
     lastScanMeta,
     itemTransitionMutation,
+    markRackVerified,
     packDefinitionByBusyCode,
     packDefinitionByItemId,
+    scannerMode,
     updateLocalItem,
     userId,
     userName,
@@ -898,9 +1206,11 @@ export default function PickPage(): React.JSX.Element | null {
         toast.error('Cannot auto-apply on a 0 qty line. Use Enter qty or flag this line.');
         return;
       }
+      const previousScanResult = local?.scanResult ?? orderItem.scan_result;
+      const previousState: OrderItemState = orderItem.state;
       const existingPicked = Math.min(
         targetQty,
-        getPickedQtyFromResult(local?.scanResult ?? orderItem.scan_result),
+        getPickedQtyFromResult(previousScanResult),
       );
       const nextPicked = Math.min(targetQty, existingPicked + Math.floor(qtyToApply));
       const nextRemaining = Math.max(0, targetQty - nextPicked);
@@ -949,9 +1259,26 @@ export default function PickPage(): React.JSX.Element | null {
           },
           optimisticState: 'picked',
         });
+        // Capture rollback data BEFORE the mutation flushes, so undo restores
+        // the exact pre-completion state (scan_result + 'pending' state).
+        setUndoSnapshot({
+          itemId,
+          itemName: orderItem.item_name,
+          itemCode: orderItem.item_alias ?? null,
+          previousScanResult,
+          previousState,
+          expiresAt: Date.now() + UNDO_DURATION_MS,
+        });
+        // Hold on the green dwell so the picker sees the win. The next stop's
+        // card slides in once `celebrating` clears.
+        setCelebrating({
+          itemId,
+          expiresAt: Date.now() + CELEBRATE_DURATION_MS,
+        });
+        appHaptics.success();
       }
     },
-    [itemTransitionMutation, localItems, order?.items, updateLocalItem, userId, userName],
+    [itemTransitionMutation, localItems, order?.items, toast, updateLocalItem, userId, userName],
   );
 
   const handlePick = useCallback(
@@ -1117,14 +1444,27 @@ export default function PickPage(): React.JSX.Element | null {
     );
   }
 
+  const isVerified = phase.kind === 'verified';
+  const isAwaitingRack = phase.kind === 'awaiting_rack';
+  const isCelebrating = phase.kind === 'celebrating';
+  const isBriefPhase = phase.kind === 'brief';
+  // Stable key drives the slide-in animation when the active stop changes.
+  const heroKey = isCelebrating
+    ? `celebrate-${celebrating?.itemId ?? 0}`
+    : currentTarget
+      ? `pick-${currentTarget.orderItem.id}`
+      : 'empty';
+
   return (
     <div className="min-h-screen pb-32">
-      {/* Header */}
+      {/* Header — order summary + global progress.
+          Audit chips were removed from here on purpose: pickers don't need to
+          read 'Pack-assisted: 3' while walking. They live in the Queue sheet now. */}
       <header className="sticky top-0 z-40 bg-[var(--bg-primary)]/90 backdrop-blur-md px-4 py-3 space-y-2">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/picking')}
-            className="min-h-11 min-w-11 flex items-center justify-center rounded-lg text-[var(--content-secondary)]"
+            className="min-h-11 min-w-11 flex items-center justify-center rounded-lg text-[var(--content-secondary)] pick-pressable"
           >
             <CaretLeft size={24} weight="bold" />
           </button>
@@ -1140,8 +1480,8 @@ export default function PickPage(): React.JSX.Element | null {
               {order.transport_name && ` · ${order.transport_name}`}
             </p>
           </div>
-          <div className="text-right shrink-0">
-            <p className="text-2xl font-bold tabular-nums text-[var(--content-primary)]">
+          <div className="text-right shrink-0 tabular-nums">
+            <p className="text-2xl font-bold text-[var(--content-primary)]">
               {counts.picked + counts.flagged}
               <span className="text-[var(--content-tertiary)] text-base font-normal">
                 /{counts.total}
@@ -1158,30 +1498,125 @@ export default function PickPage(): React.JSX.Element | null {
           ]}
           total={counts.total}
         />
-        <div className="flex flex-wrap gap-2 text-[11px] text-[var(--content-tertiary)]">
-          <span className="px-2 py-0.5 rounded-full bg-[var(--bg-tertiary)]">
-            Pack-assisted: {visibility.packAssisted}
-          </span>
-          <span className="px-2 py-0.5 rounded-full bg-[var(--bg-tertiary)]">
-            Manual: {visibility.manual}
-          </span>
-          {visibility.reasonBadges.map(([reason, total]) => (
-            <span
-              key={reason}
-              className="px-2 py-0.5 rounded-full bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]"
-            >
-              {reason}: {total}
-            </span>
-          ))}
-        </div>
       </header>
 
       <div className="px-4 pt-3 space-y-4">
-        {currentTarget ? (
-          <>
-            {/* ─── HERO SECTION: Item + Qty ─── */}
+        {isBriefPhase ? (
+          /* ─── Order Brief: trip summary before walking the route ─── */
+          <div className="space-y-4 animate-pick-stop-enter">
+            <div className="ds-card p-5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                Trip summary
+              </p>
+              <h2 className="text-xl font-bold text-[var(--content-primary)] mt-1">
+                {order.customer_name}
+              </h2>
+              {order.transport_name && (
+                <p className="text-sm text-[var(--content-secondary)] mt-0.5">
+                  {order.transport_name}
+                </p>
+              )}
+              <div className="grid grid-cols-3 gap-2 mt-4">
+                <div className="rounded-xl bg-[var(--bg-tertiary)] px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                    Lines
+                  </p>
+                  <p className="font-mono font-bold text-2xl text-[var(--content-primary)] leading-tight tabular-nums">
+                    {briefTotals.lines}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-[var(--bg-tertiary)] px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                    Pieces
+                  </p>
+                  <p className="font-mono font-bold text-2xl text-[var(--content-primary)] leading-tight tabular-nums">
+                    {briefTotals.pieces}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-[var(--bg-tertiary)] px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                    Racks
+                  </p>
+                  <p className="font-mono font-bold text-2xl text-[var(--content-primary)] leading-tight tabular-nums">
+                    {briefRacks.length}
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <div className="ds-card p-4">
-              {/* Item header with SKU */}
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mb-2">
+                Route — in pick order
+              </p>
+              <div className="space-y-1.5">
+                {briefRacks.map((r, idx) => (
+                  <div
+                    key={`${r.rack ?? 'norack'}-${idx}`}
+                    className="flex items-center gap-3 py-1.5 border-b border-[var(--border-faint)] last:border-0"
+                  >
+                    <span className="w-6 h-6 rounded-full bg-[var(--bg-tertiary)] flex items-center justify-center text-[10px] font-semibold text-[var(--content-tertiary)] shrink-0 tabular-nums">
+                      {idx + 1}
+                    </span>
+                    <MapPin size={14} weight="regular" className="text-[var(--content-tertiary)] shrink-0" />
+                    <span className="font-mono font-bold text-sm text-[var(--content-primary)] min-w-16">
+                      {r.rack ?? '—'}
+                    </span>
+                    <span className="text-xs text-[var(--content-tertiary)] flex-1">
+                      {r.lines} line{r.lines === 1 ? '' : 's'}
+                    </span>
+                    <span className="font-mono text-xs font-semibold text-[var(--content-secondary)] tabular-nums">
+                      {r.pieces} pcs
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <BigButton
+              variant="primary"
+              onClick={() => {
+                appHaptics.impactMedium();
+                setBriefAcknowledged(true);
+              }}
+              className="bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)]"
+            >
+              <ArrowRight size={20} weight="bold" />
+              Start picking
+            </BigButton>
+          </div>
+        ) : isCelebrating && celebratingItem ? (
+          /* ─── Celebrating: 700ms green dwell on the just-completed item ─── */
+          <div
+            key={heroKey}
+            className="ds-card p-6 bg-[var(--bg-positive-subtle)] border-2 border-[var(--border-positive)] animate-pick-celebrate"
+          >
+            <div className="flex flex-col items-center text-center gap-3">
+              <div className="w-16 h-16 rounded-full bg-[var(--bg-positive)] flex items-center justify-center">
+                <Check size={32} weight="bold" className="text-[var(--content-on-color)]" />
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-positive)]">
+                  Picked
+                </p>
+                <p className="font-mono font-bold text-base text-[var(--content-primary)] mt-0.5">
+                  {celebratingItem.item_alias ?? celebratingItem.item_id}
+                </p>
+                <p className="text-sm text-[var(--content-secondary)] mt-0.5 line-clamp-2">
+                  {celebratingItem.item_name}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : currentTarget ? (
+          <>
+            {/* ─── HERO STOP ─── Either gate-1 (awaiting rack) or gate-2 (verified). */}
+            <div
+              key={heroKey}
+              className={`ds-card p-4 animate-pick-stop-enter ${
+                isVerified ? 'ring-1 ring-[var(--border-positive)]' : ''
+              }`}
+            >
+              {/* Item header with SKU + position counter */}
               <div className="flex items-start justify-between gap-3 pb-3 border-b border-[var(--border-faint)]">
                 <div className="min-w-0 flex-1">
                   <p className="font-mono font-bold text-sm text-[var(--content-primary)]">
@@ -1191,33 +1626,83 @@ export default function PickPage(): React.JSX.Element | null {
                     {currentTarget.orderItem.item_name}
                   </p>
                 </div>
-                <span className="text-xs px-2 py-1 rounded-full bg-[var(--bg-tertiary)] text-[var(--content-tertiary)] shrink-0">
+                <span className="text-xs px-2 py-1 rounded-full bg-[var(--bg-tertiary)] text-[var(--content-tertiary)] shrink-0 tabular-nums">
                   {counts.picked + counts.flagged + 1} of {counts.total}
                 </span>
               </div>
 
-              {/* Hero quantity: always show remaining to pick */}
-              <div className="pt-4 pb-3">
-                <div className="mb-2 rounded-lg border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-3 py-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">
-                    Label Verify (Alias 1)
-                  </p>
-                  <p className="font-mono text-base font-bold text-[var(--content-primary)] leading-tight break-all whitespace-normal">
-                    {currentAliasForVerification ?? 'No alias available'}
-                  </p>
+              {/* Rack number — always huge.
+                  Long-press on the rack to override-verify when no QR is on the
+                  shelf yet. The press needs to be deliberate (600ms) to avoid
+                  accidental bypass. */}
+              <button
+                type="button"
+                onPointerDown={() => startRackLongPress(currentTarget.orderItem.id)}
+                onPointerUp={cancelRackLongPress}
+                onPointerLeave={cancelRackLongPress}
+                onPointerCancel={cancelRackLongPress}
+                className={`mt-4 w-full text-left rounded-2xl p-4 transition-colors duration-200 pick-pressable ${
+                  isAwaitingRack
+                    ? 'bg-[var(--bg-tertiary)] border-2 border-dashed border-[var(--border-opaque)]'
+                    : 'bg-[var(--bg-positive-subtle)] border-2 border-[var(--border-positive)]'
+                }`}
+                aria-label="Rack location. Long press to mark verified without scanning."
+              >
+                <div className="flex items-center gap-2">
+                  <MapPin
+                    size={18}
+                    weight="fill"
+                    className={
+                      isAwaitingRack
+                        ? 'text-[var(--content-tertiary)]'
+                        : 'text-[var(--content-positive)]'
+                    }
+                  />
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                    {isAwaitingRack ? 'Walk to rack' : 'Verified rack'}
+                  </span>
+                  {isVerified && (
+                    <Check size={14} weight="bold" className="text-[var(--content-positive)] ml-auto" />
+                  )}
                 </div>
+                <p className="font-mono font-bold text-[64px] leading-none mt-1 text-[var(--content-primary)]">
+                  {currentTarget.orderItem.rack_no ?? '—'}
+                </p>
+                {isAwaitingRack && (
+                  <p className="text-[11px] text-[var(--content-tertiary)] mt-2">
+                    Hold to verify without scanning if no rack QR
+                  </p>
+                )}
+              </button>
+
+              {/* Qty + pack split.
+                  Veiled (blur + dim) until rack-verified. Norman: a constraint
+                  that prevents picking from the wrong shelf — you can sense the
+                  content exists but can't act on it yet. */}
+              <div
+                className={`pt-4 transition-all duration-200 ${
+                  isAwaitingRack ? 'opacity-55' : 'animate-pick-veil-reveal'
+                }`}
+                style={isAwaitingRack ? { filter: 'blur(6px)' } : undefined}
+                aria-hidden={isAwaitingRack}
+              >
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mb-1">
                   Remaining qty
                 </p>
-                <div className="flex items-baseline gap-1">
-                  <span className="font-mono font-bold text-[52px] leading-none text-[var(--content-primary)]">
+                <div className="flex items-baseline gap-1 tabular-nums">
+                  <span className="font-mono font-bold text-[52px] leading-none text-[var(--content-primary)] transition-opacity duration-150">
                     {currentTargetProgress?.remainingQty ?? 0}
                   </span>
                   <span className="text-sm font-medium text-[var(--content-tertiary)]">pcs</span>
                 </div>
                 {currentTargetProgress && (
-                  <p className="text-xs text-[var(--content-secondary)] mt-1">
+                  <p className="text-xs text-[var(--content-secondary)] mt-1 tabular-nums">
                     Picked {currentTargetProgress.pickedQty} of {currentTargetProgress.targetQty}
+                  </p>
+                )}
+                {currentSplitText.text && currentSplitText.hasMultipleTiers && (
+                  <p className="text-sm font-semibold text-[var(--content-primary)] mt-2">
+                    {currentSplitText.text}
                   </p>
                 )}
                 {currentTargetProgress?.targetQty === 0 && (
@@ -1231,22 +1716,17 @@ export default function PickPage(): React.JSX.Element | null {
                   </div>
                 )}
 
-                {/* Pack breakdown cards */}
+                {/* Tile breakdown — secondary visual, supports the English line above. */}
                 {currentBreakdown && (currentBreakdown.hasOuter || currentBreakdown.hasInner) && (
                   <div className="flex gap-2 mt-3">
-                    {/* Outer/Master card */}
                     {currentBreakdown.hasOuter && (
                       <div
-                        className={`flex-1 rounded-xl p-2.5 border-[1.5px] ${
-                          currentBreakdown.outerQty === 0
-                            ? 'opacity-35 bg-[var(--bg-accent-subtle)] border-[var(--border-accent)]'
-                            : 'bg-[var(--bg-accent-subtle)] border-[var(--border-accent)]'
+                        className={`flex-1 rounded-xl p-2.5 border-[1.5px] bg-[var(--bg-accent-subtle)] border-[var(--border-accent)] ${
+                          currentBreakdown.outerQty === 0 ? 'opacity-35' : ''
                         }`}
                       >
-                        <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">
-                          Master
-                        </p>
-                        <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-accent)]">
+                        <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">Master</p>
+                        <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-accent)] tabular-nums">
                           {currentBreakdown.outerQty}
                         </p>
                         <p className="text-[9px] font-medium text-[var(--content-accent)]">
@@ -1254,20 +1734,14 @@ export default function PickPage(): React.JSX.Element | null {
                         </p>
                       </div>
                     )}
-
-                    {/* Inner card */}
                     {currentBreakdown.hasInner && (
                       <div
-                        className={`flex-1 rounded-xl p-2.5 border-[1.5px] ${
-                          currentBreakdown.innerQty === 0
-                            ? 'opacity-35 bg-[var(--bg-positive-subtle)] border-[var(--border-positive)]'
-                            : 'bg-[var(--bg-positive-subtle)] border-[var(--border-positive)]'
+                        className={`flex-1 rounded-xl p-2.5 border-[1.5px] bg-[var(--bg-positive-subtle)] border-[var(--border-positive)] ${
+                          currentBreakdown.innerQty === 0 ? 'opacity-35' : ''
                         }`}
                       >
-                        <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-positive)]">
-                          Inner
-                        </p>
-                        <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-positive)]">
+                        <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-positive)]">Inner</p>
+                        <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-positive)] tabular-nums">
                           {currentBreakdown.innerQty}
                         </p>
                         <p className="text-[9px] font-medium text-[var(--content-positive)]">
@@ -1275,19 +1749,13 @@ export default function PickPage(): React.JSX.Element | null {
                         </p>
                       </div>
                     )}
-
-                    {/* Loose card */}
                     <div
-                      className={`flex-1 rounded-xl p-2.5 border-[1.5px] ${
-                        currentBreakdown.looseQty === 0
-                          ? 'opacity-35 bg-[var(--bg-tertiary)] border-[var(--border-subtle)]'
-                          : 'bg-[var(--bg-tertiary)] border-[var(--border-subtle)]'
+                      className={`flex-1 rounded-xl p-2.5 border-[1.5px] bg-[var(--bg-tertiary)] border-[var(--border-subtle)] ${
+                        currentBreakdown.looseQty === 0 ? 'opacity-35' : ''
                       }`}
                     >
-                      <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-                        Loose
-                      </p>
-                      <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-secondary)]">
+                      <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">Loose</p>
+                      <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-secondary)] tabular-nums">
                         {currentBreakdown.looseQty}
                       </p>
                       <p className="text-[9px] font-medium text-[var(--content-tertiary)]">
@@ -1296,152 +1764,33 @@ export default function PickPage(): React.JSX.Element | null {
                     </div>
                   </div>
                 )}
-              </div>
 
-              {/* Location strip */}
-              <div className="flex items-center gap-2 bg-[var(--bg-tertiary)] rounded-lg px-3 py-2">
-                <MapPin size={16} weight="fill" className="text-[var(--content-tertiary)] shrink-0" />
-                <span className="text-[11px] text-[var(--content-tertiary)]">Location</span>
-                <span className="font-mono font-bold text-sm text-[var(--content-primary)] ml-auto">
-                  {currentTarget.orderItem.rack_no ?? '—'}
-                </span>
+                {/* Label-verify chip — shown only when verified. The picker eyes
+                    this against the printed alias on the box before scanning. */}
+                {isVerified && currentAliasForVerification && (
+                  <div className="mt-3 rounded-lg border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">
+                      Box label (Alias 1)
+                    </p>
+                    <p className="font-mono text-base font-bold text-[var(--content-primary)] leading-tight break-all">
+                      {currentAliasForVerification}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* ─── SCANNING SECTION ─── */}
-            {liveScanSession ? (
-              /* Active scanning state - show tier progress */
-              <div className="ds-card p-4 space-y-3">
-                {/* Scan progress header */}
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-mono font-bold text-xs text-[var(--content-primary)]">
-                      {currentTarget.orderItem.item_alias ?? currentTarget.orderItem.item_id}
-                    </p>
-                    <div className="mt-1 rounded-md border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-2 py-1">
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">
-                        Alias 1
-                      </p>
-                      <p className="font-mono text-xs font-bold text-[var(--content-primary)] leading-tight break-all whitespace-normal">
-                        {currentAliasForVerification ?? 'N/A'}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={closeLiveScan}
-                    className="text-xs text-[var(--content-tertiary)] ml-2 shrink-0"
-                  >
-                    Cancel
-                  </button>
-                </div>
-
-                {/* Progress bar */}
-                <div className="space-y-1">
-                  <div className="h-1 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-[var(--bg-positive)] rounded-full transition-all duration-300"
-                      style={{ width: `${totalScansTotal > 0 ? (totalScansDone / totalScansTotal) * 100 : 0}%` }}
-                    />
-                  </div>
-                  <p className="text-[10px] text-[var(--content-tertiary)]">
-                    {totalScansDone} of {totalScansTotal} scans
-                  </p>
-                </div>
-
-                {/* Tier rows */}
-                <div className="space-y-2">
-                  {currentTiers.map((tier) => {
-                    const TierIcon = tier.icon;
-                    const isActive = tier.state === 'active';
-                    const isDone = tier.state === 'done';
-
-                    return (
-                      <div
-                        key={tier.tier}
-                        className={`flex items-center gap-3 rounded-xl border-[1.5px] p-3 transition-all ${
-                          isDone
-                            ? 'bg-[var(--bg-positive-subtle)] border-[var(--border-positive)]'
-                            : isActive
-                              ? 'bg-[var(--bg-secondary)] border-[var(--border-selected)]'
-                              : 'bg-[var(--bg-secondary)] border-[var(--border-subtle)] opacity-40'
-                        }`}
-                      >
-                        {/* Icon */}
-                        <div
-                          className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
-                            isDone
-                              ? 'bg-[var(--bg-positive-subtle)]'
-                              : tier.tier === 'outer'
-                                ? 'bg-[var(--bg-accent-subtle)]'
-                                : tier.tier === 'inner'
-                                  ? 'bg-[var(--bg-positive-subtle)]'
-                                  : 'bg-[var(--bg-tertiary)]'
-                          }`}
-                        >
-                          {isDone ? (
-                            <Check size={18} weight="bold" className="text-[var(--content-positive)]" />
-                          ) : (
-                            <TierIcon
-                              size={18}
-                              weight="fill"
-                              className={
-                                tier.tier === 'outer'
-                                  ? 'text-[var(--content-accent)]'
-                                  : tier.tier === 'inner'
-                                    ? 'text-[var(--content-positive)]'
-                                    : 'text-[var(--content-tertiary)]'
-                              }
-                            />
-                          )}
-                        </div>
-
-                        {/* Info */}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-                            {tier.label}
-                          </p>
-                          <p className={`font-mono font-bold text-xl leading-tight ${isDone ? 'text-[var(--content-positive)]' : 'text-[var(--content-primary)]'}`}>
-                            {tier.scanned}
-                            <span className="text-sm text-[var(--content-tertiary)]"> / {tier.target}</span>
-                          </p>
-                          {isActive && (
-                            <p className="text-[10px] text-[var(--content-tertiary)]">
-                              scan {tier.label.toLowerCase()} QR
-                            </p>
-                          )}
-                          {isDone && (
-                            <p className="text-[10px] text-[var(--content-positive)]">done</p>
-                          )}
-                        </div>
-
-                        {/* Status dot */}
-                        <div
-                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                            isDone
-                              ? 'bg-[var(--bg-positive)]'
-                              : isActive
-                                ? 'bg-[var(--content-primary)]'
-                                : 'bg-[var(--border-subtle)]'
-                          }`}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Scanner hint zone */}
-                <div className="border-[1.5px] border-dashed border-[var(--border-selected)] rounded-2xl p-5 flex flex-col items-center gap-2">
-                  <Camera size={32} weight="regular" className="text-[var(--content-primary)]" />
-                  <p className="font-semibold text-sm text-[var(--content-primary)]">
-                    {activeTier ? `Scan ${activeTier.label.toLowerCase()}` : 'All scans complete'}
-                  </p>
-                  <p className="text-[11px] text-[var(--content-tertiary)] text-center">
-                    {activeTier
-                      ? `Point camera at the QR on the ${activeTier.label.toLowerCase()} label`
-                      : 'Ready to complete this line'}
-                  </p>
-                </div>
-
+            {/* ─── ACTIONS ─── different per phase. */}
+            {isAwaitingRack ? (
+              <div className="space-y-2">
+                <BigButton
+                  variant="primary"
+                  onClick={() => openLiveScan(currentTarget.orderItem, 'rack')}
+                  className="bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)]"
+                >
+                  <Camera size={20} weight="bold" />
+                  Scan rack QR to unlock pick
+                </BigButton>
                 {scannerHint && (
                   <p className="text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] rounded-lg px-3 py-2">
                     {scannerHint}
@@ -1449,22 +1798,23 @@ export default function PickPage(): React.JSX.Element | null {
                 )}
               </div>
             ) : (
-              /* Not scanning - show CTA */
+              /* Verified — full pick action set. The tier rows live inside the
+                 scanner sheet when scanning is active; here we keep the surface
+                 clean so the picker can either tap "Scan box" or use manual. */
               <div className="space-y-3">
                 <BigButton
                   variant="primary"
-                  onClick={() => openLiveScan(currentTarget.orderItem)}
+                  onClick={() => openLiveScan(currentTarget.orderItem, 'item')}
                   className="bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)]"
                 >
                   <Camera size={20} weight="bold" />
-                  Start scanning
+                  Scan box / pack
                 </BigButton>
 
-                {/* Secondary actions */}
                 <div className="grid grid-cols-4 gap-2">
                   <button
                     onClick={() => handlePick(currentTarget.orderItem.id)}
-                    className="h-11 rounded-xl bg-[var(--bg-tertiary)] text-sm font-medium text-[var(--content-secondary)]"
+                    className="h-11 rounded-xl bg-[var(--bg-tertiary)] text-sm font-medium text-[var(--content-secondary)] pick-pressable"
                   >
                     +1 manual
                   </button>
@@ -1473,13 +1823,13 @@ export default function PickPage(): React.JSX.Element | null {
                       setManualQtyTargetItemId(currentTarget.orderItem.id);
                       setManualQtyInput('1');
                     }}
-                    className="h-11 rounded-xl bg-[var(--bg-accent-subtle)] text-sm font-medium text-[var(--content-accent)]"
+                    className="h-11 rounded-xl bg-[var(--bg-accent-subtle)] text-sm font-medium text-[var(--content-accent)] pick-pressable"
                   >
                     Enter qty
                   </button>
                   <button
                     onClick={() => handleOverride(currentTarget.orderItem.id)}
-                    className="h-11 rounded-xl bg-[var(--bg-warning-subtle)] text-sm font-medium text-[var(--content-warning)]"
+                    className="h-11 rounded-xl bg-[var(--bg-warning-subtle)] text-sm font-medium text-[var(--content-warning)] pick-pressable"
                   >
                     Override
                   </button>
@@ -1490,7 +1840,7 @@ export default function PickPage(): React.JSX.Element | null {
                       setFlagNotes('');
                       setFlagBoxPrice('');
                     }}
-                    className="h-11 rounded-xl bg-[var(--bg-negative-subtle)] text-sm font-medium text-[var(--content-negative)]"
+                    className="h-11 rounded-xl bg-[var(--bg-negative-subtle)] text-sm font-medium text-[var(--content-negative)] pick-pressable"
                   >
                     Flag
                   </button>
@@ -1516,60 +1866,46 @@ export default function PickPage(): React.JSX.Element | null {
           </div>
         )}
 
-        {upNext.length > 0 && (
-          <div className="ds-card p-3">
-            <p className="ds-label mb-2">Up Next</p>
-            <div className="space-y-1.5">
-              {upNext.map((pi, idx) => (
-                <div
-                  key={pi.orderItem.id}
-                  className="flex items-center gap-3 py-1.5"
-                >
-                  <span className="w-5 h-5 rounded-full bg-[var(--bg-tertiary)] flex items-center justify-center text-[10px] font-semibold text-[var(--content-tertiary)] shrink-0">
-                    {idx + 2}
-                  </span>
-                  <span className="font-mono text-xs text-[var(--content-warning)] min-w-14 shrink-0">
-                    {pi.orderItem.rack_no ?? '—'}
-                  </span>
-                  <span className="flex-1 truncate text-sm text-[var(--content-secondary)]">
-                    {pi.orderItem.item_name}
-                  </span>
-                  <span className="font-mono text-xs text-[var(--content-tertiary)] shrink-0">
-                    ×{pickQuantityTarget(pi.orderItem)}
-                  </span>
-                </div>
-              ))}
+        {/* ─── Up-next peek + queue handle ───
+            One peek line is enough to satisfy "what's coming?" without breaking
+            focus on the current pick. Tap the handle/peek to open the full
+            queue sheet (drag handle inside the sheet itself dismisses it). */}
+        {!isBriefPhase && (currentTarget || done.length > 0) && (
+          <button
+            type="button"
+            onClick={() => {
+              appHaptics.selection();
+              setQueueSheetOpen(true);
+            }}
+            className="w-full rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-4 py-3 pick-pressable text-left"
+            aria-label="Open pick queue"
+          >
+            <div className="flex justify-center mb-1.5">
+              <span className="block w-9 h-1 rounded-full bg-[var(--border-opaque)]" />
             </div>
-          </div>
-        )}
-
-        {done.length > 0 && (
-          <div className="ds-card p-3">
-            <p className="ds-label mb-2">Completed ({done.length})</p>
-            <div className="space-y-1">
-              {done.slice(0, 8).map((pi) => (
-                <div
-                  key={pi.orderItem.id}
-                  className="flex items-center gap-2 py-1 text-xs text-[var(--content-tertiary)]"
-                >
-                  {pi.uiState === 'flagged' ? (
-                    <Flag size={14} weight="fill" className="text-[var(--content-negative)] shrink-0" />
-                  ) : (
-                    <CheckCircle size={14} weight="fill" className="text-[var(--content-positive)] shrink-0" />
-                  )}
-                  <span className="flex-1 truncate">{pi.orderItem.item_name}</span>
-                  <span className="font-mono text-[var(--content-quaternary)]">
-                    {pi.orderItem.rack_no ?? '—'}
-                  </span>
-                </div>
-              ))}
-              {done.length > 8 && (
-                <p className="text-[10px] text-[var(--content-quaternary)] text-center pt-1">
-                  +{done.length - 8} more
-                </p>
-              )}
-            </div>
-          </div>
+            {upNextOne ? (
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] shrink-0">
+                  Next
+                </span>
+                <span className="font-mono font-bold text-xs text-[var(--content-primary)] min-w-12 shrink-0">
+                  {upNextOne.orderItem.rack_no ?? '—'}
+                </span>
+                <span className="font-mono text-xs text-[var(--content-secondary)] truncate flex-1">
+                  {upNextOne.orderItem.item_alias ?? upNextOne.orderItem.item_name}
+                </span>
+                <span className="font-mono text-xs text-[var(--content-tertiary)] shrink-0 tabular-nums">
+                  ×{pickQuantityTarget(upNextOne.orderItem)}
+                </span>
+                <ListChecks size={16} weight="regular" className="text-[var(--content-tertiary)] shrink-0" />
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 justify-center text-[var(--content-tertiary)] text-xs">
+                <ArrowUp size={14} weight="regular" />
+                View queue
+              </div>
+            )}
+          </button>
         )}
       </div>
 
@@ -1802,10 +2138,63 @@ export default function PickPage(): React.JSX.Element | null {
         )}
       </BottomSheet>
 
+      {/* Queue sheet — opens via the peek-handle below the hero card. */}
+      <QueueSheet
+        isOpen={queueSheetOpen}
+        onClose={() => setQueueSheetOpen(false)}
+        rows={queueSheetRows}
+        counts={{
+          picked: counts.picked,
+          flagged: counts.flagged,
+          remaining: counts.remaining,
+          total: counts.total,
+          packAssisted: visibility.packAssisted,
+          manual: visibility.manual,
+          reasonBadges: visibility.reasonBadges,
+        }}
+        currentItemId={currentTarget?.orderItem.id ?? null}
+        onSkipItem={(itemId, reason) => {
+          skipItem(itemId, reason);
+          setQueueSheetOpen(false);
+        }}
+      />
+
+      {/* Undo toast — top-right, 5s window. The only escape hatch we expose,
+          so we don't tempt pickers into deeper rollbacks. After the window,
+          a wrong pick can still be flagged/overridden through the normal flow. */}
+      {undoSnapshot && (
+        <div
+          className="fixed top-3 right-3 z-[80] max-w-[calc(100vw-1.5rem)] animate-undo-toast-enter"
+          role="status"
+        >
+          <div className="flex items-center gap-3 rounded-2xl bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)] px-4 py-3 shadow-lg">
+            <CheckCircle size={18} weight="fill" className="text-[var(--bg-positive)] shrink-0" />
+            <div className="min-w-0">
+              <p className="text-xs font-semibold leading-tight">Picked</p>
+              <p className="font-mono text-[11px] opacity-80 truncate max-w-[180px]">
+                {undoSnapshot.itemCode ?? undoSnapshot.itemName}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={revertLastPick}
+              className="ml-2 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white/10 text-xs font-semibold pick-pressable"
+            >
+              <ArrowCounterClockwise size={14} weight="bold" />
+              Undo
+            </button>
+          </div>
+        </div>
+      )}
+
       {liveScanSession && (
         <LiveQrScanner
-          key={liveScanSession.orderItem.id}
-          title={liveScanSession.orderItem.item_name}
+          key={`${liveScanSession.orderItem.id}-${scannerMode}`}
+          title={
+            scannerMode === 'rack'
+              ? `Scan rack ${liveScanSession.orderItem.rack_no ?? ''}`.trim()
+              : liveScanSession.orderItem.item_name
+          }
           pickItem={{
             itemId: liveScanSession.orderItem.item_id,
             name: liveScanSession.orderItem.item_name,
