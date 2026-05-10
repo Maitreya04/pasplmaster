@@ -25,6 +25,7 @@ const BillingNewOrderLayout = lazy(() => import('./pages/billing/BillingNewOrder
 const PickingLayout = lazy(() => import('./pages/picking/PickingLayout'));
 const QueuePage = lazy(() => import('./pages/picking/QueuePage'));
 const PickPage = lazy(() => import('./pages/picking/PickPage'));
+const PickPreviewPage = lazy(() => import('./pages/picking/PickPreviewPage'));
 
 const AdminPage = lazy(() => import('./pages/admin/AdminPage'));
 const AdminPasscodePage = lazy(() => import('./pages/admin/AdminPasscodePage'));
@@ -148,6 +149,7 @@ export default function App(): React.JSX.Element | null {
         >
           <Route index element={<QueuePage />} />
           <Route path="pick/:id" element={<PickPage />} />
+          <Route path="preview/:id" element={<PickPreviewPage />} />
         </Route>
 
         <Route

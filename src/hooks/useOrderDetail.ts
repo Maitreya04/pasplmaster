@@ -1,10 +1,19 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
+import { isAskLine } from '../lib/picking/askBrand';
 import type { OrderItem, OrderWithItems } from '../types';
 
-type ItemCatalogJoin = { alias: string | null; alias1: string | null };
+type ItemCatalogJoin = {
+  alias: string | null;
+  alias1: string | null;
+  main_group: string | null;
+  parent_group: string | null;
+};
 
-type OrderItemRow = Omit<OrderItem, 'catalog_alias' | 'catalog_alias1'> & {
+type OrderItemRow = Omit<
+  OrderItem,
+  'catalog_alias' | 'catalog_alias1' | 'catalog_main_group' | 'catalog_parent_group'
+> & {
   items?: ItemCatalogJoin | ItemCatalogJoin[] | null;
 };
 
@@ -17,6 +26,8 @@ function mapOrderItemsWithCatalog(rows: OrderItemRow[] | null): OrderItem[] {
       ...base,
       catalog_alias: c?.alias ?? null,
       catalog_alias1: c?.alias1 ?? null,
+      catalog_main_group: c?.main_group ?? null,
+      catalog_parent_group: c?.parent_group ?? null,
     };
   });
 }
@@ -40,7 +51,9 @@ export function useOrderDetail(orderId: number | null) {
           *,
           items (
             alias,
-            alias1
+            alias1,
+            main_group,
+            parent_group
           )
         `,
         )
@@ -49,6 +62,13 @@ export function useOrderDetail(orderId: number | null) {
       if (itemsError) throw itemsError;
 
       const items = mapOrderItemsWithCatalog(rawItems as OrderItemRow[] | null);
+      const askLineCount = items.filter((oi) =>
+        isAskLine({
+          item_name: oi.item_name,
+          main_group: oi.catalog_main_group,
+          parent_group: oi.catalog_parent_group,
+        }),
+      ).length;
       let customerMobile: string | null = null;
       let customerAddress: string | null = null;
 
@@ -72,6 +92,7 @@ export function useOrderDetail(orderId: number | null) {
         items,
         /** Busy “items” = invoice lines; prefer live row count over denormalized column. */
         item_count: items.length,
+        ask_line_count: askLineCount,
       } as OrderWithItems;
     },
     enabled: orderId !== null,

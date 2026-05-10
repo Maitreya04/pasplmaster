@@ -68,6 +68,8 @@ export interface Order {
   notes: string | null;
   /** Busy “items”: number of invoice rows (distinct order_lines), not sum of qty. Prefer live count from order_items when available. */
   item_count: number;
+  /** Lines whose catalog or line text resolves to ASK (see `isAskLine`). Set when loading queue embeds. */
+  ask_line_count?: number;
   total_value: number;
   created_at: string;
   approved_at: string | null;
@@ -86,6 +88,10 @@ export interface OrderItem {
   catalog_alias?: string | null;
   /** From `items` join — same as New Order search primary code (`alias1`). */
   catalog_alias1?: string | null;
+  /** From `items` join — Busy main group (often brand). */
+  catalog_main_group?: string | null;
+  /** From `items` join — Busy parent group. */
+  catalog_parent_group?: string | null;
   rack_no: string | null;
   qty_requested: number;
   /** Units to pick from on-hand stock (≤ qty_requested). Omitted on legacy rows. */

@@ -10,6 +10,7 @@ import {
   Warning,
   Bell,
   GearSix,
+  Eye,
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
@@ -333,20 +334,38 @@ export default function QueuePage(): React.JSX.Element | null {
                       <span className="text-[var(--content-tertiary)]">
                         {' '}· {pick.item_count} items
                       </span>
+                      {(pick.ask_line_count ?? 0) > 0 && (
+                        <span className="ml-1.5 inline-flex items-center rounded-md border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--content-warning-on-light)]">
+                          ASK {pick.ask_line_count}
+                        </span>
+                      )}
                     </p>
                   </div>
                 </div>
-                <BigButton
-                  variant="primary"
-                  className="bg-[var(--bg-warning)] text-[var(--content-primary)]"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigate(`/picking/pick/${pick.id}`);
-                  }}
-                >
-                  Continue Picking
-                  <ArrowRight size={20} weight="bold" />
-                </BigButton>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/picking/preview/${pick.id}`);
+                    }}
+                    className="flex items-center justify-center gap-2 min-h-11 px-4 rounded-xl text-sm font-semibold border border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                  >
+                    <Eye size={18} weight="bold" />
+                    Preview lines
+                  </button>
+                  <BigButton
+                    variant="primary"
+                    className="bg-[var(--bg-warning)] text-[var(--content-primary)] flex-1"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/picking/pick/${pick.id}`);
+                    }}
+                  >
+                    Continue Picking
+                    <ArrowRight size={20} weight="bold" />
+                  </BigButton>
+                </div>
               </div>
             ))}
           </section>
@@ -419,17 +438,30 @@ export default function QueuePage(): React.JSX.Element | null {
                 return (
                   <Card key={order.id} className="flex items-center gap-3">
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-0.5">
+                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                         <span className="font-mono font-semibold text-sm text-[var(--content-primary)]">
                           {order.order_number}
                         </span>
                         {order.priority === 'urgent' && <StatusBadge status="urgent" />}
                         <StatusBadge status="picking" />
+                        {(order.ask_line_count ?? 0) > 0 && (
+                          <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]">
+                            ASK {order.ask_line_count}
+                          </span>
+                        )}
                       </div>
                       <p className="text-sm text-[var(--content-secondary)] truncate">
                         {order.customer_name}
                       </p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/picking/preview/${order.id}`)}
+                      className="shrink-0 min-h-11 min-w-11 flex items-center justify-center rounded-xl border border-[var(--border-subtle)] text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]"
+                      aria-label="Preview lines without claiming"
+                    >
+                      <Eye size={20} weight="bold" />
+                    </button>
                     <div className="text-right shrink-0">
                       <p className="text-xs text-[var(--content-tertiary)] flex items-center gap-1 justify-end">
                         <span>{order.claim_info?.claimed_by_name || order.picker_name}</span>
@@ -463,7 +495,9 @@ function OrderCard({
   onClaim: () => void;
   claiming: boolean;
 }) {
+  const navigate = useNavigate();
   const isUrgent = order.priority === 'urgent';
+  const askCount = order.ask_line_count ?? 0;
 
   return (
     <Card
@@ -475,11 +509,16 @@ function OrderCard({
     >
       <div className="flex items-start justify-between">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="font-mono font-semibold text-[var(--content-primary)]">
               {order.order_number}
             </span>
             {isUrgent && <StatusBadge status="urgent" />}
+            {askCount > 0 && (
+              <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]">
+                ASK {askCount}
+              </span>
+            )}
             {order.claim_info?.is_stale && (
               <span className="font-ds-micro uppercase font-bold text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] px-2 py-0.5 rounded border border-[var(--border-warning)]">
                 Stale (Takeover)
@@ -502,7 +541,7 @@ function OrderCard({
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3 text-xs text-[var(--content-tertiary)]">
           <span className="flex items-center gap-1">
             <Package size={14} />
@@ -515,10 +554,20 @@ function OrderCard({
           )}
         </div>
 
-        <button
-          onClick={onClaim}
-          disabled={claiming}
-          className={`
+        <div className="flex items-center gap-2 justify-end">
+          <button
+            type="button"
+            onClick={() => navigate(`/picking/preview/${order.id}`)}
+            className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)] min-h-11 hover:bg-[var(--bg-tertiary)] transition-colors"
+          >
+            <Eye size={18} weight="bold" />
+            Preview
+          </button>
+          <button
+            type="button"
+            onClick={onClaim}
+            disabled={claiming}
+            className={`
             flex items-center gap-2 px-4 py-3 rounded-xl
             text-sm font-semibold
             hover:opacity-90 active:scale-95
@@ -531,14 +580,15 @@ function OrderCard({
                 : 'bg-[var(--bg-warning)] text-[var(--content-primary)]'
             }
           `}
-        >
-          {claiming ? (
-            <SpinnerGap size={16} className="animate-spin" />
-          ) : (
-            <Lightning size={16} weight="fill" />
-          )}
-          Start
-        </button>
+          >
+            {claiming ? (
+              <SpinnerGap size={16} className="animate-spin" />
+            ) : (
+              <Lightning size={16} weight="fill" />
+            )}
+            Start
+          </button>
+        </div>
       </div>
     </Card>
   );
