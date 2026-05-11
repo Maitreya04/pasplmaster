@@ -1,5 +1,7 @@
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
+import { subscribeToTable } from '../lib/realtime';
 import { isAskLine } from '../lib/picking/askBrand';
 import type { OrderItem, OrderWithItems } from '../types';
 
@@ -17,6 +19,14 @@ type OrderItemRow = Omit<
   items?: ItemCatalogJoin | ItemCatalogJoin[] | null;
 };
 
+/**
+ * Realtime is the primary update path. Polling is a safety net only.
+ * 5 minutes is fine because an open order detail view also subscribes
+ * to row-level changes on `orders` and `order_items`.
+ */
+const KEEPALIVE_INTERVAL_MS = 5 * 60 * 1000;
+const REALTIME_DEBOUNCE_MS = 500;
+
 function mapOrderItemsWithCatalog(rows: OrderItemRow[] | null): OrderItem[] {
   if (!rows?.length) return [];
   return rows.map((row) => {
@@ -33,8 +43,11 @@ function mapOrderItemsWithCatalog(rows: OrderItemRow[] | null): OrderItem[] {
 }
 
 export function useOrderDetail(orderId: number | null) {
-  return useQuery<OrderWithItems>({
-    queryKey: ['order', orderId],
+  const queryClient = useQueryClient();
+  const queryKey = ['order', orderId] as const;
+
+  const query = useQuery<OrderWithItems>({
+    queryKey,
     queryFn: async () => {
       const { data: order, error: orderError } = await supabase
         .from('orders')
@@ -97,6 +110,48 @@ export function useOrderDetail(orderId: number | null) {
     },
     enabled: orderId !== null,
     staleTime: 0,
-    refetchInterval: 30000,
+    refetchInterval: KEEPALIVE_INTERVAL_MS,
+    refetchIntervalInBackground: false,
   });
+
+  // Realtime: row-level subscriptions for this specific order.
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (orderId == null) return;
+
+    const scheduleInvalidate = () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = null;
+        void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      }, REALTIME_DEBOUNCE_MS);
+    };
+
+    const unsubOrder = subscribeToTable({
+      channelName: `order-detail:${orderId}`,
+      table: 'orders',
+      filter: `id=eq.${orderId}`,
+      onChange: scheduleInvalidate,
+      onReconnect: () =>
+        queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
+    });
+
+    const unsubItems = subscribeToTable({
+      channelName: `order-items:${orderId}`,
+      table: 'order_items',
+      filter: `order_id=eq.${orderId}`,
+      onChange: scheduleInvalidate,
+      onReconnect: () =>
+        queryClient.invalidateQueries({ queryKey: ['order', orderId] }),
+    });
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      unsubOrder();
+      unsubItems();
+    };
+  }, [orderId, queryClient]);
+
+  return query;
 }

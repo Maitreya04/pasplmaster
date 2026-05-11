@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { useAuth } from '../context/AuthContext';
+import { subscribeToTable } from '../lib/realtime';
 import type { Order, ClaimStage, WorkflowStatus } from '../types';
 import {
   ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
@@ -11,7 +12,17 @@ import {
 
 /** Stale threshold in ms — matches the 3-minute heartbeat timeout */
 const STALE_THRESHOLD_MS = 3 * 60 * 1000;
-const LIVE_REFRESH_MS = 2_000;
+
+/**
+ * Realtime subscriptions on `orders` and `work_claims` are the primary update
+ * path. Polling is a safety net for the (rare) case where the websocket has
+ * been dropped without the client noticing — 60s is fast enough to feel
+ * "live" and 30× less egress than the previous 2s/8s cadence.
+ */
+const KEEPALIVE_INTERVAL_MS = 60_000;
+
+/** Coalesce realtime bursts (e.g. work_claims heartbeats) into a single refetch. */
+const REALTIME_DEBOUNCE_MS = 750;
 
 interface ClaimableOrdersOptions {
   /** The stage to check claims for */
@@ -166,11 +177,59 @@ export function useClaimableOrders(
       });
     },
     staleTime: 0, // Always refetch — claims change frequently
-    refetchInterval: (query) => (query.state.data !== undefined ? LIVE_REFRESH_MS : false),
+    refetchInterval: (query) =>
+      query.state.data !== undefined ? KEEPALIVE_INTERVAL_MS : false,
     refetchIntervalInBackground: false,
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
   });
+
+  // Realtime: react instantly to relevant order + claim changes.
+  const queryClient = useQueryClient();
+  const queryKey = useMemo(
+    () => ['claimable-orders', stage, statusKey, todayOnly ?? false] as const,
+    [stage, statusKey, todayOnly],
+  );
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const scheduleInvalidate = () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = null;
+        void queryClient.invalidateQueries({ queryKey });
+      }, REALTIME_DEBOUNCE_MS);
+    };
+
+    const ordersFilter =
+      typeof workflowStatus === 'string'
+        ? `workflow_status=eq.${workflowStatus}`
+        : undefined;
+
+    const unsubOrders = subscribeToTable({
+      channelName: `claimable-orders:${stage}:${statusKey}:${todayOnly ?? false}`,
+      table: 'orders',
+      filter: ordersFilter,
+      onChange: scheduleInvalidate,
+      onReconnect: () =>
+        queryClient.invalidateQueries({ queryKey }),
+    });
+
+    const unsubClaims = subscribeToTable({
+      channelName: `claimable-claims:${stage}:${statusKey}:${todayOnly ?? false}`,
+      table: 'work_claims',
+      filter: `stage=eq.${stage}`,
+      onChange: scheduleInvalidate,
+      onReconnect: () =>
+        queryClient.invalidateQueries({ queryKey }),
+    });
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      unsubOrders();
+      unsubClaims();
+    };
+  }, [queryClient, queryKey, stage, statusKey, todayOnly, workflowStatus]);
 
   // Categorize orders
   const categorized = useMemo(() => {

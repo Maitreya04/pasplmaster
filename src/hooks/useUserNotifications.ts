@@ -21,7 +21,7 @@ export function useUserNotifications(userId: number | null) {
     setLoading(true);
     const { data, error } = await supabase
       .from('user_notifications')
-      .select('*')
+      .select('id, user_id, title, body, type, order_id, payload, read_at, created_at')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(PAGE_SIZE);

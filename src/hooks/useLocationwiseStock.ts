@@ -78,7 +78,7 @@ export function useLocationwiseStock(busyCodes: Array<number | null | undefined>
     enabled: normalizedBusyCodes.length > 0,
     staleTime: 0,
     refetchInterval: POLL_INTERVAL_MS,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });

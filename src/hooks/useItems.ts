@@ -1,89 +1,254 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { queryClient } from '../lib/queryClient';
+import { idbGet, idbSet } from '../lib/idb';
+import { subscribeToTable, type ChangePayload } from '../lib/realtime';
 import type { Item } from '../types';
+
+/**
+ * Items catalog hook.
+ *
+ * Architecture (see senior-dev review notes in chat history):
+ *
+ *   1. **Initial snapshot**: when there is no local cache, paginate the full
+ *      active-items table once. Cost: ~one-time ~1.5–2 MB per device.
+ *
+ *   2. **IndexedDB persistence**: snapshot is written to IndexedDB keyed by a
+ *      cache version. On subsequent app loads we restore the catalog from
+ *      disk in milliseconds — zero Supabase egress.
+ *
+ *   3. **Watermark delta**: every refresh asks Postgres for rows with
+ *      `updated_at > watermark`. With the `set_items_updated_at` trigger
+ *      (migration 026) this is reliable for stock changes too. Typical
+ *      payload: a handful of rows = a few KB.
+ *
+ *   4. **Realtime push**: a single `postgres_changes` subscription on
+ *      `items` keeps the cache in sync with Postgres in real time. Stock
+ *      updates show up in < 1 s and burn ~hundreds of bytes per event.
+ *
+ *   5. **Reconcile on reconnect**: if the websocket drops we run a watermark
+ *      delta the moment it comes back, so missed events are not lost. The
+ *      5-minute `refetchInterval` is purely a belt-and-braces keep-alive.
+ */
 
 type ItemSyncRow = Item & { updated_at: string; is_active?: boolean | null };
 
+/** Columns required by the UI + sync metadata. Keep this list narrow. */
 const ITEMS_SELECT =
-  'id,name,alias,alias1,busy_code,parent_group,main_group,item_category,sales_price,mrp,stock_qty,rack_no';
+  'id,name,alias,alias1,busy_code,parent_group,main_group,item_category,' +
+  'sales_price,mrp,stock_qty,rack_no,updated_at,is_active';
 
-/** Poll frequently so stock updates are reflected quickly in the billing UI. */
-const POLL_INTERVAL_MS = 10_000;
+const IDB_KEY = 'items-cache-v1';
+const CACHE_VERSION = 1;
 
-const cachedItems: Map<number, Item> = new Map();
-let lastReturnedArray: Item[] = [];
+/** Pure keep-alive — realtime is the primary update path. */
+const KEEPALIVE_INTERVAL_MS = 5 * 60 * 1000;
 
-function hasItemChanged(prev: Item | undefined, next: ItemSyncRow): boolean {
-  if (!prev) return true;
-  return (
-    prev.id !== next.id ||
-    prev.name !== next.name ||
-    prev.alias !== next.alias ||
-    prev.alias1 !== next.alias1 ||
-    prev.busy_code !== next.busy_code ||
-    prev.parent_group !== next.parent_group ||
-    prev.main_group !== next.main_group ||
-    prev.item_category !== next.item_category ||
-    prev.sales_price !== next.sales_price ||
-    prev.mrp !== next.mrp ||
-    prev.stock_qty !== next.stock_qty ||
-    prev.rack_no !== next.rack_no
-  );
+/** Page size for snapshot pulls. */
+const PAGE_SIZE = 1000;
+
+interface PersistedSnapshot {
+  version: number;
+  items: ItemSyncRow[];
+  watermark: string | null;
 }
 
-export async function fetchAllItems(): Promise<Item[]> {
-  // Always run a full active-items sync.
-  // Some upstream stock update paths can change stock_qty without bumping updated_at,
-  // which makes delta-sync by updated_at miss real inventory changes.
-  let allFetched = false;
-  let lastId = 0;
-  let hasChanges = false;
-  const seenIds = new Set<number>();
+/** Authoritative in-memory store. Keyed by id; values include sync metadata. */
+const cachedItems: Map<number, ItemSyncRow> = new Map();
 
-  while (!allFetched) {
-    const { data: rawData, error } = await supabase
+/** Max(updated_at) across cached rows, in ISO form. `null` until first sync. */
+let watermark: string | null = null;
+
+/** Last array we handed to React Query — only swap reference when contents change. */
+let lastReturnedArray: Item[] = [];
+
+let hydrated = false;
+let hydratePromise: Promise<void> | null = null;
+let realtimeAttached = false;
+/** Coalesces rapid bursts of realtime events into one IDB write + one cache push. */
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function maxIsoTimestamp(a: string | null, b: string | null): string | null {
+  if (!a) return b;
+  if (!b) return a;
+  return a >= b ? a : b;
+}
+
+function isActiveRow(row: ItemSyncRow): boolean {
+  return row.is_active !== false;
+}
+
+function upsertRow(row: ItemSyncRow): boolean {
+  let changed = false;
+  if (isActiveRow(row)) {
+    const existing = cachedItems.get(row.id);
+    if (!existing || existing.updated_at !== row.updated_at) {
+      cachedItems.set(row.id, row);
+      changed = true;
+    }
+  } else if (cachedItems.has(row.id)) {
+    cachedItems.delete(row.id);
+    changed = true;
+  }
+  watermark = maxIsoTimestamp(watermark, row.updated_at);
+  return changed;
+}
+
+async function hydrateFromIdb(): Promise<void> {
+  if (hydrated) return;
+  if (hydratePromise) return hydratePromise;
+
+  hydratePromise = (async () => {
+    const snapshot = await idbGet<PersistedSnapshot>(IDB_KEY);
+    if (
+      snapshot &&
+      snapshot.version === CACHE_VERSION &&
+      Array.isArray(snapshot.items)
+    ) {
+      for (const row of snapshot.items) {
+        if (isActiveRow(row)) {
+          cachedItems.set(row.id, row);
+        }
+      }
+      watermark = snapshot.watermark ?? null;
+      lastReturnedArray = Array.from(cachedItems.values());
+    }
+    hydrated = true;
+  })();
+
+  return hydratePromise;
+}
+
+function schedulePersist(): void {
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    void persistToIdb();
+  }, 1_000);
+}
+
+async function persistToIdb(): Promise<void> {
+  await idbSet<PersistedSnapshot>(IDB_KEY, {
+    version: CACHE_VERSION,
+    items: Array.from(cachedItems.values()),
+    watermark,
+  });
+}
+
+/** Push the current cache snapshot into the React Query cache. */
+function publishToQueryCache(): void {
+  lastReturnedArray = Array.from(cachedItems.values());
+  queryClient.setQueryData<Item[]>(ITEMS_QUERY_KEY, lastReturnedArray);
+}
+
+/** Full paginated pull. Used only when there is no local watermark yet. */
+async function fullSnapshot(): Promise<boolean> {
+  let lastId = 0;
+  let changed = false;
+
+  for (;;) {
+    const { data, error } = await supabase
       .from('items')
-      .select(ITEMS_SELECT + ',updated_at,is_active')
+      .select(ITEMS_SELECT)
       .eq('is_active', true)
       .gt('id', lastId)
       .order('id', { ascending: true })
-      .limit(1000);
-
-    const data = (rawData ?? []) as unknown as ItemSyncRow[];
+      .limit(PAGE_SIZE);
 
     if (error) throw error;
-    if (data.length === 0) {
-      allFetched = true;
-      break;
-    }
+    const rows = (data ?? []) as unknown as ItemSyncRow[];
+    if (rows.length === 0) break;
 
-    for (const item of data) {
-      seenIds.add(item.id);
-      const prev = cachedItems.get(item.id);
-      if (hasItemChanged(prev, item)) {
-        hasChanges = true;
+    for (const row of rows) {
+      if (upsertRow(row)) changed = true;
+      lastId = row.id;
+    }
+    if (rows.length < PAGE_SIZE) break;
+  }
+
+  return changed;
+}
+
+/** Delta pull using the watermark. Also catches deactivations (is_active=false). */
+async function deltaSync(since: string): Promise<boolean> {
+  let changed = false;
+  let lastId = 0;
+  /** Same timestamp can repeat across rows; paginate by (updated_at, id). */
+  // PostgREST cannot express tuple comparisons, so we fetch by updated_at>since
+  // and walk in id order to avoid skipping rows at the same timestamp. The
+  // watermark only advances after every row at the current timestamp is read.
+  for (;;) {
+    const { data, error } = await supabase
+      .from('items')
+      .select(ITEMS_SELECT)
+      .gt('updated_at', since)
+      .gt('id', lastId)
+      .order('id', { ascending: true })
+      .limit(PAGE_SIZE);
+
+    if (error) throw error;
+    const rows = (data ?? []) as unknown as ItemSyncRow[];
+    if (rows.length === 0) break;
+
+    for (const row of rows) {
+      if (upsertRow(row)) changed = true;
+      lastId = row.id;
+    }
+    if (rows.length < PAGE_SIZE) break;
+  }
+
+  return changed;
+}
+
+/**
+ * Lazily attach one realtime channel for the whole app.
+ * Stock and price updates land here in < 1 s with no polling overhead.
+ */
+function ensureRealtime(): void {
+  if (realtimeAttached) return;
+  realtimeAttached = true;
+
+  subscribeToTable<ItemSyncRow>({
+    channelName: 'items-live',
+    table: 'items',
+    onChange: (payload: ChangePayload<ItemSyncRow>) => {
+      if (payload.eventType === 'DELETE') {
+        const oldRow = payload.old as Partial<ItemSyncRow> | undefined;
+        if (oldRow?.id != null && cachedItems.delete(oldRow.id)) {
+          publishToQueryCache();
+          schedulePersist();
+        }
+        return;
       }
-      cachedItems.set(item.id, item);
-      lastId = item.id;
-    }
 
-    if (data.length < 1000) {
-      allFetched = true;
-    }
+      const row = payload.new as ItemSyncRow | undefined;
+      if (!row || row.updated_at == null) return;
+      if (upsertRow(row)) {
+        publishToQueryCache();
+        schedulePersist();
+      }
+    },
+    onReconnect: () => {
+      // Catch any events missed while the websocket was down.
+      void queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
+    },
+  });
+}
+
+export async function fetchAllItems(): Promise<Item[]> {
+  await hydrateFromIdb();
+  ensureRealtime();
+
+  let changed = false;
+  if (watermark == null) {
+    changed = await fullSnapshot();
+  } else {
+    changed = await deltaSync(watermark);
   }
 
-  // Remove items that are no longer active/present.
-  for (const id of Array.from(cachedItems.keys())) {
-    if (!seenIds.has(id)) {
-      cachedItems.delete(id);
-      hasChanges = true;
-    }
-  }
-
-  if (hasChanges || lastReturnedArray.length === 0) {
+  if (changed || lastReturnedArray.length === 0) {
     lastReturnedArray = Array.from(cachedItems.values());
-    console.log(`[useItems] cache updated. Total active items: ${lastReturnedArray.length}`);
+    schedulePersist();
   }
 
   return lastReturnedArray;
@@ -96,21 +261,30 @@ export function useItems() {
     queryKey: ITEMS_QUERY_KEY,
     queryFn: fetchAllItems,
     staleTime: 0,
-    refetchInterval: POLL_INTERVAL_MS,
-    refetchIntervalInBackground: true,
+    /**
+     * Realtime is the primary update path. Polling is a safety net for the
+     * (rare) case where the websocket has been dropped without the client
+     * realising. 5 minutes is fast enough to feel "live" and slow enough to
+     * be invisible in egress.
+     */
+    refetchInterval: KEEPALIVE_INTERVAL_MS,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
-    // Disable structural sharing so React Query always returns a new array
-    // reference, forcing useMemo/search index to rebuild with fresh data.
+    /**
+     * We mutate the cached items map in place and hand React Query a fresh
+     * array reference on every real change, so structural sharing would only
+     * mask updates.
+     */
     structuralSharing: false,
   });
 }
 
-/** Fire-and-forget prefetch — call early so items are cached before user needs them. */
-export function prefetchItems() {
+/** Fire-and-forget prefetch — call early so items are warm before user needs them. */
+export function prefetchItems(): void {
   void queryClient.prefetchQuery({
     queryKey: ITEMS_QUERY_KEY,
     queryFn: fetchAllItems,
-    staleTime: POLL_INTERVAL_MS,
+    staleTime: KEEPALIVE_INTERVAL_MS,
   });
 }

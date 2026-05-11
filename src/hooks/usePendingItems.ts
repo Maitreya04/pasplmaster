@@ -46,6 +46,7 @@ export function usePendingItems(options?: UsePendingItemsOptions) {
     staleTime: 0,
     enabled,
     refetchInterval: 30000,
+    refetchIntervalInBackground: false,
   });
 }
 

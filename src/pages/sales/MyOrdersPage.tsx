@@ -797,6 +797,10 @@ export default function MyOrdersPage(): React.JSX.Element | null {
   const { userName, userId } = useAuth();
   const { data: orders, isLoading, error } = useOrders({
     salespersonName: userName ?? undefined,
+    /** Cap payload: list is sorted newest-first; reduces repeated full-table egress while polling. */
+    limit: 500,
+    /** Slower than live billing queues; push + manual refresh still update the UI. */
+    liveRefreshIntervalMs: 60_000,
   });
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const { items: notifications, markRead } = useUserNotifications(userId);

@@ -403,6 +403,7 @@ export function useSalesPendingRecovery(userName: string | null) {
     enabled: !!userName,
     staleTime: 0,
     refetchInterval: 30000,
+    refetchIntervalInBackground: false,
   });
 
   const parties = useMemo(() => {
