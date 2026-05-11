@@ -44,11 +44,31 @@ const ITEMS_SELECT =
 const IDB_KEY = 'items-cache-v1';
 const CACHE_VERSION = 1;
 
-/** When Realtime works: frequent enough to feel like the old 10–30s stock poll, cheap because each tick is watermark-only. */
-const KEEPALIVE_INTERVAL_MS = 30_000;
+/**
+ * Items keep-alive. Stock is the most user-visible value in the app, so we
+ * pay a small egress cost for near-realtime feel.
+ *
+ * Math (per 5 concurrent users, 8h/day, 22 working days):
+ *   - Each tick is a *watermark delta*: `updated_at > last_seen`.
+ *   - 90%+ of ticks return `[]` (Busy sync runs ~every 70s; most clients
+ *     see nothing new). Empty PostgREST response ≈ 400 B body + headers
+ *     ≈ 2 KB total round-trip.
+ *   - 5 s tick → 720 polls/hr × 5 users × 8 h × 22 d × 2 KB ≈ 1.3 GB/month
+ *     **upper bound**. Real traffic is lower because users aren't all
+ *     active for the full window and most ticks are bodies-only ~400 B.
+ *   - Well inside the Free 5 GB egress cap.
+ *
+ * When Realtime is healthy this is a safety net the user never sees — the
+ * websocket pushes updates in < 1 s. When Realtime is blocked (this device's
+ * network), 5 s is the live cadence; users feel < 5 s freshness on stock.
+ */
+const KEEPALIVE_INTERVAL_MS = 5_000;
 
-/** When Realtime is disabled (blocked wss://), poll often; each tick is a cheap watermark delta. */
-const POLL_FALLBACK_MS = 2_000;
+/**
+ * Same cadence whether the env flag opt-out is set or not. The watermark
+ * delta is cheap; there is no benefit to splitting modes.
+ */
+const POLL_FALLBACK_MS = KEEPALIVE_INTERVAL_MS;
 
 /** Page size for snapshot pulls. */
 const PAGE_SIZE = 1000;
@@ -269,9 +289,9 @@ export function useItems() {
     queryFn: fetchAllItems,
     staleTime: 0,
     /**
-     * Realtime is the primary update path. REST refetch is watermark-only
-     * (tiny payload) so a 30s keep-alive stays responsive without the old
-     * full-catalog egress cost.
+     * Realtime is the primary update path; REST refetch is watermark-only
+     * (tiny delta) so a 5s keep-alive feels near-realtime even when wss://
+     * is blocked, without bringing back the full-catalog egress cost.
      */
     refetchInterval: REALTIME_ENABLED ? KEEPALIVE_INTERVAL_MS : POLL_FALLBACK_MS,
     refetchIntervalInBackground: false,

@@ -20,6 +20,7 @@ import { importPackDefinitions } from '../../lib/import/packDefinitionsImporter'
 import { importSalesTargets } from '../../lib/import/salesTargetsImporter';
 import { importSalesHistory } from '../../lib/import/salesHistoryImporter';
 import { queryClient } from '../../lib/queryClient';
+import { broadcastItemsChanged } from '../../lib/crossTabSync';
 import { ITEMS_QUERY_KEY } from '../../hooks/useItems';
 import { PACK_DEFINITIONS_QUERY_KEY } from '../../lib/packLpn';
 
@@ -105,6 +106,7 @@ export default function UploadPage(): React.JSX.Element | null {
       // Invalidate items cache so New Order / search see updated list after item or stock import
       if (detection.type === 'items_price' || detection.type === 'items_stock') {
         void queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
+        broadcastItemsChanged();
       }
       if (detection.type === 'item_pack_definitions') {
         void queryClient.invalidateQueries({ queryKey: PACK_DEFINITIONS_QUERY_KEY });

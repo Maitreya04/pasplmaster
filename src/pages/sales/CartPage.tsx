@@ -21,6 +21,7 @@ import {
   formatInternalNotificationError,
 } from '../../lib/pickerPush';
 import { ITEMS_QUERY_KEY } from '../../hooks/useItems';
+import { broadcastItemsChanged, broadcastInvalidate } from '../../lib/crossTabSync';
 import { useTransports } from '../../hooks/useTransports';
 import { supabase } from '../../lib/supabase/client';
 import {
@@ -1069,6 +1070,10 @@ export default function CartPage(): React.JSX.Element | null {
       queryClient.invalidateQueries({ queryKey: ['customer_quick_reorder'] });
       queryClient.invalidateQueries({ queryKey: ['salesperson_top_customers'] });
       queryClient.invalidateQueries({ queryKey: ['trending_items'] });
+      // Push the same refreshes to every other tab on this device — instant
+      // cross-tab updates even when wss:// is blocked.
+      broadcastItemsChanged();
+      broadcastInvalidate(['orders']);
     },
     onError: (e) => {
       const msg =

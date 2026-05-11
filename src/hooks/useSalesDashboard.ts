@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase/client';
 import type { Order } from '../types';
 import {
   ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
-  normalizeOrderBusyItemCount,
+  normalizeOrderListBusyItemCount,
   type OrderRowWithEmbed,
 } from '../lib/orderItemCount';
 
@@ -181,8 +181,8 @@ export function useSalesDashboard(salespersonName: string | null) {
 
       if (recentErr) throw recentErr;
 
-      const recentOrders = (recentRaw ?? []).map((row) =>
-        normalizeOrderBusyItemCount(row as OrderRowWithEmbed),
+      const recentOrders = normalizeOrderListBusyItemCount(
+        (recentRaw ?? []) as OrderRowWithEmbed[],
       );
 
       return {

@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase/client';
 import { useAuth } from '../context/AuthContext';
 import {
   ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
-  normalizeOrderBusyItemCount,
+  normalizeOrderListBusyItemCount,
   type OrderRowWithEmbed,
 } from '../lib/orderItemCount';
 import { subscribeToTable } from '../lib/realtime';
@@ -112,8 +112,8 @@ export function useClaimableOrders(
       if (orderError) throw orderError;
       if (!rawOrders || rawOrders.length === 0) return [];
 
-      const orders = rawOrders.map((row) =>
-        normalizeOrderBusyItemCount(row as OrderRowWithEmbed),
+      const orders = normalizeOrderListBusyItemCount(
+        rawOrders as OrderRowWithEmbed[],
       );
 
       const orderIds = orders.map((o: Order) => o.id);

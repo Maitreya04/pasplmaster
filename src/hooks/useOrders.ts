@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import {
   ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
-  normalizeOrderBusyItemCount,
+  normalizeOrderListBusyItemCount,
   type OrderRowWithEmbed,
 } from '../lib/orderItemCount';
 import { subscribeToTable } from '../lib/realtime';
@@ -130,9 +130,7 @@ export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
 
       const { data, error } = await q;
       if (error) throw error;
-      return (data ?? []).map((row) =>
-        normalizeOrderBusyItemCount(row as OrderRowWithEmbed),
-      );
+      return normalizeOrderListBusyItemCount((data ?? []) as OrderRowWithEmbed[]);
     },
     staleTime: 0,
     refetchInterval: (query) =>
