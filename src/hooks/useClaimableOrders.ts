@@ -3,7 +3,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { useAuth } from '../context/AuthContext';
 import { subscribeToTable } from '../lib/realtime';
+import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
 import type { Order, ClaimStage, WorkflowStatus } from '../types';
+
+const REALTIME_ON = isSupabasePostgresChangesEnabled();
 import {
   ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
   normalizeOrderBusyItemCount,
@@ -20,6 +23,7 @@ const STALE_THRESHOLD_MS = 3 * 60 * 1000;
  * "live" and 30× less egress than the previous 2s/8s cadence.
  */
 const KEEPALIVE_INTERVAL_MS = 60_000;
+const POLL_NO_REALTIME_MS = 2_000;
 
 /** Coalesce realtime bursts (e.g. work_claims heartbeats) into a single refetch. */
 const REALTIME_DEBOUNCE_MS = 750;
@@ -178,7 +182,11 @@ export function useClaimableOrders(
     },
     staleTime: 0, // Always refetch — claims change frequently
     refetchInterval: (query) =>
-      query.state.data !== undefined ? KEEPALIVE_INTERVAL_MS : false,
+      query.state.data !== undefined
+        ? REALTIME_ON
+          ? KEEPALIVE_INTERVAL_MS
+          : POLL_NO_REALTIME_MS
+        : false,
     refetchIntervalInBackground: false,
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
@@ -193,6 +201,8 @@ export function useClaimableOrders(
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (!REALTIME_ON) return;
+
     const scheduleInvalidate = () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {

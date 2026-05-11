@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase/client';
+import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
 import type { UserNotification } from '../types';
 
 const PAGE_SIZE = 50;
+const REALTIME_ON = isSupabasePostgresChangesEnabled();
+const POLL_MS = 15_000;
 
 export function useUserNotifications(userId: number | null) {
   const uid = useId();
@@ -47,6 +50,13 @@ export function useUserNotifications(userId: number | null) {
 
   useEffect(() => {
     if (!userId) return;
+
+    if (!REALTIME_ON) {
+      const id = window.setInterval(() => {
+        void fetchNotifications();
+      }, POLL_MS);
+      return () => window.clearInterval(id);
+    }
 
     const channel = supabase
       .channel(`user-notifications-${userId}-${uid}`)

@@ -2,8 +2,11 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { queryClient } from '../lib/queryClient';
 import { idbGet, idbSet } from '../lib/idb';
+import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
 import { subscribeToTable, type ChangePayload } from '../lib/realtime';
 import type { Item } from '../types';
+
+const REALTIME_ENABLED = isSupabasePostgresChangesEnabled();
 
 /**
  * Items catalog hook.
@@ -41,8 +44,11 @@ const ITEMS_SELECT =
 const IDB_KEY = 'items-cache-v1';
 const CACHE_VERSION = 1;
 
-/** Pure keep-alive — realtime is the primary update path. */
+/** When Realtime works, REST polling is only a rare safety net. */
 const KEEPALIVE_INTERVAL_MS = 5 * 60 * 1000;
+
+/** When Realtime is disabled (blocked wss://), poll often; each tick is a cheap watermark delta. */
+const POLL_FALLBACK_MS = 2_000;
 
 /** Page size for snapshot pulls. */
 const PAGE_SIZE = 1000;
@@ -205,6 +211,7 @@ async function deltaSync(since: string): Promise<boolean> {
  * Stock and price updates land here in < 1 s with no polling overhead.
  */
 function ensureRealtime(): void {
+  if (!REALTIME_ENABLED) return;
   if (realtimeAttached) return;
   realtimeAttached = true;
 
@@ -267,7 +274,7 @@ export function useItems() {
      * realising. 5 minutes is fast enough to feel "live" and slow enough to
      * be invisible in egress.
      */
-    refetchInterval: KEEPALIVE_INTERVAL_MS,
+    refetchInterval: REALTIME_ENABLED ? KEEPALIVE_INTERVAL_MS : POLL_FALLBACK_MS,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
@@ -285,6 +292,6 @@ export function prefetchItems(): void {
   void queryClient.prefetchQuery({
     queryKey: ITEMS_QUERY_KEY,
     queryFn: fetchAllItems,
-    staleTime: KEEPALIVE_INTERVAL_MS,
+    staleTime: REALTIME_ENABLED ? KEEPALIVE_INTERVAL_MS : POLL_FALLBACK_MS,
   });
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { subscribeToTable } from '../lib/realtime';
+import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
 import { isAskLine } from '../lib/picking/askBrand';
 import type { OrderItem, OrderWithItems } from '../types';
 
@@ -25,7 +26,10 @@ type OrderItemRow = Omit<
  * to row-level changes on `orders` and `order_items`.
  */
 const KEEPALIVE_INTERVAL_MS = 5 * 60 * 1000;
+const POLL_NO_REALTIME_MS = 2_000;
 const REALTIME_DEBOUNCE_MS = 500;
+
+const REALTIME_ON = isSupabasePostgresChangesEnabled();
 
 function mapOrderItemsWithCatalog(rows: OrderItemRow[] | null): OrderItem[] {
   if (!rows?.length) return [];
@@ -110,7 +114,7 @@ export function useOrderDetail(orderId: number | null) {
     },
     enabled: orderId !== null,
     staleTime: 0,
-    refetchInterval: KEEPALIVE_INTERVAL_MS,
+    refetchInterval: REALTIME_ON ? KEEPALIVE_INTERVAL_MS : POLL_NO_REALTIME_MS,
     refetchIntervalInBackground: false,
   });
 
@@ -118,7 +122,7 @@ export function useOrderDetail(orderId: number | null) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (orderId == null) return;
+    if (orderId == null || !REALTIME_ON) return;
 
     const scheduleInvalidate = () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);

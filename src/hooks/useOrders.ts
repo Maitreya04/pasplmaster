@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { subscribeToTable } from '../lib/realtime';
+import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
 import type { Order, WorkflowStatus } from '../types';
+
+const REALTIME_ON = isSupabasePostgresChangesEnabled();
 import {
   ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
   normalizeOrderBusyItemCount,
@@ -41,6 +44,15 @@ interface UseOrdersOptions {
  */
 const KEEPALIVE_INTERVAL_MS = 60_000;
 const REALTIME_DEBOUNCE_MS = 750;
+
+/** When Realtime is off, poll every 2s unless caller asked for a slower cadence (capped at 10s). */
+function ordersRefetchIntervalMs(opts: UseOrdersOptions): number {
+  if (REALTIME_ON) return opts.liveRefreshIntervalMs ?? KEEPALIVE_INTERVAL_MS;
+  if (opts.liveRefreshIntervalMs != null) {
+    return Math.min(opts.liveRefreshIntervalMs, 10_000);
+  }
+  return 2_000;
+}
 
 function getTodayStartIso(): string {
   const d = new Date();
@@ -123,9 +135,7 @@ export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
     },
     staleTime: 0,
     refetchInterval: (query) =>
-      query.state.data !== undefined
-        ? opts.liveRefreshIntervalMs ?? KEEPALIVE_INTERVAL_MS
-        : false,
+      query.state.data !== undefined ? ordersRefetchIntervalMs(opts) : false,
     refetchIntervalInBackground: false,
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
@@ -138,6 +148,8 @@ export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (!REALTIME_ON) return;
+
     const scheduleInvalidate = () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
