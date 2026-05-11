@@ -30,8 +30,8 @@ const REALTIME_ENABLED = isSupabasePostgresChangesEnabled();
  *      updates show up in < 1 s and burn ~hundreds of bytes per event.
  *
  *   5. **Reconcile on reconnect**: if the websocket drops we run a watermark
- *      delta the moment it comes back, so missed events are not lost. The
- *      5-minute `refetchInterval` is purely a belt-and-braces keep-alive.
+ *      delta the moment it comes back. A 30s REST keep-alive catches silent
+ *      failures; each tick is a cheap delta, not a full catalog pull.
  */
 
 type ItemSyncRow = Item & { updated_at: string; is_active?: boolean | null };
@@ -44,8 +44,8 @@ const ITEMS_SELECT =
 const IDB_KEY = 'items-cache-v1';
 const CACHE_VERSION = 1;
 
-/** When Realtime works, REST polling is only a rare safety net. */
-const KEEPALIVE_INTERVAL_MS = 5 * 60 * 1000;
+/** When Realtime works: frequent enough to feel like the old 10–30s stock poll, cheap because each tick is watermark-only. */
+const KEEPALIVE_INTERVAL_MS = 30_000;
 
 /** When Realtime is disabled (blocked wss://), poll often; each tick is a cheap watermark delta. */
 const POLL_FALLBACK_MS = 2_000;
@@ -269,10 +269,9 @@ export function useItems() {
     queryFn: fetchAllItems,
     staleTime: 0,
     /**
-     * Realtime is the primary update path. Polling is a safety net for the
-     * (rare) case where the websocket has been dropped without the client
-     * realising. 5 minutes is fast enough to feel "live" and slow enough to
-     * be invisible in egress.
+     * Realtime is the primary update path. REST refetch is watermark-only
+     * (tiny payload) so a 30s keep-alive stays responsive without the old
+     * full-catalog egress cost.
      */
     refetchInterval: REALTIME_ENABLED ? KEEPALIVE_INTERVAL_MS : POLL_FALLBACK_MS,
     refetchIntervalInBackground: false,

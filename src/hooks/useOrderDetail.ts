@@ -21,11 +21,10 @@ type OrderItemRow = Omit<
 };
 
 /**
- * Realtime is the primary update path. Polling is a safety net only.
- * 5 minutes is fine because an open order detail view also subscribes
- * to row-level changes on `orders` and `order_items`.
+ * Realtime is primary; 15s REST keep-alive matches the prior detail polling
+ * feel if the websocket is down, without hammering the API every few seconds.
  */
-const KEEPALIVE_INTERVAL_MS = 5 * 60 * 1000;
+const KEEPALIVE_INTERVAL_MS = 15_000;
 const POLL_NO_REALTIME_MS = 2_000;
 const REALTIME_DEBOUNCE_MS = 500;
 

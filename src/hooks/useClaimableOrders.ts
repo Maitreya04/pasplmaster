@@ -2,27 +2,25 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { useAuth } from '../context/AuthContext';
-import { subscribeToTable } from '../lib/realtime';
-import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
-import type { Order, ClaimStage, WorkflowStatus } from '../types';
-
-const REALTIME_ON = isSupabasePostgresChangesEnabled();
 import {
   ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
   normalizeOrderBusyItemCount,
   type OrderRowWithEmbed,
 } from '../lib/orderItemCount';
+import { subscribeToTable } from '../lib/realtime';
+import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
+import type { Order, ClaimStage, WorkflowStatus } from '../types';
+
+const REALTIME_ON = isSupabasePostgresChangesEnabled();
 
 /** Stale threshold in ms — matches the 3-minute heartbeat timeout */
 const STALE_THRESHOLD_MS = 3 * 60 * 1000;
 
 /**
- * Realtime subscriptions on `orders` and `work_claims` are the primary update
- * path. Polling is a safety net for the (rare) case where the websocket has
- * been dropped without the client noticing — 60s is fast enough to feel
- * "live" and 30× less egress than the previous 2s/8s cadence.
+ * Realtime is primary; 5s REST keep-alive matches the old live-queue cadence
+ * if the websocket drops, without polling every 2s when Realtime is healthy.
  */
-const KEEPALIVE_INTERVAL_MS = 60_000;
+const KEEPALIVE_INTERVAL_MS = 5_000;
 const POLL_NO_REALTIME_MS = 2_000;
 
 /** Coalesce realtime bursts (e.g. work_claims heartbeats) into a single refetch. */

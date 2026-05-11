@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
-import { subscribeToTable } from '../lib/realtime';
-import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
-import type { Order, WorkflowStatus } from '../types';
-
-const REALTIME_ON = isSupabasePostgresChangesEnabled();
 import {
   ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
   normalizeOrderBusyItemCount,
   type OrderRowWithEmbed,
 } from '../lib/orderItemCount';
+import { subscribeToTable } from '../lib/realtime';
+import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
+import type { Order, WorkflowStatus } from '../types';
+
+const REALTIME_ON = isSupabasePostgresChangesEnabled();
 
 interface UseOrdersOptions {
   status?: WorkflowStatus;
@@ -39,10 +39,11 @@ interface UseOrdersOptions {
 }
 
 /**
- * Realtime is the primary update path; polling is a safety net for the rare
- * case where the websocket has been dropped without the client noticing.
+ * Realtime is the primary update path; REST refetch is a cheap safety net so
+ * a dropped websocket does not leave lists stale for a full minute.
+ * Default 8s matches the “snappy billing” feel from earlier builds.
  */
-const KEEPALIVE_INTERVAL_MS = 60_000;
+const KEEPALIVE_INTERVAL_MS = 8_000;
 const REALTIME_DEBOUNCE_MS = 750;
 
 /** When Realtime is off, poll every 2s unless caller asked for a slower cadence (capped at 10s). */

@@ -5,7 +5,7 @@ import type { UserNotification } from '../types';
 
 const PAGE_SIZE = 50;
 const REALTIME_ON = isSupabasePostgresChangesEnabled();
-const POLL_MS = 15_000;
+const POLL_MS = 10_000;
 
 export function useUserNotifications(userId: number | null) {
   const uid = useId();
