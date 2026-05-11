@@ -13,11 +13,7 @@ import type { Order, OrderItem, OrderWithItems, PendingItem } from '../../types'
 
 import { formatCurrency, formatTimeAgo } from '../../utils/formatters';
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
-import {
-  digitsOnlyMobile,
-  whatsappPrefilledUrl,
-  whatsappShareUrl,
-} from '../../lib/buildOrderCustomerMessage';
+import { whatsappPrefilledUrl } from '../../lib/buildOrderCustomerMessage';
 import {
   isPendingRecoveryActionable,
   pendingRecoveryBadgeClasses,
@@ -68,12 +64,6 @@ function formatRejectReason(notes: string | null | undefined): string | null {
     return 'Account locked. Billing cannot process this order until the account is unlocked.';
   }
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
-}
-
-function normalizeWhatsappDigits(mobile: string | null | undefined): string {
-  const digits = digitsOnlyMobile(mobile);
-  if (digits.length === 10) return `91${digits}`;
-  return digits;
 }
 
 // ─── Merge helpers ────────────────────────────────────────────
@@ -480,7 +470,6 @@ function OrderDetailSheet({
     : null;
   const isRejected = order ? isWholeOrderRejected(order) : false;
   const rejectReason = formatRejectReason(order?.notes);
-  const customerWhatsappDigits = normalizeWhatsappDigits(order?.customer_mobile);
   const liveBillingPreview = useMemo(() => {
     if (!order || !billingUpdate) return null;
     return buildBillingCustomerUpdate({
@@ -517,11 +506,7 @@ function OrderDetailSheet({
   const billingUpdateTime = billingUpdate?.created_at
     ? formatTimeAgo(billingUpdate.created_at)
     : null;
-  const sendUrl = billingMessage
-    ? customerWhatsappDigits
-      ? whatsappShareUrl(customerWhatsappDigits, billingMessage)
-      : whatsappPrefilledUrl(billingMessage)
-    : null;
+  const sendUrl = billingMessage ? whatsappPrefilledUrl(billingMessage) : null;
 
   const handleCopyMessage = useCallback(async () => {
     if (!billingMessage) return;
@@ -613,11 +598,9 @@ function OrderDetailSheet({
                 </button>
               </div>
 
-              {!customerWhatsappDigits && (
-                <p className="mt-2 text-xs text-[var(--content-warning)]">
-                  Customer mobile not saved. WhatsApp will open with the message only so you can choose the chat manually.
-                </p>
-              )}
+              <p className="mt-2 text-xs text-[var(--content-secondary)]">
+                WhatsApp opens with this message — search your chats, pick the party, then send.
+              </p>
 
               {showMessagePreview && (
                 <div className="mt-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--embed-whatsapp-bg)] p-4">

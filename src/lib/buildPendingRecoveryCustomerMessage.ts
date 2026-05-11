@@ -1,8 +1,4 @@
-import {
-  formatCustomerShareDate,
-  whatsappPrefilledUrl,
-  whatsappShareUrl,
-} from './buildOrderCustomerMessage';
+import { formatCustomerShareDate, whatsappPrefilledUrl } from './buildOrderCustomerMessage';
 
 type AvailabilityLine = {
   name: string;
@@ -64,7 +60,10 @@ export function buildPendingRecoveryCustomerMessage(params: {
   return chunks.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd();
 }
 
-export function pendingRecoveryWhatsappUrl(phoneDigits: string | null | undefined, text: string): string {
-  const digits = (phoneDigits ?? '').replace(/\D/g, '');
-  return digits ? whatsappShareUrl(digits, text) : whatsappPrefilledUrl(text);
+/**
+ * Same as billing / cart: message prefilled, no phone in the URL — staff picks the chat in WhatsApp.
+ * `phoneDigits` is kept for call-site compatibility and ignored.
+ */
+export function pendingRecoveryWhatsappUrl(_phoneDigits: string | null | undefined, text: string): string {
+  return whatsappPrefilledUrl(text);
 }
