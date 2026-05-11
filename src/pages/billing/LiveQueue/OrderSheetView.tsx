@@ -590,15 +590,24 @@ export function OrderSheetView({
       {showConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div
-            className="ds-card p-6 max-w-md w-full shadow-xl animate-slide-up"
+            className="ds-card p-6 max-w-md w-full max-h-[min(85vh,85dvh)] flex flex-col overflow-hidden shadow-xl animate-slide-up min-h-0"
             role="dialog"
             aria-modal="true"
+            aria-labelledby="billing-finish-confirm-title"
           >
-            <h3 className="text-base font-bold text-[var(--content-primary)] mb-4">
+            <h3
+              id="billing-finish-confirm-title"
+              className="text-base font-bold text-[var(--content-primary)] mb-4 shrink-0"
+            >
               Finish billing {orderName}?
             </h3>
 
-            <div className="space-y-2 mb-5">
+            <div
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-2 mb-4 pr-1 -mr-0.5 [scrollbar-gutter:stable]"
+              tabIndex={0}
+              role="region"
+              aria-label="Order summary"
+            >
               {items.length - flagCount > 0 && (
                 <p className="text-sm text-[var(--content-positive)] font-medium">
                   {items.length - flagCount} item{items.length - flagCount !== 1 ? 's' : ''} billed normally
@@ -626,6 +635,7 @@ export function OrderSheetView({
                 })}
             </div>
 
+            <div className="shrink-0 border-t border-[var(--border-subtle)] pt-4 mt-0">
             <p className="font-ds-label-size text-[var(--content-quaternary)] mb-4">
               Out of stock items will be marked pending. Partial items billed at available qty.
             </p>
@@ -658,6 +668,7 @@ export function OrderSheetView({
                   <span className="font-ds-label-size font-normal opacity-80 hidden sm:inline tabular-nums">{SHORTCUT_FINISH}</span>
                 )}
               </button>
+            </div>
             </div>
           </div>
         </div>
