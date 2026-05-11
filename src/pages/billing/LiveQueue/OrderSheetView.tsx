@@ -604,7 +604,6 @@ export function OrderSheetView({
 
             <div
               className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-2 mb-4 pr-1 -mr-0.5 [scrollbar-gutter:stable]"
-              tabIndex={0}
               role="region"
               aria-label="Order summary"
             >
