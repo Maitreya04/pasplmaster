@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import type { Icon } from '@phosphor-icons/react';
 import { Link, useLocation } from 'react-router-dom';
 import { appHaptics } from '../../lib/haptics';
@@ -8,6 +8,8 @@ export interface BottomNavItem {
   icon: Icon;
   label: string;
   path: string;
+  /** When multiple tabs share `path`, set this so optimistic highlight targets one tab. */
+  navKey?: string;
   match?: (pathname: string, search: string) => boolean;
   activeWeight?: IconWeight;
   inactiveWeight?: IconWeight;
@@ -88,12 +90,18 @@ function BottomNavLink({
   );
 }
 
+function navKeyFor(item: BottomNavItem): string {
+  return item.navKey ?? `${item.path}::${item.label}`;
+}
+
 export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
   const location = useLocation();
   const currentFull = location.pathname + location.search;
-  const [optimisticPath, setOptimisticPath] = useState<string | null>(null);
-  const pendingOptimisticPath =
-    optimisticPath && optimisticPath !== currentFull ? optimisticPath : null;
+  const [optimisticNavKey, setOptimisticNavKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOptimisticNavKey(null);
+  }, [location.pathname, location.search]);
 
   return (
     <nav
@@ -114,7 +122,8 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
           : item.path.includes('?')
             ? currentFull === item.path
             : location.pathname === item.path;
-        const isActive = pendingOptimisticPath ? item.path === pendingOptimisticPath : matchesLocation;
+        const nk = navKeyFor(item);
+        const isActive = optimisticNavKey ? optimisticNavKey === nk : matchesLocation;
         const iconWeight = isActive ? (item.activeWeight ?? 'fill') : (item.inactiveWeight ?? 'regular');
 
         // Gate haptics on real navigation, not tab highlight. E.g. New Order tab stays active on
@@ -126,13 +135,13 @@ export function BottomNav({ items }: BottomNavProps): React.JSX.Element | null {
 
         return (
           <BottomNavLink
-            key={item.path}
+            key={`${item.path}::${item.label}`}
             item={item}
             willNavigate={willNavigate}
             isActive={isActive}
             iconWeight={iconWeight}
             onNavigateIntent={() => {
-              setOptimisticPath(item.path);
+              setOptimisticNavKey(nk);
             }}
           />
         );

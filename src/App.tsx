@@ -150,6 +150,7 @@ export default function App(): React.JSX.Element | null {
           }
         >
           <Route index element={<QueuePage />} />
+          <Route path="barcode-mapping" element={<BarcodeMappingPage />} />
           <Route path="pick/:id" element={<PickPage />} />
           <Route path="preview/:id" element={<PickPreviewPage />} />
         </Route>

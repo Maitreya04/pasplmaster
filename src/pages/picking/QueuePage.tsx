@@ -11,6 +11,7 @@ import {
   Bell,
   GearSix,
   Eye,
+  Barcode,
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
@@ -249,6 +250,23 @@ export default function QueuePage(): React.JSX.Element | null {
             Ready orders will appear here as billing approves them.
           </p>
         </header>
+
+        <button
+          type="button"
+          onClick={() => navigate('/picking/barcode-mapping')}
+          className="flex w-full items-center gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 text-left transition-colors hover:bg-[var(--bg-tertiary)] active:scale-[0.99]"
+        >
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--bg-accent-subtle)]">
+            <Barcode size={22} weight="duotone" className="text-[var(--content-accent)]" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-[var(--content-primary)]">Map manufacturer barcodes</p>
+            <p className="mt-0.5 text-sm text-[var(--content-secondary)]">
+              Link bin QR and part barcodes to Busy SKUs — also in the bottom bar as Map SKU.
+            </p>
+          </div>
+          <ArrowRight size={20} weight="bold" className="shrink-0 text-[var(--content-tertiary)]" />
+        </button>
 
         {!pushAlerts.enabled && (
           <Card className="border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]">

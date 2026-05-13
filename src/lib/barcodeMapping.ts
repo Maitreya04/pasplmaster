@@ -41,6 +41,26 @@ export interface MappedSkuSummary {
   skuBusyCode: number;
 }
 
+export interface BarcodeRackCoverageSummary {
+  rack_count: number;
+  racks_complete: number;
+  racks_in_progress: number;
+  racks_without_mappings: number;
+}
+
+export interface BarcodeRackCoverageRow {
+  rack_id: string;
+  total_skus: number;
+  mapped_skus: number;
+  unmapped_skus: number;
+  coverage_pct: number;
+}
+
+export interface BarcodeRackCoveragePayload {
+  summary: BarcodeRackCoverageSummary;
+  racks: BarcodeRackCoverageRow[];
+}
+
 export interface SaveBarcodeMappingInput {
   barcodeRaw: string;
   barcodeKey: string;
@@ -189,6 +209,33 @@ export async function fetchBarcodeCoverage(): Promise<BarcodeCoverage> {
   const { data, error } = await supabase.rpc('get_barcode_coverage');
   if (error) throw error;
   return data as BarcodeCoverage;
+}
+
+export async function fetchBarcodeRackCoverage(): Promise<BarcodeRackCoveragePayload> {
+  const { data, error } = await supabase.rpc('get_barcode_rack_coverage');
+  if (error) throw error;
+  const emptySummary: BarcodeRackCoverageSummary = {
+    rack_count: 0,
+    racks_complete: 0,
+    racks_in_progress: 0,
+    racks_without_mappings: 0,
+  };
+  if (data == null || typeof data !== 'object') {
+    return { summary: emptySummary, racks: [] };
+  }
+  const payload = data as {
+    summary?: Partial<BarcodeRackCoverageSummary>;
+    racks?: BarcodeRackCoverageRow[];
+  };
+  return {
+    summary: {
+      rack_count: Number(payload.summary?.rack_count ?? 0),
+      racks_complete: Number(payload.summary?.racks_complete ?? 0),
+      racks_in_progress: Number(payload.summary?.racks_in_progress ?? 0),
+      racks_without_mappings: Number(payload.summary?.racks_without_mappings ?? 0),
+    },
+    racks: Array.isArray(payload.racks) ? payload.racks : [],
+  };
 }
 
 export async function fetchMappedSkuSummaries(): Promise<MappedSkuSummary[]> {

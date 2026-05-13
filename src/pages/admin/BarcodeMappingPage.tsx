@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowLeftIcon,
   BarcodeIcon,
@@ -8,6 +8,7 @@ import {
   CheckCircleIcon,
   DatabaseIcon,
   MagnifyingGlassIcon,
+  MapPinIcon,
   SealWarningIcon,
   SkipForwardIcon,
   XCircleIcon,
@@ -21,6 +22,7 @@ import { useItems } from '../../hooks/useItems';
 import {
   fetchMappedSkuSummaries,
   fetchBarcodeCoverage,
+  fetchBarcodeRackCoverage,
   loadSkuFromBusyCode,
   loadSkuOptionsFromBin,
   normalizeBinCode,
@@ -63,6 +65,7 @@ interface SessionStats {
 }
 
 const BARCODE_COVERAGE_QUERY_KEY = ['barcode-coverage'] as const;
+const BARCODE_RACK_COVERAGE_QUERY_KEY = ['barcode-rack-coverage'] as const;
 const MAPPED_SKUS_QUERY_KEY = ['barcode-mapped-skus'] as const;
 
 const EMPTY_STATS: SessionStats = {
@@ -86,6 +89,26 @@ function formatNumber(value: number | null | undefined): string {
 function formatCoverage(coverage: BarcodeCoverage | undefined): string {
   if (!coverage) return 'Loading coverage...';
   return `${formatNumber(coverage.mapped_skus)} / ${formatNumber(coverage.total_active_skus)} active SKUs (${coverage.coverage_pct}%)`;
+}
+
+function rackStatusLabel(row: { mapped_skus: number; total_skus: number }): string {
+  if (row.total_skus <= 0) return '—';
+  if (row.mapped_skus >= row.total_skus) return 'Complete';
+  if (row.mapped_skus > 0) return 'In progress';
+  return 'Not started';
+}
+
+function rackStatusClass(row: { mapped_skus: number; total_skus: number }): string {
+  if (row.total_skus <= 0) {
+    return 'bg-[var(--bg-tertiary)] text-[var(--content-tertiary)]';
+  }
+  if (row.mapped_skus >= row.total_skus) {
+    return 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]';
+  }
+  if (row.mapped_skus > 0) {
+    return 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)]';
+  }
+  return 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]';
 }
 
 function isLikelyManufacturerPartKey(value: string): boolean {
@@ -141,6 +164,8 @@ function ItemSummary({ sku }: { sku: BarcodeSkuOption }): React.JSX.Element {
 
 export default function BarcodeMappingPage(): React.JSX.Element {
   const navigate = useNavigate();
+  const location = useLocation();
+  const isPickingContext = location.pathname.startsWith('/picking/');
   const toast = useToast();
   const queryClient = useQueryClient();
   const { userId, userName } = useAuth();
@@ -159,6 +184,7 @@ export default function BarcodeMappingPage(): React.JSX.Element {
   const [pendingBarcode, setPendingBarcode] = useState<ParsedBarcode | null>(null);
   const [conflict, setConflict] = useState<SaveBarcodeMappingResult | null>(null);
   const [stats, setStats] = useState<SessionStats>(EMPTY_STATS);
+  const [rackFilter, setRackFilter] = useState('');
 
   // Scan-first search state
   const [skuQuery, setSkuQuery] = useState('');
@@ -241,6 +267,11 @@ export default function BarcodeMappingPage(): React.JSX.Element {
     queryFn: fetchBarcodeCoverage,
     staleTime: 30_000,
   });
+  const { data: rackCoverage, isLoading: rackCoverageLoading } = useQuery({
+    queryKey: BARCODE_RACK_COVERAGE_QUERY_KEY,
+    queryFn: fetchBarcodeRackCoverage,
+    staleTime: 30_000,
+  });
   const { data: mappedSkuSummaries = [] } = useQuery({
     queryKey: MAPPED_SKUS_QUERY_KEY,
     queryFn: fetchMappedSkuSummaries,
@@ -250,6 +281,23 @@ export default function BarcodeMappingPage(): React.JSX.Element {
     () => new Set(mappedSkuSummaries.map((entry) => entry.skuBusyCode)),
     [mappedSkuSummaries],
   );
+
+  /** Per-bin progress for the SKU picker (same definition as rack coverage: SKU has ≥1 row in item_barcodes). */
+  const binSkuMappingProgress = useMemo(() => {
+    if (skuOptions.length === 0) return { mapped: 0, total: 0 };
+    let mapped = 0;
+    for (const opt of skuOptions) {
+      if (mappedSkuSet.has(opt.skuBusyCode)) mapped += 1;
+    }
+    return { mapped, total: skuOptions.length };
+  }, [skuOptions, mappedSkuSet]);
+
+  const filteredRackRows = useMemo(() => {
+    const rows = rackCoverage?.racks ?? [];
+    const q = normalizeBinCode(rackFilter);
+    if (!q) return rows;
+    return rows.filter((row) => row.rack_id.includes(q));
+  }, [rackCoverage, rackFilter]);
 
   const manufacturer = useMemo(
     () => selectedSku?.mainGroup ?? selectedSku?.parentGroup ?? null,
@@ -316,6 +364,7 @@ export default function BarcodeMappingPage(): React.JSX.Element {
 
       setSelectedSku(null);
       setStep('choose_sku');
+      void queryClient.invalidateQueries({ queryKey: MAPPED_SKUS_QUERY_KEY });
       toast.info('Multiple SKUs found in this bin. Choose the one you are mapping.');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not load this bin.';
@@ -324,7 +373,7 @@ export default function BarcodeMappingPage(): React.JSX.Element {
     } finally {
       setLoadingBin(false);
     }
-  }, [toast]);
+  }, [queryClient, toast]);
 
   const handleScannerResolved = useCallback((scan: LiveQrScannerResolved) => {
     if (scannerMode === 'bin') {
@@ -427,6 +476,7 @@ export default function BarcodeMappingPage(): React.JSX.Element {
       setStep('saved');
       toast.success(result.status === 'overridden' ? 'Mapping updated.' : 'Barcode mapped.');
       void queryClient.invalidateQueries({ queryKey: BARCODE_COVERAGE_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: BARCODE_RACK_COVERAGE_QUERY_KEY });
       void queryClient.invalidateQueries({ queryKey: MAPPED_SKUS_QUERY_KEY });
 
       // Patch the live scan index so the scanner resolves this barcode immediately
@@ -452,9 +502,6 @@ export default function BarcodeMappingPage(): React.JSX.Element {
     manufacturer,
     pendingBarcode,
     queryClient,
-    mappedSkuSet,
-    selectedSku,
-    toast,
     userId,
     userName,
   ]);
@@ -503,17 +550,17 @@ export default function BarcodeMappingPage(): React.JSX.Element {
       : 'Scan manufacturer barcode';
 
   return (
-    <div className="role-admin min-h-screen bg-[var(--bg-primary)]">
+    <div className={`${isPickingContext ? 'role-picking' : 'role-admin'} min-h-screen bg-[var(--bg-primary)]`}>
       <div className="mx-auto max-w-3xl px-4 py-4 lg:px-6">
         <div className="mb-5 flex items-start justify-between gap-3">
           <div className="min-w-0">
             <button
               type="button"
-              onClick={() => navigate('/admin')}
+              onClick={() => navigate(isPickingContext ? '/picking' : '/admin')}
               className="mb-3 inline-flex min-h-11 items-center gap-2 rounded-xl px-1 text-sm font-semibold text-[var(--content-secondary)] hover:text-[var(--content-primary)]"
             >
               <ArrowLeftIcon size={18} weight="bold" />
-              Admin
+              {isPickingContext ? 'Picking' : 'Admin'}
             </button>
             <h1 className="text-2xl font-bold leading-tight text-[var(--content-primary)]">
               Barcode Mapping
@@ -539,6 +586,134 @@ export default function BarcodeMappingPage(): React.JSX.Element {
             </div>
           </div>
         </div>
+
+        <details className="group mb-5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] [&_summary::-webkit-details-marker]:hidden">
+          <summary className="flex cursor-pointer list-none items-center gap-3 p-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-accent-subtle)]">
+              <MapPinIcon size={20} weight="regular" className="text-[var(--content-accent)]" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-[var(--content-primary)]">Rack-wise mapping progress</p>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--content-tertiary)]">
+                Built from each SKU&apos;s rack location on file plus WMS bin slots. Complete means every SKU in that
+                rack or bin has at least one manufacturer barcode saved.
+              </p>
+            </div>
+            <span className="shrink-0 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--content-secondary)] group-open:hidden">
+              Expand
+            </span>
+            <span className="hidden shrink-0 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--content-secondary)] group-open:inline">
+              Collapse
+            </span>
+          </summary>
+          <div className="border-t border-[var(--border-subtle)] px-4 pb-4 pt-3">
+            {rackCoverageLoading ? (
+              <p className="text-sm text-[var(--content-secondary)]">Loading rack breakdown…</p>
+            ) : (
+              <>
+                {rackCoverage?.summary ? (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--content-primary)]">
+                      <span>
+                        <span className="font-bold tabular-nums text-[var(--content-positive)]">
+                          {formatNumber(rackCoverage.summary.racks_complete)}
+                        </span>{' '}
+                        <span className="text-[var(--content-secondary)]">racks complete</span>
+                      </span>
+                      <span className="text-[var(--content-tertiary)]">·</span>
+                      <span>
+                        <span className="font-bold tabular-nums text-[var(--content-warning)]">
+                          {formatNumber(rackCoverage.summary.racks_in_progress)}
+                        </span>{' '}
+                        <span className="text-[var(--content-secondary)]">in progress</span>
+                      </span>
+                      <span className="text-[var(--content-tertiary)]">·</span>
+                      <span>
+                        <span className="font-bold tabular-nums text-[var(--content-negative)]">
+                          {formatNumber(rackCoverage.summary.racks_without_mappings)}
+                        </span>{' '}
+                        <span className="text-[var(--content-secondary)]">not started</span>
+                      </span>
+                      <span className="text-[var(--content-tertiary)]">·</span>
+                      <span className="text-[var(--content-secondary)]">
+                        <span className="font-semibold tabular-nums text-[var(--content-primary)]">
+                          {formatNumber(rackCoverage.summary.rack_count)}
+                        </span>{' '}
+                        racks tracked
+                      </span>
+                    </div>
+                    {rackCoverage.summary.rack_count > 0 && (
+                      <div
+                        className="h-2 overflow-hidden rounded-full bg-[var(--bg-tertiary)]"
+                        title="Share of racks that are fully mapped"
+                      >
+                        <div
+                          className="h-full rounded-full bg-[var(--content-positive)] transition-[width] duration-300"
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              (rackCoverage.summary.racks_complete / rackCoverage.summary.rack_count) * 100,
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+                <div className="mt-4">
+                  <input
+                    value={rackFilter}
+                    onChange={(event) => setRackFilter(event.target.value)}
+                    placeholder="Filter racks (e.g. GGR-1E)"
+                    className="min-h-11 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 font-mono text-sm text-[var(--content-primary)] outline-none focus:border-[var(--content-accent)]"
+                  />
+                </div>
+                <div className="mt-3 max-h-80 overflow-auto rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)]">
+                  <table className="w-full min-w-[320px] border-collapse text-left text-sm">
+                    <thead className="sticky top-0 z-[1] bg-[var(--bg-secondary)] text-xs font-semibold uppercase tracking-wide text-[var(--content-tertiary)]">
+                      <tr>
+                        <th className="px-3 py-2">Rack / bin</th>
+                        <th className="px-3 py-2 text-right tabular-nums">Mapped</th>
+                        <th className="px-3 py-2 text-right tabular-nums">%</th>
+                        <th className="px-3 py-2 text-right">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border-subtle)] text-[var(--content-primary)]">
+                      {filteredRackRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-3 py-6 text-center text-sm text-[var(--content-secondary)]">
+                            {rackCoverage?.summary?.rack_count === 0
+                              ? 'No rack or bin locations found yet. Stock import (rack column) or bin inventory will populate this list.'
+                              : 'No racks match your filter.'}
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredRackRows.map((row) => (
+                          <tr key={row.rack_id} className="bg-[var(--bg-primary)]">
+                            <td className="px-3 py-2.5 font-mono text-xs font-semibold">{row.rack_id}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums text-[var(--content-secondary)]">
+                              {formatNumber(row.mapped_skus)} / {formatNumber(row.total_skus)}
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums text-[var(--content-secondary)]">
+                              {row.coverage_pct}%
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${rackStatusClass(row)}`}
+                              >
+                                {rackStatusLabel(row)}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        </details>
 
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatTile label="Mapped" value={stats.mapped} />
@@ -811,28 +986,91 @@ export default function BarcodeMappingPage(): React.JSX.Element {
               <h2 className="mt-1 text-lg font-bold text-[var(--content-primary)]">
                 Choose the SKU to map
               </h2>
-              <div className="mt-4 space-y-2">
-                {skuOptions.map((option) => (
-                  <button
-                    key={`${option.binId}-${option.skuBusyCode}`}
-                    type="button"
-                    onClick={() => {
-                      setSelectedSku(option);
-                      setStep('bin_loaded');
-                    }}
-                    className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 text-left transition-colors hover:bg-[var(--bg-tertiary)]"
+              {binSkuMappingProgress.total > 0 && (
+                <div className="mt-3 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <p className="text-[var(--content-secondary)]">
+                      <span className="font-semibold tabular-nums text-[var(--content-primary)]">
+                        {formatNumber(binSkuMappingProgress.mapped)}
+                      </span>
+                      {' / '}
+                      <span className="tabular-nums">{formatNumber(binSkuMappingProgress.total)}</span>
+                      <span className="text-[var(--content-tertiary)]"> SKUs already have a barcode</span>
+                    </p>
+                    {binSkuMappingProgress.total > 0 && (
+                      <span className="shrink-0 rounded-full bg-[var(--bg-tertiary)] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[var(--content-secondary)]">
+                        {Math.round((binSkuMappingProgress.mapped / binSkuMappingProgress.total) * 100)}% done
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    className="h-1.5 overflow-hidden rounded-full bg-[var(--bg-tertiary)]"
+                    aria-hidden
                   >
-                    <p className="font-semibold leading-snug text-[var(--content-primary)]">
-                      {option.itemName}
-                    </p>
-                    <p className="mt-1 text-sm text-[var(--content-secondary)]">
-                      Busy {option.skuBusyCode} · {option.mainGroup || option.parentGroup || 'No group'}
-                    </p>
-                    <p className="mt-1 text-xs font-mono text-[var(--content-tertiary)]">
-                      Alias 1 {option.alias1 ?? '—'} · Alias {option.alias ?? '—'}
-                    </p>
-                  </button>
-                ))}
+                    <div
+                      className="h-full rounded-full bg-[var(--content-positive)] transition-[width] duration-300"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          (binSkuMappingProgress.mapped / binSkuMappingProgress.total) * 100,
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              <div className="mt-4 space-y-2">
+                {skuOptions.map((option) => {
+                  const isMapped = mappedSkuSet.has(option.skuBusyCode);
+                  return (
+                    <button
+                      key={`${option.binId}-${option.skuBusyCode}`}
+                      type="button"
+                      onClick={() => {
+                        setSelectedSku(option);
+                        setStep('bin_loaded');
+                      }}
+                      className={`w-full rounded-xl border p-4 text-left transition-colors hover:bg-[var(--bg-tertiary)] ${
+                        isMapped
+                          ? 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] hover:bg-[var(--bg-positive-subtle)]'
+                          : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)]'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold leading-snug text-[var(--content-primary)]">
+                            {option.itemName}
+                          </p>
+                          <p className="mt-1 text-sm text-[var(--content-secondary)]">
+                            Busy {option.skuBusyCode} · {option.mainGroup || option.parentGroup || 'No group'}
+                          </p>
+                          <p className="mt-1 text-xs font-mono text-[var(--content-tertiary)]">
+                            Alias 1 {option.alias1 ?? '—'} · Alias {option.alias ?? '—'}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5">
+                          {isMapped ? (
+                            <>
+                              <CheckCircleIcon
+                                size={26}
+                                weight="fill"
+                                className="text-[var(--content-positive)]"
+                                aria-hidden
+                              />
+                              <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--content-positive)]">
+                                Mapped
+                              </span>
+                            </>
+                          ) : (
+                            <span className="rounded-md border border-dashed border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--content-tertiary)]">
+                              To map
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
               <button type="button" onClick={resetForNextBin} className={`${secondaryButton} mt-4 w-full`}>
                 Scan another bin
