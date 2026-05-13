@@ -25,7 +25,7 @@ const STALE_THRESHOLD_MS = 3 * 60 * 1000;
  * keep-alive cadence; the new billing event stream uses a slow safety poll.
  */
 const KEEPALIVE_INTERVAL_MS = 5_000;
-const BILLING_EVENT_KEEPALIVE_INTERVAL_MS = 60_000;
+const BILLING_EVENT_KEEPALIVE_INTERVAL_MS = 5_000;
 const POLL_NO_REALTIME_MS = 2_000;
 
 /** Coalesce realtime bursts into a single refetch. */
@@ -361,9 +361,24 @@ export function useClaimableOrders(
           queryClient.invalidateQueries({ queryKey }),
       });
 
+      const ordersFilter =
+        typeof workflowStatus === 'string'
+          ? `workflow_status=eq.${workflowStatus}`
+          : undefined;
+
+      const unsubOrders = subscribeToTable({
+        channelName: `billing-orders-backstop:${statusKey}:${todayOnly ?? false}`,
+        table: 'orders',
+        filter: ordersFilter,
+        onChange: scheduleInvalidate,
+        onReconnect: () =>
+          queryClient.invalidateQueries({ queryKey }),
+      });
+
       return () => {
         if (debounceRef.current) clearTimeout(debounceRef.current);
         unsubQueueEvents();
+        unsubOrders();
       };
     }
 
