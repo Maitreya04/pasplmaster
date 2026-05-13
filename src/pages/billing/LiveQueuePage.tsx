@@ -14,6 +14,10 @@ import {
 } from '../../lib/pickerPush';
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
+import {
+  captureBillingLiveQueueBaseline,
+  persistBillingLiveQueueDraft,
+} from '../../lib/billing/liveQueueDraft';
 
 import { useBillingFlow } from '../../hooks/useBillingFlow';
 import { QueueView } from './LiveQueue/QueueView';
@@ -136,6 +140,68 @@ export default function LiveQueuePage() {
 
   // 4. New 3-state machine
   const flow = useBillingFlow();
+  const flowRef = useRef(flow);
+  flowRef.current = flow;
+
+  /** qty_shippable / qty_po when the sheet was opened — used to restore cleared lines on draft save. */
+  const draftBaselineRef = useRef<Map<number, { qty_shippable: number; qty_po: number }>>(new Map());
+  const hydratedSessionRef = useRef<{ orderId: number } | null>(null);
+  const itemsRef = useRef<OrderItem[]>([]);
+  const flagsRef = useRef(flow.flags);
+  const orderRef = useRef(order);
+  itemsRef.current = items;
+  flagsRef.current = flow.flags;
+  orderRef.current = order ?? null;
+
+  const persistLiveQueueDraftIfDirty = useCallback(async () => {
+    if (!flowRef.current.isDraftDirty()) return;
+    const oid = orderRef.current?.id ?? null;
+    const itemsSnap = itemsRef.current;
+    const flagsSnap = flagsRef.current;
+    const baseline = draftBaselineRef.current;
+    if (!oid || itemsSnap.length === 0 || baseline.size === 0) return;
+
+    const { error } = await persistBillingLiveQueueDraft({
+      items: itemsSnap,
+      flags: flagsSnap,
+      baseline,
+    });
+    if (error) {
+      console.error('[LiveQueue] draft persist failed', error);
+      toast.error('Could not save stock flags. Try again before leaving.');
+    } else {
+      flowRef.current.resetDraftDirty();
+      void queryClient.invalidateQueries({ queryKey: ['order', oid] });
+      void queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+    }
+  }, [queryClient, toast]);
+
+  // Reset sheet hydration when the targeted order changes
+  useEffect(() => {
+    hydratedSessionRef.current = null;
+  }, [effectiveOrderId]);
+
+  // One-time hydrate when entering the order sheet (avoid overwriting in-progress flags on refetch)
+  useEffect(() => {
+    if (flow.state === 'queue' || flow.state === 'report') {
+      if (flow.state === 'queue') hydratedSessionRef.current = null;
+      return;
+    }
+    if (flow.state !== 'orderSheet' || !order || order.id !== effectiveOrderId || items.length === 0) {
+      return;
+    }
+    if (hydratedSessionRef.current?.orderId === order.id) return;
+
+    draftBaselineRef.current = captureBillingLiveQueueBaseline(items);
+    flow.hydrateFromItems(items);
+    hydratedSessionRef.current = { orderId: order.id };
+  }, [flow.state, order, effectiveOrderId, items, flow]);
+
+  useEffect(() => {
+    return () => {
+      void persistLiveQueueDraftIfDirty();
+    };
+  }, [persistLiveQueueDraftIfDirty]);
 
   // ── Handle pre-selection from URL on mount ──
   const didConsumeParam = useRef(false);
@@ -178,6 +244,7 @@ export default function LiveQueuePage() {
 
   // ── Skip / Release ──
   const handleSkip = useCallback(async () => {
+    await persistLiveQueueDraftIfDirty();
     if (claimId && userId) {
       try {
         await release();
@@ -188,12 +255,14 @@ export default function LiveQueuePage() {
     setCurrentOrderId(null);
     claimAttempted.current = null;
     flow.returnToQueue();
-  }, [claimId, userId, release, flow]);
+  }, [claimId, userId, release, flow, persistLiveQueueDraftIfDirty]);
 
   // ── Urgent interrupt ──
   const handleUrgentInterrupt = useCallback(async () => {
     const urgentOrder = urgentInQueue[0];
     if (!urgentOrder) return;
+
+    await persistLiveQueueDraftIfDirty();
 
     if (claimId && userId) {
       try {
@@ -206,7 +275,7 @@ export default function LiveQueuePage() {
     setCurrentOrderId(urgentOrder.id);
     setTimeout(() => flow.openOrder(), 50);
     toast.info(`Switching to urgent order: ${urgentOrder.customer_name}`);
-  }, [urgentInQueue, claimId, userId, release, flow, toast]);
+  }, [urgentInQueue, claimId, userId, release, flow, toast, persistLiveQueueDraftIfDirty]);
 
   // ── Complete Billing (Approve) — simplified from flags only ──
   const approveMutation = useMutation({
