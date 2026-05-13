@@ -6,6 +6,7 @@ import {
   CaretLeft,
   CheckCircle,
   ClipboardText,
+  QrCode,
   Warning,
 } from '@phosphor-icons/react';
 import { useItems } from '../../hooks/useItems';
@@ -36,6 +37,18 @@ interface ScanLabQuantityResult {
   remainingBefore: number;
   remainingAfter: number;
   requiresBreakConfirmation: boolean;
+}
+
+type LabScannerMode = 'verify' | 'scan';
+
+interface ScanOnlyResult {
+  rawValue: string;
+  recognizedItemName: string | null;
+  recognizedBusyCode: number | null;
+  matchedBy: string | null;
+  codeType: LiveQrScannerResolved['codeType'];
+  reason: string;
+  timestamp: string;
 }
 
 function buildScanLabRecord(item: Item): ScanLabRecord | null {
@@ -143,11 +156,14 @@ export default function PickScanLabPage(): React.JSX.Element {
   const [liveTarget, setLiveTarget] = useState<ScanLabRecord | null>(null);
   const [targetQty, setTargetQty] = useState(40);
   const [simulatedPickedQty, setSimulatedPickedQty] = useState(0);
+  const [labScannerMode, setLabScannerMode] = useState<LabScannerMode>('verify');
+  const [scanOnlyOpen, setScanOnlyOpen] = useState(false);
   const [lastResult, setLastResult] = useState<{
     item: ScanLabRecord;
     result: ScanResult;
     quantity: ScanLabQuantityResult;
   } | null>(null);
+  const [lastScanOnlyResult, setLastScanOnlyResult] = useState<ScanOnlyResult | null>(null);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
 
   const labelableItems = useMemo(
@@ -177,6 +193,10 @@ export default function PickScanLabPage(): React.JSX.Element {
 
   const closeScan = useCallback(() => {
     setLiveTarget(null);
+  }, []);
+
+  const closeScanOnly = useCallback(() => {
+    setScanOnlyOpen(false);
   }, []);
 
   const handleScanResolved = useCallback((scan: LiveQrScannerResolved) => {
@@ -225,6 +245,20 @@ export default function PickScanLabPage(): React.JSX.Element {
     });
   }, [packDefinitionByBusyCode, simulatedPickedQty, targetQty]);
 
+  const handleScanOnlyResolved = useCallback((scan: LiveQrScannerResolved) => {
+    setLastScanOnlyResult({
+      rawValue: scan.rawValue,
+      recognizedItemName: scan.matchedItem?.name ?? null,
+      recognizedBusyCode: scan.matchedItem?.busy_code != null
+        ? Number(scan.matchedItem.busy_code)
+        : null,
+      matchedBy: scan.matchedBy ?? null,
+      codeType: scan.codeType,
+      reason: scan.reason,
+      timestamp: new Date().toISOString(),
+    });
+  }, []);
+
   return (
     <div className="role-admin min-h-screen bg-[var(--bg-primary)]">
       <div className="mx-auto max-w-5xl p-4 lg:px-6">
@@ -238,11 +272,75 @@ export default function PickScanLabPage(): React.JSX.Element {
           <div className="min-w-0">
             <h1 className="text-2xl font-bold text-[var(--content-primary)]">Pick Scan Lab</h1>
             <p className="text-sm text-[var(--content-tertiary)]">
-              Test the live QR scanner against Alias 1 and Alias without touching live orders.
+              Test verification mode or scan-only recognition using current barcode mapping and alias rules.
             </p>
           </div>
         </div>
 
+        <div className="mt-5 flex items-center gap-1 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-1">
+          <button
+            type="button"
+            onClick={() => setLabScannerMode('verify')}
+            className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all ${
+              labScannerMode === 'verify'
+                ? 'bg-[var(--content-primary)] text-[var(--bg-primary)] shadow-sm'
+                : 'text-[var(--content-secondary)] hover:text-[var(--content-primary)]'
+            }`}
+          >
+            Verify Mode
+          </button>
+          <button
+            type="button"
+            onClick={() => setLabScannerMode('scan')}
+            className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all ${
+              labScannerMode === 'scan'
+                ? 'bg-[var(--content-primary)] text-[var(--bg-primary)] shadow-sm'
+                : 'text-[var(--content-secondary)] hover:text-[var(--content-primary)]'
+            }`}
+          >
+            Scan Mode
+          </button>
+        </div>
+
+        {labScannerMode === 'scan' && (
+          <section className="mt-5 rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--content-tertiary)]">
+              Scan-Only Recognition
+            </p>
+            <p className="mt-2 text-sm text-[var(--content-secondary)]">
+              Scan any barcode/QR and the lab will recognize the product using the latest scan catalog +
+              barcode mappings from the current verification pipeline.
+            </p>
+            <button
+              type="button"
+              onClick={() => setScanOnlyOpen(true)}
+              className="mt-4 inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[var(--bg-positive)] px-4 text-sm font-semibold text-[var(--content-on-color)]"
+            >
+              <QrCode size={18} weight="bold" />
+              Start Scan Mode
+            </button>
+
+            {lastScanOnlyResult && (
+              <div className="mt-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4">
+                <p className="text-sm font-semibold text-[var(--content-primary)]">Latest scan-only result</p>
+                <div className="mt-3 space-y-1 text-sm text-[var(--content-secondary)]">
+                  <p>Read: <span className="font-mono">{lastScanOnlyResult.rawValue}</span></p>
+                  <p>
+                    Recognized: {lastScanOnlyResult.recognizedItemName
+                      ? `${lastScanOnlyResult.recognizedItemName}${lastScanOnlyResult.recognizedBusyCode ? ` (Busy ${lastScanOnlyResult.recognizedBusyCode})` : ''}`
+                      : 'No mapped product'}
+                  </p>
+                  <p>Matched By: {lastScanOnlyResult.matchedBy ?? 'No match source'}</p>
+                  <p>Code Type: {lastScanOnlyResult.codeType}</p>
+                  <p>Reason: {lastScanOnlyResult.reason}</p>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {labScannerMode === 'verify' && (
+          <>
         <div className="mt-6 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
           <section className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--content-tertiary)]">
@@ -529,6 +627,8 @@ export default function PickScanLabPage(): React.JSX.Element {
             )}
           </div>
         )}
+          </>
+        )}
       </div>
 
       {liveTarget && (
@@ -548,6 +648,21 @@ export default function PickScanLabPage(): React.JSX.Element {
           onError={(message) => {
             toast.error(message);
             closeScan();
+          }}
+        />
+      )}
+      {scanOnlyOpen && (
+        <LiveQrScanner
+          mode="collect"
+          title="Product Scan Mode"
+          eyebrow="Test Scan Lab"
+          idleStatus="Point at product barcode or QR"
+          helpText="This mode only scans and recognizes products based on current alias and barcode mappings."
+          onClose={closeScanOnly}
+          onResolved={handleScanOnlyResolved}
+          onError={(message) => {
+            toast.error(message);
+            closeScanOnly();
           }}
         />
       )}
