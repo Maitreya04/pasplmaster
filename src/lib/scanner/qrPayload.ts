@@ -218,17 +218,28 @@ function extractPrefixedCode(value: string): string | null {
   return null;
 }
 
+import { parseManufacturerBarcode } from './barcodeParser';
+
 export function collectQrLookupCandidates(rawValue: string): string[] {
   const trimmed = rawValue.trim();
-  const ordered = [trimmed, extractJsonCode(trimmed), extractPrefixedCode(trimmed), ...extractUrlCodes(trimmed)];
+  const baseValues = [trimmed, extractJsonCode(trimmed), extractPrefixedCode(trimmed), ...extractUrlCodes(trimmed)];
   const seen = new Set<string>();
   const candidates: string[] = [];
 
-  for (const value of ordered) {
-    const normalized = normalizeScanCode(value);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    candidates.push(normalized);
+  for (const value of baseValues) {
+    if (!value) continue;
+
+    // Use our smart manufacturer parser to extract structured part numbers
+    // and strip serial suffixes (e.g. "2125599K01-03042601968" -> "2125599K01")
+    const parsed = parseManufacturerBarcode(value);
+    const valueCandidates = [...parsed.candidates, value];
+
+    for (const candidate of valueCandidates) {
+      const normalized = normalizeScanCode(candidate);
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      candidates.push(normalized);
+    }
   }
 
   return candidates;
