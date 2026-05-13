@@ -82,28 +82,6 @@ function upscaleNearest(source: ImageData, scale: number): ImageData {
   return new ImageData(out, targetWidth, targetHeight);
 }
 
-function sharpenImageData(source: ImageData): ImageData {
-  const { width, height } = source;
-  const input = source.data;
-  const output = new Uint8ClampedArray(input);
-
-  for (let y = 1; y < height - 1; y += 1) {
-    for (let x = 1; x < width - 1; x += 1) {
-      const idx = (y * width + x) * 4;
-      for (let channel = 0; channel < 3; channel += 1) {
-        const center = input[idx + channel] * 5;
-        const top = input[((y - 1) * width + x) * 4 + channel];
-        const left = input[(y * width + x - 1) * 4 + channel];
-        const right = input[(y * width + x + 1) * 4 + channel];
-        const bottom = input[((y + 1) * width + x) * 4 + channel];
-        output[idx + channel] = Math.max(0, Math.min(255, center - top - left - right - bottom));
-      }
-    }
-  }
-
-  return new ImageData(output, width, height);
-}
-
 function isLikelyPartNumber(raw: string): boolean {
   const value = raw.trim().toUpperCase();
   if (!value) return false;
@@ -241,11 +219,10 @@ async function getBarcodeScanner(): Promise<ZBarScanner> {
   if (!scannerPromise) {
     scannerPromise = ZBarScanner.create().then((scanner) => {
       scanner.enableCache(false);
-      
-      // Increase scanning density to 1 (check every pixel row/column) 
-      // This is critical for detecting 1D barcodes reliably on standard webcams.
-      scanner.setConfig(ZBarSymbolType.ZBAR_NONE, ZBarConfigType.ZBAR_CFG_X_DENSITY, 1);
-      scanner.setConfig(ZBarSymbolType.ZBAR_NONE, ZBarConfigType.ZBAR_CFG_Y_DENSITY, 1);
+
+      // Density 1 scans every row/column (slow). 2–3 is much faster with minor miss trade-off.
+      scanner.setConfig(ZBarSymbolType.ZBAR_NONE, ZBarConfigType.ZBAR_CFG_X_DENSITY, 2);
+      scanner.setConfig(ZBarSymbolType.ZBAR_NONE, ZBarConfigType.ZBAR_CFG_Y_DENSITY, 2);
 
       // Disable everything first, then enable the formats we want.
       scanner.setConfig(ZBarSymbolType.ZBAR_NONE, ZBarConfigType.ZBAR_CFG_ENABLE, 0);
@@ -270,9 +247,6 @@ async function getBarcodeScanner(): Promise<ZBarScanner> {
 async function handleScan(message: ScanRequestMessage) {
   const scanner = await getBarcodeScanner();
   const image = message.imageData;
-  const variants: Array<{ image: ImageData; tryHarder: boolean }> = [
-    { image, tryHarder: false },
-  ];
   const centerCrop = cropImageData(
     image,
     image.width * 0.2,
@@ -280,35 +254,58 @@ async function handleScan(message: ScanRequestMessage) {
     image.width * 0.6,
     image.height * 0.6,
   );
-  variants.push({ image: centerCrop, tryHarder: false });
-  variants.push({ image: upscaleNearest(centerCrop, 2), tryHarder: true });
-  if (message.roiLevel !== 'tight') {
-    variants.push({ image: sharpenImageData(centerCrop), tryHarder: true });
-    variants.push({ image: upscaleNearest(image, 1.35), tryHarder: true });
+
+  const post = (rawValue: string | null) => {
+    const response: WorkerResponseMessage = {
+      type: 'scan-result',
+      frameId: message.frameId,
+      rawValue,
+    };
+    self.postMessage(response);
+  };
+
+  // Phase 1: smallest buffers + ZXing fast only (one WASM entry per image).
+  const fastPassImages: ImageData[] = [centerCrop, image];
+  for (const img of fastPassImages) {
+    const zxingResult = await scanBestZXing(img, false);
+    if (zxingResult) {
+      post(zxingResult.text);
+      return;
+    }
   }
 
-  let rawValue: string | null = null;
-  for (const variant of variants) {
+  // Phase 2: ZBar on the same cheap crops (often faster than ZXing "try harder" for 1D).
+  for (const img of fastPassImages) {
+    const symbol = await scanBestSymbol(scanner, img);
+    if (symbol) {
+      post(symbol.decode());
+      return;
+    }
+  }
+
+  // Phase 3: upscaled / harder ZXing, then ZBar (skip heavy sharpen — pure JS O(n) was a major bottleneck).
+  const hardVariants: Array<{ image: ImageData; tryHarder: boolean }> = [
+    { image: upscaleNearest(centerCrop, 2), tryHarder: true },
+  ];
+  if (message.roiLevel !== 'tight') {
+    hardVariants.push({ image: upscaleNearest(image, 1.35), tryHarder: true });
+  }
+
+  for (const variant of hardVariants) {
     const zxingResult = await scanBestZXing(variant.image, variant.tryHarder);
     if (zxingResult) {
-      rawValue = zxingResult.text;
-      break;
+      post(zxingResult.text);
+      return;
     }
 
     const symbol = await scanBestSymbol(scanner, variant.image);
     if (symbol) {
-      rawValue = symbol.decode();
-      break;
+      post(symbol.decode());
+      return;
     }
   }
 
-  const response: WorkerResponseMessage = {
-    type: 'scan-result',
-    frameId: message.frameId,
-    rawValue,
-  };
-
-  self.postMessage(response);
+  post(null);
 }
 
 self.postMessage({ type: 'ready' } satisfies WorkerResponseMessage);

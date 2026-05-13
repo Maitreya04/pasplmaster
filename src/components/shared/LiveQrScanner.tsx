@@ -35,14 +35,15 @@ type BarcodeDetectorStatic = BarcodeDetectorCtor & {
 };
 
 const NATIVE_SCAN_INTERVAL_MS = 33;
-const WORKER_SCAN_INTERVAL_MS = 45;
+const WORKER_SCAN_INTERVAL_MS = 33;
 const BURST_SCAN_INTERVAL_MS = 16;
 const BURST_WINDOW_MS = 700;
 const WORKER_MAX_PENDING_FRAMES = 2;
-const ROI_MAX_LONG_EDGE = 1280;
+const ROI_MAX_LONG_EDGE_NATIVE = 1280;
+const ROI_MAX_LONG_EDGE_WORKER = 800;
 const AUTO_RETRY_DELAY_MS = 1000;
 const RESET_COOLDOWN_MS = 350;
-const STABLE_SCAN_MIN_FRAMES = 2;
+const STABLE_SCAN_MIN_FRAMES = 1;
 const STABLE_SCAN_TTL_MS = 600;
 const REQUESTED_BARCODE_FORMATS = [
   'qr_code',
@@ -106,13 +107,15 @@ interface DisplayBox {
 
 function detectScannerPlatform() {
   const ua = navigator.userAgent;
-  const isAndroid = /Android/i.test(ua);
-  const isChrome = /Chrome|CriOS/i.test(ua) && !/Edg|OPR|SamsungBrowser/i.test(ua);
   const isIOS = /iPad|iPhone|iPod/i.test(ua);
+  /** Chromium exposes a fast on-device path; WebKit's implementation is spottier, so we keep WASM there. */
+  const isLikelyChromium =
+    typeof (window as Window & { chrome?: unknown }).chrome !== 'undefined' ||
+    /Chrome|Chromium|Edg|OPR|Brave/i.test(ua);
 
   return {
-    isAndroidChrome: isAndroid && isChrome,
-    preferNativeDetector: isAndroid && isChrome,
+    /** Prefer native on any non-iOS Chromium (desktop Chrome, Edge, etc.), not only Android. */
+    preferNativeDetector: !isIOS && isLikelyChromium,
     isIOS,
   };
 }
@@ -655,7 +658,7 @@ export function LiveQrScanner({
 
             if (roiLevel !== 'full') {
               roiCapture = await captureRoiBitmap(video, roiLevel, {
-                maxLongEdge: ROI_MAX_LONG_EDGE,
+                maxLongEdge: ROI_MAX_LONG_EDGE_NATIVE,
                 upscale: roiLevel === 'tight' ? 1.8 : 1.25,
               });
               if (roiCapture) {
@@ -701,8 +704,8 @@ export function LiveQrScanner({
             if (engine.pending.size < WORKER_MAX_PENDING_FRAMES) {
               const roiLevel = getNextRoiLevel(frameNumber);
               const capture = captureRoiImageData(video, engine.workerCanvas, engine.workerCtx, roiLevel, {
-                maxLongEdge: ROI_MAX_LONG_EDGE,
-                upscale: roiLevel === 'tight' ? 1.8 : 1.2,
+                maxLongEdge: ROI_MAX_LONG_EDGE_WORKER,
+                upscale: roiLevel === 'tight' ? 1.65 : 1.1,
               });
               if (capture) {
                 const frameId = Date.now();
@@ -749,9 +752,7 @@ export function LiveQrScanner({
           const formats = supportedFormats
             ? REQUESTED_BARCODE_FORMATS.filter((format) => supportedFormats.includes(format))
             : REQUESTED_BARCODE_FORMATS;
-          if (formats.length === 0) {
-            useFallback = true;
-          } else if (!platform.preferNativeDetector) {
+          if (formats.length === 0 || !platform.preferNativeDetector) {
             useFallback = true;
           } else {
             engineRef.current = { type: 'native', detector: new Detector({ formats }) };
