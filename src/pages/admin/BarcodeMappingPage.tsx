@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -7,16 +7,20 @@ import {
   CameraIcon,
   CheckCircleIcon,
   DatabaseIcon,
+  MagnifyingGlassIcon,
   SealWarningIcon,
   SkipForwardIcon,
   XCircleIcon,
 } from '@phosphor-icons/react';
-import { LiveQrScanner } from '../../components/shared';
+import { LiveQrScanner, SearchInput } from '../../components/shared';
+
 import type { LiveQrScannerResolved } from '../../components/shared/LiveQrScanner';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { useItems } from '../../hooks/useItems';
 import {
   fetchBarcodeCoverage,
+  loadSkuFromBusyCode,
   loadSkuOptionsFromBin,
   normalizeBinCode,
   saveBarcodeMapping,
@@ -24,11 +28,15 @@ import {
   type BarcodeSkuOption,
   type SaveBarcodeMappingResult,
 } from '../../lib/barcodeMapping';
+import { searchItems } from '../../lib/search/itemSearch';
+import { buildSearchIndex } from '../../lib/search/searchIndex';
 import {
   parseManufacturerBarcode,
   type ParsedBarcode,
 } from '../../lib/scanner/barcodeParser';
 import { classifyScanPayload, parseRackPayload } from '../../lib/scanner/qrPayload';
+
+type MappingDirection = 'bin_first' | 'scan_first';
 
 type MappingStep =
   | 'scan_bin'
@@ -39,7 +47,9 @@ type MappingStep =
   | 'saved'
   | 'conflict'
   | 'already_mapped'
-  | 'no_barcode';
+  | 'no_barcode'
+  | 'scan_barcode_first'
+  | 'search_sku';
 
 type ScannerMode = 'bin' | 'barcode';
 
@@ -115,6 +125,7 @@ export default function BarcodeMappingPage(): React.JSX.Element {
   const queryClient = useQueryClient();
   const { userId, userName } = useAuth();
 
+  const [direction, setDirection] = useState<MappingDirection>('bin_first');
   const [step, setStep] = useState<MappingStep>('scan_bin');
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannerMode, setScannerMode] = useState<ScannerMode>('bin');
@@ -129,6 +140,19 @@ export default function BarcodeMappingPage(): React.JSX.Element {
   const [conflict, setConflict] = useState<SaveBarcodeMappingResult | null>(null);
   const [stats, setStats] = useState<SessionStats>(EMPTY_STATS);
 
+  // Scan-first search state
+  const [skuQuery, setSkuQuery] = useState('');
+  const [loadingSkuLookup, setLoadingSkuLookup] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  const { data: items = [] } = useItems();
+  const searchIndex = useMemo(() => buildSearchIndex(items), [items]);
+
+  const skuSearchResults = useMemo(() => {
+    if (!skuQuery || skuQuery.length < 2) return [];
+    return searchItems(skuQuery, searchIndex).slice(0, 20);
+  }, [skuQuery, searchIndex]);
+
   const { data: coverage } = useQuery({
     queryKey: BARCODE_COVERAGE_QUERY_KEY,
     queryFn: fetchBarcodeCoverage,
@@ -140,20 +164,30 @@ export default function BarcodeMappingPage(): React.JSX.Element {
     [selectedSku],
   );
 
-  const resetForNextBin = useCallback(() => {
-    setStep('scan_bin');
-    setScannerMode('bin');
+  const resetForNext = useCallback((dir: MappingDirection) => {
+    setStep(dir === 'scan_first' ? 'scan_barcode_first' : 'scan_bin');
+    setScannerMode(dir === 'scan_first' ? 'barcode' : 'bin');
     setCurrentBinId(null);
     setSkuOptions([]);
     setSelectedSku(null);
     setPendingBarcode(null);
     setConflict(null);
     setManualBarcode('');
+    setSkuQuery('');
   }, []);
+
+  const resetForNextBin = useCallback(() => {
+    resetForNext(direction);
+  }, [direction, resetForNext]);
 
   const finishSoon = useCallback(() => {
     window.setTimeout(resetForNextBin, 1200);
   }, [resetForNextBin]);
+
+  const handleDirectionChange = useCallback((dir: MappingDirection) => {
+    setDirection(dir);
+    resetForNext(dir);
+  }, [resetForNext]);
 
   const handleLoadBin = useCallback(async (value: string) => {
     const binId = normalizeBinCode(value);
@@ -225,8 +259,8 @@ export default function BarcodeMappingPage(): React.JSX.Element {
     setPendingBarcode(parsed);
     setManualBarcode(parsed.raw);
     setScannerOpen(false);
-    setStep('barcode_detected');
-  }, [handleLoadBin, scannerMode, toast]);
+    setStep(direction === 'scan_first' ? 'search_sku' : 'barcode_detected');
+  }, [direction, handleLoadBin, scannerMode, toast]);
 
   const handleManualBarcodePreview = () => {
     const parsed = parseManufacturerBarcode(manualBarcode);
@@ -235,7 +269,7 @@ export default function BarcodeMappingPage(): React.JSX.Element {
       return;
     }
     setPendingBarcode(parsed);
-    setStep('barcode_detected');
+    setStep(direction === 'scan_first' ? 'search_sku' : 'barcode_detected');
   };
 
   const handleSave = useCallback(async (force = false) => {
@@ -310,9 +344,28 @@ export default function BarcodeMappingPage(): React.JSX.Element {
   const handleSkip = () => {
     setStats((current) => ({ ...current, skipped: current.skipped + 1 }));
     setStep('no_barcode');
-    toast.info('Skipped this bin.');
+    toast.info('Skipped this item.');
     finishSoon();
   };
+
+  const handleSelectSkuFromSearch = useCallback(async (busyCode: number) => {
+    setLoadingSkuLookup(true);
+    try {
+      const sku = await loadSkuFromBusyCode(busyCode);
+      if (!sku) {
+        toast.error('Could not find that item in the catalog.');
+        return;
+      }
+      setSelectedSku(sku);
+      setCurrentBinId(sku.rackNo);
+      setStep('barcode_detected');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not load item.';
+      toast.error(message);
+    } finally {
+      setLoadingSkuLookup(false);
+    }
+  }, [toast]);
 
   const openBinScanner = () => {
     setScannerMode('bin');
@@ -320,7 +373,7 @@ export default function BarcodeMappingPage(): React.JSX.Element {
   };
 
   const openBarcodeScanner = () => {
-    if (!selectedSku) return;
+    if (direction === 'bin_first' && !selectedSku) return;
     setScannerMode('barcode');
     setScannerOpen(true);
   };
@@ -375,8 +428,173 @@ export default function BarcodeMappingPage(): React.JSX.Element {
           <StatTile label="Skipped" value={stats.skipped} />
           <StatTile label="Conflicts" value={stats.conflictsResolved} />
         </div>
+        {/* ── Direction toggle ── */}
+        <div className="mb-5 flex items-center gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-1">
+          <button
+            type="button"
+            onClick={() => handleDirectionChange('bin_first')}
+            className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-semibold transition-all ${
+              direction === 'bin_first'
+                ? 'bg-[var(--content-primary)] text-[var(--bg-primary)] shadow-sm'
+                : 'text-[var(--content-secondary)] hover:text-[var(--content-primary)]'
+            }`}
+          >
+            Bin First
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDirectionChange('scan_first')}
+            className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-semibold transition-all ${
+              direction === 'scan_first'
+                ? 'bg-[var(--content-primary)] text-[var(--bg-primary)] shadow-sm'
+                : 'text-[var(--content-secondary)] hover:text-[var(--content-primary)]'
+            }`}
+          >
+            Scan First
+          </button>
+        </div>
 
         <div className="space-y-4">
+          {/* ── Scan-first: Step 1 — scan barcode ── */}
+          {step === 'scan_barcode_first' && (
+            <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-accent-subtle)]">
+                  <BarcodeIcon size={20} weight="regular" className="text-[var(--content-accent)]" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--content-tertiary)]">
+                    Step 1 of 2
+                  </p>
+                  <h2 className="mt-1 text-lg font-bold text-[var(--content-primary)]">
+                    Scan the manufacturer barcode
+                  </h2>
+                  <p className="mt-1 text-sm leading-relaxed text-[var(--content-secondary)]">
+                    Scan or type the barcode printed on the item, then search to find the matching SKU.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto]">
+                <input
+                  value={manualBarcode}
+                  onChange={(event) => setManualBarcode(event.target.value)}
+                  placeholder="Manufacturer barcode"
+                  className="min-h-12 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 font-mono text-sm text-[var(--content-primary)] outline-none focus:border-[var(--content-accent)]"
+                />
+                <button type="button" onClick={handleManualBarcodePreview} className={secondaryButton}>
+                  Preview
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={openBarcodeScanner}
+                className={`${primaryButton} mt-3 w-full`}
+              >
+                <CameraIcon size={18} weight="bold" />
+                Scan barcode
+              </button>
+            </section>
+          )}
+
+          {/* ── Scan-first: Step 2 — search SKU ── */}
+          {step === 'search_sku' && pendingBarcode && (
+            <section className="space-y-4">
+              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-positive-subtle)]">
+                    <CheckCircleIcon size={20} weight="fill" className="text-[var(--content-positive)]" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--content-tertiary)]">
+                      Barcode captured
+                    </p>
+                    <p className="mt-1 break-all font-mono text-sm font-semibold text-[var(--content-primary)]">
+                      {pendingBarcode.key}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-accent-subtle)]">
+                    <MagnifyingGlassIcon size={20} weight="regular" className="text-[var(--content-accent)]" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--content-tertiary)]">
+                      Step 2 of 2
+                    </p>
+                    <h2 className="mt-1 text-lg font-bold text-[var(--content-primary)]">
+                      Find the matching SKU
+                    </h2>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <SearchInput
+                    placeholder="Search by item name, code, or alias…"
+                    value={skuQuery}
+                    onChange={setSkuQuery}
+                    loading={loadingSkuLookup}
+                    autoFocus
+                    inputRef={searchInputRef}
+                  />
+                </div>
+
+                {skuSearchResults.length > 0 && (
+                  <div className="mt-3 max-h-80 space-y-2 overflow-y-auto">
+                    {skuSearchResults.map((result) => (
+                      <button
+                        key={result.item.id}
+                        type="button"
+                        disabled={loadingSkuLookup}
+                        onClick={() => void handleSelectSkuFromSearch(Number(result.item.busy_code))}
+                        className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 text-left transition-colors hover:bg-[var(--bg-tertiary)] disabled:opacity-50"
+                      >
+                        <p className="font-semibold leading-snug text-[var(--content-primary)]">
+                          {result.item.name}
+                        </p>
+                        <p className="mt-1 text-sm text-[var(--content-secondary)]">
+                          Busy {result.item.busy_code}
+                          {result.item.main_group ? ` · ${result.item.main_group}` : ''}
+                          {result.item.rack_no ? ` · Bin ${result.item.rack_no}` : ''}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {skuQuery.length >= 2 && skuSearchResults.length === 0 && !loadingSkuLookup && (
+                  <p className="mt-4 text-center text-sm text-[var(--content-tertiary)]">
+                    No items found for "{skuQuery}"
+                  </p>
+                )}
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingBarcode(null);
+                      setManualBarcode('');
+                      setSkuQuery('');
+                      setStep('scan_barcode_first');
+                    }}
+                    className={secondaryButton}
+                  >
+                    Rescan barcode
+                  </button>
+                  <button type="button" onClick={handleSkip} className={secondaryButton}>
+                    <SkipForwardIcon size={18} weight="bold" />
+                    Skip
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* ── Bin-first: Step 1 — scan bin ── */}
           {step === 'scan_bin' && (
             <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4 shadow-sm">
               <div className="flex items-start gap-3">
@@ -534,8 +752,12 @@ export default function BarcodeMappingPage(): React.JSX.Element {
                       type="button"
                       onClick={() => {
                         setPendingBarcode(null);
-                        setStep('bin_loaded');
-                        openBarcodeScanner();
+                        if (direction === 'scan_first') {
+                          setStep('scan_barcode_first');
+                        } else {
+                          setStep('bin_loaded');
+                          openBarcodeScanner();
+                        }
                       }}
                       disabled={saving}
                       className={secondaryButton}
@@ -607,7 +829,7 @@ export default function BarcodeMappingPage(): React.JSX.Element {
                   <p className="mt-3 text-lg font-bold text-[var(--content-primary)]">Skipped</p>
                 </>
               )}
-              <p className="mt-1 text-sm text-[var(--content-secondary)]">Returning to the next bin...</p>
+              <p className="mt-1 text-sm text-[var(--content-secondary)]">Returning to the next item...</p>
             </section>
           )}
         </div>

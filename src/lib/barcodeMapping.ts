@@ -25,7 +25,7 @@ export interface BarcodeSkuOption {
   parentGroup: string | null;
   itemCategory: string | null;
   rackNo: string | null;
-  source: 'bin_inventory' | 'items_rack_no';
+  source: 'bin_inventory' | 'items_rack_no' | 'search';
 }
 
 export interface BarcodeCoverage {
@@ -181,4 +181,29 @@ export async function fetchBarcodeCoverage(): Promise<BarcodeCoverage> {
   const { data, error } = await supabase.rpc('get_barcode_coverage');
   if (error) throw error;
   return data as BarcodeCoverage;
+}
+
+/**
+ * Look up a single SKU by busy_code from the items table.
+ * Used by the "Scan First" mapping flow where there is no bin context.
+ */
+export async function loadSkuFromBusyCode(busyCode: number): Promise<BarcodeSkuOption | null> {
+  const { data, error } = await supabase
+    .from('items')
+    .select(ITEM_SELECT)
+    .eq('busy_code', busyCode)
+    .eq('is_active', true)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  const item = data as ItemLookupRow;
+  return toSkuOption({
+    binId: item.rack_no ?? '',
+    skuBusyCode: Number(item.busy_code),
+    item,
+    source: 'search',
+  });
 }
