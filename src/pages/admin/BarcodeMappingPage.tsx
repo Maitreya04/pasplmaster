@@ -380,13 +380,6 @@ export default function BarcodeMappingPage(): React.JSX.Element {
 
   const handleSave = useCallback(async (force = false) => {
     if (!selectedSku || !pendingBarcode) return;
-    if (mappedSkuSet.has(selectedSku.skuBusyCode)) {
-      setStats((current) => ({ ...current, alreadyMapped: current.alreadyMapped + 1 }));
-      setStep('already_mapped');
-      toast.info(`Busy ${selectedSku.skuBusyCode} is already mapped. Skipping duplicate mapping.`);
-      finishSoon();
-      return;
-    }
 
     setSaving(true);
     setStep('saving');
@@ -851,12 +844,12 @@ export default function BarcodeMappingPage(): React.JSX.Element {
             <section className="space-y-4">
               <ItemSummary sku={selectedSku} />
               {selectedSkuAlreadyMapped && (
-                <div className="rounded-xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] p-4">
-                  <p className="text-sm font-semibold text-[var(--content-warning)]">
-                    Busy {selectedSku.skuBusyCode} is already mapped.
+                <div className="rounded-xl border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] p-4">
+                  <p className="text-sm font-semibold text-[var(--content-accent)]">
+                    Busy {selectedSku.skuBusyCode} already has a barcode.
                   </p>
                   <p className="mt-1 text-sm text-[var(--content-secondary)]">
-                    This SKU already has a barcode mapping. Use Skip or scan another item.
+                    You can still add this barcode — multiple barcodes per SKU are supported (different batches, manufacturers, etc).
                   </p>
                 </div>
               )}
@@ -928,7 +921,7 @@ export default function BarcodeMappingPage(): React.JSX.Element {
                     <button
                       type="button"
                       onClick={() => void handleSave(false)}
-                      disabled={saving || selectedSkuAlreadyMapped}
+                      disabled={saving}
                       className={primaryButton}
                     >
                       <CheckCircleIcon size={18} weight="bold" />
