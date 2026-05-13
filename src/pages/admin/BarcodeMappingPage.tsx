@@ -34,7 +34,8 @@ import {
   parseManufacturerBarcode,
   type ParsedBarcode,
 } from '../../lib/scanner/barcodeParser';
-import { classifyScanPayload, parseRackPayload } from '../../lib/scanner/qrPayload';
+import { classifyScanPayload, normalizeScanCode, parseRackPayload } from '../../lib/scanner/qrPayload';
+import { resolveScannedCatalogItem } from '../../stores/itemScanIndex';
 
 type MappingDirection = 'bin_first' | 'scan_first';
 
@@ -152,6 +153,31 @@ export default function BarcodeMappingPage(): React.JSX.Element {
     if (!skuQuery || skuQuery.length < 2) return [];
     return searchItems(skuQuery, searchIndex).slice(0, 20);
   }, [skuQuery, searchIndex]);
+
+  // Auto-suggest: try to resolve the barcode against alias1/alias/itemCode maps
+  const autoSuggestedItem = useMemo(() => {
+    if (!pendingBarcode?.key) return null;
+    // Try the parsed key as a raw scan through the existing scan index
+    const lookup = resolveScannedCatalogItem(pendingBarcode.key);
+    if (lookup) return lookup;
+    // Also try the full raw value (may contain structured data)
+    if (pendingBarcode.raw !== pendingBarcode.key) {
+      return resolveScannedCatalogItem(pendingBarcode.raw);
+    }
+    // Try normalized key against the search index for code-like matches
+    const normalized = normalizeScanCode(pendingBarcode.key);
+    if (normalized.length >= 3) {
+      const codeResults = searchItems(pendingBarcode.key, searchIndex);
+      if (codeResults.length === 1 && codeResults[0].score >= 90) {
+        return {
+          code: normalized,
+          item: { ...codeResults[0].item, itemCode: '' } as import('../../stores/itemScanIndex').ScanCatalogItem,
+          source: 'alias1' as const,
+        };
+      }
+    }
+    return null;
+  }, [pendingBarcode, searchIndex]);
 
   const { data: coverage } = useQuery({
     queryKey: BARCODE_COVERAGE_QUERY_KEY,
@@ -517,6 +543,32 @@ export default function BarcodeMappingPage(): React.JSX.Element {
                 </div>
               </div>
 
+              {/* ── Auto-suggested match ── */}
+              {autoSuggestedItem && (
+                <div className="rounded-xl border-2 border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--content-positive)]">
+                    Suggested match · via {autoSuggestedItem.source}
+                  </p>
+                  <p className="mt-2 text-lg font-bold leading-snug text-[var(--content-primary)]">
+                    {autoSuggestedItem.item.name}
+                  </p>
+                  <p className="mt-1 text-sm text-[var(--content-secondary)]">
+                    Busy {autoSuggestedItem.item.busy_code}
+                    {autoSuggestedItem.item.main_group ? ` · ${autoSuggestedItem.item.main_group}` : ''}
+                    {autoSuggestedItem.item.rack_no ? ` · Bin ${autoSuggestedItem.item.rack_no}` : ''}
+                  </p>
+                  <button
+                    type="button"
+                    disabled={loadingSkuLookup}
+                    onClick={() => void handleSelectSkuFromSearch(Number(autoSuggestedItem.item.busy_code))}
+                    className={`${primaryButton} mt-3 w-full`}
+                  >
+                    <CheckCircleIcon size={18} weight="bold" />
+                    {loadingSkuLookup ? 'Loading...' : 'Use this match'}
+                  </button>
+                </div>
+              )}
+
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4 shadow-sm">
                 <div className="flex items-start gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-accent-subtle)]">
@@ -524,10 +576,10 @@ export default function BarcodeMappingPage(): React.JSX.Element {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--content-tertiary)]">
-                      Step 2 of 2
+                      {autoSuggestedItem ? 'Or search manually' : 'Step 2 of 2'}
                     </p>
                     <h2 className="mt-1 text-lg font-bold text-[var(--content-primary)]">
-                      Find the matching SKU
+                      {autoSuggestedItem ? 'Search for a different SKU' : 'Find the matching SKU'}
                     </h2>
                   </div>
                 </div>
