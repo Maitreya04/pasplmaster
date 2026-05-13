@@ -653,7 +653,7 @@ export default function CompactQueuePage() {
   // Approve
   const approveMutation = useMutation({
     mutationFn: async (vars?: { salesDraftText?: string }) => {
-      if (!order || !claimId || !userId) throw new Error('Cannot approve.');
+      if (!order || !userId) throw new Error('Cannot approve.');
       const reviewer = userName || 'Billing';
 
       const finalItems = items.map((item) => {

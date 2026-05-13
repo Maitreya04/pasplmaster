@@ -126,18 +126,19 @@ export function OrderSheetView({
   }, []);
 
   const handleFinishAttempt = useCallback(() => {
+    if (isClaiming) return;
     if (flagCount > 0) {
       setShowConfirm(true);
     } else {
       onFinish();
     }
-  }, [flagCount, onFinish]);
+  }, [flagCount, onFinish, isClaiming]);
 
   const confirmFinish = useCallback(() => {
-    if (isApproving) return;
+    if (isApproving || isClaiming) return;
     setShowConfirm(false);
     onFinish();
-  }, [isApproving, onFinish]);
+  }, [isApproving, isClaiming, onFinish]);
 
   useEffect(() => {
     if (!showConfirm) return;
@@ -163,6 +164,7 @@ export function OrderSheetView({
 
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
+        if (isClaiming) return;
         if (showConfirm) {
           confirmFinish();
         } else {
@@ -571,11 +573,11 @@ export function OrderSheetView({
             </button>
             <button
               onClick={handleFinishAttempt}
-              disabled={isApproving || isRejecting}
+              disabled={isClaiming || isApproving || isRejecting}
               className="h-11 px-6 rounded-xl bg-[var(--role-primary)] text-white text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
             >
-              {isApproving ? 'Approving...' : 'Finish Billing'}
-              {!isApproving && (
+              {isClaiming ? 'Claiming…' : isApproving ? 'Approving...' : 'Finish Billing'}
+              {!isClaiming && !isApproving && (
                 <>
                   <span className="font-ds-label-size font-normal opacity-60 hidden sm:inline mx-1">·</span>
                   <span className="font-ds-label-size font-normal opacity-70 hidden sm:inline tabular-nums">{SHORTCUT_FINISH}</span>
@@ -659,11 +661,11 @@ export function OrderSheetView({
                 ref={confirmFinishRef}
                 type="button"
                 onClick={confirmFinish}
-                disabled={isApproving}
+                disabled={isClaiming || isApproving}
                 className="flex-1 h-11 rounded-xl bg-[var(--role-primary)] text-white text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {isApproving ? 'Approving...' : 'Confirm & Finish'}
-                {!isApproving && (
+                {isClaiming ? 'Claiming…' : isApproving ? 'Approving...' : 'Confirm & Finish'}
+                {!isClaiming && !isApproving && (
                   <span className="font-ds-label-size font-normal opacity-80 hidden sm:inline tabular-nums">{SHORTCUT_FINISH}</span>
                 )}
               </button>
