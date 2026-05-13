@@ -15,6 +15,7 @@ import {
 
 type BarcodeDetectorResult = {
   rawValue?: string | null;
+  format?: string;
 };
 
 type BarcodeDetectorLike = {
@@ -42,6 +43,61 @@ const REQUESTED_BARCODE_FORMATS = [
   'upc_a',
   'upc_e',
 ];
+
+function isLikelyPartNumber(raw: string): boolean {
+  const value = raw.trim().toUpperCase();
+  if (!value) return false;
+  if (value.length < 4 || value.length > 36) return false;
+  if (/\n/.test(value)) return false;
+  if (/\b(?:MRP|QTY|COMMODITY|NUMBER OF|PACKED)\b/.test(value)) return false;
+  if (/^[A-Z0-9][A-Z0-9.\-/]{3,}$/.test(value) && /[A-Z]/.test(value) && /\d/.test(value)) {
+    return true;
+  }
+  if (/^\d{6,18}$/.test(value)) return true;
+  return false;
+}
+
+function scoreDetectedValue(raw: string, format: string | undefined, collectMode: boolean): number {
+  let score = 0;
+  const normalizedFormat = (format ?? '').toLowerCase();
+  const trimmed = raw.trim();
+
+  if (!trimmed) return -1000;
+  if (collectMode && normalizedFormat === 'qr_code') score -= 8;
+  if (normalizedFormat === 'code_128') score += 12;
+  if (normalizedFormat === 'code_39' || normalizedFormat === 'code_93') score += 8;
+  if (normalizedFormat === 'ean_13' || normalizedFormat === 'upc_a' || normalizedFormat === 'upc_e') score += 6;
+  if (isLikelyPartNumber(trimmed)) score += 20;
+  if (trimmed.length > 26) score -= 4;
+  if (/\s{2,}/.test(trimmed)) score -= 3;
+  if (/\n/.test(trimmed)) score -= 6;
+  return score;
+}
+
+function pickBestDetectedRawValue(codes: BarcodeDetectorResult[], collectMode: boolean): string | null {
+  const candidates = codes
+    .map((code) => ({
+      rawValue: typeof code.rawValue === 'string' ? code.rawValue.trim() : '',
+      format: code.format,
+    }))
+    .filter((entry) => entry.rawValue.length > 0);
+
+  if (candidates.length === 0) return null;
+
+  let best = candidates[0];
+  let bestScore = scoreDetectedValue(best.rawValue, best.format, collectMode);
+
+  for (let i = 1; i < candidates.length; i += 1) {
+    const candidate = candidates[i];
+    const score = scoreDetectedValue(candidate.rawValue, candidate.format, collectMode);
+    if (score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+
+  return best.rawValue;
+}
 
 type ScannerEnginePath =
   | { type: 'native'; detector: BarcodeDetectorLike }
@@ -372,9 +428,9 @@ export function LiveQrScanner({
       try {
         if (engine.type === 'native') {
           const barcodes = await engine.detector.detect(video);
-          const qr = barcodes.find((code) => typeof code.rawValue === 'string' && code.rawValue.trim());
-          if (qr?.rawValue) {
-            handleResolvedScan(qr.rawValue);
+          const selectedRawValue = pickBestDetectedRawValue(barcodes, collectMode);
+          if (selectedRawValue) {
+            handleResolvedScan(selectedRawValue);
             return;
           }
         } else if (engine.type === 'worker') {

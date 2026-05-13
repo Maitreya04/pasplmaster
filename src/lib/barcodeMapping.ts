@@ -35,6 +35,10 @@ export interface BarcodeCoverage {
   coverage_pct: number;
 }
 
+export interface MappedSkuSummary {
+  skuBusyCode: number;
+}
+
 export interface SaveBarcodeMappingInput {
   barcodeRaw: string;
   barcodeKey: string;
@@ -181,6 +185,24 @@ export async function fetchBarcodeCoverage(): Promise<BarcodeCoverage> {
   const { data, error } = await supabase.rpc('get_barcode_coverage');
   if (error) throw error;
   return data as BarcodeCoverage;
+}
+
+export async function fetchMappedSkuSummaries(): Promise<MappedSkuSummary[]> {
+  const { data, error } = await supabase
+    .from('item_barcodes')
+    .select('sku_busy_code')
+    .not('sku_busy_code', 'is', null)
+    .limit(50_000);
+
+  if (error) throw error;
+
+  const unique = new Set<number>();
+  for (const row of data ?? []) {
+    const skuBusyCode = Number((row as { sku_busy_code: number | string }).sku_busy_code);
+    if (Number.isFinite(skuBusyCode)) unique.add(skuBusyCode);
+  }
+
+  return [...unique].map((skuBusyCode) => ({ skuBusyCode }));
 }
 
 /**

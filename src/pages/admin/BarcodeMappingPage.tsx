@@ -19,6 +19,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useItems } from '../../hooks/useItems';
 import {
+  fetchMappedSkuSummaries,
   fetchBarcodeCoverage,
   loadSkuFromBusyCode,
   loadSkuOptionsFromBin,
@@ -62,6 +63,7 @@ interface SessionStats {
 }
 
 const BARCODE_COVERAGE_QUERY_KEY = ['barcode-coverage'] as const;
+const MAPPED_SKUS_QUERY_KEY = ['barcode-mapped-skus'] as const;
 
 const EMPTY_STATS: SessionStats = {
   mapped: 0,
@@ -84,6 +86,17 @@ function formatNumber(value: number | null | undefined): string {
 function formatCoverage(coverage: BarcodeCoverage | undefined): string {
   if (!coverage) return 'Loading coverage...';
   return `${formatNumber(coverage.mapped_skus)} / ${formatNumber(coverage.total_active_skus)} active SKUs (${coverage.coverage_pct}%)`;
+}
+
+function isLikelyManufacturerPartKey(value: string): boolean {
+  const key = value.trim().toUpperCase();
+  if (!key) return false;
+  if (key.length < 4 || key.length > 36) return false;
+  if (/\n/.test(key)) return false;
+  if (/\b(?:MRP|QTY|COMMODITY|NUMBER OF|PACKED)\b/.test(key)) return false;
+  if (/^[A-Z0-9][A-Z0-9.\-/]{3,}$/.test(key) && /[A-Z]/.test(key) && /\d/.test(key)) return true;
+  if (/^\d{6,18}$/.test(key)) return true;
+  return false;
 }
 
 function StatTile({ label, value }: { label: string; value: number }): React.JSX.Element {
@@ -222,11 +235,21 @@ export default function BarcodeMappingPage(): React.JSX.Element {
     queryFn: fetchBarcodeCoverage,
     staleTime: 30_000,
   });
+  const { data: mappedSkuSummaries = [] } = useQuery({
+    queryKey: MAPPED_SKUS_QUERY_KEY,
+    queryFn: fetchMappedSkuSummaries,
+    staleTime: 30_000,
+  });
+  const mappedSkuSet = useMemo(
+    () => new Set(mappedSkuSummaries.map((entry) => entry.skuBusyCode)),
+    [mappedSkuSummaries],
+  );
 
   const manufacturer = useMemo(
     () => selectedSku?.mainGroup ?? selectedSku?.parentGroup ?? null,
     [selectedSku],
   );
+  const selectedSkuAlreadyMapped = selectedSku ? mappedSkuSet.has(selectedSku.skuBusyCode) : false;
 
   const resetForNext = useCallback((dir: MappingDirection) => {
     setStep(dir === 'scan_first' ? 'scan_barcode_first' : 'scan_bin');
@@ -320,6 +343,11 @@ export default function BarcodeMappingPage(): React.JSX.Element {
       return;
     }
 
+    if (!isLikelyManufacturerPartKey(parsed.key)) {
+      toast.warning('That scan looked like damaged/noisy QR data. Please point at the printed part-number barcode.');
+      return;
+    }
+
     setPendingBarcode(parsed);
     setManualBarcode(parsed.raw);
     setScannerOpen(false);
@@ -346,6 +374,13 @@ export default function BarcodeMappingPage(): React.JSX.Element {
 
   const handleSave = useCallback(async (force = false) => {
     if (!selectedSku || !pendingBarcode) return;
+    if (mappedSkuSet.has(selectedSku.skuBusyCode)) {
+      setStats((current) => ({ ...current, alreadyMapped: current.alreadyMapped + 1 }));
+      setStep('already_mapped');
+      toast.info(`Busy ${selectedSku.skuBusyCode} is already mapped. Skipping duplicate mapping.`);
+      finishSoon();
+      return;
+    }
 
     setSaving(true);
     setStep('saving');
@@ -393,6 +428,7 @@ export default function BarcodeMappingPage(): React.JSX.Element {
       setStep('saved');
       toast.success(result.status === 'overridden' ? 'Mapping updated.' : 'Barcode mapped.');
       void queryClient.invalidateQueries({ queryKey: BARCODE_COVERAGE_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: MAPPED_SKUS_QUERY_KEY });
       finishSoon();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not save barcode mapping.';
@@ -407,6 +443,7 @@ export default function BarcodeMappingPage(): React.JSX.Element {
     manufacturer,
     pendingBarcode,
     queryClient,
+    mappedSkuSet,
     selectedSku,
     toast,
     userId,
@@ -603,6 +640,11 @@ export default function BarcodeMappingPage(): React.JSX.Element {
                     {autoSuggestedItem.item.main_group ? ` · ${autoSuggestedItem.item.main_group}` : ''}
                     {autoSuggestedItem.item.rack_no ? ` · Bin ${autoSuggestedItem.item.rack_no}` : ''}
                   </p>
+                  {mappedSkuSet.has(Number(autoSuggestedItem.item.busy_code)) && (
+                    <p className="mt-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-warning)]">
+                      Already mapped
+                    </p>
+                  )}
                   <button
                     type="button"
                     disabled={loadingSkuLookup}
@@ -659,6 +701,11 @@ export default function BarcodeMappingPage(): React.JSX.Element {
                           {result.item.main_group ? ` · ${result.item.main_group}` : ''}
                           {result.item.rack_no ? ` · Bin ${result.item.rack_no}` : ''}
                         </p>
+                        {mappedSkuSet.has(Number(result.item.busy_code)) && (
+                          <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-warning)]">
+                            Already mapped
+                          </p>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -778,6 +825,16 @@ export default function BarcodeMappingPage(): React.JSX.Element {
           {(step === 'bin_loaded' || step === 'barcode_detected' || step === 'saving') && selectedSku && (
             <section className="space-y-4">
               <ItemSummary sku={selectedSku} />
+              {selectedSkuAlreadyMapped && (
+                <div className="rounded-xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] p-4">
+                  <p className="text-sm font-semibold text-[var(--content-warning)]">
+                    Busy {selectedSku.skuBusyCode} is already mapped.
+                  </p>
+                  <p className="mt-1 text-sm text-[var(--content-secondary)]">
+                    This SKU already has a barcode mapping. Use Skip or scan another item.
+                  </p>
+                </div>
+              )}
 
               {step === 'bin_loaded' && (
                 <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4 shadow-sm">
@@ -840,7 +897,7 @@ export default function BarcodeMappingPage(): React.JSX.Element {
                     <button
                       type="button"
                       onClick={() => void handleSave(false)}
-                      disabled={saving}
+                      disabled={saving || selectedSkuAlreadyMapped}
                       className={primaryButton}
                     >
                       <CheckCircleIcon size={18} weight="bold" />
