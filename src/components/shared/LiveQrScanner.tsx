@@ -671,6 +671,7 @@ export function LiveQrScanner({
         setStatus(idleStatus ?? 'Point the QR inside the frame');
         scheduleScan(scanFrame);
       } catch (error) {
+        if (cancelled) return;
         const message = error instanceof Error ? error.message : 'Could not start the QR scanner.';
         setStatus('Scanner unavailable');
         setErrorMessage(message);
