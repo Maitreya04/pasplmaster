@@ -74,9 +74,121 @@ function isStructuredText(value: string): boolean {
   return false;
 }
 
+function ensureUrlScheme(rawValue: string): string | null {
+  const v = rawValue.trim();
+  if (!v) return null;
+  if (/^https?:\/\//i.test(v)) return v;
+  if (/^www\./i.test(v)) return `https://${v}`;
+  // Best-effort: allow bare hosts/shortlinks like "bit.ly/abc" or "example.com/xyz".
+  if (!/\s/.test(v) && v.includes('/') && /^[a-z0-9.-]+\.[a-z]{2,}/i.test(v)) return `https://${v}`;
+  if (!/\s/.test(v) && v.includes('/') && !v.includes(':')) return `https://${v}`;
+  return null;
+}
+
+function looksLikePartKey(value: string): boolean {
+  const key = value.trim().toUpperCase();
+  if (!key) return false;
+  if (key.length < 4 || key.length > 36) return false;
+  if (/\n/.test(key)) return false;
+  if (/\b(?:MRP|QTY|COMMODITY|NUMBER OF|PACKED)\b/.test(key)) return false;
+  if (/^[A-Z0-9][A-Z0-9.\-]{3,}$/.test(key) && /[A-Z]/.test(key) && /\d/.test(key)) return true;
+  if (/^\d{6,18}$/.test(key)) return true;
+  return false;
+}
+
+function extractPartCandidatesFromUrl(rawValue: string): string[] {
+  const urlStr = ensureUrlScheme(rawValue);
+  if (!urlStr) return [];
+
+  try {
+    const url = new URL(urlStr);
+
+    const queryKeys = [
+      'code',
+      'item',
+      'sku',
+      'alias',
+      'alias1',
+      // common vendor parameter names
+      'part',
+      'part_no',
+      'partno',
+      'pn',
+      'product',
+      'material',
+      'model',
+    ];
+
+    const fromQuery = queryKeys
+      .map((k) => url.searchParams.get(k)?.trim() ?? '')
+      .filter(Boolean)
+      .map((v) => v.toUpperCase());
+
+    const fromPath = (url.pathname.match(/[A-Z0-9][A-Z0-9.\-]{3,}/gi) ?? []).map((v) => v.toUpperCase());
+    const fromHash = (url.hash.match(/[A-Z0-9][A-Z0-9.\-]{3,}/gi) ?? []).map((v) => v.toUpperCase());
+
+    const seen = new Set<string>();
+    const out: string[] = [];
+
+    for (const candidate of [...fromQuery, ...fromPath, ...fromHash]) {
+      const maybe = candidate.trim().toUpperCase();
+      if (!maybe) continue;
+      if (!looksLikePartKey(maybe)) continue;
+      if (seen.has(maybe)) continue;
+      seen.add(maybe);
+      out.push(maybe);
+    }
+
+    return out;
+  } catch {
+    // Fallback: many QR generators embed "URL-ish" strings that include unescaped
+    // characters in the path (e.g. `]a$[@!E9...`). In that case, still attempt
+    // to extract code-like tokens from the whole payload.
+    const upper = rawValue.trim().toUpperCase();
+    if (!upper) return [];
+
+    // Remove leading scheme+host when present so we don't match domain fragments.
+    const withoutHost = upper.replace(/^HTTPS?:\/\/[^/]+\/?/i, '');
+    const tokens = withoutHost.match(/[A-Z0-9][A-Z0-9.\-]{3,}/g) ?? [];
+
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const token of tokens) {
+      const maybe = token.trim().toUpperCase();
+      if (!looksLikePartKey(maybe)) continue;
+      if (seen.has(maybe)) continue;
+      seen.add(maybe);
+      out.push(maybe);
+    }
+    return out;
+  }
+}
+
 export function parseManufacturerBarcode(raw: string): ParsedBarcode {
   const trimmed = raw.trim();
   const candidates: string[] = [];
+
+  // If the QR payload is a URL/redirect, extract the part-number candidate from it
+  // so admin mapping can proceed without treating the whole URL as "noisy QR data".
+  const urlCandidates = extractPartCandidatesFromUrl(trimmed);
+  if (urlCandidates.length > 0) {
+    const cleaned: Array<ReturnType<typeof stripBarcodeSuffixes>> = urlCandidates.map((c) =>
+      stripBarcodeSuffixes(c),
+    );
+
+    const best = cleaned[0];
+    for (const c of urlCandidates) candidates.push(c);
+    if (best.key !== urlCandidates[0]) candidates.push(best.key);
+
+    return {
+      raw: trimmed,
+      key: best.key,
+      strategy: best.strategy,
+      looksSerialised: best.key !== urlCandidates[0],
+      strippedSuffix: best.key !== urlCandidates[0] ? best.suffix : null,
+      candidates,
+    };
+  }
 
   // ── Structured / multi-line payloads (TAFE, Mahindra, etc.) ──
   if (isStructuredText(trimmed)) {
