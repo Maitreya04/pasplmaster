@@ -151,7 +151,7 @@ export default function LiveQueuePage() {
   const orderRef = useRef(order);
   itemsRef.current = items;
   flagsRef.current = flow.flags;
-  orderRef.current = order ?? null;
+  orderRef.current = order;
 
   const persistLiveQueueDraftIfDirty = useCallback(async () => {
     if (!flowRef.current.isDraftDirty()) return;
