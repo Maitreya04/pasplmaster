@@ -16,6 +16,8 @@ import {
 type BarcodeDetectorResult = {
   rawValue?: string | null;
   format?: string;
+  boundingBox?: DOMRectReadOnly;
+  cornerPoints?: ReadonlyArray<{ x: number; y: number }>;
 };
 
 type BarcodeDetectorLike = {
@@ -27,9 +29,11 @@ type BarcodeDetectorStatic = BarcodeDetectorCtor & {
   getSupportedFormats?: () => Promise<string[]>;
 };
 
-const SCAN_LOOP_DELAY_MS = 90;
+const SCAN_LOOP_DELAY_MS = 70;
 const AUTO_RETRY_DELAY_MS = 1000;
 const RESET_COOLDOWN_MS = 350;
+const STABLE_SCAN_MIN_FRAMES = 2;
+const STABLE_SCAN_TTL_MS = 600;
 const REQUESTED_BARCODE_FORMATS = [
   'qr_code',
   'code_128',
@@ -74,22 +78,59 @@ function scoreDetectedValue(raw: string, format: string | undefined, collectMode
   return score;
 }
 
-function pickBestDetectedRawValue(codes: BarcodeDetectorResult[], collectMode: boolean): string | null {
+function getBoundingBoxArea(entry: BarcodeDetectorResult): number | null {
+  const bbox = entry.boundingBox;
+  if (bbox && Number.isFinite(bbox.width) && Number.isFinite(bbox.height) && bbox.width > 0 && bbox.height > 0) {
+    return bbox.width * bbox.height;
+  }
+  return null;
+}
+
+function scoreSpatialPriority(
+  entry: BarcodeDetectorResult,
+  video: HTMLVideoElement,
+): number {
+  const area = getBoundingBoxArea(entry);
+  if (!area || video.videoWidth <= 0 || video.videoHeight <= 0) return 0;
+
+  // Bias toward smaller symbols while preferring candidates near center to reduce accidental side picks.
+  const frameArea = video.videoWidth * video.videoHeight;
+  const areaRatio = Math.min(1, Math.max(0, area / frameArea));
+  const sizeScore = (1 - areaRatio) * 30;
+
+  const bbox = entry.boundingBox;
+  if (!bbox) return sizeScore;
+  const centerX = bbox.x + bbox.width / 2;
+  const centerY = bbox.y + bbox.height / 2;
+  const dx = (centerX - video.videoWidth / 2) / (video.videoWidth / 2);
+  const dy = (centerY - video.videoHeight / 2) / (video.videoHeight / 2);
+  const distance = Math.min(1, Math.sqrt(dx * dx + dy * dy));
+  const centerScore = (1 - distance) * 12;
+
+  return sizeScore + centerScore;
+}
+
+function pickBestDetectedRawValue(
+  codes: BarcodeDetectorResult[],
+  collectMode: boolean,
+  video: HTMLVideoElement,
+): string | null {
   const candidates = codes
     .map((code) => ({
       rawValue: typeof code.rawValue === 'string' ? code.rawValue.trim() : '',
       format: code.format,
+      scoreBoost: scoreSpatialPriority(code, video),
     }))
     .filter((entry) => entry.rawValue.length > 0);
 
   if (candidates.length === 0) return null;
 
   let best = candidates[0];
-  let bestScore = scoreDetectedValue(best.rawValue, best.format, collectMode);
+  let bestScore = scoreDetectedValue(best.rawValue, best.format, collectMode) + best.scoreBoost;
 
   for (let i = 1; i < candidates.length; i += 1) {
     const candidate = candidates[i];
-    const score = scoreDetectedValue(candidate.rawValue, candidate.format, collectMode);
+    const score = scoreDetectedValue(candidate.rawValue, candidate.format, collectMode) + candidate.scoreBoost;
     if (score > bestScore) {
       best = candidate;
       bestScore = score;
@@ -201,6 +242,11 @@ export function LiveQrScanner({
   const scanFrameRef = useRef<(() => Promise<void>) | null>(null);
   const completedRef = useRef(false);
   const lockedRef = useRef(false);
+  const stableScanRef = useRef<{ rawValue: string | null; count: number; updatedAt: number }>({
+    rawValue: null,
+    count: 0,
+    updatedAt: 0,
+  });
   const [status, setStatus] = useState('Loading scanner...');
   const [supportMessage, setSupportMessage] = useState<string | null>(null);
   const [torchAvailable, setTorchAvailable] = useState(false);
@@ -428,10 +474,24 @@ export function LiveQrScanner({
       try {
         if (engine.type === 'native') {
           const barcodes = await engine.detector.detect(video);
-          const selectedRawValue = pickBestDetectedRawValue(barcodes, collectMode);
+          const selectedRawValue = pickBestDetectedRawValue(barcodes, collectMode, video);
           if (selectedRawValue) {
-            handleResolvedScan(selectedRawValue);
-            return;
+            const now = Date.now();
+            const state = stableScanRef.current;
+            const isFresh = now - state.updatedAt <= STABLE_SCAN_TTL_MS;
+            const isSame = isFresh && state.rawValue === selectedRawValue;
+            stableScanRef.current = {
+              rawValue: selectedRawValue,
+              count: isSame ? state.count + 1 : 1,
+              updatedAt: now,
+            };
+            if (stableScanRef.current.count >= STABLE_SCAN_MIN_FRAMES) {
+              stableScanRef.current = { rawValue: null, count: 0, updatedAt: 0 };
+              handleResolvedScan(selectedRawValue);
+              return;
+            }
+          } else {
+            stableScanRef.current = { rawValue: null, count: 0, updatedAt: 0 };
           }
         } else if (engine.type === 'worker') {
           if (engine.pending.size < 2) {
@@ -505,7 +565,19 @@ export function LiveQrScanner({
                 engine.pending.delete(data.frameId);
               }
               if (data.rawValue && !cancelled && !completedRef.current && !lockedRef.current) {
-                handleResolvedScan(data.rawValue);
+                const now = Date.now();
+                const state = stableScanRef.current;
+                const isFresh = now - state.updatedAt <= STABLE_SCAN_TTL_MS;
+                const isSame = isFresh && state.rawValue === data.rawValue;
+                stableScanRef.current = {
+                  rawValue: data.rawValue,
+                  count: isSame ? state.count + 1 : 1,
+                  updatedAt: now,
+                };
+                if (stableScanRef.current.count >= STABLE_SCAN_MIN_FRAMES) {
+                  stableScanRef.current = { rawValue: null, count: 0, updatedAt: 0 };
+                  handleResolvedScan(data.rawValue);
+                }
               }
             } else if (data.type === 'error') {
               console.error('QR Worker error:', data.message);
@@ -616,6 +688,7 @@ export function LiveQrScanner({
     }
     completedRef.current = false;
     lockedRef.current = false;
+    stableScanRef.current = { rawValue: null, count: 0, updatedAt: 0 };
     setErrorMessage(null);
     setLastScan(null);
     setStatus(idleStatus ?? 'Point the QR inside the frame');

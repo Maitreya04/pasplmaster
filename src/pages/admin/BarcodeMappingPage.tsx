@@ -111,6 +111,9 @@ function StatTile({ label, value }: { label: string; value: number }): React.JSX
 }
 
 function ItemSummary({ sku }: { sku: BarcodeSkuOption }): React.JSX.Element {
+  const aliasDisplay = sku.alias1 || sku.alias
+    ? `Alias 1 ${sku.alias1 ?? '—'} · Alias ${sku.alias ?? '—'}`
+    : 'Alias 1 — · Alias —';
   return (
     <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
       <div className="flex items-start gap-3">
@@ -126,6 +129,9 @@ function ItemSummary({ sku }: { sku: BarcodeSkuOption }): React.JSX.Element {
           </p>
           <p className="mt-1 text-sm text-[var(--content-secondary)]">
             {sku.mainGroup || sku.parentGroup || 'No group'} · Busy {sku.skuBusyCode}
+          </p>
+          <p className="mt-1 text-xs font-mono text-[var(--content-tertiary)]">
+            {aliasDisplay}
           </p>
         </div>
       </div>
@@ -640,6 +646,9 @@ export default function BarcodeMappingPage(): React.JSX.Element {
                     {autoSuggestedItem.item.main_group ? ` · ${autoSuggestedItem.item.main_group}` : ''}
                     {autoSuggestedItem.item.rack_no ? ` · Bin ${autoSuggestedItem.item.rack_no}` : ''}
                   </p>
+                  <p className="mt-1 text-xs font-mono text-[var(--content-tertiary)]">
+                    Alias 1 {autoSuggestedItem.item.alias1 ?? '—'} · Alias {autoSuggestedItem.item.alias ?? '—'}
+                  </p>
                   {mappedSkuSet.has(Number(autoSuggestedItem.item.busy_code)) && (
                     <p className="mt-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-warning)]">
                       Already mapped
@@ -700,6 +709,9 @@ export default function BarcodeMappingPage(): React.JSX.Element {
                           Busy {result.item.busy_code}
                           {result.item.main_group ? ` · ${result.item.main_group}` : ''}
                           {result.item.rack_no ? ` · Bin ${result.item.rack_no}` : ''}
+                        </p>
+                        <p className="mt-1 text-xs font-mono text-[var(--content-tertiary)]">
+                          Alias 1 {result.item.alias1 ?? '—'} · Alias {result.item.alias ?? '—'}
                         </p>
                         {mappedSkuSet.has(Number(result.item.busy_code)) && (
                           <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-warning)]">
@@ -813,6 +825,9 @@ export default function BarcodeMappingPage(): React.JSX.Element {
                     <p className="mt-1 text-sm text-[var(--content-secondary)]">
                       Busy {option.skuBusyCode} · {option.mainGroup || option.parentGroup || 'No group'}
                     </p>
+                    <p className="mt-1 text-xs font-mono text-[var(--content-tertiary)]">
+                      Alias 1 {option.alias1 ?? '—'} · Alias {option.alias ?? '—'}
+                    </p>
                   </button>
                 ))}
               </div>
@@ -883,6 +898,12 @@ export default function BarcodeMappingPage(): React.JSX.Element {
                       </p>
                       <p className="mt-1 break-all font-mono text-sm font-semibold text-[var(--content-primary)]">
                         Saved key: {pendingBarcode.key}
+                      </p>
+                      <p className="mt-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
+                        Part Number {'->'} Alias Mapping
+                      </p>
+                      <p className="mt-1 break-all font-mono text-xs text-[var(--content-secondary)]">
+                        {pendingBarcode.key} {'->'} {selectedSku.alias1 ?? selectedSku.alias ?? 'No alias configured'}
                       </p>
                     </div>
                   </div>

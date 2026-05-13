@@ -21,6 +21,8 @@ export interface BarcodeSkuOption {
   skuBusyCode: number;
   itemId: number | null;
   itemName: string;
+  alias1: string | null;
+  alias: string | null;
   mainGroup: string | null;
   parentGroup: string | null;
   itemCategory: string | null;
@@ -89,6 +91,8 @@ function toSkuOption({
     skuBusyCode,
     itemId: item?.id ?? null,
     itemName: item?.name ?? itemNameSnapshot ?? `Busy ${skuBusyCode}`,
+    alias1: item?.alias1 ?? null,
+    alias: item?.alias ?? null,
     mainGroup: item?.main_group ?? null,
     parentGroup: item?.parent_group ?? null,
     itemCategory: item?.item_category ?? null,

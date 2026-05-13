@@ -27,6 +27,53 @@ type WorkerResponseMessage =
       message: string;
     };
 
+function cropImageData(
+  source: ImageData,
+  sx: number,
+  sy: number,
+  width: number,
+  height: number,
+): ImageData {
+  const srcWidth = source.width;
+  const srcHeight = source.height;
+  const x = Math.max(0, Math.min(srcWidth - 1, Math.floor(sx)));
+  const y = Math.max(0, Math.min(srcHeight - 1, Math.floor(sy)));
+  const w = Math.max(1, Math.min(srcWidth - x, Math.floor(width)));
+  const h = Math.max(1, Math.min(srcHeight - y, Math.floor(height)));
+  const out = new Uint8ClampedArray(w * h * 4);
+  const src = source.data;
+
+  for (let row = 0; row < h; row += 1) {
+    const srcOffset = ((y + row) * srcWidth + x) * 4;
+    const dstOffset = row * w * 4;
+    out.set(src.subarray(srcOffset, srcOffset + w * 4), dstOffset);
+  }
+
+  return new ImageData(out, w, h);
+}
+
+function upscaleNearest(source: ImageData, scale: number): ImageData {
+  const targetWidth = Math.max(1, Math.floor(source.width * scale));
+  const targetHeight = Math.max(1, Math.floor(source.height * scale));
+  const out = new Uint8ClampedArray(targetWidth * targetHeight * 4);
+  const src = source.data;
+
+  for (let y = 0; y < targetHeight; y += 1) {
+    const sy = Math.min(source.height - 1, Math.floor(y / scale));
+    for (let x = 0; x < targetWidth; x += 1) {
+      const sx = Math.min(source.width - 1, Math.floor(x / scale));
+      const srcIdx = (sy * source.width + sx) * 4;
+      const dstIdx = (y * targetWidth + x) * 4;
+      out[dstIdx] = src[srcIdx];
+      out[dstIdx + 1] = src[srcIdx + 1];
+      out[dstIdx + 2] = src[srcIdx + 2];
+      out[dstIdx + 3] = src[srcIdx + 3];
+    }
+  }
+
+  return new ImageData(out, targetWidth, targetHeight);
+}
+
 function isLikelyPartNumber(raw: string): boolean {
   const value = raw.trim().toUpperCase();
   if (!value) return false;
@@ -59,6 +106,24 @@ function scoreSymbol(symbol: { type: ZBarSymbolType; decode(): string }): number
   if (isLikelyPartNumber(decoded)) score += 20;
   if (decoded.length > 26) score -= 4;
   return score;
+}
+
+async function scanBestSymbol(scanner: ZBarScanner, imageData: ImageData) {
+  const symbols = await scanImageData(imageData, scanner);
+  const usableSymbols = symbols.filter((symbol) => symbol.decode().trim().length > 0);
+  if (usableSymbols.length === 0) return null;
+
+  let best = usableSymbols[0];
+  let bestScore = scoreSymbol(best);
+  for (let i = 1; i < usableSymbols.length; i += 1) {
+    const candidate = usableSymbols[i];
+    const score = scoreSymbol(candidate);
+    if (score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 let scannerPromise: Promise<ZBarScanner> | null = null;
@@ -95,21 +160,23 @@ async function getBarcodeScanner(): Promise<ZBarScanner> {
 
 async function handleScan(message: ScanRequestMessage) {
   const scanner = await getBarcodeScanner();
-  const symbols = await scanImageData(message.imageData, scanner);
-  const usableSymbols = symbols.filter((symbol) => symbol.decode().trim().length > 0);
-  let symbol: (typeof usableSymbols)[number] | undefined;
+  const image = message.imageData;
+  const variants: ImageData[] = [image];
+  const centerCrop = cropImageData(
+    image,
+    image.width * 0.2,
+    image.height * 0.2,
+    image.width * 0.6,
+    image.height * 0.6,
+  );
+  variants.push(centerCrop);
+  variants.push(upscaleNearest(centerCrop, 2));
+  variants.push(upscaleNearest(image, 1.5));
 
-  if (usableSymbols.length > 0) {
-    symbol = usableSymbols[0];
-    let bestScore = scoreSymbol(symbol);
-    for (let i = 1; i < usableSymbols.length; i += 1) {
-      const candidate = usableSymbols[i];
-      const score = scoreSymbol(candidate);
-      if (score > bestScore) {
-        symbol = candidate;
-        bestScore = score;
-      }
-    }
+  let symbol: { decode(): string } | null = null;
+  for (const variant of variants) {
+    symbol = await scanBestSymbol(scanner, variant);
+    if (symbol) break;
   }
 
   const response: WorkerResponseMessage = {
