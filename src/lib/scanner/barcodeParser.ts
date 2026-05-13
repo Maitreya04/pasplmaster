@@ -1,4 +1,4 @@
-export type MatchStrategy = 'exact' | 'prefix_hyphen' | 'prefix_space' | 'structured_field' | 'manual';
+export type MatchStrategy = 'exact' | 'prefix_hyphen' | 'prefix_space' | 'slash_separated' | 'structured_field' | 'manual';
 
 export interface ParsedBarcode {
   raw: string;
@@ -64,7 +64,7 @@ export function parseManufacturerBarcode(raw: string): ParsedBarcode {
       candidates.push(extracted);
 
       // Check if extracted part number itself has a serial suffix
-      const cleaned = stripSerialSuffix(extracted);
+      const cleaned = stripBarcodeSuffixes(extracted);
       if (cleaned.key !== extracted) {
         candidates.push(cleaned.key);
       }
@@ -86,7 +86,7 @@ export function parseManufacturerBarcode(raw: string): ParsedBarcode {
     if (codeLikeMatch?.[1] && codeLikeMatch[1].length >= 6) {
       const codeCandidate = codeLikeMatch[1];
       candidates.push(codeCandidate);
-      const cleaned = stripSerialSuffix(codeCandidate);
+      const cleaned = stripBarcodeSuffixes(codeCandidate);
       if (cleaned.key !== codeCandidate) candidates.push(cleaned.key);
       return {
         raw: trimmed,
@@ -100,7 +100,7 @@ export function parseManufacturerBarcode(raw: string): ParsedBarcode {
   }
 
   // ── Simple serial-suffix stripping (original logic) ──
-  const serialResult = stripSerialSuffix(trimmed);
+  const serialResult = stripBarcodeSuffixes(trimmed);
   if (serialResult.key !== trimmed) {
     candidates.push(serialResult.key);
     candidates.push(trimmed);
@@ -127,16 +127,27 @@ export function parseManufacturerBarcode(raw: string): ParsedBarcode {
 }
 
 /**
- * Strip serial/batch suffixes from a barcode value.
+ * Strip serial/batch suffixes and slash-separated metadata from a barcode value.
  * Handles patterns like:
+ *   - "2125599K01/SEAL INNER/56.00/1.000 N/40169330" (slash-separated fields)
  *   - "1310C03801-17102231402"  (hyphen + 6+ digit serial)
  *   - "ABC123 987654"           (space + 6+ digit serial)
  */
-function stripSerialSuffix(value: string): {
+function stripBarcodeSuffixes(value: string): {
   key: string;
   suffix: string | null;
-  strategy: 'prefix_hyphen' | 'prefix_space' | 'exact';
+  strategy: MatchStrategy;
 } {
+  // Handle slash-separated records (PartNo/Desc/MRP/Qty...)
+  const slashParts = value.split('/');
+  if (slashParts.length >= 3) {
+    const prefix = slashParts[0].trim();
+    if (/^[A-Z0-9.\-]{4,}$/i.test(prefix)) {
+      return { key: prefix, suffix: value.substring(prefix.length), strategy: 'slash_separated' };
+    }
+  }
+
+  // Handle hyphen with serial
   const hyphenIdx = value.indexOf('-');
   if (hyphenIdx > 3 && hyphenIdx < value.length - 1) {
     const prefix = value.substring(0, hyphenIdx);
@@ -146,6 +157,7 @@ function stripSerialSuffix(value: string): {
     }
   }
 
+  // Handle space with serial
   const spaceIdx = value.indexOf(' ');
   if (spaceIdx > 3) {
     const afterSpace = value.substring(spaceIdx + 1);
