@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase/client';
+import { subscribeToTable } from '../lib/realtime';
 import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
 import type { UserNotification } from '../types';
 
@@ -58,24 +59,28 @@ export function useUserNotifications(userId: number | null) {
       return () => window.clearInterval(id);
     }
 
-    const channel = supabase
-      .channel(`user-notifications-${userId}-${uid}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'user_notifications',
-          filter: `user_id=eq.${userId}`,
-        },
-        () => {
+    let pollId: ReturnType<typeof window.setInterval> | null = null;
+    const unsub = subscribeToTable({
+      channelName: `user-notifications-${userId}-${uid}`,
+      table: 'user_notifications',
+      filter: `user_id=eq.${userId}`,
+      onChange: () => {
+        void fetchNotifications();
+      },
+      onReconnect: () => {
+        void fetchNotifications();
+      },
+      onGiveUp: () => {
+        if (pollId != null) return;
+        pollId = window.setInterval(() => {
           void fetchNotifications();
-        },
-      )
-      .subscribe();
+        }, POLL_MS);
+      },
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      unsub();
+      if (pollId != null) window.clearInterval(pollId);
     };
   }, [userId, uid, fetchNotifications]);
 

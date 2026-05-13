@@ -44,6 +44,8 @@ export interface SubscribeToTableOptions<Row extends AnyRow> {
   onChange: (payload: ChangePayload<Row>) => void;
   /** Fires whenever the channel transitions to SUBSCRIBED after the first time. */
   onReconnect?: () => void;
+  /** Fires once when we stop reconnecting after repeated failures (e.g. `wss://` blocked). */
+  onGiveUp?: () => void;
 }
 
 const INITIAL_BACKOFF_MS = 2_000;
@@ -110,6 +112,15 @@ export function subscribeToTable<Row extends AnyRow>(
         console.warn(
           `[realtime] giving up on "${opts.channelName}" after ${consecutiveFailures} failed attempts (${reason}). App will use REST polling instead.`,
         );
+      }
+      if (opts.onGiveUp) {
+        try {
+          opts.onGiveUp();
+        } catch (err) {
+          if (typeof console !== 'undefined') {
+            console.error('[realtime] onGiveUp threw', err);
+          }
+        }
       }
       return;
     }
