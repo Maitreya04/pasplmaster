@@ -14,6 +14,7 @@ import {
 import { useItems } from '../../hooks/useItems';
 import { useToast } from '../../context/ToastContext';
 import { BigButton, LiveQrScanner, SearchInput, Skeleton } from '../../components/shared';
+import { QRScannerSimulation } from '../../components/QRScanner';
 import type { Item, ItemPackDefinition, LicensePlatePackType, ScanResult } from '../../types';
 import { appHaptics } from '../../lib/haptics';
 import type { LiveQrScannerResolved } from '../../components/shared/LiveQrScanner';
@@ -41,7 +42,7 @@ interface ScanLabQuantityResult {
   requiresBreakConfirmation: boolean;
 }
 
-type LabScannerMode = 'verify' | 'scan';
+type LabScannerMode = 'verify' | 'scan' | 'simulate';
 
 interface ScanOnlyResult {
   rawValue: string;
@@ -303,6 +304,17 @@ export default function PickScanLabPage(): React.JSX.Element {
           >
             Scan Mode
           </button>
+          <button
+            type="button"
+            onClick={() => setLabScannerMode('simulate')}
+            className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all ${
+              labScannerMode === 'simulate'
+                ? 'bg-[var(--content-primary)] text-[var(--bg-primary)] shadow-sm'
+                : 'text-[var(--content-secondary)] hover:text-[var(--content-primary)]'
+            }`}
+          >
+            Tiny QR Sim
+          </button>
         </div>
 
         {labScannerMode === 'scan' && (
@@ -398,6 +410,12 @@ export default function PickScanLabPage(): React.JSX.Element {
               </div>
             )}
           </section>
+        )}
+
+        {labScannerMode === 'simulate' && (
+          <div className="mt-5">
+            <QRScannerSimulation />
+          </div>
         )}
 
         {labScannerMode === 'verify' && (

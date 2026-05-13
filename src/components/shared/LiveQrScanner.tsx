@@ -12,16 +12,21 @@ import {
   classifyScanPayload,
   normalizeScanCode,
 } from '../../lib/scanner/qrPayload';
+import {
+  captureRoiBitmap,
+  captureRoiImageData,
+  getNextRoiLevel,
+} from '../../lib/scanner/roiProcessor';
 
 type BarcodeDetectorResult = {
   rawValue?: string | null;
   format?: string;
-  boundingBox?: DOMRectReadOnly;
+  boundingBox?: { x: number; y: number; width: number; height: number };
   cornerPoints?: ReadonlyArray<{ x: number; y: number }>;
 };
 
 type BarcodeDetectorLike = {
-  detect(source: HTMLVideoElement): Promise<BarcodeDetectorResult[]>;
+  detect(source: HTMLVideoElement | ImageBitmap): Promise<BarcodeDetectorResult[]>;
 };
 
 type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => BarcodeDetectorLike;
@@ -29,7 +34,12 @@ type BarcodeDetectorStatic = BarcodeDetectorCtor & {
   getSupportedFormats?: () => Promise<string[]>;
 };
 
-const SCAN_LOOP_DELAY_MS = 70;
+const NATIVE_SCAN_INTERVAL_MS = 33;
+const WORKER_SCAN_INTERVAL_MS = 45;
+const BURST_SCAN_INTERVAL_MS = 16;
+const BURST_WINDOW_MS = 700;
+const WORKER_MAX_PENDING_FRAMES = 2;
+const ROI_MAX_LONG_EDGE = 1280;
 const AUTO_RETRY_DELAY_MS = 1000;
 const RESET_COOLDOWN_MS = 350;
 const STABLE_SCAN_MIN_FRAMES = 2;
@@ -41,9 +51,11 @@ const REQUESTED_BARCODE_FORMATS = [
   'code_93',
   'codabar',
   'data_matrix',
+  'aztec',
   'ean_13',
   'ean_8',
   'itf',
+  'pdf417',
   'upc_a',
   'upc_e',
 ];
@@ -76,6 +88,33 @@ function scoreDetectedValue(raw: string, format: string | undefined, collectMode
   if (/\s{2,}/.test(trimmed)) score -= 3;
   if (/\n/.test(trimmed)) score -= 6;
   return score;
+}
+
+interface PickedDetectedValue {
+  rawValue: string;
+  format?: string;
+  boundingBox?: { x: number; y: number; width: number; height: number };
+}
+
+interface DisplayBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  areaRatio: number;
+}
+
+function detectScannerPlatform() {
+  const ua = navigator.userAgent;
+  const isAndroid = /Android/i.test(ua);
+  const isChrome = /Chrome|CriOS/i.test(ua) && !/Edg|OPR|SamsungBrowser/i.test(ua);
+  const isIOS = /iPad|iPhone|iPod/i.test(ua);
+
+  return {
+    isAndroidChrome: isAndroid && isChrome,
+    preferNativeDetector: isAndroid && isChrome,
+    isIOS,
+  };
 }
 
 function getBoundingBoxArea(entry: BarcodeDetectorResult): number | null {
@@ -114,11 +153,12 @@ function pickBestDetectedRawValue(
   codes: BarcodeDetectorResult[],
   collectMode: boolean,
   video: HTMLVideoElement,
-): string | null {
+): PickedDetectedValue | null {
   const candidates = codes
     .map((code) => ({
       rawValue: typeof code.rawValue === 'string' ? code.rawValue.trim() : '',
       format: code.format,
+      boundingBox: code.boundingBox,
       scoreBoost: scoreSpatialPriority(code, video),
     }))
     .filter((entry) => entry.rawValue.length > 0);
@@ -137,7 +177,49 @@ function pickBestDetectedRawValue(
     }
   }
 
-  return best.rawValue;
+  return best;
+}
+
+function mapBoundingBoxToDisplay(entry: PickedDetectedValue, video: HTMLVideoElement): DisplayBox | null {
+  const bbox = entry.boundingBox;
+  if (!bbox || video.videoWidth <= 0 || video.videoHeight <= 0) return null;
+
+  const rect = video.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+
+  const coverScale = Math.max(rect.width / video.videoWidth, rect.height / video.videoHeight);
+  const renderedWidth = video.videoWidth * coverScale;
+  const renderedHeight = video.videoHeight * coverScale;
+  const offsetX = (rect.width - renderedWidth) / 2;
+  const offsetY = (rect.height - renderedHeight) / 2;
+
+  return {
+    left: offsetX + bbox.x * coverScale,
+    top: offsetY + bbox.y * coverScale,
+    width: bbox.width * coverScale,
+    height: bbox.height * coverScale,
+    areaRatio: (bbox.width * bbox.height) / (video.videoWidth * video.videoHeight),
+  };
+}
+
+function projectRoiPickToVideo(
+  picked: PickedDetectedValue,
+  capture: { sourceCrop: { sx: number; sy: number; sw: number; sh: number }; bitmap: ImageBitmap },
+): PickedDetectedValue {
+  const bbox = picked.boundingBox;
+  if (!bbox) return picked;
+
+  const scaleX = capture.sourceCrop.sw / capture.bitmap.width;
+  const scaleY = capture.sourceCrop.sh / capture.bitmap.height;
+  return {
+    ...picked,
+    boundingBox: {
+      x: capture.sourceCrop.sx + bbox.x * scaleX,
+      y: capture.sourceCrop.sy + bbox.y * scaleY,
+      width: bbox.width * scaleX,
+      height: bbox.height * scaleY,
+    },
+  };
 }
 
 type ScannerEnginePath =
@@ -237,9 +319,16 @@ export function LiveQrScanner({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const engineRef = useRef<ScannerEnginePath | null>(null);
-  const scanTimerRef = useRef<number | null>(null);
+  const scanAnimationRef = useRef<number | null>(null);
   const retryTimerRef = useRef<number | null>(null);
-  const scanFrameRef = useRef<(() => Promise<void>) | null>(null);
+  const scanFrameRef = useRef<(() => void) | null>(null);
+  const scanInFlightRef = useRef(false);
+  const lastScanAtRef = useRef(0);
+  const scanSequenceRef = useRef(0);
+  const burstUntilRef = useRef(0);
+  const noHitFrameCountRef = useRef(0);
+  const maxZoomRef = useRef<number | null>(null);
+  const currentZoomRef = useRef<number | null>(null);
   const completedRef = useRef(false);
   const lockedRef = useRef(false);
   const stableScanRef = useRef<{ rawValue: string | null; count: number; updatedAt: number }>({
@@ -251,6 +340,8 @@ export function LiveQrScanner({
   const [supportMessage, setSupportMessage] = useState<string | null>(null);
   const [torchAvailable, setTorchAvailable] = useState(false);
   const [torchActive, setTorchActive] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState<number | null>(null);
+  const [detectedBox, setDetectedBox] = useState<DisplayBox | null>(null);
   const [canReset, setCanReset] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastScan, setLastScan] = useState<LiveQrScannerResolved | null>(null);
@@ -284,9 +375,9 @@ export function LiveQrScanner({
   );
 
   const stopScanner = useCallback(() => {
-    if (scanTimerRef.current !== null) {
-      window.clearTimeout(scanTimerRef.current);
-      scanTimerRef.current = null;
+    if (scanAnimationRef.current !== null) {
+      cancelAnimationFrame(scanAnimationRef.current);
+      scanAnimationRef.current = null;
     }
     if (retryTimerRef.current !== null) {
       window.clearTimeout(retryTimerRef.current);
@@ -307,6 +398,7 @@ export function LiveQrScanner({
     if (engineRef.current?.type === 'worker') {
       engineRef.current.worker.terminate();
     }
+    scanInFlightRef.current = false;
     engineRef.current = null;
   }, []);
 
@@ -317,15 +409,62 @@ export function LiveQrScanner({
     }, 220);
   }, []);
 
-  const scheduleScan = useCallback((scan: () => Promise<void>) => {
-    if (scanTimerRef.current !== null) {
-      window.clearTimeout(scanTimerRef.current);
-      scanTimerRef.current = null;
-    }
-    scanTimerRef.current = window.setTimeout(() => {
-      void scan();
-    }, SCAN_LOOP_DELAY_MS);
+  const scheduleScan = useCallback((scan: () => void) => {
+    scanFrameRef.current = scan;
+    if (scanAnimationRef.current !== null) return;
+
+    const loop = (timestamp: number) => {
+      const activeScan = scanFrameRef.current;
+      if (!activeScan) {
+        scanAnimationRef.current = null;
+        return;
+      }
+
+      const engine = engineRef.current;
+      const baseInterval = engine?.type === 'worker' ? WORKER_SCAN_INTERVAL_MS : NATIVE_SCAN_INTERVAL_MS;
+      const interval = Date.now() < burstUntilRef.current ? BURST_SCAN_INTERVAL_MS : baseInterval;
+      if (!scanInFlightRef.current && timestamp - lastScanAtRef.current >= interval) {
+        lastScanAtRef.current = timestamp;
+        activeScan();
+      }
+
+      scanAnimationRef.current = requestAnimationFrame(loop);
+    };
+
+    scanAnimationRef.current = requestAnimationFrame(loop);
   }, []);
+
+  const applyCameraZoom = useCallback(async (targetZoom: number) => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    const maxZoom = maxZoomRef.current;
+    if (!track || !maxZoom || maxZoom <= 1) return false;
+
+    const nextZoom = Math.max(1, Math.min(maxZoom, targetZoom));
+    try {
+      await track.applyConstraints({
+        advanced: [{ zoom: nextZoom } as MediaTrackConstraintSet],
+      });
+      currentZoomRef.current = nextZoom;
+      setZoomLevel(nextZoom);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const nudgeZoomForTinyCodes = useCallback((areaRatio?: number) => {
+    const maxZoom = maxZoomRef.current;
+    if (!maxZoom || maxZoom <= 1) return;
+
+    const currentZoom = currentZoomRef.current ?? 1;
+    const shouldZoomForBox = areaRatio != null && areaRatio > 0 && areaRatio < 0.025;
+    const shouldZoomForMisses = noHitFrameCountRef.current >= 18;
+    if (!shouldZoomForBox && !shouldZoomForMisses) return;
+    if (currentZoom >= Math.min(maxZoom, 3)) return;
+
+    void applyCameraZoom(Math.min(maxZoom, currentZoom + 0.5, 3));
+    noHitFrameCountRef.current = 0;
+  }, [applyCameraZoom]);
 
   const handleResolvedScan = useCallback((rawValue: string) => {
     const classified = classifyScanPayload(rawValue);
@@ -494,59 +633,98 @@ export function LiveQrScanner({
   useEffect(() => {
     let cancelled = false;
 
-    const scanFrame = async () => {
+    const scanFrame = () => {
       if (cancelled || completedRef.current || lockedRef.current) return;
       const engine = engineRef.current;
       const video = videoRef.current;
 
       if (!engine || !video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-        scheduleScan(scanFrame);
         return;
       }
 
-      try {
-        if (engine.type === 'native') {
-          const barcodes = await engine.detector.detect(video);
-          const selectedRawValue = pickBestDetectedRawValue(barcodes, collectMode, video);
-          if (selectedRawValue) {
-            const now = Date.now();
-            const state = stableScanRef.current;
-            const isFresh = now - state.updatedAt <= STABLE_SCAN_TTL_MS;
-            const isSame = isFresh && state.rawValue === selectedRawValue;
-            stableScanRef.current = {
-              rawValue: selectedRawValue,
-              count: isSame ? state.count + 1 : 1,
-              updatedAt: now,
-            };
-            if (stableScanRef.current.count >= STABLE_SCAN_MIN_FRAMES) {
-              stableScanRef.current = { rawValue: null, count: 0, updatedAt: 0 };
-              handleResolvedScan(selectedRawValue);
-              return;
-            }
-          } else {
-            stableScanRef.current = { rawValue: null, count: 0, updatedAt: 0 };
-          }
-        } else if (engine.type === 'worker') {
-          if (engine.pending.size < 2) {
-            const { videoWidth, videoHeight } = video;
-            if (videoWidth > 0 && videoHeight > 0) {
-              if (engine.workerCanvas.width !== videoWidth || engine.workerCanvas.height !== videoHeight) {
-                engine.workerCanvas.width = videoWidth;
-                engine.workerCanvas.height = videoHeight;
-              }
-              engine.workerCtx.drawImage(video, 0, 0, videoWidth, videoHeight);
-              const imageData = engine.workerCtx.getImageData(0, 0, videoWidth, videoHeight);
-              const frameId = Date.now();
-              engine.pending.add(frameId);
-              engine.worker.postMessage({ type: 'scan', frameId, imageData }, [imageData.data.buffer]);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('QR scan failed:', error);
-      }
+      scanInFlightRef.current = true;
+      const frameNumber = scanSequenceRef.current + 1;
+      scanSequenceRef.current = frameNumber;
 
-      scheduleScan(scanFrame);
+      void (async () => {
+        try {
+          if (engine.type === 'native') {
+            const roiLevel = getNextRoiLevel(frameNumber);
+            let selected: PickedDetectedValue | null = null;
+            let roiCapture: Awaited<ReturnType<typeof captureRoiBitmap>> = null;
+
+            if (roiLevel !== 'full') {
+              roiCapture = await captureRoiBitmap(video, roiLevel, {
+                maxLongEdge: ROI_MAX_LONG_EDGE,
+                upscale: roiLevel === 'tight' ? 1.8 : 1.25,
+              });
+              if (roiCapture) {
+                const roiCodes = await engine.detector.detect(roiCapture.bitmap);
+                const roiPick = pickBestDetectedRawValue(roiCodes, collectMode, video);
+                selected = roiPick ? projectRoiPickToVideo(roiPick, roiCapture) : null;
+                roiCapture.bitmap.close();
+              }
+            }
+
+            if (!selected && roiLevel === 'full') {
+              const barcodes = await engine.detector.detect(video);
+              selected = pickBestDetectedRawValue(barcodes, collectMode, video);
+            }
+
+            if (selected) {
+              noHitFrameCountRef.current = 0;
+              burstUntilRef.current = Date.now() + BURST_WINDOW_MS;
+              const box = mapBoundingBoxToDisplay(selected, video);
+              setDetectedBox(box);
+              nudgeZoomForTinyCodes(box?.areaRatio);
+
+              const now = Date.now();
+              const state = stableScanRef.current;
+              const isFresh = now - state.updatedAt <= STABLE_SCAN_TTL_MS;
+              const isSame = isFresh && state.rawValue === selected.rawValue;
+              stableScanRef.current = {
+                rawValue: selected.rawValue,
+                count: isSame ? state.count + 1 : 1,
+                updatedAt: now,
+              };
+              if (stableScanRef.current.count >= STABLE_SCAN_MIN_FRAMES) {
+                stableScanRef.current = { rawValue: null, count: 0, updatedAt: 0 };
+                handleResolvedScan(selected.rawValue);
+              }
+            } else {
+              noHitFrameCountRef.current += 1;
+              if (noHitFrameCountRef.current % 6 === 0) setDetectedBox(null);
+              nudgeZoomForTinyCodes();
+              stableScanRef.current = { rawValue: null, count: 0, updatedAt: 0 };
+            }
+          } else if (engine.type === 'worker') {
+            if (engine.pending.size < WORKER_MAX_PENDING_FRAMES) {
+              const roiLevel = getNextRoiLevel(frameNumber);
+              const capture = captureRoiImageData(video, engine.workerCanvas, engine.workerCtx, roiLevel, {
+                maxLongEdge: ROI_MAX_LONG_EDGE,
+                upscale: roiLevel === 'tight' ? 1.8 : 1.2,
+              });
+              if (capture) {
+                const frameId = Date.now();
+                engine.pending.add(frameId);
+                engine.worker.postMessage(
+                  {
+                    type: 'scan',
+                    frameId,
+                    imageData: capture.imageData,
+                    roiLevel: capture.level,
+                  },
+                  [capture.imageData.data.buffer],
+                );
+              }
+            }
+          }
+        } catch (error) {
+          console.error('QR scan failed:', error);
+        } finally {
+          scanInFlightRef.current = false;
+        }
+      })();
     };
     scanFrameRef.current = scanFrame;
 
@@ -563,6 +741,7 @@ export function LiveQrScanner({
         const Detector = (window as Window & typeof globalThis & {
           BarcodeDetector?: BarcodeDetectorStatic;
         }).BarcodeDetector;
+        const platform = detectScannerPlatform();
 
         let useFallback = false;
         if (Detector) {
@@ -571,6 +750,8 @@ export function LiveQrScanner({
             ? REQUESTED_BARCODE_FORMATS.filter((format) => supportedFormats.includes(format))
             : REQUESTED_BARCODE_FORMATS;
           if (formats.length === 0) {
+            useFallback = true;
+          } else if (!platform.preferNativeDetector) {
             useFallback = true;
           } else {
             engineRef.current = { type: 'native', detector: new Detector({ formats }) };
@@ -598,6 +779,9 @@ export function LiveQrScanner({
                 engine.pending.delete(data.frameId);
               }
               if (data.rawValue && !cancelled && !completedRef.current && !lockedRef.current) {
+                noHitFrameCountRef.current = 0;
+                burstUntilRef.current = Date.now() + BURST_WINDOW_MS;
+                setDetectedBox(null);
                 const now = Date.now();
                 const state = stableScanRef.current;
                 const isFresh = now - state.updatedAt <= STABLE_SCAN_TTL_MS;
@@ -610,6 +794,12 @@ export function LiveQrScanner({
                 if (stableScanRef.current.count >= STABLE_SCAN_MIN_FRAMES) {
                   stableScanRef.current = { rawValue: null, count: 0, updatedAt: 0 };
                   handleResolvedScan(data.rawValue);
+                }
+              } else if (!data.rawValue) {
+                noHitFrameCountRef.current += 1;
+                if (noHitFrameCountRef.current % 8 === 0) {
+                  setDetectedBox(null);
+                  nudgeZoomForTinyCodes();
                 }
               }
             } else if (data.type === 'error') {
@@ -628,8 +818,9 @@ export function LiveQrScanner({
           audio: false,
           video: {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: 30, min: 24 },
           },
         });
 
@@ -651,6 +842,7 @@ export function LiveQrScanner({
         const track = stream.getVideoTracks()[0];
         const capabilities = (track.getCapabilities?.() ?? {}) as CameraCapabilities;
         setTorchAvailable(Boolean(capabilities.torch));
+        maxZoomRef.current = capabilities.zoom?.max ?? null;
 
         try {
           const advanced: Record<string, unknown> = {
@@ -659,7 +851,10 @@ export function LiveQrScanner({
             whiteBalanceMode: 'continuous',
           };
           if (capabilities.zoom?.max && capabilities.zoom.max > 1) {
-            advanced.zoom = Math.min(2, capabilities.zoom.max);
+            const initialZoom = Math.min(2.25, capabilities.zoom.max);
+            advanced.zoom = initialZoom;
+            currentZoomRef.current = initialZoom;
+            setZoomLevel(initialZoom);
           }
           await track.applyConstraints({
             advanced: [advanced as MediaTrackConstraintSet],
@@ -686,7 +881,7 @@ export function LiveQrScanner({
       scanFrameRef.current = null;
       stopScanner();
     };
-  }, [handleResolvedScan, idleStatus, onError, scheduleScan, stopScanner]);
+  }, [collectMode, handleResolvedScan, idleStatus, nudgeZoomForTinyCodes, onError, scheduleScan, stopScanner]);
 
   useEffect(() => {
     if (scanIndexStatus !== 'error' || !scanIndexError) return;
@@ -713,6 +908,18 @@ export function LiveQrScanner({
       setStatus('Torch control is not available on this camera.');
     }
   }, [torchActive]);
+
+  const handleZoomToggle = useCallback(() => {
+    const maxZoom = maxZoomRef.current;
+    if (!maxZoom || maxZoom <= 1) return;
+
+    const currentZoom = currentZoomRef.current ?? 1;
+    const zoomStops = [1, Math.min(2, maxZoom), Math.min(3, maxZoom)]
+      .filter((value, index, values) => values.indexOf(value) === index);
+    const currentIndex = zoomStops.findIndex((value) => Math.abs(value - currentZoom) < 0.2);
+    const nextZoom = zoomStops[(currentIndex + 1) % zoomStops.length] ?? 1;
+    void applyCameraZoom(nextZoom);
+  }, [applyCameraZoom]);
 
   const dismissSheet = useCallback(() => {
     if (sheetDismissTimerRef.current !== null) {
@@ -810,6 +1017,18 @@ export function LiveQrScanner({
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <div className="h-48 w-64 rounded-[20px] border-2 border-emerald-400/70 shadow-[0_0_0_9999px_rgba(2,6,23,0.35)]" />
                 </div>
+                {detectedBox && (
+                  <div
+                    className="pointer-events-none absolute rounded-xl border-2 border-emerald-300 shadow-[0_0_24px_rgba(52,211,153,0.45)]"
+                    style={{
+                      left: detectedBox.left,
+                      top: detectedBox.top,
+                      width: detectedBox.width,
+                      height: detectedBox.height,
+                      transition: 'all 90ms linear',
+                    }}
+                  />
+                )}
                 {/* Scan flash */}
                 {flashColor && (
                   <div
@@ -859,16 +1078,27 @@ export function LiveQrScanner({
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             <button
               type="button"
               onClick={handleTorchToggle}
               disabled={!torchAvailable || Boolean(supportMessage)}
-              className="flex h-11 items-center justify-center gap-1.5 rounded-2xl bg-white/10 text-sm font-medium text-white disabled:opacity-35"
+              className={`flex h-11 items-center justify-center gap-1.5 rounded-2xl text-sm font-medium text-white disabled:opacity-35 ${
+                torchActive ? 'bg-amber-400/25 text-amber-100' : 'bg-white/10'
+              }`}
               style={{ transition: 'transform 120ms ease-out, opacity 120ms ease-out' }}
             >
               <Lightning size={16} weight="fill" />
-              {torchActive ? 'On' : 'Off'}
+              Torch
+            </button>
+            <button
+              type="button"
+              onClick={handleZoomToggle}
+              disabled={!zoomLevel || Boolean(supportMessage)}
+              className="flex h-11 items-center justify-center rounded-2xl bg-white/10 text-sm font-medium text-white disabled:opacity-35"
+              style={{ transition: 'transform 120ms ease-out, opacity 120ms ease-out' }}
+            >
+              {zoomLevel ? `${zoomLevel.toFixed(zoomLevel % 1 === 0 ? 0 : 1)}x` : 'Zoom'}
             </button>
             <button
               type="button"
