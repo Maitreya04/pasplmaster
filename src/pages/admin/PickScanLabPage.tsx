@@ -6,8 +6,10 @@ import {
   CaretLeft,
   CheckCircle,
   ClipboardText,
+  Package,
   QrCode,
   Warning,
+  X,
 } from '@phosphor-icons/react';
 import { useItems } from '../../hooks/useItems';
 import { useToast } from '../../context/ToastContext';
@@ -163,7 +165,7 @@ export default function PickScanLabPage(): React.JSX.Element {
     result: ScanResult;
     quantity: ScanLabQuantityResult;
   } | null>(null);
-  const [lastScanOnlyResult, setLastScanOnlyResult] = useState<ScanOnlyResult | null>(null);
+  const [scanOnlyHistory, setScanOnlyHistory] = useState<ScanOnlyResult[]>([]);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
 
   const labelableItems = useMemo(
@@ -246,7 +248,7 @@ export default function PickScanLabPage(): React.JSX.Element {
   }, [packDefinitionByBusyCode, simulatedPickedQty, targetQty]);
 
   const handleScanOnlyResolved = useCallback((scan: LiveQrScannerResolved) => {
-    setLastScanOnlyResult({
+    const entry: ScanOnlyResult = {
       rawValue: scan.rawValue,
       recognizedItemName: scan.matchedItem?.name ?? null,
       recognizedBusyCode: scan.matchedItem?.busy_code != null
@@ -256,7 +258,8 @@ export default function PickScanLabPage(): React.JSX.Element {
       codeType: scan.codeType,
       reason: scan.reason,
       timestamp: new Date().toISOString(),
-    });
+    };
+    setScanOnlyHistory((prev) => [entry, ...prev].slice(0, 20));
   }, []);
 
   return (
@@ -303,36 +306,94 @@ export default function PickScanLabPage(): React.JSX.Element {
         </div>
 
         {labScannerMode === 'scan' && (
-          <section className="mt-5 rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--content-tertiary)]">
-              Scan-Only Recognition
-            </p>
-            <p className="mt-2 text-sm text-[var(--content-secondary)]">
-              Scan any barcode/QR and the lab will recognize the product using the latest scan catalog +
-              barcode mappings from the current verification pipeline.
-            </p>
-            <button
-              type="button"
-              onClick={() => setScanOnlyOpen(true)}
-              className="mt-4 inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-[var(--bg-positive)] px-4 text-sm font-semibold text-[var(--content-on-color)]"
-            >
-              <QrCode size={18} weight="bold" />
-              Start Scan Mode
-            </button>
+          <section className="mt-5 space-y-4">
+            {/* CTA card */}
+            <div className="flex items-center justify-between gap-4 rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-[var(--content-primary)]">
+                  Product recognition
+                </p>
+                <p className="mt-0.5 text-xs text-[var(--content-tertiary)]">
+                  Scans resolve via alias, alias1, and barcode mapping — same as live picking.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setScanOnlyOpen(true)}
+                className="inline-flex shrink-0 h-10 items-center justify-center gap-2 rounded-2xl bg-[var(--bg-positive)] px-4 text-sm font-semibold text-[var(--content-on-color)] active:scale-[0.97]"
+                style={{ transition: 'transform 120ms ease-out' }}
+              >
+                <QrCode size={16} weight="bold" />
+                Open Scanner
+              </button>
+            </div>
 
-            {lastScanOnlyResult && (
-              <div className="mt-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4">
-                <p className="text-sm font-semibold text-[var(--content-primary)]">Latest scan-only result</p>
-                <div className="mt-3 space-y-1 text-sm text-[var(--content-secondary)]">
-                  <p>Read: <span className="font-mono">{lastScanOnlyResult.rawValue}</span></p>
-                  <p>
-                    Recognized: {lastScanOnlyResult.recognizedItemName
-                      ? `${lastScanOnlyResult.recognizedItemName}${lastScanOnlyResult.recognizedBusyCode ? ` (Busy ${lastScanOnlyResult.recognizedBusyCode})` : ''}`
-                      : 'No mapped product'}
+            {/* History */}
+            {scanOnlyHistory.length > 0 && (
+              <div className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--content-tertiary)]">
+                    Scan history · {scanOnlyHistory.length}
                   </p>
-                  <p>Matched By: {lastScanOnlyResult.matchedBy ?? 'No match source'}</p>
-                  <p>Code Type: {lastScanOnlyResult.codeType}</p>
-                  <p>Reason: {lastScanOnlyResult.reason}</p>
+                  <button
+                    type="button"
+                    onClick={() => setScanOnlyHistory([])}
+                    className="flex items-center gap-1 text-xs font-semibold text-[var(--content-tertiary)] hover:text-[var(--content-primary)]"
+                  >
+                    <X size={12} weight="bold" />
+                    Clear
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {scanOnlyHistory.map((entry, index) => (
+                    <div
+                      key={`${entry.timestamp}-${index}`}
+                      className="flex items-start gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3"
+                    >
+                      <div
+                        className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+                          entry.recognizedItemName
+                            ? 'bg-[var(--bg-positive-subtle)]'
+                            : 'bg-[var(--bg-warning-subtle)]'
+                        }`}
+                      >
+                        {entry.recognizedItemName ? (
+                          <CheckCircle size={15} weight="fill" className="text-[var(--content-positive)]" />
+                        ) : (
+                          <Package size={15} weight="fill" className="text-[var(--content-warning)]" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold leading-snug text-[var(--content-primary)] text-sm">
+                          {entry.recognizedItemName ?? 'Not in catalog'}
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          {entry.recognizedBusyCode != null && (
+                            <span className="rounded-full border border-[var(--border-subtle)] px-2 py-0.5 font-mono text-[11px] text-[var(--content-tertiary)]">
+                              Busy {entry.recognizedBusyCode}
+                            </span>
+                          )}
+                          {entry.matchedBy && (
+                            <span className="rounded-full border border-[var(--border-subtle)] px-2 py-0.5 text-[11px] font-medium text-[var(--content-tertiary)]">
+                              {entry.matchedBy}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1.5 break-all font-mono text-[11px] text-[var(--content-tertiary)]">
+                          {entry.rawValue.length > 60
+                            ? `${entry.rawValue.slice(0, 60)}…`
+                            : entry.rawValue}
+                        </p>
+                      </div>
+                      <p className="shrink-0 text-[10px] tabular-nums text-[var(--content-tertiary)]">
+                        {new Date(entry.timestamp).toLocaleTimeString('en-IN', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        })}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

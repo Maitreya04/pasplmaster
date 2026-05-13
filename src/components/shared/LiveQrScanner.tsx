@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CameraRotate, Lightning, WarningCircle } from '@phosphor-icons/react';
+import { CameraRotate, CheckCircle, Lightning, Package, WarningCircle, X } from '@phosphor-icons/react';
 import {
   initializeItemScanIndex,
   resolveScannedCatalogItem,
@@ -255,6 +255,10 @@ export function LiveQrScanner({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastScan, setLastScan] = useState<LiveQrScannerResolved | null>(null);
   const [flashColor, setFlashColor] = useState<'green' | 'red' | null>(null);
+  const [sheetState, setSheetState] = useState<'hidden' | 'open' | 'closing'>('hidden');
+  const [scanCount, setScanCount] = useState(0);
+  const sheetDismissTimerRef = useRef<number | null>(null);
+  const sheetAnimFrameRef = useRef<number | null>(null);
   const scanIndexStatus = useItemScanIndexStore((state) => state.status);
   const scanIndexError = useItemScanIndexStore((state) => state.error);
   const collectMode = mode === 'collect';
@@ -287,6 +291,14 @@ export function LiveQrScanner({
     if (retryTimerRef.current !== null) {
       window.clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
+    }
+    if (sheetDismissTimerRef.current !== null) {
+      window.clearTimeout(sheetDismissTimerRef.current);
+      sheetDismissTimerRef.current = null;
+    }
+    if (sheetAnimFrameRef.current !== null) {
+      cancelAnimationFrame(sheetAnimFrameRef.current);
+      sheetAnimFrameRef.current = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -391,6 +403,27 @@ export function LiveQrScanner({
     };
 
     setLastScan(result);
+    if (collectMode) {
+      setScanCount((n) => n + 1);
+      // Clear any pending auto-dismiss
+      if (sheetDismissTimerRef.current !== null) {
+        window.clearTimeout(sheetDismissTimerRef.current);
+        sheetDismissTimerRef.current = null;
+      }
+      if (sheetAnimFrameRef.current !== null) {
+        cancelAnimationFrame(sheetAnimFrameRef.current);
+        sheetAnimFrameRef.current = null;
+      }
+      // Open sheet (mount first, then transition on next frame)
+      setSheetState('open');
+      // Auto-dismiss after 3 s
+      sheetDismissTimerRef.current = window.setTimeout(() => {
+        setSheetState('closing');
+        sheetDismissTimerRef.current = window.setTimeout(() => {
+          setSheetState('hidden');
+        }, 340);
+      }, 3000);
+    }
     lockedRef.current = true;
     setCanReset(false);
     onResolved(result);
@@ -680,6 +713,17 @@ export function LiveQrScanner({
     }
   }, [torchActive]);
 
+  const dismissSheet = useCallback(() => {
+    if (sheetDismissTimerRef.current !== null) {
+      window.clearTimeout(sheetDismissTimerRef.current);
+      sheetDismissTimerRef.current = null;
+    }
+    setSheetState('closing');
+    sheetDismissTimerRef.current = window.setTimeout(() => {
+      setSheetState('hidden');
+    }, 340);
+  }, []);
+
   const handleReset = useCallback(() => {
     if (!canReset) return;
     if (retryTimerRef.current !== null) {
@@ -697,40 +741,57 @@ export function LiveQrScanner({
     }
   }, [canReset, idleStatus, scheduleScan]);
 
+  const isMatched = Boolean(lastScan?.matchedItem);
+  const sheetVisible = sheetState !== 'hidden';
+  const sheetOpen = sheetState === 'open';
+
   return (
-    <div className="fixed inset-0 z-[70] bg-slate-950/95 text-white">
+    <div className="fixed inset-0 z-[70] bg-slate-950 text-white">
       <div className="flex h-full flex-col">
-        <div className="flex items-start justify-between gap-3 px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
+
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-[max(0.875rem,env(safe-area-inset-top))]">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
-              {eyebrow ?? (collectMode ? 'Cycle Count Scan' : 'Shelf Verification')}
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+              {eyebrow ?? (collectMode ? 'Scan Mode' : 'Shelf Verification')}
             </p>
-            <h2 className="mt-1 text-lg font-semibold leading-tight text-white">
+            <h2 className="mt-0.5 text-base font-semibold leading-tight text-white">
               {title ?? scannerPickItem.name}
             </h2>
-            <p className="mt-1 text-sm text-slate-300">{status}</p>
           </div>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="rounded-full border border-white/20 px-3 py-2 text-sm font-medium text-white/90"
-          >
-            Close
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {collectMode && scanCount > 0 && (
+              <span className="rounded-full bg-emerald-500/20 px-2.5 py-1 text-xs font-semibold tabular-nums text-emerald-300">
+                {scanCount} scanned
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={handleClose}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 active:scale-95"
+              style={{ transition: 'transform 120ms ease-out' }}
+            >
+              <X size={16} weight="bold" />
+            </button>
+          </div>
         </div>
 
-        <div className="px-4">
-          <div className="relative overflow-hidden rounded-[28px] border border-white/15 bg-black">
+        {/* ── Status line ── */}
+        <p className="px-4 pb-2 text-xs text-slate-400">{status}</p>
+
+        {/* ── Viewfinder ── */}
+        <div className="flex-1 px-3 pb-3">
+          <div className="relative h-full overflow-hidden rounded-[24px] border border-white/10 bg-black">
             {supportMessage ? (
-              <div className="flex aspect-[3/4] w-full items-center justify-center bg-slate-950 p-5">
-                <div className="max-w-sm rounded-[24px] border border-amber-400/20 bg-amber-400/10 p-5 text-left">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200/80">
+              <div className="flex h-full items-center justify-center p-5">
+                <div className="max-w-sm rounded-[20px] border border-amber-400/20 bg-amber-400/10 p-5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300/80">
                     Browser Limitation
                   </p>
                   <p className="mt-3 text-base font-semibold text-white">
-                    Fast live QR scanning is not available here
+                    Live scanning not available
                   </p>
-                  <p className="mt-2 text-sm leading-relaxed text-amber-50/90">
+                  <p className="mt-2 text-sm leading-relaxed text-amber-50/80">
                     {supportMessage}
                   </p>
                 </div>
@@ -742,16 +803,22 @@ export function LiveQrScanner({
                   autoPlay
                   muted
                   playsInline
-                  className="aspect-[3/4] w-full object-cover"
+                  className="h-full w-full object-cover"
                 />
-                <div className="pointer-events-none absolute inset-0 p-5">
-                  <div className="h-full rounded-[24px] border-2 border-emerald-400/90 shadow-[0_0_0_9999px_rgba(2,6,23,0.28)]" />
+                {/* Aim guide */}
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <div className="h-48 w-64 rounded-[20px] border-2 border-emerald-400/70 shadow-[0_0_0_9999px_rgba(2,6,23,0.35)]" />
                 </div>
+                {/* Scan flash */}
                 {flashColor && (
                   <div
-                    className={`pointer-events-none absolute inset-0 transition-opacity duration-200 ${
-                      flashColor === 'green' ? 'bg-emerald-400/30' : 'bg-red-500/25'
-                    }`}
+                    className="pointer-events-none absolute inset-0"
+                    style={{
+                      background: flashColor === 'green'
+                        ? 'rgba(52,211,153,0.22)'
+                        : 'rgba(239,68,68,0.2)',
+                      transition: 'opacity 180ms ease-out',
+                    }}
                   />
                 )}
               </>
@@ -759,13 +826,14 @@ export function LiveQrScanner({
           </div>
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        {/* ── Controls ── */}
+        <div className="space-y-3 px-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
           {expectedCodes.length > 0 && (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5 px-1">
               {expectedCodes.map((code) => (
                 <span
                   key={code}
-                  className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 font-mono text-xs text-emerald-100"
+                  className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2.5 py-0.5 font-mono text-xs text-emerald-200"
                 >
                   {code}
                 </span>
@@ -774,20 +842,15 @@ export function LiveQrScanner({
           )}
 
           {errorMessage && (
-            <div className="rounded-2xl border border-red-400/25 bg-red-500/10 p-4 text-sm text-red-50">
-              <div className="flex items-start gap-3">
-                <WarningCircle size={18} weight="fill" className="mt-0.5 shrink-0 text-red-200" />
+            <div className="rounded-2xl border border-red-400/20 bg-red-500/10 p-3 text-sm">
+              <div className="flex items-start gap-2.5">
+                <WarningCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-red-300" />
                 <div className="min-w-0">
                   <p className="font-semibold text-white">Verification failed</p>
-                  <p className="mt-1 leading-relaxed">{errorMessage}</p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-red-200">{errorMessage}</p>
                   {lastScan?.matchedItem && (
-                    <p className="mt-2 text-xs text-red-100/90">
-                      Scanned item: {lastScan.matchedItem.name}
-                    </p>
-                  )}
-                  {lastScan?.rawValue && (
-                    <p className="mt-2 break-all font-mono text-xs text-red-100/90">
-                      Payload: {lastScan.rawValue}
+                    <p className="mt-1 text-xs text-red-100/80">
+                      Got: {lastScan.matchedItem.name}
                     </p>
                   )}
                 </div>
@@ -795,43 +858,171 @@ export function LiveQrScanner({
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
               onClick={handleTorchToggle}
               disabled={!torchAvailable || Boolean(supportMessage)}
-              className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-white/10 text-sm font-semibold text-white disabled:opacity-40"
+              className="flex h-11 items-center justify-center gap-1.5 rounded-2xl bg-white/10 text-sm font-medium text-white disabled:opacity-35"
+              style={{ transition: 'transform 120ms ease-out, opacity 120ms ease-out' }}
             >
-              <Lightning size={18} weight="fill" />
-              {torchActive ? 'Torch On' : 'Torch Off'}
+              <Lightning size={16} weight="fill" />
+              {torchActive ? 'On' : 'Off'}
             </button>
             <button
               type="button"
               onClick={handleReset}
               disabled={!lockedRef.current || !canReset || Boolean(supportMessage)}
-              className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-white/10 text-sm font-semibold text-white disabled:opacity-40"
+              className="flex h-11 items-center justify-center gap-1.5 rounded-2xl bg-white/10 text-sm font-medium text-white disabled:opacity-35"
+              style={{ transition: 'transform 120ms ease-out, opacity 120ms ease-out' }}
             >
-              <CameraRotate size={18} weight="bold" />
-              Scan Again
+              <CameraRotate size={16} weight="bold" />
+              Again
             </button>
             <button
               type="button"
               onClick={handleClose}
-              className="flex h-12 items-center justify-center rounded-2xl bg-white/10 text-sm font-semibold text-white"
+              className="flex h-11 items-center justify-center rounded-2xl bg-white/10 text-sm font-medium text-white"
+              style={{ transition: 'transform 120ms ease-out' }}
             >
-              Cancel
+              Done
             </button>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
-            <p className="font-semibold text-white">Best results</p>
-            <p className="mt-2 leading-relaxed">
-              {helpText ??
-                'Keep the phone steady, fill the frame with the QR, and use the torch in dim aisles. The scan verifies the decoded code against the preloaded alias1, alias, and item code maps, then checks that it matches the current pick item.'}
+          {!collectMode && (
+            <p className="px-1 text-center text-xs leading-relaxed text-slate-500">
+              {helpText ?? 'Steady, fill the frame, use torch in dim aisles.'}
             </p>
-          </div>
+          )}
         </div>
       </div>
+
+      {/* ── Collect-mode result bottom sheet ── */}
+      {collectMode && sheetVisible && lastScan && (
+        <>
+          {/* Scrim */}
+          <div
+            className="absolute inset-0 bg-slate-950/50"
+            style={{
+              opacity: sheetOpen ? 1 : 0,
+              transition: 'opacity 280ms cubic-bezier(0.32, 0.72, 0, 1)',
+            }}
+            onClick={dismissSheet}
+          />
+
+          {/* Sheet */}
+          <div
+            className="absolute inset-x-0 bottom-0"
+            style={{
+              transform: sheetOpen ? 'translateY(0)' : 'translateY(100%)',
+              transition: 'transform 340ms cubic-bezier(0.32, 0.72, 0, 1)',
+            }}
+          >
+            <div className="rounded-t-[28px] border-t border-x border-white/10 bg-slate-900 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3">
+              {/* Drag handle */}
+              <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-white/20" />
+
+              {/* Auto-dismiss progress bar — keyed on scan count so animation restarts each scan */}
+              <div
+                key={scanCount}
+                className="mb-4 h-0.5 w-full overflow-hidden rounded-full bg-white/10"
+              >
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    background: isMatched ? 'rgb(52,211,153)' : 'rgb(251,191,36)',
+                    transformOrigin: 'left center',
+                    animation: 'shrinkX 3000ms linear forwards',
+                  }}
+                />
+              </div>
+
+              {/* Icon + status label */}
+              <div className="flex items-center gap-2 mb-3">
+                <div
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+                    isMatched ? 'bg-emerald-500/20' : 'bg-amber-400/20'
+                  }`}
+                >
+                  {isMatched ? (
+                    <CheckCircle size={16} weight="fill" className="text-emerald-400" />
+                  ) : (
+                    <Package size={16} weight="fill" className="text-amber-400" />
+                  )}
+                </div>
+                <p
+                  className={`text-[10px] font-bold uppercase tracking-[0.18em] ${
+                    isMatched ? 'text-emerald-400' : 'text-amber-400'
+                  }`}
+                >
+                  {isMatched ? 'Product recognized' : 'Not in catalog'}
+                </p>
+                <button
+                  type="button"
+                  onClick={dismissSheet}
+                  className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/8 text-slate-400"
+                  style={{ transition: 'transform 120ms ease-out' }}
+                >
+                  <X size={13} weight="bold" />
+                </button>
+              </div>
+
+              {/* Product info */}
+              {isMatched && lastScan.matchedItem ? (
+                <div>
+                  <p className="text-xl font-bold leading-tight text-white">
+                    {lastScan.matchedItem.name}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {lastScan.matchedItem.busy_code != null && (
+                      <span className="rounded-full border border-white/15 bg-white/8 px-2.5 py-0.5 font-mono text-xs text-slate-300">
+                        Busy {lastScan.matchedItem.busy_code}
+                      </span>
+                    )}
+                    {lastScan.matchedBy && (
+                      <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-300">
+                        via {lastScan.matchedBy}
+                      </span>
+                    )}
+                    {lastScan.codeType !== 'unknown' && (
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-xs text-slate-400 uppercase tracking-wide">
+                        {lastScan.codeType}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-xl font-bold text-amber-200">Unknown barcode</p>
+                  <p className="mt-1 text-sm text-slate-400">
+                    No product matched in the scan catalog.
+                  </p>
+                </div>
+              )}
+
+              {/* Raw barcode */}
+              <div className="mt-4 rounded-xl border border-white/8 bg-white/5 px-3 py-2">
+                <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Raw scan
+                </p>
+                <p className="break-all font-mono text-xs text-slate-300">
+                  {lastScan.rawValue.length > 80
+                    ? `${lastScan.rawValue.slice(0, 80)}…`
+                    : lastScan.rawValue}
+                </p>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Keyframe for the progress bar shrink animation */}
+      <style>{`
+        @keyframes shrinkX {
+          from { transform: scaleX(1); }
+          to   { transform: scaleX(0); }
+        }
+      `}</style>
     </div>
   );
 }
