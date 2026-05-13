@@ -29,6 +29,19 @@ type BarcodeDetectorStatic = BarcodeDetectorCtor & {
 const SCAN_LOOP_DELAY_MS = 90;
 const AUTO_RETRY_DELAY_MS = 1000;
 const RESET_COOLDOWN_MS = 350;
+const REQUESTED_BARCODE_FORMATS = [
+  'qr_code',
+  'code_128',
+  'code_39',
+  'code_93',
+  'codabar',
+  'data_matrix',
+  'ean_13',
+  'ean_8',
+  'itf',
+  'upc_a',
+  'upc_e',
+];
 
 type ScannerEnginePath =
   | { type: 'native'; detector: BarcodeDetectorLike }
@@ -72,7 +85,11 @@ export interface LiveQrScannerResolved {
 
 interface LiveQrScannerProps {
   title?: string;
-  pickItem: LiveQrScannerPickItem;
+  eyebrow?: string;
+  helpText?: string;
+  idleStatus?: string;
+  mode?: 'verify' | 'collect';
+  pickItem?: LiveQrScannerPickItem;
   onClose: () => void;
   onResolved: (result: LiveQrScannerResolved) => void;
   onError: (message: string) => void;
@@ -111,6 +128,10 @@ function vibrate(pattern: number | number[]) {
 
 export function LiveQrScanner({
   title,
+  eyebrow,
+  helpText,
+  idleStatus,
+  mode = 'verify',
   pickItem,
   onClose,
   onResolved,
@@ -134,10 +155,26 @@ export function LiveQrScanner({
   const [flashColor, setFlashColor] = useState<'green' | 'red' | null>(null);
   const scanIndexStatus = useItemScanIndexStore((state) => state.status);
   const scanIndexError = useItemScanIndexStore((state) => state.error);
+  const collectMode = mode === 'collect';
+  const scannerPickItem = useMemo<LiveQrScannerPickItem>(
+    () =>
+      pickItem ?? {
+        itemId: -1,
+        name: title ?? 'Cycle count scanner',
+        alias1: null,
+        alias: null,
+        itemCode: null,
+        busyCode: null,
+      },
+    [pickItem, title],
+  );
 
   const expectedCodes = useMemo(
-    () => uniqueCodes([pickItem.alias1, pickItem.alias, pickItem.itemCode]),
-    [pickItem.alias1, pickItem.alias, pickItem.itemCode],
+    () =>
+      collectMode
+        ? []
+        : uniqueCodes([scannerPickItem.alias1, scannerPickItem.alias, scannerPickItem.itemCode]),
+    [collectMode, scannerPickItem.alias1, scannerPickItem.alias, scannerPickItem.itemCode],
   );
 
   const stopScanner = useCallback(() => {
@@ -187,10 +224,10 @@ export function LiveQrScanner({
     let lookupCode: string | null = null;
 
     const busyCodeCandidates = extractNumericCandidates([
-      pickItem.alias1,
-      pickItem.alias,
-      pickItem.itemCode,
-      pickItem.busyCode != null ? String(pickItem.busyCode) : null,
+      scannerPickItem.alias1,
+      scannerPickItem.alias,
+      scannerPickItem.itemCode,
+      scannerPickItem.busyCode != null ? String(scannerPickItem.busyCode) : null,
     ]);
 
     if (packPayload && busyCodeCandidates.includes(packPayload.busyCode)) {
@@ -199,13 +236,13 @@ export function LiveQrScanner({
       lookupCode = String(packPayload.busyCode);
     } else {
       for (const code of candidates) {
-        if (pickItem.alias1 && normalizeScanCode(pickItem.alias1) === code) {
+        if (scannerPickItem.alias1 && normalizeScanCode(scannerPickItem.alias1) === code) {
           matchesPickItem = true; matchedBy = 'alias1'; lookupCode = code; break;
         }
-        if (pickItem.alias && normalizeScanCode(pickItem.alias) === code) {
+        if (scannerPickItem.alias && normalizeScanCode(scannerPickItem.alias) === code) {
           matchesPickItem = true; matchedBy = 'alias'; lookupCode = code; break;
         }
-        if (pickItem.itemCode && normalizeScanCode(pickItem.itemCode) === code) {
+        if (scannerPickItem.itemCode && normalizeScanCode(scannerPickItem.itemCode) === code) {
           matchesPickItem = true; matchedBy = 'item_code'; lookupCode = code; break;
         }
       }
@@ -213,7 +250,7 @@ export function LiveQrScanner({
 
     const lookup = resolveScannedCatalogItem(rawValue);
 
-    if (!matchesPickItem && lookup?.item.id === pickItem.itemId) {
+    if (!matchesPickItem && lookup?.item.id === scannerPickItem.itemId) {
       matchesPickItem = true;
       matchedBy = lookup.source;
       lookupCode = lookup.code;
@@ -222,11 +259,17 @@ export function LiveQrScanner({
     const result: LiveQrScannerResolved = {
       rawValue,
       matchedItem: matchesPickItem 
-        ? (getScanCatalogItemById(pickItem.itemId) ?? lookup?.item ?? null) 
+        ? (getScanCatalogItemById(scannerPickItem.itemId) ?? lookup?.item ?? null) 
         : (lookup?.item ?? null),
       matchedBy: matchesPickItem ? matchedBy : (lookup?.source ?? null),
       matchesPickItem,
-      lookupCode: matchesPickItem ? lookupCode : (lookup?.code ?? null),
+      lookupCode: matchesPickItem
+        ? lookupCode
+        : (packPayload
+          ? String(packPayload.busyCode)
+          : lpnPayload?.busyCode != null
+            ? String(lpnPayload.busyCode)
+            : (lookup?.code ?? candidates[0] ?? null)),
       codeType: classified.kind,
       suggestedQty:
         classified.kind === 'pack'
@@ -242,13 +285,29 @@ export function LiveQrScanner({
           : `Verified against ${matchedBy}.`
         : !lookup
           ? 'QR decoded, but no catalog item matched alias1, alias, or item code.'
-          : `Scanned ${lookup.item.name}, but the picker is expected to verify ${pickItem.name}.`,
+          : `Scanned ${lookup.item.name}, but the picker is expected to verify ${scannerPickItem.name}.`,
     };
 
     setLastScan(result);
     lockedRef.current = true;
     setCanReset(false);
     onResolved(result);
+
+    if (collectMode) {
+      vibrate(60);
+      flashViewport('green');
+      setErrorMessage(null);
+      setStatus('Scan logged. Point at the next label...');
+      window.setTimeout(() => {
+        lockedRef.current = false;
+        setCanReset(true);
+        setStatus(idleStatus ?? 'Point the QR inside the frame');
+        if (scanFrameRef.current) {
+          scheduleScan(scanFrameRef.current);
+        }
+      }, RESET_COOLDOWN_MS);
+      return;
+    }
 
     window.setTimeout(() => {
       setCanReset(true);
@@ -284,14 +343,16 @@ export function LiveQrScanner({
     }, AUTO_RETRY_DELAY_MS);
   }, [
     flashViewport,
+    collectMode,
+    idleStatus,
     onResolved,
-    pickItem.alias,
-    pickItem.alias1,
-    pickItem.busyCode,
-    pickItem.itemCode,
-    pickItem.itemId,
-    pickItem.name,
     scheduleScan,
+    scannerPickItem.alias,
+    scannerPickItem.alias1,
+    scannerPickItem.busyCode,
+    scannerPickItem.itemCode,
+    scannerPickItem.itemId,
+    scannerPickItem.name,
     stopScanner,
   ]);
 
@@ -357,10 +418,13 @@ export function LiveQrScanner({
         let useFallback = false;
         if (Detector) {
           const supportedFormats = await Detector.getSupportedFormats?.();
-          if (supportedFormats && !supportedFormats.includes('qr_code')) {
+          const formats = supportedFormats
+            ? REQUESTED_BARCODE_FORMATS.filter((format) => supportedFormats.includes(format))
+            : REQUESTED_BARCODE_FORMATS;
+          if (formats.length === 0) {
             useFallback = true;
           } else {
-            engineRef.current = { type: 'native', detector: new Detector({ formats: ['qr_code'] }) };
+            engineRef.current = { type: 'native', detector: new Detector({ formats }) };
           }
         } else {
           useFallback = true;
@@ -443,7 +507,7 @@ export function LiveQrScanner({
           // Best effort only.
         }
 
-        setStatus('Point the QR inside the frame');
+        setStatus(idleStatus ?? 'Point the QR inside the frame');
         scheduleScan(scanFrame);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Could not start the QR scanner.';
@@ -460,7 +524,7 @@ export function LiveQrScanner({
       scanFrameRef.current = null;
       stopScanner();
     };
-  }, [handleResolvedScan, onError, scheduleScan, stopScanner]);
+  }, [handleResolvedScan, idleStatus, onError, scheduleScan, stopScanner]);
 
   useEffect(() => {
     if (scanIndexStatus !== 'error' || !scanIndexError) return;
@@ -498,11 +562,11 @@ export function LiveQrScanner({
     lockedRef.current = false;
     setErrorMessage(null);
     setLastScan(null);
-    setStatus('Point the QR inside the frame');
+    setStatus(idleStatus ?? 'Point the QR inside the frame');
     if (scanFrameRef.current) {
       scheduleScan(scanFrameRef.current);
     }
-  }, [canReset, scheduleScan]);
+  }, [canReset, idleStatus, scheduleScan]);
 
   return (
     <div className="fixed inset-0 z-[70] bg-slate-950/95 text-white">
@@ -510,10 +574,10 @@ export function LiveQrScanner({
         <div className="flex items-start justify-between gap-3 px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">
-              Shelf Verification
+              {eyebrow ?? (collectMode ? 'Cycle Count Scan' : 'Shelf Verification')}
             </p>
             <h2 className="mt-1 text-lg font-semibold leading-tight text-white">
-              {title ?? pickItem.name}
+              {title ?? scannerPickItem.name}
             </h2>
             <p className="mt-1 text-sm text-slate-300">{status}</p>
           </div>
@@ -567,16 +631,18 @@ export function LiveQrScanner({
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
-          <div className="flex flex-wrap gap-2">
-            {expectedCodes.map((code) => (
-              <span
-                key={code}
-                className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 font-mono text-xs text-emerald-100"
-              >
-                {code}
-              </span>
-            ))}
-          </div>
+          {expectedCodes.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {expectedCodes.map((code) => (
+                <span
+                  key={code}
+                  className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 font-mono text-xs text-emerald-100"
+                >
+                  {code}
+                </span>
+              ))}
+            </div>
+          )}
 
           {errorMessage && (
             <div className="rounded-2xl border border-red-400/25 bg-red-500/10 p-4 text-sm text-red-50">
@@ -631,9 +697,8 @@ export function LiveQrScanner({
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
             <p className="font-semibold text-white">Best results</p>
             <p className="mt-2 leading-relaxed">
-              Keep the phone steady, fill the frame with the QR, and use the torch in dim aisles.
-              The scan verifies the decoded code against the preloaded alias1, alias, and item code
-              maps, then checks that it matches the current pick item.
+              {helpText ??
+                'Keep the phone steady, fill the frame with the QR, and use the torch in dim aisles. The scan verifies the decoded code against the preloaded alias1, alias, and item code maps, then checks that it matches the current pick item.'}
             </p>
           </div>
         </div>

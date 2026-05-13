@@ -18,11 +18,21 @@ type LabelRecord = Item & {
   groupLabel: string;
 };
 
+interface BinLocationLabel {
+  key: string;
+  binId: string;
+  itemName: string;
+  pickCode: string;
+  groupLabel: string;
+  busyCode: number | null;
+  qrPayload: string;
+}
+
 type SortMode = 'group-rack-code' | 'code-rack';
 type PreviewScope = 'filtered' | 'selected';
 type PrintPreset = 'pack-strip' | 'rack-strip' | 'compact' | 'full';
 type GroupFilter = 'unselected' | 'all' | string;
-type LabelMode = 'sku' | 'pack';
+type LabelMode = 'sku' | 'pack' | 'bin';
 type PackType = 'inner' | 'outer';
 
 interface PackLabelRequestRow {
@@ -289,6 +299,15 @@ function packPickPayload(busyCode: number, packType: PackType): string {
   return `PASPL-PACK:${busyCode}:${packType}`;
 }
 
+function binLocationPayload(label: Pick<BinLocationLabel, 'binId' | 'busyCode' | 'pickCode'>): string {
+  return JSON.stringify({
+    type: 'BIN',
+    rack: label.binId,
+    busy_code: label.busyCode,
+    sku: label.pickCode,
+  });
+}
+
 function packTypeLabel(packType: PackType): string {
   return packType === 'inner' ? 'INNER BOX' : 'MASTER BOX';
 }
@@ -399,6 +418,7 @@ export default function LabelStudioPage(): React.JSX.Element {
   const [generatedPackLabels, setGeneratedPackLabels] = useState<GeneratedPackPickLabel[]>([]);
   const [qrByPackLabelKey, setQrByPackLabelKey] = useState<Record<string, string>>({});
   const [qrByPackStripPayload, setQrByPackStripPayload] = useState<Record<string, string>>({});
+  const [qrByBinLabelKey, setQrByBinLabelKey] = useState<Record<string, string>>({});
 
   const labelableItems = useMemo<LabelRecord[]>(
     () =>
@@ -459,6 +479,27 @@ export default function LabelStudioPage(): React.JSX.Element {
       }),
     [filteredItems, packDefinitionByBusyCode],
   );
+
+  const binLocationLabels = useMemo<BinLocationLabel[]>(() => {
+    const labels: BinLocationLabel[] = [];
+    for (const item of filteredItems) {
+      const binId = item.rack_no?.trim().toUpperCase();
+      if (!binId) continue;
+      const label = {
+        key: `${binId}:${item.busy_code ?? item.pickCode}`,
+        binId,
+        itemName: item.name,
+        pickCode: item.pickCode,
+        groupLabel: item.groupLabel,
+        busyCode: item.busy_code == null ? null : Number(item.busy_code),
+      };
+      labels.push({
+        ...label,
+        qrPayload: binLocationPayload(label),
+      });
+    }
+    return labels;
+  }, [filteredItems]);
 
   const selectedItems = useMemo(() => {
     const selectedSet = new Set(selectedIds);
@@ -610,6 +651,40 @@ export default function LabelStudioPage(): React.JSX.Element {
     };
   }, [generatedPackLabels, qrByPackLabelKey]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const pendingLabels = binLocationLabels.filter((label) => !qrByBinLabelKey[label.key]);
+    if (pendingLabels.length === 0) return;
+
+    void Promise.all(
+      pendingLabels.map(async (label) => {
+        const svgMarkup = await QRCode.toString(label.qrPayload, {
+          errorCorrectionLevel: 'M',
+          margin: 1,
+          type: 'svg',
+          color: {
+            dark: '#111827',
+            light: '#ffffff',
+          },
+        });
+        return [label.key, svgMarkup.replace('<svg', '<svg shape-rendering="crispEdges"')] as const;
+      }),
+    ).then((entries) => {
+      if (cancelled) return;
+      startTransition(() => {
+        setQrByBinLabelKey((current) => {
+          const next = { ...current };
+          for (const [key, dataUrl] of entries) next[key] = dataUrl;
+          return next;
+        });
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [binLocationLabels, qrByBinLabelKey]);
+
   const toggleSelected = (itemId: number) => {
     setSelectedIds((current) =>
       current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId],
@@ -677,6 +752,7 @@ export default function LabelStudioPage(): React.JSX.Element {
 
   const printCurrentScope = () => {
     if (labelMode === 'pack' && generatedPackLabels.length === 0) return;
+    if (labelMode === 'bin' && binLocationLabels.length === 0) return;
     if (labelMode === 'sku' && previewItems.length === 0) return;
     window.print();
   };
@@ -736,30 +812,32 @@ export default function LabelStudioPage(): React.JSX.Element {
 
           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard
-              label={labelMode === 'pack' ? 'Pack Definitions' : 'Labelable Items'}
-              value={formatCount(labelMode === 'pack' ? packDefinitions.length : labelableItems.length)}
-              hint={labelMode === 'pack' ? 'Imported SKU pack rules mapped by busy code' : 'Items with alias1 or alias available'}
+              label={labelMode === 'pack' ? 'Pack Definitions' : labelMode === 'bin' ? 'Bin Labels' : 'Labelable Items'}
+              value={formatCount(labelMode === 'pack' ? packDefinitions.length : labelMode === 'bin' ? binLocationLabels.length : labelableItems.length)}
+              hint={labelMode === 'pack' ? 'Imported SKU pack rules mapped by busy code' : labelMode === 'bin' ? 'SKU slots with a rack number in this batch' : 'Items with alias1 or alias available'}
             />
             <MetricCard
-              label={labelMode === 'pack' ? 'Filtered Ready' : 'Filtered'}
-              value={formatCount(labelMode === 'pack' ? packFilteredItems.length : filteredItems.length)}
+              label={labelMode === 'pack' ? 'Filtered Ready' : labelMode === 'bin' ? 'Filtered SKU Bins' : 'Filtered'}
+              value={formatCount(labelMode === 'pack' ? packFilteredItems.length : labelMode === 'bin' ? binLocationLabels.length : filteredItems.length)}
               hint={
                 brandChosen
                   ? labelMode === 'pack'
                     ? 'Current brand/search items with inner or master pack definitions'
+                    : labelMode === 'bin'
+                      ? 'Current SKU-level bin labels after search and group filters'
                     : 'Current list after search, group, and rack filters'
                   : 'Choose a brand/group to open a batch'
               }
             />
               <MetricCard
-              label={labelMode === 'pack' ? 'Generated Pack QRs' : 'Selected'}
-              value={formatCount(labelMode === 'pack' ? generatedPackLabels.length : selectedItems.length)}
-              hint={labelMode === 'pack' ? 'Reusable pack pick labels in the current print batch' : 'Manual picks for focused print runs'}
+              label={labelMode === 'pack' ? 'Generated Pack QRs' : labelMode === 'bin' ? 'BIN Payloads' : 'Selected'}
+              value={formatCount(labelMode === 'pack' ? generatedPackLabels.length : labelMode === 'bin' ? binLocationLabels.length : selectedItems.length)}
+              hint={labelMode === 'pack' ? 'Reusable pack pick labels in the current print batch' : labelMode === 'bin' ? 'Rack plus SKU payloads' : 'Manual picks for focused print runs'}
             />
             <MetricCard
               label="Payload"
-              value={labelMode === 'pack' ? 'PASPL-PACK' : 'alias1 → alias'}
-              hint={labelMode === 'pack' ? 'Reusable pack-size pick QR' : 'Canonical QR code fallback rule'}
+              value={labelMode === 'pack' ? 'PASPL-PACK' : labelMode === 'bin' ? 'BIN' : 'alias1 -> alias'}
+              hint={labelMode === 'pack' ? 'Reusable pack-size pick QR' : labelMode === 'bin' ? 'Rack-gate compatible JSON QR' : 'Canonical QR code fallback rule'}
             />
           </div>
 
@@ -767,6 +845,7 @@ export default function LabelStudioPage(): React.JSX.Element {
             {([
               ['sku', 'SKU labels'],
               ['pack', 'Pack pick labels'],
+              ['bin', 'Bin location labels'],
             ] as const).map(([mode, label]) => (
               <button
                 key={mode}
@@ -792,16 +871,18 @@ export default function LabelStudioPage(): React.JSX.Element {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <h2 className="text-base font-semibold text-[var(--content-primary)]">
-                  {labelMode === 'pack' ? 'Pack label batch' : 'Batch selection'}
+                  {labelMode === 'pack' ? 'Pack label batch' : labelMode === 'bin' ? 'Bin label batch' : 'Batch selection'}
                 </h2>
                 <p className="mt-1 text-sm text-[var(--content-tertiary)]">
                   {labelMode === 'pack'
                     ? 'Choose a brand/group, enter how many reusable inner or master pick labels to print, then prepare the sheet.'
+                    : labelMode === 'bin'
+                      ? 'Choose a brand/group and print one bin label for each SKU kept at a rack.'
                     : 'Pick a brand/group first, then search inside that batch and build the A4 run you want.'}
                 </p>
               </div>
 
-              <div className={`flex flex-wrap gap-2 ${labelMode === 'pack' ? 'hidden' : ''}`}>
+              <div className={`flex flex-wrap gap-2 ${labelMode !== 'sku' ? 'hidden' : ''}`}>
                 <button
                   type="button"
                   onClick={selectFiltered}
@@ -883,7 +964,7 @@ export default function LabelStudioPage(): React.JSX.Element {
                 <select
                   value={printPreset}
                   onChange={(event) => setPrintPreset(event.target.value as PrintPreset)}
-                  disabled={labelMode === 'pack'}
+                  disabled={labelMode !== 'sku'}
                   className="min-h-11 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--content-primary)]"
                 >
                   <option value="pack-strip">Pack strip 35mm</option>
@@ -895,13 +976,19 @@ export default function LabelStudioPage(): React.JSX.Element {
             </div>
 
             <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--border-subtle)]">
-              <div className={`${labelMode === 'pack' ? 'grid-cols-[minmax(0,0.75fr)_minmax(0,1.15fr)_minmax(0,0.8fr)_minmax(0,0.8fr)]' : 'grid-cols-[auto_minmax(0,0.8fr)_minmax(0,0.95fr)_minmax(0,1.4fr)]'} grid gap-3 bg-[var(--bg-primary)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]`}>
+              <div className={`${labelMode === 'pack' ? 'grid-cols-[minmax(0,0.75fr)_minmax(0,1.15fr)_minmax(0,0.8fr)_minmax(0,0.8fr)]' : labelMode === 'bin' ? 'grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_minmax(0,1fr)]' : 'grid-cols-[auto_minmax(0,0.8fr)_minmax(0,0.95fr)_minmax(0,1.4fr)]'} grid gap-3 bg-[var(--bg-primary)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]`}>
                 {labelMode === 'pack' ? (
                   <>
                     <span>Rack</span>
                     <span>Item</span>
                     <span>Inner labels</span>
                     <span>Master labels</span>
+                  </>
+                ) : labelMode === 'bin' ? (
+                  <>
+                    <span>Bin</span>
+                    <span>First item</span>
+                    <span>SKU</span>
                   </>
                 ) : (
                   <>
@@ -928,6 +1015,10 @@ export default function LabelStudioPage(): React.JSX.Element {
                 <div className="px-4 py-6 text-sm text-[var(--content-tertiary)]">
                   No pack-ready items matched this filter. Import pack definitions first or choose a
                   group with inner/master quantities.
+                </div>
+              ) : labelMode === 'bin' && binLocationLabels.length === 0 ? (
+                <div className="px-4 py-6 text-sm text-[var(--content-tertiary)]">
+                  No SKU bins matched this filter. Bin labels need items.rack_no populated.
                 </div>
               ) : labelMode === 'sku' && filteredItems.length === 0 ? (
                 <div className="px-4 py-6 text-sm text-[var(--content-tertiary)]">
@@ -989,6 +1080,27 @@ export default function LabelStudioPage(): React.JSX.Element {
                       </li>
                     );
                   })}
+                </ul>
+              ) : labelMode === 'bin' ? (
+                <ul className="max-h-[34rem] divide-y divide-[var(--border-subtle)] overflow-y-auto">
+                  {binLocationLabels.map((label) => (
+                    <li key={label.key} className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_minmax(0,1fr)] gap-3 bg-[var(--bg-secondary)] px-4 py-3">
+                      <span className="truncate font-mono text-sm font-bold text-[var(--content-primary)]">
+                        {label.binId}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium text-[var(--content-primary)]">
+                          {label.itemName}
+                        </span>
+                        <span className="block truncate text-xs text-[var(--content-tertiary)]">
+                          {label.groupLabel}
+                        </span>
+                      </span>
+                      <span className="truncate font-mono text-sm text-[var(--content-accent)]">
+                        {label.pickCode}
+                      </span>
+                    </li>
+                  ))}
                 </ul>
               ) : (
                 <ul className="max-h-[34rem] divide-y divide-[var(--border-subtle)] overflow-y-auto">
@@ -1080,19 +1192,21 @@ export default function LabelStudioPage(): React.JSX.Element {
                 <p className="mt-1 text-sm text-[var(--content-tertiary)]">
                   {labelMode === 'pack'
                     ? 'Print reusable pack-pick labels for shelf or floor locations.'
+                    : labelMode === 'bin'
+                      ? 'Print SKU-level bin labels for shelves that hold multiple products in separate slots.'
                     : 'Choose whether the sheet is built from the filtered set or your manual selection, then print or save as PDF from the browser dialog.'}
                 </p>
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
-                <label className={`space-y-1 ${labelMode === 'pack' ? 'opacity-50' : ''}`}>
+                <label className={`space-y-1 ${labelMode !== 'sku' ? 'opacity-50' : ''}`}>
                   <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
                     Preview scope
                   </span>
                   <select
                     value={previewScope}
                     onChange={(event) => setPreviewScope(event.target.value as PreviewScope)}
-                    disabled={labelMode === 'pack'}
+                    disabled={labelMode !== 'sku'}
                     className="min-h-11 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--content-primary)]"
                   >
                     <option value="filtered" disabled={!brandChosen}>
@@ -1108,12 +1222,14 @@ export default function LabelStudioPage(): React.JSX.Element {
                       ? generatedPackLabels.length > 0
                         ? `${formatCount(generatedPackLabels.length)} reusable pack labels`
                         : 'No pack labels prepared'
+                      : labelMode === 'bin'
+                        ? `${formatCount(binLocationLabels.length)} bin labels`
                       : previewScope === 'filtered'
                         ? `${formatCount(filteredItems.length)} filtered labels`
                         : `${formatCount(selectedItems.length)} selected labels`}
                   </p>
                   <p className="mt-1">
-                    {labelMode === 'pack' ? 'Color-coded inner/master pack pick labels' : presetDescription(printPreset)}
+                    {labelMode === 'pack' ? 'Color-coded inner/master pack pick labels' : labelMode === 'bin' ? 'One label per SKU slot on a rack' : presetDescription(printPreset)}
                   </p>
                 </div>
               </div>
@@ -1122,7 +1238,7 @@ export default function LabelStudioPage(): React.JSX.Element {
                 <button
                   type="button"
                   onClick={printCurrentScope}
-                  disabled={labelMode === 'pack' ? generatedPackLabels.length === 0 : previewItems.length === 0}
+                  disabled={labelMode === 'pack' ? generatedPackLabels.length === 0 : labelMode === 'bin' ? binLocationLabels.length === 0 : previewItems.length === 0}
                   className="inline-flex items-center gap-2 rounded-xl bg-[var(--bg-accent)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 >
                   <PrinterIcon size={18} weight="bold" />
@@ -1131,24 +1247,24 @@ export default function LabelStudioPage(): React.JSX.Element {
                 <button
                   type="button"
                   onClick={() => exportManifest(previewScope)}
-                  disabled={labelMode === 'pack' || previewItems.length === 0}
-                  className={`rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm font-semibold text-[var(--content-secondary)] disabled:opacity-50 ${labelMode === 'pack' ? 'hidden' : ''}`}
+                  disabled={labelMode !== 'sku' || previewItems.length === 0}
+                  className={`rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm font-semibold text-[var(--content-secondary)] disabled:opacity-50 ${labelMode !== 'sku' ? 'hidden' : ''}`}
                 >
                   Export current manifest CSV
                 </button>
                 <button
                   type="button"
                   onClick={() => exportManifest('filtered')}
-                  disabled={labelMode === 'pack' || filteredItems.length === 0}
-                  className={`rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm font-semibold text-[var(--content-secondary)] disabled:opacity-50 ${labelMode === 'pack' ? 'hidden' : ''}`}
+                  disabled={labelMode !== 'sku' || filteredItems.length === 0}
+                  className={`rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm font-semibold text-[var(--content-secondary)] disabled:opacity-50 ${labelMode !== 'sku' ? 'hidden' : ''}`}
                 >
                   Export filtered CSV
                 </button>
                 <button
                   type="button"
                   onClick={() => exportManifest('selected')}
-                  disabled={labelMode === 'pack' || selectedItems.length === 0}
-                  className={`rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm font-semibold text-[var(--content-secondary)] disabled:opacity-50 ${labelMode === 'pack' ? 'hidden' : ''}`}
+                  disabled={labelMode !== 'sku' || selectedItems.length === 0}
+                  className={`rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm font-semibold text-[var(--content-secondary)] disabled:opacity-50 ${labelMode !== 'sku' ? 'hidden' : ''}`}
                 >
                   Export selected CSV
                 </button>
@@ -1208,6 +1324,69 @@ export default function LabelStudioPage(): React.JSX.Element {
                               />
                             ) : (
                               <div className="text-center text-xs text-slate-500">Rendering QR...</div>
+                            )}
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )
+            ) : labelMode === 'bin' ? (
+              binLocationLabels.length === 0 ? (
+                <div className="py-8 text-sm text-[var(--content-tertiary)]" data-print-hidden="true">
+                  Choose a brand/group with rack numbers to build SKU-level bin labels.
+                </div>
+              ) : (
+                <div className="a4-label-sheet mt-4 grid gap-4 sm:grid-cols-2" data-preset="rack-strip">
+                  {binLocationLabels.map((label) => {
+                    const qrMarkup = qrByBinLabelKey[label.key];
+                    const wrapBinCode = label.binId.trim().length > 12;
+                    return (
+                      <article
+                        key={label.key}
+                        data-preset="rack-strip"
+                        className="a4-label-card overflow-hidden border border-[var(--border-opaque)] bg-white text-slate-900 shadow-sm"
+                        style={{ height: `${RACK_STRIP_HEIGHT_MM}mm` }}
+                      >
+                        <div className="rack-strip-shell">
+                          <div className="rack-strip-copy">
+                            <div className="min-w-0">
+                              <p
+                                className={`rack-strip-code block min-w-0 font-sans font-black uppercase text-slate-900 ${
+                                  wrapBinCode ? 'whitespace-normal break-all' : 'whitespace-nowrap'
+                                }`}
+                                style={rackStripCodeStyle(label.binId)}
+                              >
+                                {label.binId}
+                              </p>
+                              <p className="rack-strip-description mt-[1.2mm] text-[3.6mm] font-semibold leading-tight text-slate-700">
+                                {label.itemName}
+                              </p>
+                            </div>
+                            <p className="font-mono text-[3.5mm] font-bold leading-none tracking-[0.08em] text-slate-500">
+                              {label.pickCode}
+                            </p>
+                          </div>
+
+                          <div className="rack-strip-qr-shell">
+                            {qrMarkup ? (
+                              <div
+                                className="rack-strip-qr"
+                                aria-label={`QR for ${label.qrPayload}`}
+                                role="img"
+                                dangerouslySetInnerHTML={{ __html: qrMarkup }}
+                              />
+                            ) : (
+                              <div
+                                className="flex items-center justify-center text-center text-xs text-slate-500"
+                                style={{
+                                  width: `${RACK_STRIP_QR_SIZE_MM}mm`,
+                                  height: `${RACK_STRIP_QR_SIZE_MM}mm`,
+                                }}
+                              >
+                                Rendering QR...
+                              </div>
                             )}
                           </div>
                         </div>

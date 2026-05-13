@@ -310,6 +310,7 @@ export interface LicensePlate {
   id?: number;
   lpn_code: string;
   batch_id: number | null;
+  parent_lp_id?: number | null;
   batch_code?: string;
   busy_code: number;
   item_id_snapshot: number | null;
@@ -338,9 +339,57 @@ export interface OrderItemPickScan {
   lpn_id: number | null;
   qty_delta: number;
   qr_payload: string | null;
+  bin_id?: string | null;
   reason: string | null;
   picker_user_id: number | null;
   claim_id: number | null;
+  created_at: string;
+}
+
+export type BinInventoryStatus = 'healthy' | 'low' | 'empty' | 'pending_review' | 'inactive';
+export type BinCountType = 'initial_setup' | 'cycle_count' | 'adjustment';
+export type BinCountStatus = 'auto_approved' | 'pending_review' | 'approved' | 'rejected';
+
+export interface BinInventory {
+  bin_id: string;
+  sku_busy_code: number;
+  item_id_snapshot: number | null;
+  item_name_snapshot: string | null;
+  inner_packs: number;
+  loose_ea_qty: number;
+  inner_pack_qty: number;
+  total_qty: number;
+  reorder_point: number | null;
+  daily_target: number | null;
+  status: BinInventoryStatus;
+  last_counted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BinCountLog {
+  id: number;
+  bin_id: string;
+  count_type: BinCountType;
+  sku_busy_code: number;
+  item_id_snapshot: number | null;
+  item_name_snapshot: string | null;
+  expected_inner_packs: number;
+  expected_loose_ea_qty: number;
+  counted_inner_packs: number;
+  counted_loose_ea_qty: number;
+  inner_pack_qty: number;
+  variance_inner_packs: number;
+  variance_loose_ea_qty: number;
+  status: BinCountStatus;
+  note: string | null;
+  source_file: string | null;
+  created_by_user_id: number | null;
+  created_by_name: string | null;
+  reviewed_by_user_id: number | null;
+  reviewed_by_name: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
   created_at: string;
 }
 
