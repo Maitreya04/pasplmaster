@@ -154,28 +154,66 @@ export default function BarcodeMappingPage(): React.JSX.Element {
     return searchItems(skuQuery, searchIndex).slice(0, 20);
   }, [skuQuery, searchIndex]);
 
-  // Auto-suggest: try to resolve the barcode against alias1/alias/itemCode maps
+  // Auto-suggest: try to resolve the barcode against alias1/alias/itemCode maps,
+  // then fall back to search index for code-like part numbers.
   const autoSuggestedItem = useMemo(() => {
     if (!pendingBarcode?.key) return null;
-    // Try the parsed key as a raw scan through the existing scan index
-    const lookup = resolveScannedCatalogItem(pendingBarcode.key);
-    if (lookup) return lookup;
-    // Also try the full raw value (may contain structured data)
-    if (pendingBarcode.raw !== pendingBarcode.key) {
-      return resolveScannedCatalogItem(pendingBarcode.raw);
+
+    // 1. Try every candidate the barcode parser extracted (best-first order)
+    const allCandidates = [
+      ...pendingBarcode.candidates,
+      // Also always include raw if not already covered
+      ...(pendingBarcode.candidates.includes(pendingBarcode.raw) ? [] : [pendingBarcode.raw]),
+    ];
+    for (const candidate of allCandidates) {
+      const lookup = resolveScannedCatalogItem(candidate);
+      if (lookup) return lookup;
     }
-    // Try normalized key against the search index for code-like matches
-    const normalized = normalizeScanCode(pendingBarcode.key);
-    if (normalized.length >= 3) {
-      const codeResults = searchItems(pendingBarcode.key, searchIndex);
-      if (codeResults.length === 1 && codeResults[0].score >= 90) {
+
+    // 2. Try each candidate through the search index
+    for (const candidate of allCandidates) {
+      const normalized = normalizeScanCode(candidate);
+      if (normalized.length < 3) continue;
+
+      const codeResults = searchItems(candidate, searchIndex);
+      if (codeResults.length === 0) continue;
+
+      // Exact single high-confidence match
+      if (codeResults.length === 1 && codeResults[0].score >= 80) {
         return {
           code: normalized,
           item: { ...codeResults[0].item, itemCode: '' } as import('../../stores/itemScanIndex').ScanCatalogItem,
           source: 'alias1' as const,
         };
       }
+
+      // Top result is significantly better than second (dominant match)
+      if (
+        codeResults.length >= 2 &&
+        codeResults[0].score >= 85 &&
+        codeResults[0].score - codeResults[1].score >= 10
+      ) {
+        return {
+          code: normalized,
+          item: { ...codeResults[0].item, itemCode: '' } as import('../../stores/itemScanIndex').ScanCatalogItem,
+          source: 'alias1' as const,
+        };
+      }
+
+      // Check if the top result's alias1 contains the part number (normalized)
+      if (codeResults[0].score >= 80) {
+        const topItem = codeResults[0].item;
+        const topAlias1Norm = normalizeScanCode(topItem.alias1);
+        if (topAlias1Norm && (topAlias1Norm === normalized || topAlias1Norm.includes(normalized) || normalized.includes(topAlias1Norm))) {
+          return {
+            code: normalized,
+            item: { ...topItem, itemCode: '' } as import('../../stores/itemScanIndex').ScanCatalogItem,
+            source: 'alias1' as const,
+          };
+        }
+      }
     }
+
     return null;
   }, [pendingBarcode, searchIndex]);
 
@@ -285,6 +323,10 @@ export default function BarcodeMappingPage(): React.JSX.Element {
     setPendingBarcode(parsed);
     setManualBarcode(parsed.raw);
     setScannerOpen(false);
+    // In scan-first mode, pre-fill the search box with the extracted key
+    if (direction === 'scan_first') {
+      setSkuQuery(parsed.key);
+    }
     setStep(direction === 'scan_first' ? 'search_sku' : 'barcode_detected');
   }, [direction, handleLoadBin, scannerMode, toast]);
 
@@ -295,6 +337,10 @@ export default function BarcodeMappingPage(): React.JSX.Element {
       return;
     }
     setPendingBarcode(parsed);
+    // In scan-first mode, pre-fill the search box with the extracted key
+    if (direction === 'scan_first') {
+      setSkuQuery(parsed.key);
+    }
     setStep(direction === 'scan_first' ? 'search_sku' : 'barcode_detected');
   };
 
