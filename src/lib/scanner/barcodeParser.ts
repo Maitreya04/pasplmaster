@@ -8,6 +8,8 @@ export interface ParsedBarcode {
   strippedSuffix: string | null;
   /** All part-number candidates extracted, best first. Used by auto-suggest. */
   candidates: string[];
+  /** Optional quantity extracted from the barcode text (e.g., "1.000 N" -> 1). */
+  extractedQuantity?: number;
 }
 
 /**
@@ -25,6 +27,14 @@ const PART_NUMBER_PATTERNS: RegExp[] = [
 ];
 
 /**
+ * Patterns for extracting quantity from structured text.
+ * Covers "QTY: 10", "NUMBER OF COMMODITY: 1 N", etc.
+ */
+const QUANTITY_PATTERNS: RegExp[] = [
+  /(?:QTY|QUANTITY|NO\.? OF COMMODITY|NUMBER OF COMMODITY)\s*[:\-–]?\s*([\d.]+)/i,
+];
+
+/**
  * Try to extract a part number from structured / multi-line QR text.
  * Returns the first matched group, trimmed, or null.
  */
@@ -37,6 +47,17 @@ function extractPartNumberFromStructured(text: string): string | null {
     }
   }
   return null;
+}
+
+function extractQuantityFromStructured(text: string): number | undefined {
+  for (const pattern of QUANTITY_PATTERNS) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const qty = parseFloat(match[1]);
+      if (!isNaN(qty) && qty > 0) return qty;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -60,6 +81,8 @@ export function parseManufacturerBarcode(raw: string): ParsedBarcode {
   // ── Structured / multi-line payloads (TAFE, Mahindra, etc.) ──
   if (isStructuredText(trimmed)) {
     const extracted = extractPartNumberFromStructured(trimmed);
+    const extractedQuantity = extractQuantityFromStructured(trimmed);
+
     if (extracted) {
       candidates.push(extracted);
 
@@ -76,6 +99,7 @@ export function parseManufacturerBarcode(raw: string): ParsedBarcode {
         looksSerialised: cleaned.key !== extracted,
         strippedSuffix: cleaned.key !== extracted ? cleaned.suffix : null,
         candidates,
+        extractedQuantity,
       };
     }
     // Even if we couldn't find a labeled field, try the first "code-like" token
@@ -95,6 +119,7 @@ export function parseManufacturerBarcode(raw: string): ParsedBarcode {
         looksSerialised: false,
         strippedSuffix: null,
         candidates,
+        extractedQuantity,
       };
     }
   }
@@ -111,6 +136,7 @@ export function parseManufacturerBarcode(raw: string): ParsedBarcode {
       looksSerialised: true,
       strippedSuffix: serialResult.suffix,
       candidates,
+      extractedQuantity: serialResult.extractedQuantity,
     };
   }
 
@@ -123,6 +149,7 @@ export function parseManufacturerBarcode(raw: string): ParsedBarcode {
     looksSerialised: false,
     strippedSuffix: null,
     candidates,
+    extractedQuantity: serialResult.extractedQuantity,
   };
 }
 
@@ -137,13 +164,28 @@ function stripBarcodeSuffixes(value: string): {
   key: string;
   suffix: string | null;
   strategy: MatchStrategy;
+  extractedQuantity?: number;
 } {
   // Handle slash-separated records (PartNo/Desc/MRP/Qty...)
   const slashParts = value.split('/');
   if (slashParts.length >= 3) {
     const prefix = slashParts[0].trim();
     if (/^[A-Z0-9.\-]{4,}$/i.test(prefix)) {
-      return { key: prefix, suffix: value.substring(prefix.length), strategy: 'slash_separated' };
+      let extractedQuantity: number | undefined;
+      // Qty is typically the 4th element (index 3) like "1.000 N" or "10 NOS"
+      if (slashParts.length >= 4) {
+        const qtyMatch = slashParts[3].match(/^([\d.]+)\s*(?:N|NOS|PCS)/i);
+        if (qtyMatch) {
+          const qty = parseFloat(qtyMatch[1]);
+          if (!isNaN(qty) && qty > 0) extractedQuantity = qty;
+        }
+      }
+      return { 
+        key: prefix, 
+        suffix: value.substring(prefix.length), 
+        strategy: 'slash_separated',
+        extractedQuantity
+      };
     }
   }
 

@@ -732,19 +732,20 @@ export default function CycleCountPage(): React.JSX.Element {
         });
         return;
       }
+      const looseDelta = classified.extractedQuantity && classified.extractedQuantity > 0 ? classified.extractedQuantity : 1;
       setForm((current) => ({
         ...current,
         skuBusyCode: current.skuBusyCode || String(matchedBusyCode),
-        looseEaQty: String(parseRequiredInt(current.looseEaQty) + 1),
+        looseEaQty: String(parseRequiredInt(current.looseEaQty) + looseDelta),
       }));
       primeSkuFromBusyCode(matchedBusyCode);
       addScanEvent({
         label: 'Loose item counted',
-        detail: `${scan.matchedItem?.name ?? `Busy ${matchedBusyCode}`} · +1 EA`,
+        detail: `${scan.matchedItem?.name ?? `Busy ${matchedBusyCode}`} · +${formatCount(looseDelta)} EA`,
         rawValue: scan.rawValue,
         tone: 'positive',
         deltaInnerPacks: 0,
-        deltaLooseEaQty: 1,
+        deltaLooseEaQty: looseDelta,
       });
       return;
     }

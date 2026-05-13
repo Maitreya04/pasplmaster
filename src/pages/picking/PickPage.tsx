@@ -1061,7 +1061,9 @@ export default function PickPage(): React.JSX.Element | null {
           ? Math.max(1, Number(lpnSuggested))
           : Number.isFinite(packQty) && (packQty ?? 0) > 0
             ? Number(packQty)
-            : 1;
+            : classified.extractedQuantity && classified.extractedQuantity > 0
+              ? classified.extractedQuantity
+              : 1;
       const requiresBreakConfirmation = suggestedQty > remainingBeforeScan;
       const requiresLargeQtyConfirmation =
         suggestedQty > MAX_AUTO_SCAN_QTY && remainingBeforeScan > 1;

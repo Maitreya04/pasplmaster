@@ -50,6 +50,7 @@ export interface ClassifiedScanPayload {
   packPayload?: PackPickPayload;
   lpnPayload?: LpnPickPayload;
   rackPayload?: RackPayload;
+  extractedQuantity?: number;
 }
 
 /** Normalise a rack code: uppercase, single dash, no whitespace. */
@@ -250,6 +251,14 @@ export function classifyScanPayload(rawValue: string): ClassifiedScanPayload {
   const packPayload = parsePackPickPayload(rawValue);
   const lpnPayload = parseLpnPickPayload(rawValue);
   const normalizedCandidates = collectQrLookupCandidates(rawValue);
+  
+  // Try to extract quantity using the manufacturer parser directly
+  // (collectQrLookupCandidates only returns the keys, so we parse it again to get the qty)
+  let extractedQuantity: number | undefined;
+  if (!rackPayload && !packPayload && !lpnPayload) {
+    const parsed = parseManufacturerBarcode(rawValue);
+    extractedQuantity = parsed.extractedQuantity;
+  }
 
   // Rack wins: the prefix is unambiguous and shouldn't be mis-classified as SKU.
   if (rackPayload) {
@@ -281,6 +290,7 @@ export function classifyScanPayload(rawValue: string): ClassifiedScanPayload {
       kind: 'sku',
       rawValue,
       normalizedCandidates,
+      extractedQuantity,
     };
   }
   return {
