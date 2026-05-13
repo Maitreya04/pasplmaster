@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { useAuth } from '../context/AuthContext';
@@ -8,22 +8,27 @@ import {
   type OrderRowWithEmbed,
 } from '../lib/orderItemCount';
 import { subscribeToTable } from '../lib/realtime';
-import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
+import {
+  isBillingQueueEventsEnabled,
+  isSupabasePostgresChangesEnabled,
+} from '../lib/realtimePolicy';
 import type { Order, ClaimStage, WorkflowStatus } from '../types';
 
 const REALTIME_ON = isSupabasePostgresChangesEnabled();
+const BILLING_QUEUE_EVENTS_ON = isBillingQueueEventsEnabled();
 
 /** Stale threshold in ms — matches the 3-minute heartbeat timeout */
 const STALE_THRESHOLD_MS = 3 * 60 * 1000;
 
 /**
- * Realtime is primary; 5s REST keep-alive matches the old live-queue cadence
- * if the websocket drops, without polling every 2s when Realtime is healthy.
+ * Realtime is primary. Old table-subscription queues keep their previous
+ * keep-alive cadence; the new billing event stream uses a slow safety poll.
  */
 const KEEPALIVE_INTERVAL_MS = 5_000;
+const BILLING_EVENT_KEEPALIVE_INTERVAL_MS = 60_000;
 const POLL_NO_REALTIME_MS = 2_000;
 
-/** Coalesce realtime bursts (e.g. work_claims heartbeats) into a single refetch. */
+/** Coalesce realtime bursts into a single refetch. */
 const REALTIME_DEBOUNCE_MS = 750;
 
 interface ClaimableOrdersOptions {
@@ -70,132 +75,268 @@ interface UseClaimableOrdersReturn {
   isLoading: boolean;
 }
 
+type BillingQueueSnapshotRow = {
+  id: number;
+  order_number: string;
+  order_kind: 'standard' | 'recovery' | null;
+  customer_id: number;
+  customer_name: string;
+  customer_city: string | null;
+  transport_id: number | null;
+  transport_name: string | null;
+  salesperson_name: string;
+  salesperson_user_id: number | null;
+  reviewer_name: string | null;
+  picker_name: string | null;
+  workflow_status: WorkflowStatus;
+  priority: 'normal' | 'urgent';
+  notes: string | null;
+  item_count: number;
+  ask_line_count: number;
+  special_rate_line_count: number;
+  special_rate_qty: number;
+  total_value: number;
+  created_at: string;
+  approved_at: string | null;
+  picked_at: string | null;
+  completed_at: string | null;
+  dispatched_at: string | null;
+  claim_id: number | null;
+  claimed_by_user_id: number | null;
+  claimed_by_name: string | null;
+  claimed_at: string | null;
+  last_heartbeat_at: string | null;
+  claim_is_stale: boolean | null;
+};
+
+function getTodayStartIso(): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+function workflowStatusesToArray(
+  workflowStatus: WorkflowStatus | WorkflowStatus[] | undefined,
+): WorkflowStatus[] | null {
+  if (!workflowStatus) return null;
+  return Array.isArray(workflowStatus) ? workflowStatus : [workflowStatus];
+}
+
+function shouldUseBillingQueueEvents(stage: ClaimStage): boolean {
+  return stage === 'billing' && BILLING_QUEUE_EVENTS_ON;
+}
+
+async function fetchLegacyClaimableOrders(
+  options: ClaimableOrdersOptions,
+  userId: number | null,
+): Promise<OrderWithClaimInfo[]> {
+  const { stage, workflowStatus, todayOnly } = options;
+
+  let orderQuery = supabase
+    .from('orders')
+    .select(ORDERS_SELECT_WITH_ITEM_LINE_COUNT)
+    .order('created_at', { ascending: false });
+
+  if (workflowStatus) {
+    if (Array.isArray(workflowStatus)) {
+      orderQuery = orderQuery.in('workflow_status', workflowStatus);
+    } else {
+      orderQuery = orderQuery.eq('workflow_status', workflowStatus);
+    }
+  }
+
+  if (todayOnly) {
+    orderQuery = orderQuery.gte('created_at', getTodayStartIso());
+  }
+
+  const { data: rawOrders, error: orderError } = await orderQuery;
+  if (orderError) throw orderError;
+  if (!rawOrders || rawOrders.length === 0) return [];
+
+  const orders = normalizeOrderListBusyItemCount(
+    rawOrders as OrderRowWithEmbed[],
+  );
+
+  const orderIds = orders.map((o: Order) => o.id);
+  const customerIds = [...new Set(
+    orders
+      .map((o: Order) => o.customer_id)
+      .filter((id): id is number => typeof id === 'number'),
+  )];
+
+  const customerAddressMap = new Map<number, string | null>();
+  if (customerIds.length > 0) {
+    const { data: customers, error: customerError } = await supabase
+      .from('customers')
+      .select('id, address')
+      .in('id', customerIds);
+
+    if (customerError) throw customerError;
+
+    for (const customer of customers ?? []) {
+      customerAddressMap.set(customer.id, customer.address ?? null);
+    }
+  }
+
+  const { data: claims, error: claimError } = await supabase
+    .from('work_claims')
+    .select('id, order_id, claimed_by_user_id, claimed_at, last_heartbeat_at, status, users!work_claims_claimed_by_user_id_fkey(full_name)')
+    .in('order_id', orderIds)
+    .eq('stage', stage)
+    .eq('status', 'active');
+
+  if (claimError) throw claimError;
+
+  const claimMap = new Map<number, ActiveClaimInfo>();
+  const now = Date.now();
+
+  for (const claim of claims ?? []) {
+    const heartbeatAge = now - new Date(claim.last_heartbeat_at).getTime();
+    const userRecord = claim.users as unknown as { full_name: string } | null;
+    claimMap.set(claim.order_id, {
+      claim_id: claim.id,
+      claimed_by_user_id: claim.claimed_by_user_id,
+      claimed_by_name: userRecord?.full_name ?? 'Unknown',
+      claimed_at: claim.claimed_at,
+      last_heartbeat_at: claim.last_heartbeat_at,
+      is_stale: heartbeatAge > STALE_THRESHOLD_MS,
+    });
+  }
+
+  return orders.map((order): OrderWithClaimInfo => {
+    const claimInfo = claimMap.get(order.id) ?? null;
+    return {
+      ...order,
+      customer_address:
+        typeof order.customer_id === 'number'
+          ? (customerAddressMap.get(order.customer_id) ?? null)
+          : null,
+      claim_info: claimInfo,
+      is_mine: claimInfo?.claimed_by_user_id === userId,
+    };
+  });
+}
+
+async function fetchBillingQueueSnapshot(
+  options: ClaimableOrdersOptions,
+  userId: number | null,
+): Promise<OrderWithClaimInfo[]> {
+  const { data, error } = await supabase.rpc('get_billing_queue_snapshot', {
+    p_statuses: workflowStatusesToArray(options.workflowStatus),
+    p_created_from: options.todayOnly ? getTodayStartIso() : null,
+    p_created_to: null,
+  });
+
+  if (error) throw error;
+
+  return ((data ?? []) as BillingQueueSnapshotRow[]).map((row): OrderWithClaimInfo => {
+    const claimInfo =
+      row.claim_id != null &&
+      row.claimed_by_user_id != null &&
+      row.claimed_at != null &&
+      row.last_heartbeat_at != null
+        ? {
+            claim_id: Number(row.claim_id),
+            claimed_by_user_id: Number(row.claimed_by_user_id),
+            claimed_by_name: row.claimed_by_name ?? 'Unknown',
+            claimed_at: row.claimed_at,
+            last_heartbeat_at: row.last_heartbeat_at,
+            is_stale: Boolean(row.claim_is_stale),
+          }
+        : null;
+
+    return {
+      id: Number(row.id),
+      order_number: row.order_number,
+      order_kind: row.order_kind ?? 'standard',
+      customer_id: Number(row.customer_id),
+      customer_name: row.customer_name,
+      customer_city: row.customer_city,
+      transport_id: row.transport_id == null ? null : Number(row.transport_id),
+      transport_name: row.transport_name,
+      salesperson_name: row.salesperson_name,
+      salesperson_user_id:
+        row.salesperson_user_id == null ? null : Number(row.salesperson_user_id),
+      reviewer_name: row.reviewer_name,
+      picker_name: row.picker_name,
+      workflow_status: row.workflow_status,
+      priority: row.priority,
+      notes: row.notes,
+      item_count: Number(row.item_count ?? 0),
+      ask_line_count: Number(row.ask_line_count ?? 0),
+      special_rate_line_count: Number(row.special_rate_line_count ?? 0),
+      special_rate_qty: Number(row.special_rate_qty ?? 0),
+      total_value: Number(row.total_value ?? 0),
+      created_at: row.created_at,
+      approved_at: row.approved_at,
+      picked_at: row.picked_at,
+      completed_at: row.completed_at,
+      dispatched_at: row.dispatched_at,
+      claim_info: claimInfo,
+      is_mine: claimInfo?.claimed_by_user_id === userId,
+    };
+  });
+}
+
 /**
  * Fetch orders enriched with active claim info for a given stage.
- * Subscribes to realtime changes on both orders and work_claims tables.
+ *
+ * Billing can use a compact snapshot RPC + low-volume queue_events stream.
+ * Other stages keep the legacy table reads/subscriptions for compatibility.
  */
 export function useClaimableOrders(
   options: ClaimableOrdersOptions,
 ): UseClaimableOrdersReturn {
   const { userId } = useAuth();
   const { stage, workflowStatus, todayOnly } = options;
+  const [billingSnapshotFailed, setBillingSnapshotFailed] = useState(false);
+  const billingEventsEnabled =
+    shouldUseBillingQueueEvents(stage) && !billingSnapshotFailed;
 
-  // Stable query key
   const statusKey = Array.isArray(workflowStatus)
     ? workflowStatus.join(',')
     : workflowStatus ?? 'all';
 
+  const queryKey = useMemo(
+    () => [
+      'claimable-orders',
+      stage,
+      statusKey,
+      todayOnly ?? false,
+      billingEventsEnabled ? 'billing-events' : 'legacy',
+    ] as const,
+    [stage, statusKey, todayOnly, billingEventsEnabled],
+  );
+
   const result = useQuery<OrderWithClaimInfo[]>({
-    queryKey: ['claimable-orders', stage, statusKey, todayOnly ?? false],
+    queryKey,
     queryFn: async () => {
-      // 1. Fetch orders
-      let orderQuery = supabase
-        .from('orders')
-        .select(ORDERS_SELECT_WITH_ITEM_LINE_COUNT)
-        .order('created_at', { ascending: false });
-
-      if (workflowStatus) {
-        if (Array.isArray(workflowStatus)) {
-          orderQuery = orderQuery.in('workflow_status', workflowStatus);
-        } else {
-          orderQuery = orderQuery.eq('workflow_status', workflowStatus);
-        }
+      if (!billingEventsEnabled) {
+        return fetchLegacyClaimableOrders(options, userId);
       }
 
-      if (todayOnly) {
-        const d = new Date();
-        d.setHours(0, 0, 0, 0);
-        orderQuery = orderQuery.gte('created_at', d.toISOString());
+      try {
+        return await fetchBillingQueueSnapshot(options, userId);
+      } catch (error) {
+        console.warn('[billing-queue] snapshot RPC failed; falling back to legacy query', error);
+        setBillingSnapshotFailed(true);
+        return fetchLegacyClaimableOrders(options, userId);
       }
-
-      const { data: rawOrders, error: orderError } = await orderQuery;
-      if (orderError) throw orderError;
-      if (!rawOrders || rawOrders.length === 0) return [];
-
-      const orders = normalizeOrderListBusyItemCount(
-        rawOrders as OrderRowWithEmbed[],
-      );
-
-      const orderIds = orders.map((o: Order) => o.id);
-      const customerIds = [...new Set(
-        orders
-          .map((o: Order) => o.customer_id)
-          .filter((id): id is number => typeof id === 'number'),
-      )];
-
-      const customerAddressMap = new Map<number, string | null>();
-      if (customerIds.length > 0) {
-        const { data: customers, error: customerError } = await supabase
-          .from('customers')
-          .select('id, address')
-          .in('id', customerIds);
-
-        if (customerError) throw customerError;
-
-        for (const customer of customers ?? []) {
-          customerAddressMap.set(customer.id, customer.address ?? null);
-        }
-      }
-
-      // 2. Fetch active claims for these orders + stage, joined with user name
-      const { data: claims, error: claimError } = await supabase
-        .from('work_claims')
-        .select('id, order_id, claimed_by_user_id, claimed_at, last_heartbeat_at, status, users!work_claims_claimed_by_user_id_fkey(full_name)')
-        .in('order_id', orderIds)
-        .eq('stage', stage)
-        .eq('status', 'active');
-
-      if (claimError) throw claimError;
-
-      // Build a map: order_id → claim info
-      const claimMap = new Map<number, ActiveClaimInfo>();
-      const now = Date.now();
-
-      for (const claim of claims ?? []) {
-        const heartbeatAge = now - new Date(claim.last_heartbeat_at).getTime();
-        const userRecord = claim.users as unknown as { full_name: string } | null;
-        claimMap.set(claim.order_id, {
-          claim_id: claim.id,
-          claimed_by_user_id: claim.claimed_by_user_id,
-          claimed_by_name: userRecord?.full_name ?? 'Unknown',
-          claimed_at: claim.claimed_at,
-          last_heartbeat_at: claim.last_heartbeat_at,
-          is_stale: heartbeatAge > STALE_THRESHOLD_MS,
-        });
-      }
-
-      // 3. Enrich orders
-      return orders.map((order): OrderWithClaimInfo => {
-        const claimInfo = claimMap.get(order.id) ?? null;
-        return {
-          ...order,
-          customer_address:
-            typeof order.customer_id === 'number'
-              ? (customerAddressMap.get(order.customer_id) ?? null)
-              : null,
-          claim_info: claimInfo,
-          is_mine: claimInfo?.claimed_by_user_id === userId,
-        };
-      });
     },
-    staleTime: 0, // Always refetch — claims change frequently
-    refetchInterval: (query) =>
-      query.state.data !== undefined
-        ? REALTIME_ON
-          ? KEEPALIVE_INTERVAL_MS
-          : POLL_NO_REALTIME_MS
-        : false,
+    staleTime: 0,
+    refetchInterval: (query) => {
+      if (query.state.data === undefined) return false;
+      if (!REALTIME_ON) return POLL_NO_REALTIME_MS;
+      return billingEventsEnabled
+        ? BILLING_EVENT_KEEPALIVE_INTERVAL_MS
+        : KEEPALIVE_INTERVAL_MS;
+    },
     refetchIntervalInBackground: false,
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
   });
 
-  // Realtime: react instantly to relevant order + claim changes.
   const queryClient = useQueryClient();
-  const queryKey = useMemo(
-    () => ['claimable-orders', stage, statusKey, todayOnly ?? false] as const,
-    [stage, statusKey, todayOnly],
-  );
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -208,6 +349,23 @@ export function useClaimableOrders(
         void queryClient.invalidateQueries({ queryKey });
       }, REALTIME_DEBOUNCE_MS);
     };
+
+    if (billingEventsEnabled) {
+      const unsubQueueEvents = subscribeToTable({
+        channelName: `billing-queue-events:${statusKey}:${todayOnly ?? false}`,
+        table: 'queue_events',
+        filter: 'stage=eq.billing',
+        events: ['INSERT'],
+        onChange: scheduleInvalidate,
+        onReconnect: () =>
+          queryClient.invalidateQueries({ queryKey }),
+      });
+
+      return () => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        unsubQueueEvents();
+      };
+    }
 
     const ordersFilter =
       typeof workflowStatus === 'string'
@@ -237,9 +395,16 @@ export function useClaimableOrders(
       unsubOrders();
       unsubClaims();
     };
-  }, [queryClient, queryKey, stage, statusKey, todayOnly, workflowStatus]);
+  }, [
+    billingEventsEnabled,
+    queryClient,
+    queryKey,
+    stage,
+    statusKey,
+    todayOnly,
+    workflowStatus,
+  ]);
 
-  // Categorize orders
   const categorized = useMemo(() => {
     const all = result.data ?? [];
     const available: OrderWithClaimInfo[] = [];

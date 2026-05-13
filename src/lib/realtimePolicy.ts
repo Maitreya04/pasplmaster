@@ -14,3 +14,14 @@ export function isSupabasePostgresChangesEnabled(): boolean {
   const v = import.meta.env.VITE_DISABLE_SUPABASE_REALTIME;
   return v !== 'true' && v !== '1';
 }
+
+/**
+ * Use the low-volume billing queue event stream + compact snapshot RPC.
+ *
+ * Keep this behind a flag so production can roll the DB migration first and
+ * fall back to the existing table-subscription path instantly if needed.
+ */
+export function isBillingQueueEventsEnabled(): boolean {
+  const v = import.meta.env.VITE_BILLING_QUEUE_EVENTS;
+  return v === 'true' || v === '1';
+}

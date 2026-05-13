@@ -4,6 +4,19 @@ import type { ImportProgress, ProgressCallback } from './itemImporter';
 
 const BATCH_SIZE = 500;
 
+type ExistingStockItem = {
+  name: string;
+  alias: string | null;
+  alias1: string | null;
+  parent_group: string | null;
+  item_category: string | null;
+  gst_percent: number | null;
+  hsn_code: string | null;
+  stock_qty: number | null;
+  rack_no: string | null;
+  is_active: boolean | null;
+};
+
 function hasVlookup(row: unknown[]): boolean {
   return row.some(cell => typeof cell === 'string' && cell.startsWith('=VLOOKUP'));
 }
@@ -61,6 +74,28 @@ function assignIfPresent(
   obj[key] = value;
 }
 
+function valuesEqual(existing: ExistingStockItem, key: string, value: unknown): boolean {
+  const current = existing[key as keyof ExistingStockItem];
+  if (typeof value === 'number') {
+    if (current == null) return false;
+    const currentNumber = Number(current);
+    return Number.isFinite(currentNumber) && Math.abs(currentNumber - value) < 0.0001;
+  }
+  return (current ?? null) === (value ?? null);
+}
+
+function recordChanged(
+  existing: ExistingStockItem | undefined,
+  record: Record<string, unknown>,
+): boolean {
+  if (!existing) return true;
+  for (const [key, value] of Object.entries(record)) {
+    if (key === 'name') continue;
+    if (!valuesEqual(existing, key, value)) return true;
+  }
+  return false;
+}
+
 export async function importStock(
   workbook: XLSX.WorkBook,
   fileName: string,
@@ -81,8 +116,12 @@ export async function importStock(
       !hasVlookup(row),
   );
 
-  const { data: existing } = await supabase.from('items').select('name').returns<{name: string}[]>();
-  const existingNames = new Set((existing ?? []).map(r => r.name));
+  const { data: existing } = await supabase
+    .from('items')
+    .select('name,alias,alias1,parent_group,item_category,gst_percent,hsn_code,stock_qty,rack_no,is_active')
+    .returns<ExistingStockItem[]>();
+  const existingByName = new Map((existing ?? []).map((item) => [item.name, item]));
+  const existingNames = new Set(existingByName.keys());
 
   const total = dataRows.length;
   const totalBatches = Math.ceil(total / BATCH_SIZE);
@@ -102,7 +141,6 @@ export async function importStock(
         const record: Record<string, unknown> = {
           name,
           is_active: true,
-          updated_at: new Date().toISOString(),
         };
 
         // Only assign optional fields if the column exists AND value is present.
@@ -124,15 +162,18 @@ export async function importStock(
       })
       .filter((r): r is Record<string, unknown> => r !== null);
 
-    const batchNew = records.filter(r => !existingNames.has(r.name as string)).length;
-    const batchUpdated = records.length - batchNew;
-    records.forEach(r => existingNames.add(r.name as string));
+    const changedRecords = records.filter((record) =>
+      recordChanged(existingByName.get(record.name as string), record),
+    );
+    const batchNew = changedRecords.filter(r => !existingNames.has(r.name as string)).length;
+    const batchUpdated = changedRecords.length - batchNew;
+    changedRecords.forEach(r => existingNames.add(r.name as string));
 
-    if (records.length > 0) {
-      const { error } = await supabase.from('items').upsert(records, { onConflict: 'name' });
+    if (changedRecords.length > 0) {
+      const { error } = await supabase.from('items').upsert(changedRecords, { onConflict: 'name' });
       if (error) {
-        failedCount += records.length;
-        records.forEach(r => existingNames.delete(r.name as string));
+        failedCount += changedRecords.length;
+        changedRecords.forEach(r => existingNames.delete(r.name as string));
         onProgress({
           processed,
           total,

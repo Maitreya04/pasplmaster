@@ -15,6 +15,20 @@ export type ProgressCallback = (progress: ImportProgress) => void;
 
 const BATCH_SIZE = 500;
 
+type ExistingItemImportRow = {
+  name: string;
+  alias: string | null;
+  alias1: string | null;
+  parent_group: string | null;
+  gst_percent: number | null;
+  hsn_code: string | null;
+  sales_price: number | null;
+  mrp: number | null;
+  item_category: string | null;
+  main_group: string | null;
+  is_active: boolean | null;
+};
+
 function hasVlookup(row: unknown[]): boolean {
   return row.some(cell => typeof cell === 'string' && cell.startsWith('=VLOOKUP'));
 }
@@ -39,6 +53,28 @@ function num(val: unknown, fallback: number): number {
 /** Normalize code for matching: lowercase, remove spaces and slashes (e.g. "ASK/BJ/FBD/0025" and "ASKBDBAJBOX4SF" can match). */
 function normalizeCode(s: string): string {
   return s.toLowerCase().replace(/\s+/g, '').replace(/\//g, '');
+}
+
+function valuesEqual(existing: ExistingItemImportRow, key: string, value: unknown): boolean {
+  const current = existing[key as keyof ExistingItemImportRow];
+  if (typeof value === 'number') {
+    if (current == null) return false;
+    const currentNumber = Number(current);
+    return Number.isFinite(currentNumber) && Math.abs(currentNumber - value) < 0.0001;
+  }
+  return (current ?? null) === (value ?? null);
+}
+
+function recordChanged(
+  existing: ExistingItemImportRow | undefined,
+  record: Record<string, unknown>,
+): boolean {
+  if (!existing) return true;
+  for (const [key, value] of Object.entries(record)) {
+    if (key === 'name') continue;
+    if (!valuesEqual(existing, key, value)) return true;
+  }
+  return false;
 }
 
 /** Default column indices when header detection doesn't find a column (original spec). */
@@ -111,8 +147,10 @@ export async function importItems(
   // Pre-fetch existing items so we can match by name, alias, or alias1 (so price updates apply to the right row when the file uses a different name)
   const { data: existingItems } = await supabase
     .from('items')
-    .select('name, alias, alias1');
+    .select('name,alias,alias1,parent_group,gst_percent,hsn_code,sales_price,mrp,item_category,main_group,is_active')
+    .returns<ExistingItemImportRow[]>();
   const existingList = existingItems ?? [];
+  const existingByName = new Map(existingList.map((item) => [item.name, item]));
   const existingNames = new Set(existingList.map(r => r.name));
   const nameByAlias = new Map<string, string>();
   const nameByAlias1 = new Map<string, string>();
@@ -162,7 +200,6 @@ export async function importItems(
           item_category: str(row[cols.item_category]),
           main_group: str(row[cols.main_group]),
           is_active: true,
-          updated_at: new Date().toISOString(),
         };
         // Only set alias/alias1 when the file has a value — avoids overwriting existing codes with null when the column is blank or wrong
         if (alias != null && alias !== '') record.alias = alias;
@@ -171,16 +208,19 @@ export async function importItems(
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
 
-    const batchNew = records.filter(r => !existingNames.has(r.name)).length;
-    const batchUpdated = records.length - batchNew;
-    records.forEach(r => existingNames.add(r.name));
+    const changedRecords = records.filter((record) =>
+      recordChanged(existingByName.get(record.name as string), record),
+    );
+    const batchNew = changedRecords.filter(r => !existingNames.has(r.name as string)).length;
+    const batchUpdated = changedRecords.length - batchNew;
+    changedRecords.forEach(r => existingNames.add(r.name as string));
 
-    if (records.length > 0) {
-      const { error } = await supabase.from('items').upsert(records, { onConflict: 'name' });
+    if (changedRecords.length > 0) {
+      const { error } = await supabase.from('items').upsert(changedRecords, { onConflict: 'name' });
       if (error) {
         console.error(`[Import items_price] Batch ${batchIndex} failed:`, error.message, error.details);
-        failedCount += records.length;
-        records.forEach(r => existingNames.delete(r.name));
+        failedCount += changedRecords.length;
+        changedRecords.forEach(r => existingNames.delete(r.name as string));
         onProgress({
           processed,
           total,

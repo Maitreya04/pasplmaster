@@ -39,11 +39,10 @@ interface UseOrdersOptions {
 }
 
 /**
- * Realtime is the primary update path; REST refetch is a cheap safety net so
- * a dropped websocket does not leave lists stale for a full minute.
- * Default 8s matches the “snappy billing” feel from earlier builds.
+ * Realtime is the primary update path; REST refetch is only a safety net.
+ * Keep this slow while Realtime is healthy so list screens do not burn egress.
  */
-const KEEPALIVE_INTERVAL_MS = 8_000;
+const KEEPALIVE_INTERVAL_MS = 60_000;
 const REALTIME_DEBOUNCE_MS = 750;
 
 /** When Realtime is off, poll every 2s unless caller asked for a slower cadence (capped at 10s). */

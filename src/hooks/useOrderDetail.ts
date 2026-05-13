@@ -21,11 +21,10 @@ type OrderItemRow = Omit<
 };
 
 /**
- * Realtime is primary; 8s REST keep-alive is a snappy backstop when the
- * websocket is down. One order detail mounted per user; the payload is
- * scoped to a single order (~10–30 KB) so 8 s × per-page cost is small.
+ * Realtime is primary; REST keep-alive is a slow safety net when the websocket
+ * is healthy. If Realtime is disabled, the hook falls back to short polling.
  */
-const KEEPALIVE_INTERVAL_MS = 8_000;
+const KEEPALIVE_INTERVAL_MS = 60_000;
 const POLL_NO_REALTIME_MS = 2_000;
 const REALTIME_DEBOUNCE_MS = 500;
 
