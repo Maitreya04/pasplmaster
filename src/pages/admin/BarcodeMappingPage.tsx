@@ -36,7 +36,7 @@ import {
   type ParsedBarcode,
 } from '../../lib/scanner/barcodeParser';
 import { classifyScanPayload, normalizeScanCode, parseRackPayload } from '../../lib/scanner/qrPayload';
-import { resolveScannedCatalogItem } from '../../stores/itemScanIndex';
+import { resolveScannedCatalogItem, getScanCatalogItemById, patchBarcodeMappingEntry } from '../../stores/itemScanIndex';
 
 type MappingDirection = 'bin_first' | 'scan_first';
 
@@ -435,6 +435,16 @@ export default function BarcodeMappingPage(): React.JSX.Element {
       toast.success(result.status === 'overridden' ? 'Mapping updated.' : 'Barcode mapped.');
       void queryClient.invalidateQueries({ queryKey: BARCODE_COVERAGE_QUERY_KEY });
       void queryClient.invalidateQueries({ queryKey: MAPPED_SKUS_QUERY_KEY });
+
+      // Patch the live scan index so the scanner resolves this barcode immediately
+      // in the current browser session without waiting for a full index reload.
+      if (pendingBarcode?.key && selectedSku.itemId != null) {
+        const liveItem = getScanCatalogItemById(selectedSku.itemId);
+        if (liveItem) {
+          patchBarcodeMappingEntry(pendingBarcode.key, liveItem);
+        }
+      }
+
       finishSoon();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not save barcode mapping.';

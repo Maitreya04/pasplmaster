@@ -169,3 +169,17 @@ export function resolveScannedCatalogItem(rawValue: string): ScanLookupResult | 
 export function getScanCatalogItemById(itemId: number): ScanCatalogItem | null {
   return useItemScanIndexStore.getState().itemsById.get(itemId) ?? null;
 }
+
+/**
+ * Immediately patch the live barcode-mapping index after a new mapping is saved.
+ * Call this right after saveBarcodeMapping() succeeds so the current browser
+ * session sees the new mapping without waiting for a full index reload.
+ */
+export function patchBarcodeMappingEntry(barcodeKey: string, item: ScanCatalogItem): void {
+  const normalizedKey = normalizeScanCode(barcodeKey);
+  if (!normalizedKey) return;
+  const { barcodeMappingMap } = useItemScanIndexStore.getState();
+  const updated = new Map(barcodeMappingMap);
+  updated.set(normalizedKey, item);
+  useItemScanIndexStore.setState({ barcodeMappingMap: updated });
+}
