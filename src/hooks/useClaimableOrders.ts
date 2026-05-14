@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase/client';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -25,11 +26,15 @@ const STALE_THRESHOLD_MS = 3 * 60 * 1000;
  * keep-alive cadence; the new billing event stream uses a slow safety poll.
  */
 const KEEPALIVE_INTERVAL_MS = 5_000;
-const BILLING_EVENT_KEEPALIVE_INTERVAL_MS = 5_000;
+const BILLING_EVENT_CONNECTED_KEEPALIVE_INTERVAL_MS = 60_000;
+const BILLING_EVENT_DEGRADED_KEEPALIVE_INTERVAL_MS = 5_000;
 const POLL_NO_REALTIME_MS = 2_000;
 
 /** Coalesce realtime bursts into a single refetch. */
 const REALTIME_DEBOUNCE_MS = 750;
+
+const INITIAL_REALTIME_RETRY_MS = 2_000;
+const MAX_REALTIME_RETRY_MS = 60_000;
 
 interface ClaimableOrdersOptions {
   /** The stage to check claims for */
@@ -74,6 +79,8 @@ interface UseClaimableOrdersReturn {
   /** Loading state */
   isLoading: boolean;
 }
+
+type BillingRealtimeStatus = 'disabled' | 'connected' | 'disconnected';
 
 type BillingQueueSnapshotRow = {
   id: number;
@@ -290,6 +297,8 @@ export function useClaimableOrders(
   const { userId } = useAuth();
   const { stage, workflowStatus, todayOnly } = options;
   const [billingSnapshotFailed, setBillingSnapshotFailed] = useState(false);
+  const [billingRealtimeStatus, setBillingRealtimeStatus] =
+    useState<BillingRealtimeStatus>(REALTIME_ON ? 'disconnected' : 'disabled');
   const billingEventsEnabled =
     shouldUseBillingQueueEvents(stage) && !billingSnapshotFailed;
 
@@ -326,10 +335,13 @@ export function useClaimableOrders(
     staleTime: 0,
     refetchInterval: (query) => {
       if (query.state.data === undefined) return false;
+      if (billingEventsEnabled) {
+        return billingRealtimeStatus === 'connected'
+          ? BILLING_EVENT_CONNECTED_KEEPALIVE_INTERVAL_MS
+          : BILLING_EVENT_DEGRADED_KEEPALIVE_INTERVAL_MS;
+      }
       if (!REALTIME_ON) return POLL_NO_REALTIME_MS;
-      return billingEventsEnabled
-        ? BILLING_EVENT_KEEPALIVE_INTERVAL_MS
-        : KEEPALIVE_INTERVAL_MS;
+      return KEEPALIVE_INTERVAL_MS;
     },
     refetchIntervalInBackground: false,
     refetchOnReconnect: true,
@@ -340,26 +352,123 @@ export function useClaimableOrders(
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!REALTIME_ON) return;
+    const setBillingStatus = (next: BillingRealtimeStatus) => {
+      setBillingRealtimeStatus((current) => (current === next ? current : next));
+    };
+
+    const invalidateNow = () => {
+      void queryClient.invalidateQueries({ queryKey });
+    };
+
+    if (!REALTIME_ON) {
+      setBillingStatus('disabled');
+      return;
+    }
 
     const scheduleInvalidate = () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         debounceRef.current = null;
-        void queryClient.invalidateQueries({ queryKey });
+        invalidateNow();
       }, REALTIME_DEBOUNCE_MS);
     };
 
     if (billingEventsEnabled) {
-      const unsubQueueEvents = subscribeToTable({
-        channelName: `billing-queue-events:${statusKey}:${todayOnly ?? false}`,
-        table: 'queue_events',
-        filter: 'stage=eq.billing',
-        events: ['INSERT'],
-        onChange: scheduleInvalidate,
-        onReconnect: () =>
-          queryClient.invalidateQueries({ queryKey }),
-      });
+      setBillingStatus('disconnected');
+
+      let cancelled = false;
+      let channel: RealtimeChannel | null = null;
+      let retryTimer: ReturnType<typeof setTimeout> | null = null;
+      let retryMs = INITIAL_REALTIME_RETRY_MS;
+      let everConnected = false;
+      let shouldInvalidateOnSubscribe = false;
+
+      const removeChannel = (dead: RealtimeChannel | null) => {
+        if (!dead) return;
+        setTimeout(() => {
+          try {
+            void supabase.removeChannel(dead);
+          } catch (error) {
+            console.debug('[billing-queue] removeChannel failed', error);
+          }
+        }, 0);
+      };
+
+      const scheduleReconnect = () => {
+        if (cancelled || retryTimer) return;
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          connect();
+        }, retryMs);
+        retryMs = Math.min(retryMs * 2, MAX_REALTIME_RETRY_MS);
+      };
+
+      const handleDisconnect = (dead: RealtimeChannel | null) => {
+        if (cancelled) return;
+        setBillingStatus('disconnected');
+        shouldInvalidateOnSubscribe = everConnected;
+        if (channel === dead) channel = null;
+        removeChannel(dead);
+        scheduleReconnect();
+      };
+
+      function connect() {
+        if (cancelled || channel) return;
+
+        let nextChannel: RealtimeChannel;
+        try {
+          nextChannel = supabase
+            .channel(`billing-queue-events:${statusKey}:${todayOnly ?? false}`)
+            .on(
+              'postgres_changes',
+              {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'queue_events',
+                filter: 'stage=eq.billing',
+              },
+              () => {
+                invalidateNow();
+              },
+            );
+        } catch (error) {
+          console.warn('[billing-queue] queue_events channel setup failed', error);
+          handleDisconnect(null);
+          return;
+        }
+
+        channel = nextChannel;
+
+        try {
+          nextChannel.subscribe((status) => {
+            if (cancelled) return;
+
+            if (status === 'SUBSCRIBED') {
+              retryMs = INITIAL_REALTIME_RETRY_MS;
+              setBillingStatus('connected');
+              if (shouldInvalidateOnSubscribe) {
+                shouldInvalidateOnSubscribe = false;
+                invalidateNow();
+              }
+              everConnected = true;
+              return;
+            }
+
+            if (
+              status === 'CHANNEL_ERROR' ||
+              status === 'CLOSED' ||
+              status === 'TIMED_OUT'
+            ) {
+              handleDisconnect(nextChannel);
+            }
+          });
+        } catch (error) {
+          console.warn('[billing-queue] queue_events subscribe failed', error);
+          handleDisconnect(nextChannel);
+        }
+      }
+
+      connect();
 
       const ordersFilter =
         typeof workflowStatus === 'string'
@@ -371,16 +480,20 @@ export function useClaimableOrders(
         table: 'orders',
         filter: ordersFilter,
         onChange: scheduleInvalidate,
-        onReconnect: () =>
-          queryClient.invalidateQueries({ queryKey }),
+        onReconnect: invalidateNow,
       });
 
       return () => {
+        cancelled = true;
+        if (retryTimer) clearTimeout(retryTimer);
         if (debounceRef.current) clearTimeout(debounceRef.current);
-        unsubQueueEvents();
+        removeChannel(channel);
+        channel = null;
         unsubOrders();
       };
     }
+
+    setBillingStatus('disabled');
 
     const ordersFilter =
       typeof workflowStatus === 'string'
@@ -392,23 +505,12 @@ export function useClaimableOrders(
       table: 'orders',
       filter: ordersFilter,
       onChange: scheduleInvalidate,
-      onReconnect: () =>
-        queryClient.invalidateQueries({ queryKey }),
-    });
-
-    const unsubClaims = subscribeToTable({
-      channelName: `claimable-claims:${stage}:${statusKey}:${todayOnly ?? false}`,
-      table: 'work_claims',
-      filter: `stage=eq.${stage}`,
-      onChange: scheduleInvalidate,
-      onReconnect: () =>
-        queryClient.invalidateQueries({ queryKey }),
+      onReconnect: invalidateNow,
     });
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       unsubOrders();
-      unsubClaims();
     };
   }, [
     billingEventsEnabled,
