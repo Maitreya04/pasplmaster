@@ -228,9 +228,9 @@ function RecentOrderCard({ order }: { order: Order }) {
 }
 
 export default function SalesHome(): React.JSX.Element | null {
-  const { userName } = useAuth();
+  const { userId, userName } = useAuth();
   const { data, isLoading } = useSalesDashboard(userName);
-  const { data: pendingRecovery = [] } = useSalesPendingRecovery(userName);
+  const { data: pendingRecovery = [] } = useSalesPendingRecovery(userId, userName);
   const actionableRecoveryCount = pendingRecovery.filter(
     (item) => item.recovery_status === 'back_in_stock' || item.recovery_status === 'needs_checked',
   ).length;

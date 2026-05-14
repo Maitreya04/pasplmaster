@@ -23,6 +23,11 @@ import {
 import { ITEMS_QUERY_KEY } from '../../hooks/useItems';
 import { broadcastItemsChanged, broadcastInvalidate } from '../../lib/crossTabSync';
 import { useTransports } from '../../hooks/useTransports';
+import {
+  getStockQtyForLocation,
+  useLocationwiseStock,
+} from '../../hooks/useLocationwiseStock';
+import { useUserStockLocation } from '../../hooks/useUserStockLocation';
 import { supabase } from '../../lib/supabase/client';
 import {
   PageHeader,
@@ -861,6 +866,7 @@ export default function CartPage(): React.JSX.Element | null {
   const toast = useToast();
   const { userId, userName } = useOrderAuthor();
   const { userId: authUserId, userName: authUserName } = useAuth();
+  const { data: sellableLocationCode = 'main_store' } = useUserStockLocation(userId, userName);
   const { data: transports = [] } = useTransports();
   const isOnBehalf = userId !== null && authUserId !== null && userId !== authUserId;
 
@@ -879,6 +885,11 @@ export default function CartPage(): React.JSX.Element | null {
 
   const rateCartItem = rateItemId !== null ? items.find((ci) => ci.lineId === rateItemId) ?? null : null;
   const deleteCartItem = deleteItemId !== null ? items.find((ci) => ci.lineId === deleteItemId) ?? null : null;
+  const visibleBusyCodes = useMemo(
+    () => items.map((ci) => ci.item.busy_code),
+    [items],
+  );
+  const { data: locationwiseStock = {} } = useLocationwiseStock(visibleBusyCodes);
 
   /** Single pass over lines: splits, billing/PO lists, totals (one stock calc per line). */
   const {
@@ -887,14 +898,30 @@ export default function CartPage(): React.JSX.Element | null {
     billingCount,
     billingTotal,
     poPiecesTotal,
+    splitByLineId,
   } = useMemo(() => {
     const billingSplits: { ci: CartItem; ship: number; po: number }[] = [];
     const poSplits: { ci: CartItem; ship: number; po: number }[] = [];
+    const splitByLineId = new Map<string, { ship: number; po: number }>();
+    const remainingByBusyCode = new Map<number, number | null>();
     let billingCount = 0;
     let billingTotal = 0;
     let poPiecesTotal = 0;
     for (const ci of items) {
-      const { ship, po } = splitCartLine(ci.item, ci.qty);
+      const busyCode = ci.item.busy_code == null ? NaN : Number(ci.item.busy_code);
+      let stockQty: number | null = null;
+      if (Number.isFinite(busyCode)) {
+        if (remainingByBusyCode.has(busyCode)) {
+          stockQty = remainingByBusyCode.get(busyCode) ?? null;
+        } else {
+          stockQty = getStockQtyForLocation(locationwiseStock[busyCode], sellableLocationCode);
+        }
+      }
+      const { ship, po } = splitCartLine(ci.item, ci.qty, stockQty);
+      if (Number.isFinite(busyCode) && stockQty != null) {
+        remainingByBusyCode.set(busyCode, Math.max(0, stockQty - ship));
+      }
+      splitByLineId.set(ci.lineId, { ship, po });
       if (ship > 0) billingSplits.push({ ci, ship, po });
       if (po > 0) poSplits.push({ ci, ship, po });
       billingCount += ship;
@@ -907,15 +934,16 @@ export default function CartPage(): React.JSX.Element | null {
       billingCount,
       billingTotal,
       poPiecesTotal,
+      splitByLineId,
     };
-  }, [items]);
+  }, [items, locationwiseStock, sellableLocationCode]);
 
   /** When PO stepper changes, adjust total qty; ship from stock stays implied by item + stock. */
   const handlePoQtyChange = useCallback(
     (lineId: string, newPoQty: number) => {
       const ci = items.find((c) => c.lineId === lineId);
       if (!ci) return;
-      const { ship } = splitCartLine(ci.item, ci.qty);
+      const { ship } = splitByLineId.get(lineId) ?? { ship: 0 };
       const newTotal = ship + Math.max(0, newPoQty);
       if (newTotal < 1) {
         removeItem(lineId);
@@ -923,14 +951,14 @@ export default function CartPage(): React.JSX.Element | null {
         updateQty(lineId, newTotal);
       }
     },
-    [items, updateQty, removeItem],
+    [items, splitByLineId, updateQty, removeItem],
   );
 
   const handleShipQtyChange = useCallback(
     (lineId: string, newShipQty: number) => {
       const ci = items.find((c) => c.lineId === lineId);
       if (!ci) return;
-      const { po } = splitCartLine(ci.item, ci.qty);
+      const { po } = splitByLineId.get(lineId) ?? { po: 0 };
       const newTotal = Math.max(0, newShipQty) + po;
       if (newTotal < 1) {
         removeItem(lineId);
@@ -938,7 +966,7 @@ export default function CartPage(): React.JSX.Element | null {
         updateQty(lineId, newTotal);
       }
     },
-    [items, updateQty, removeItem],
+    [items, splitByLineId, updateQty, removeItem],
   );
 
   const openRateSheet = useCallback((cartItem: CartItem) => {
@@ -1066,6 +1094,7 @@ export default function CartPage(): React.JSX.Element | null {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['pending-items'] });
       queryClient.invalidateQueries({ queryKey: ['open-po-demand-lines'] });
+      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
       queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ['customer_quick_reorder'] });
       queryClient.invalidateQueries({ queryKey: ['salesperson_top_customers'] });

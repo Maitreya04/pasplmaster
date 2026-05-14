@@ -426,6 +426,7 @@ export default function LiveQueuePage() {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', snapshot.orderId] });
+      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
 
       // Move to report screen
       flow.finishBilling();
@@ -469,6 +470,7 @@ export default function LiveQueuePage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
       if (order) {
         queryClient.invalidateQueries({ queryKey: ['order', order.id] });
       }

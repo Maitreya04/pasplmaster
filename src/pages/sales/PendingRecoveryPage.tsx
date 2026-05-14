@@ -513,7 +513,7 @@ export default function PendingRecoveryPage(): React.JSX.Element | null {
   const queryClient = useQueryClient();
   const toast = useToast();
   const { userId, userName } = useAuth();
-  const { parties, isLoading, error } = useSalesPendingRecovery(userName);
+  const { parties, isLoading, error } = useSalesPendingRecovery(userId, userName);
 
   const [activePartyKey, setActivePartyKey] = useState<string | null>(null);
   const [sheetMode, setSheetMode] = useState<SheetMode>('overview');
@@ -695,6 +695,7 @@ export default function PendingRecoveryPage(): React.JSX.Element | null {
       queryClient.invalidateQueries({ queryKey: ['pending-items'] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
       setActivePartyKey(null);
       toast.success(
         result?.order_number

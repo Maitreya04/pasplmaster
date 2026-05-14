@@ -6,18 +6,28 @@ import { getStockTier } from './stockDisplay';
  * OOS → 0. Unknown stock → full qty (no cap).
  */
 export function qtyShippableFromStock(item: Item, cartQty: number): number {
-  const tier = getStockTier(item.stock_qty);
-  if (tier === 'out') return 0;
-  if (tier === 'unknown' || item.stock_qty == null || !Number.isFinite(Number(item.stock_qty))) {
-    return cartQty;
+  return qtyShippableFromStockQty(item.stock_qty, cartQty);
+}
+
+export function qtyShippableFromStockQty(
+  stockQty: number | null | undefined,
+  cartQty: number,
+): number {
+  const tier = getStockTier(stockQty);
+  if (tier === 'out' || tier === 'unknown' || stockQty == null || !Number.isFinite(Number(stockQty))) {
+    return 0;
   }
-  const stock = Math.max(0, Number(item.stock_qty));
+  const stock = Math.max(0, Number(stockQty));
   return Math.min(cartQty, stock);
 }
 
 /** One stock read: shippable vs PO gap (avoids double tier/qty work in UI loops). */
-export function splitCartLine(item: Item, cartQty: number): { ship: number; po: number } {
-  const ship = qtyShippableFromStock(item, cartQty);
+export function splitCartLine(
+  item: Item,
+  cartQty: number,
+  stockQty: number | null | undefined = item.stock_qty,
+): { ship: number; po: number } {
+  const ship = qtyShippableFromStockQty(stockQty, cartQty);
   return { ship, po: Math.max(0, cartQty - ship) };
 }
 

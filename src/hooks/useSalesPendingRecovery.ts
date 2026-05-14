@@ -1,10 +1,15 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
-import { fetchLocationwiseStock, normalizeBusyCodes } from './useLocationwiseStock';
+import {
+  fetchLocationwiseStock,
+  getStockQtyForLocation,
+  normalizeBusyCodes,
+} from './useLocationwiseStock';
 import type {
   PendingItem,
   PendingRecoveryResponse,
+  StockLocationCode,
   WorkflowStatus,
 } from '../types';
 import { getStockTier, type StockTier } from '../lib/stockDisplay';
@@ -19,7 +24,6 @@ type PendingRecoveryOrderRow = {
 type ItemStockRow = {
   id: number;
   busy_code: number | null;
-  stock_qty: number | null;
   sales_price: number | null;
   alias1: string | null;
 };
@@ -280,9 +284,13 @@ function buildParty(lines: SalesPendingRecoveryLine[]): SalesPendingRecoveryPart
   };
 }
 
-export function useSalesPendingRecovery(userName: string | null) {
+function normalizeStockLocationCode(value: unknown): StockLocationCode {
+  return value === 'jabalpur' ? 'jabalpur' : 'main_store';
+}
+
+export function useSalesPendingRecovery(userId: number | null, userName: string | null) {
   const query = useQuery<SalesPendingRecoveryLine[]>({
-    queryKey: ['sales-pending-recovery', userName ?? 'unknown'],
+    queryKey: ['sales-pending-recovery', userId ?? 'name', userName ?? 'unknown'],
     queryFn: async () => {
       if (!userName) return [];
 
@@ -339,7 +347,7 @@ export function useSalesPendingRecovery(userName: string | null) {
         itemIds.length > 0
           ? supabase
               .from('items')
-              .select('id, busy_code, stock_qty, sales_price, alias1')
+              .select('id, busy_code, sales_price, alias1')
               .in('id', itemIds)
               .returns<ItemStockRow[]>()
           : Promise.resolve({ data: [], error: null }),
@@ -357,6 +365,17 @@ export function useSalesPendingRecovery(userName: string | null) {
       if (customersError) throw formatPendingRecoveryError(customersError);
       if (itemsError) throw formatPendingRecoveryError(itemsError);
       if (orderItemsError) throw formatPendingRecoveryError(orderItemsError);
+
+      const stockLocationCode = await (async (): Promise<StockLocationCode> => {
+        if (userId == null) return 'main_store';
+        const { data, error } = await supabase
+          .from('users')
+          .select('stock_location_code')
+          .eq('id', userId)
+          .maybeSingle();
+        if (error) throw formatPendingRecoveryError(error);
+        return normalizeStockLocationCode(data?.stock_location_code);
+      })();
 
       const locationwiseStockByBusyCode =
         items && items.length > 0
@@ -383,15 +402,15 @@ export function useSalesPendingRecovery(userName: string | null) {
         .map((item) => {
           const itemRow = typeof item.item_id === 'number' ? itemMap.get(item.item_id) : undefined;
           const busyCode = itemRow?.busy_code == null ? NaN : Number(itemRow.busy_code);
-          const indoreStockQty = Number.isFinite(busyCode)
-            ? locationwiseStockByBusyCode[busyCode]?.mainStoreStockQty ?? itemRow?.stock_qty ?? null
-            : itemRow?.stock_qty ?? null;
+          const localStockQty = Number.isFinite(busyCode)
+            ? getStockQtyForLocation(locationwiseStockByBusyCode[busyCode], stockLocationCode)
+            : null;
 
           return normalizePendingItem(
             item,
             ownedOrders.get(item.order_id),
             typeof item.customer_id === 'number' ? customerMap.get(item.customer_id) ?? null : null,
-            indoreStockQty,
+            localStockQty,
             typeof item.item_id === 'number'
               ? orderItemPriceMap.get(`${item.order_id}:${item.item_id}`) ?? null
               : null,

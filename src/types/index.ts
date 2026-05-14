@@ -61,6 +61,7 @@ export interface Order {
   transport_name: string | null;
   salesperson_name: string;
   salesperson_user_id?: number | null;
+  stock_location_code?: StockLocationCode | null;
   reviewer_name: string | null;
   picker_name: string | null;
   workflow_status: WorkflowStatus;
@@ -99,6 +100,7 @@ export interface OrderItem {
   /** PO / back-order qty. Omitted on legacy rows. */
   qty_po?: number;
   qty_approved: number | null;
+  stock_location_code?: StockLocationCode | null;
   price_quoted: number | null;
   price_system: number | null;
   state: OrderItemState;
@@ -142,6 +144,7 @@ export interface PendingItem {
   recovery_reviewed_by: string | null;
   resolved_at: string | null;
   resolved_by: string | null;
+  stock_location_code?: StockLocationCode | null;
 }
 
 export interface ScanSignal {
@@ -213,6 +216,7 @@ export interface AuthState {
 // ─── Work Claims System Types ───────────────────────────────
 
 export type UserRole = 'sales' | 'billing' | 'picking' | 'admin';
+export type StockLocationCode = 'main_store' | 'jabalpur';
 export type NotificationEventType =
   | 'order_ready_to_pick'
   | 'pending_item_back_in_stock'
@@ -224,6 +228,7 @@ export interface AppUser {
   role: UserRole;
   is_active: boolean;
   station_label: string | null;
+  stock_location_code?: StockLocationCode | null;
   created_at: string;
 }
 

@@ -745,6 +745,7 @@ export default function CompactQueuePage() {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', effectiveOrderId] });
+      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
       machine.confirmCommunication();
     },
     onError: () => toast.error('Failed to approve order'),

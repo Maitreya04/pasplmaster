@@ -565,6 +565,7 @@ export default function ReviewPage(): React.JSX.Element | null {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       queryClient.invalidateQueries({ queryKey: ['pending-items'] });
       queryClient.invalidateQueries({ queryKey: ['open-po-demand-lines'] });
+      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
       queryClient.invalidateQueries({ queryKey: ['billing-customer-update', orderId] });
       toast.success(
         order?.workflow_status === 'flagged'
@@ -599,6 +600,7 @@ export default function ReviewPage(): React.JSX.Element | null {
       setRejectReason('');
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
       toast.success('Order rejected', {
         action: {
           label: 'Undo',
@@ -617,6 +619,7 @@ export default function ReviewPage(): React.JSX.Element | null {
               .then(() => {
                 queryClient.invalidateQueries({ queryKey: ['orders'] });
                 queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+                queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
                 toast.success('Rejection undone');
               });
           },

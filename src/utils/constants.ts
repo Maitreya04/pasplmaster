@@ -10,10 +10,11 @@ export const FLAG_REASONS = [
 export type FlagReason = (typeof FLAG_REASONS)[number];
 
 export const BILLING_NAMES = [
+  'Deepak Yogi',
   'Kamlakar',
   'Govind',
-  'Deepak Yogi',
   'Neetu',
+  'Sachin Rathore',
   'Ashok',
 ];
 
@@ -21,23 +22,25 @@ export const PICKER_NAMES = [
   'Shankar',
   'Dharmendra',
   'Abhishek',
+  'Harsh',
 ];
 
 export const SALES_NAMES = [
-  'Satish',
+  'Hardeep',
+  'Rehan Multani',
+  'Shri Ram Sharma',
+  'Mahendra Rajput',
+  'Sachin Rao',
+  'Pankaj Meena',
+  'Raju Ji',
   'Hemant',
-  'Rohan',
-  'Raju',
   'Guddu',
   'Mankar',
-  'Sachin Rao',
-  'Mahendra Rajput',
-  'Pankaj',
-  'Direct',
-  'Neeraj',
   'Asad',
-  'Manish',
-  'Hardeep',
+  'Anand Awasthi',
+  'Manish Sharma',
+  'Kamlakar',
+  'Neeraj',
   'Shashank',
-  'Awasthi',
+  'Satish',
 ];
