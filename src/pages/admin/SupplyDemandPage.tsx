@@ -32,6 +32,7 @@ type BrandSkuRow = {
   item_id: number;
   item_name: string;
   item_alias: string | null;
+  item_alias1: string | null;
   totalPo: number;
   totalValue: number;
   lineCount: number;
@@ -56,6 +57,7 @@ type SkuSummary = {
   item_id: number;
   item_name: string;
   item_alias: string | null;
+  item_alias1: string | null;
   brandLabel: string;
   totalPo: number;
   totalValue: number;
@@ -158,11 +160,12 @@ function toTabSeparated(rows: Array<Array<string | number>>): string {
 
 function buildAllBrandCopy(rows: BrandSummary[]): string {
   return toTabSeparated([
-    ['Brand', 'Description', 'Alias', 'Qty'],
+    ['Brand', 'Description', 'Alias 1', 'Alias', 'Qty'],
     ...rows.flatMap((brand) =>
       brand.skuRows.map((sku) => [
         brand.label,
         sku.item_name,
+        sku.item_alias1 ?? '',
         sku.item_alias ?? '',
         sku.totalPo,
       ]),
@@ -172,9 +175,10 @@ function buildAllBrandCopy(rows: BrandSummary[]): string {
 
 function buildSingleBrandCopy(brand: BrandSummary): string {
   return toTabSeparated([
-    ['Description', 'Alias', 'Qty'],
+    ['Description', 'Alias 1', 'Alias', 'Qty'],
     ...brand.skuRows.map((sku) => [
       sku.item_name,
+      sku.item_alias1 ?? '',
       sku.item_alias ?? '',
       sku.totalPo,
     ]),
@@ -263,6 +267,56 @@ function EmptyBlock({ text }: { text: string }) {
   return <p className="rounded-2xl border border-dashed border-[var(--border-subtle)] p-5 text-sm text-[var(--content-tertiary)]">{text}</p>;
 }
 
+function AliasChip({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: string;
+  tone?: 'primary' | 'neutral';
+}) {
+  const toneClass =
+    tone === 'primary'
+      ? {
+          shell: 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)]',
+          label: 'border-[color-mix(in_srgb,var(--bg-accent)_35%,transparent)] text-[var(--content-accent)]',
+          value: 'text-[var(--content-primary)]',
+        }
+      : {
+          shell: 'border-[var(--border-subtle)] bg-[var(--bg-primary)]',
+          label: 'border-[var(--border-subtle)] text-[var(--content-tertiary)]',
+          value: 'text-[var(--content-secondary)]',
+        };
+
+  return (
+    <span className={`inline-flex min-w-0 max-w-full items-stretch overflow-hidden rounded-lg border text-[11px] leading-none ${toneClass.shell}`}>
+      <span className={`shrink-0 border-r px-1.5 py-1 font-sans font-bold uppercase tracking-[0.08em] ${toneClass.label}`}>
+        {label}
+      </span>
+      <span className={`min-w-0 truncate px-2 py-1 font-mono font-semibold ${toneClass.value}`}>{value}</span>
+    </span>
+  );
+}
+
+function AliasChipRow({
+  alias1,
+  alias,
+  className = 'mt-2',
+}: {
+  alias1: string | null;
+  alias: string | null;
+  className?: string;
+}) {
+  if (!alias1 && !alias) return null;
+  return (
+    <div className={`flex max-w-full flex-wrap gap-1.5 ${className}`}>
+      {alias1 && <AliasChip label="Alias 1" value={alias1} tone="primary" />}
+      {alias && <AliasChip label="Alias" value={alias} />}
+    </div>
+  );
+}
+
 export default function SupplyDemandPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -319,6 +373,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
             item_id: number;
             item_name: string;
             item_alias: string | null;
+            item_alias1: string | null;
             totalPo: number;
             totalValue: number;
             lineCount: number;
@@ -362,6 +417,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
         item_id: row.item_id,
         item_name: row.item_name,
         item_alias: normalizeEmbeddedItem(row.items)?.alias ?? null,
+        item_alias1: normalizeEmbeddedItem(row.items)?.alias1 ?? null,
         totalPo: 0,
         totalValue: 0,
         lineCount: 0,
@@ -397,6 +453,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
             item_id: sku.item_id,
             item_name: sku.item_name,
             item_alias: sku.item_alias,
+            item_alias1: sku.item_alias1,
             totalPo: sku.totalPo,
             totalValue: sku.totalValue,
             lineCount: sku.lineCount,
@@ -415,6 +472,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
         item_id: number;
         item_name: string;
         item_alias: string | null;
+        item_alias1: string | null;
         brandLabel: string;
         totalPo: number;
         totalValue: number;
@@ -430,6 +488,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
         item_id: row.item_id,
         item_name: row.item_name,
         item_alias: normalizeEmbeddedItem(row.items)?.alias ?? null,
+        item_alias1: normalizeEmbeddedItem(row.items)?.alias1 ?? null,
         brandLabel: groupLabel(row),
         totalPo: 0,
         totalValue: 0,
@@ -455,6 +514,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
         item_id: sku.item_id,
         item_name: sku.item_name,
         item_alias: sku.item_alias,
+        item_alias1: sku.item_alias1,
         brandLabel: sku.brandLabel,
         totalPo: sku.totalPo,
         totalValue: sku.totalValue,
@@ -873,11 +933,9 @@ function BrandTab({
                     className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] gap-3 px-4 py-3 text-left text-sm transition-colors hover:bg-[var(--bg-primary)]"
                   >
                     <div className="min-w-0">
+                      <AliasChipRow alias1={sku.item_alias1} alias={sku.item_alias} className="mb-2" />
                       <p className="truncate font-medium text-[var(--content-primary)]">{sku.item_name}</p>
-                      {sku.item_alias && (
-                        <p className="mt-1 text-xs font-mono text-[var(--content-secondary)]">Alias: {sku.item_alias}</p>
-                      )}
-                      <p className="mt-1 text-xs text-[var(--content-tertiary)]">
+                      <p className="mt-2 text-xs text-[var(--content-tertiary)]">
                         {formatCurrency(sku.totalValue)} · {countLabel(sku.customerCount, 'customer')}
                       </p>
                     </div>
@@ -923,9 +981,9 @@ function SkuTab({
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
+                <AliasChipRow alias1={row.item_alias1} alias={row.item_alias} className="mb-2" />
                 <p className="line-clamp-2 text-base font-semibold text-[var(--content-primary)]">{row.item_name}</p>
-                {row.item_alias && <p className="mt-1 text-xs font-mono text-[var(--content-secondary)]">Alias: {row.item_alias}</p>}
-                <p className="mt-1 text-sm text-[var(--content-tertiary)]">{row.brandLabel}</p>
+                <p className="mt-2 text-sm text-[var(--content-tertiary)]">{row.brandLabel}</p>
               </div>
               {row.oldestCreatedAt && <AgePill createdAt={row.oldestCreatedAt} />}
             </div>

@@ -22,8 +22,8 @@ export type OpenPoDemandLine = {
   orders: OpenPoDemandOrder | OpenPoDemandOrder[] | null;
   /** PostgREST may return a single object or a one-element array. */
   items:
-    | { alias: string | null; main_group: string | null; parent_group: string | null }
-    | { alias: string | null; main_group: string | null; parent_group: string | null }[]
+    | { alias: string | null; alias1: string | null; main_group: string | null; parent_group: string | null }
+    | { alias: string | null; alias1: string | null; main_group: string | null; parent_group: string | null }[]
     | null;
 };
 
@@ -44,7 +44,7 @@ export function normalizeEmbeddedOrder(
 
 export function normalizeEmbeddedItem(
   row: OpenPoDemandLine['items'],
-): { alias: string | null; main_group: string | null; parent_group: string | null } | null {
+): { alias: string | null; alias1: string | null; main_group: string | null; parent_group: string | null } | null {
   if (!row) return null;
   return Array.isArray(row) ? row[0] ?? null : row;
 }
@@ -75,6 +75,7 @@ export function useOpenPoDemandLines() {
           ),
           items (
             alias,
+            alias1,
             main_group,
             parent_group
           )

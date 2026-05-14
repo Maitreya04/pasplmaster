@@ -98,6 +98,38 @@ function MetricCard({
   );
 }
 
+function AliasChip({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: string;
+  tone?: 'primary' | 'neutral';
+}) {
+  const toneClass =
+    tone === 'primary'
+      ? {
+          shell: 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)]',
+          label: 'border-[color-mix(in_srgb,var(--bg-accent)_35%,transparent)] text-[var(--content-accent)]',
+          value: 'text-[var(--content-primary)]',
+        }
+      : {
+          shell: 'border-[var(--border-subtle)] bg-[var(--bg-primary)]',
+          label: 'border-[var(--border-subtle)] text-[var(--content-tertiary)]',
+          value: 'text-[var(--content-secondary)]',
+        };
+
+  return (
+    <span className={`inline-flex min-w-0 max-w-full items-stretch overflow-hidden rounded-lg border text-[11px] leading-none ${toneClass.shell}`}>
+      <span className={`shrink-0 border-r px-1.5 py-1 font-sans font-bold uppercase tracking-[0.08em] ${toneClass.label}`}>
+        {label}
+      </span>
+      <span className={`min-w-0 truncate px-2 py-1 font-mono font-semibold ${toneClass.value}`}>{value}</span>
+    </span>
+  );
+}
+
 export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
   const navigate = useNavigate();
   const { itemId: itemIdParam } = useParams();
@@ -156,6 +188,7 @@ export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
   }, [skuLines]);
 
   const itemName = skuLines[0]?.item_name ?? 'SKU';
+  const itemCodes = skuLines[0] ? normalizeEmbeddedItem(skuLines[0].items) : null;
   const brandLabel = skuLines[0] ? groupLabel(skuLines[0]) : null;
 
   const backToSummary = () => {
@@ -204,8 +237,14 @@ export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
         <section className="mt-4 rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 flex-1">
+              {(itemCodes?.alias1 || itemCodes?.alias) && (
+                <div className="mb-2 flex max-w-full flex-wrap gap-1.5">
+                  {itemCodes.alias1 && <AliasChip label="Alias 1" value={itemCodes.alias1} tone="primary" />}
+                  {itemCodes.alias && <AliasChip label="Alias" value={itemCodes.alias} />}
+                </div>
+              )}
               <p className="text-lg font-semibold text-[var(--content-primary)]">{itemName}</p>
-              <p className="mt-1 text-sm text-[var(--content-tertiary)]">
+              <p className="mt-2 text-sm text-[var(--content-tertiary)]">
                 {brandLabel ?? 'Item detail'}
                 {selectedDate ? ` · ${formatShortDate(selectedDate)}` : ' · All active pending orders'}
               </p>
