@@ -138,6 +138,59 @@ If you need tighter freshness, add:
 
 This keeps search fast and avoids hammering Busy.
 
+### 5.1 Supabase write path: `apply_erp_items_delta` (migrations 036 + 041)
+
+The integration worker should call the Postgres RPC **`apply_erp_items_delta`** once per sync tick (for example every 60 seconds) with **only changed SKUs**, using the **service role** JWT — **never** ship that key to the browser.
+
+- **Match key:** `items.busy_code` (numeric Busy / ERP item code). The migration ensures `items.busy_code` exists and adds a partial index where it is not null.
+- **Payload:** `p_rows` is a JSON array. Each element may include `busy_code` (alias key `busyCode` is accepted), `stock_qty`, `sales_price`, and `mrp`. Omit a field or send an empty string to **leave that column unchanged** in Postgres.
+- **Unified stock (recommended):** Optional **`locations`** — a non-empty JSON array of `{ "stock_location": "Main Store", "stock_qty": "10" }` (aliases `stockLocation` / `stockQty` are accepted). Each location string must normalize to **Main Store** or **Jabalpur** per `normalize_stock_location_code` (migration 038). When `locations` is present, the RPC applies **`stock_locationwise`** and **`items.stock_qty`** in **one transaction**: it replaces all `main_store` / `jabalpur` rows for that `busy_code` with exactly two canonical rows (`Main Store`, `Jabalpur`) and sets **`items.stock_qty`** to the **sum** of those two quantities. This keeps the catalog total and per-store rows aligned with the same Busy snapshot. **Do not** also POST separate `stock_locationwise` upserts for the same SKU in the same tick, or you risk racing the RPC.
+- **Legacy payload:** If `locations` is omitted, behavior matches migration 036: only `items` columns are updated when values differ (`IS DISTINCT FROM`), which avoids no-op trigger churn.
+- **Audit:** Each successful call inserts one row into **`inventory_sync_runs`** (`rows_in`, `rows_invalid`, `rows_staged`, `rows_updated`, `rows_not_found`). Optional `p_extra` jsonb is merged into the `extra` column for your own tags (job id, MSSQL checkpoint, etc.). When `locations` is used, `extra` also includes `rows_stock_locations_deleted` and `rows_stock_locations_inserted`; the RPC return jsonb includes the same keys.
+
+**PostgREST example** (curl):
+
+```bash
+curl -sS "$SUPABASE_URL/rest/v1/rpc/apply_erp_items_delta" \
+  -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "p_rows": [
+      { "busy_code": "1001", "stock_qty": "48", "sales_price": "120", "mrp": "150" }
+    ],
+    "p_source": "mssql_60s",
+    "p_extra": { "checkpoint": "2026-05-13T10:00:00Z" }
+  }'
+```
+
+**Unified stock example** (same RPC; `stock_qty` on the row is optional when `locations` is present — the RPC sets `items.stock_qty` from the sum of the two warehouses):
+
+```bash
+curl -sS "$SUPABASE_URL/rest/v1/rpc/apply_erp_items_delta" \
+  -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "p_rows": [
+      {
+        "busy_code": "1001",
+        "locations": [
+          { "stock_location": "Main Store", "stock_qty": "30" },
+          { "stock_location": "Jabalpur", "stock_qty": "18" }
+        ],
+        "sales_price": "120",
+        "mrp": "150"
+      }
+    ],
+    "p_source": "mssql_60s"
+  }'
+```
+
+**Avoid** chaining many `POST /items` upserts from the worker for this loop — use this RPC for a single round-trip and predictable load. Manual spreadsheet imports in the app may continue to use existing batch upsert code paths.
+
+**Freshness:** With ERP updates every 60 seconds and the SPA polling item deltas every 30 seconds (`updated_at` watermark in `useItems`), operators still see stock within roughly half a minute of a real change landing in Postgres.
+
 ## 6. Minimum Backend You Should Add
 
 This repo currently has no dedicated backend service outside Supabase, so the senior approach is to add one.
@@ -174,7 +227,7 @@ Recommended new tables:
 - `erp_order_outbox`
 - `erp_sync_checkpoints`
 - `erp_sync_failures`
-- `inventory_sync_runs`
+- `inventory_sync_runs` (implemented: migration 036 + written by `apply_erp_items_delta`)
 - `customer_sync_runs`
 - `item_sync_runs`
 

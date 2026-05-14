@@ -3,9 +3,21 @@ import { supabase } from '../lib/supabase/client';
 import type { StockLocationCode } from '../types';
 
 const DEFAULT_STOCK_LOCATION_CODE: StockLocationCode = 'main_store';
+const SALESPERSON_ALIASES: Record<string, string> = {
+  rajuji: 'raju',
+  asadkhan: 'asad',
+  manishsharma: 'manish',
+  hardeepsingh: 'hardeep',
+  anandawasthi: 'awasthi',
+};
 
 function normalizeStockLocationCode(value: unknown): StockLocationCode {
   return value === 'jabalpur' ? 'jabalpur' : DEFAULT_STOCK_LOCATION_CODE;
+}
+
+function normalizeSalespersonKey(value: string | null | undefined): string {
+  const normalized = (value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return SALESPERSON_ALIASES[normalized] ?? normalized;
 }
 
 export function useUserStockLocation(
@@ -27,7 +39,7 @@ export function useUserStockLocation(
         return normalizeStockLocationCode(data?.stock_location_code);
       }
 
-      const normalizedName = userName?.trim();
+      const normalizedName = normalizeSalespersonKey(userName);
       if (!normalizedName) return DEFAULT_STOCK_LOCATION_CODE;
 
       const { data, error } = await supabase
@@ -37,10 +49,10 @@ export function useUserStockLocation(
 
       if (error) throw error;
 
-      const needle = normalizedName.toLowerCase();
+      const needle = normalizedName;
       const match = (data ?? []).find((row) =>
         typeof row.full_name === 'string' &&
-        row.full_name.trim().toLowerCase() === needle
+        normalizeSalespersonKey(row.full_name) === needle
       );
       return normalizeStockLocationCode(match?.stock_location_code);
     },

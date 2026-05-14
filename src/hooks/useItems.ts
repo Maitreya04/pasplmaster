@@ -257,7 +257,12 @@ export function useItems() {
   return useQuery<Item[]>({
     queryKey: ITEMS_QUERY_KEY,
     queryFn: fetchAllItems,
-    staleTime: 0,
+    /**
+     * Align stale window with the stock poll so focus events do not refetch the
+     * full catalog while data is still considered fresh — cuts redundant DB
+     * traffic while keeping the same 30s watermark cadence.
+     */
+    staleTime: STOCK_SYNC_INTERVAL_MS,
     /**
      * Stock freshness uses watermark polling instead of `items` Realtime.
      * This prevents bulk imports from fanning out one Realtime message per row
@@ -265,7 +270,7 @@ export function useItems() {
      */
     refetchInterval: STOCK_SYNC_INTERVAL_MS,
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     refetchOnReconnect: true,
     /**
      * We mutate the cached items map in place and hand React Query a fresh

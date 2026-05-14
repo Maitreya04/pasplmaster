@@ -25,6 +25,7 @@ import { broadcastItemsChanged, broadcastInvalidate } from '../../lib/crossTabSy
 import { useTransports } from '../../hooks/useTransports';
 import {
   getStockQtyForLocation,
+  stockLocationLabel,
   useLocationwiseStock,
 } from '../../hooks/useLocationwiseStock';
 import { useUserStockLocation } from '../../hooks/useUserStockLocation';
@@ -866,7 +867,10 @@ export default function CartPage(): React.JSX.Element | null {
   const toast = useToast();
   const { userId, userName } = useOrderAuthor();
   const { userId: authUserId, userName: authUserName } = useAuth();
-  const { data: sellableLocationCode = 'main_store' } = useUserStockLocation(userId, userName);
+  const {
+    data: sellableLocationCode = 'main_store',
+    isLoading: stockLocationLoading,
+  } = useUserStockLocation(userId, userName);
   const { data: transports = [] } = useTransports();
   const isOnBehalf = userId !== null && authUserId !== null && userId !== authUserId;
 
@@ -889,7 +893,15 @@ export default function CartPage(): React.JSX.Element | null {
     () => items.map((ci) => ci.item.busy_code),
     [items],
   );
-  const { data: locationwiseStock = {} } = useLocationwiseStock(visibleBusyCodes);
+  const hasLocationwiseLines = useMemo(
+    () => visibleBusyCodes.some((code) => code != null && Number.isFinite(Number(code))),
+    [visibleBusyCodes],
+  );
+  const {
+    data: locationwiseStock = {},
+    isLoading: locationwiseStockLoading,
+  } = useLocationwiseStock(visibleBusyCodes);
+  const stockSplitLoading = stockLocationLoading || (hasLocationwiseLines && locationwiseStockLoading);
 
   /** Single pass over lines: splits, billing/PO lists, totals (one stock calc per line). */
   const {
@@ -917,7 +929,7 @@ export default function CartPage(): React.JSX.Element | null {
           stockQty = getStockQtyForLocation(locationwiseStock[busyCode], sellableLocationCode);
         }
       }
-      const { ship, po } = splitCartLine(ci.item, ci.qty, stockQty);
+      const { ship, po } = splitCartLine(ci.qty, stockQty);
       if (Number.isFinite(busyCode) && stockQty != null) {
         remainingByBusyCode.set(busyCode, Math.max(0, stockQty - ship));
       }
@@ -1531,10 +1543,15 @@ export default function CartPage(): React.JSX.Element | null {
               variant="primary"
               onClick={handleSubmit}
               loading={submitMutation.isPending}
-              disabled={!customer}
+              disabled={!customer || stockSplitLoading}
             >
               Submit Order
             </BigButton>
+            {stockSplitLoading && (
+              <p className="mt-2 text-center text-xs font-medium text-[var(--content-tertiary)]">
+                Loading {stockLocationLabel(sellableLocationCode)} stock split...
+              </p>
+            )}
           </div>
         </div>
       )}

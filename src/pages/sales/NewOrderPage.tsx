@@ -1108,6 +1108,7 @@ interface ItemRowProps {
   price: number;
   sellableStockQty?: number | null;
   sellableLocationCode: StockLocationCode;
+  stockResolving: boolean;
   mainStoreStockQty?: number | null;
   jabalpurStockQty?: number | null;
   hasSpecialLine: boolean;
@@ -1203,20 +1204,47 @@ function PendingItemStockLine({
   stockQty,
   totalInOrderQty,
   draftQty,
+  sellableLocationCode,
+  stockResolving,
   mainStoreStockQty,
   jabalpurStockQty,
 }: {
   stockQty: number | null | undefined;
   totalInOrderQty: number;
   draftQty: number;
+  sellableLocationCode: StockLocationCode;
+  stockResolving: boolean;
   mainStoreStockQty?: number | null;
   jabalpurStockQty?: number | null;
 }) {
   const tier = getStockTier(stockQty);
 
+  if (stockResolving) {
+    return (
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} />
+        <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
+        <p className="pl-3 font-ds-label-size font-medium leading-[1.35] text-[var(--content-secondary)]">
+          Checking {stockLocationLabel(sellableLocationCode)} stock...
+        </p>
+      </div>
+    );
+  }
+
   if (tier === 'unknown' || stockQty == null || !Number.isFinite(Number(stockQty))) {
     return (
       <div className="flex min-w-0 flex-col gap-0.5">
+        <div
+          className="rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5"
+          role="status"
+        >
+          <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 font-ds-caption-size font-semibold leading-snug">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--bg-warning)]" aria-hidden />
+            <span className="min-w-0 text-[var(--content-warning)]">
+              No {stockLocationLabel(sellableLocationCode)} stock available · {formatStockQty(draftQty)} in this add goes to PO
+            </span>
+          </p>
+        </div>
         <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} />
         <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
       </div>
@@ -1328,12 +1356,14 @@ function ItemStockBlock({
   stockQty,
   totalInOrderQty,
   sellableLocationCode,
+  stockResolving,
   mainStoreStockQty,
   jabalpurStockQty,
 }: {
   stockQty: number | null | undefined;
   totalInOrderQty: number;
   sellableLocationCode: StockLocationCode;
+  stockResolving: boolean;
   mainStoreStockQty?: number | null;
   jabalpurStockQty?: number | null;
 }) {
@@ -1347,10 +1377,17 @@ function ItemStockBlock({
     <div className="flex min-w-0 flex-col gap-0.5">
       <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} />
       <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
-      {tier === 'unknown' && (
+      {stockResolving && (
         <p className="pl-3 font-ds-label-size font-medium leading-[1.35] text-[var(--content-secondary)]">
-          No {stockLocationLabel(sellableLocationCode)} stock available for billing
+          Checking {stockLocationLabel(sellableLocationCode)} stock...
         </p>
+      )}
+      {!stockResolving && tier === 'unknown' && (
+        <div className="mt-1 rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5">
+          <p className="font-ds-caption-size font-semibold leading-snug text-[var(--content-warning)]">
+            No {stockLocationLabel(sellableLocationCode)} stock available · add goes to PO
+          </p>
+        </div>
       )}
       {secondary &&
         (secondary.variant === 'shortfall' ? (
@@ -1382,6 +1419,8 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   price,
   totalInOrderQty,
   sellableStockQty,
+  sellableLocationCode,
+  stockResolving,
   mainStoreStockQty,
   jabalpurStockQty,
   hasSpecialLine,
@@ -1397,6 +1436,8 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   price: number;
   totalInOrderQty: number;
   sellableStockQty?: number | null;
+  sellableLocationCode: StockLocationCode;
+  stockResolving: boolean;
   mainStoreStockQty?: number | null;
   jabalpurStockQty?: number | null;
   hasSpecialLine: boolean;
@@ -1427,6 +1468,13 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   }, [getDraftQty, item, onConfirmSpecialRateAdd]);
 
   const draftQty = getDraftQty();
+  const draftGoesToPo =
+    !stockResolving &&
+    (
+      sellableStockQty == null ||
+      !Number.isFinite(Number(sellableStockQty)) ||
+      totalInOrderQty + draftQty > Number(sellableStockQty)
+    );
 
   return (
     <div className="min-w-0">
@@ -1448,6 +1496,8 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
             stockQty={sellableStockQty}
             totalInOrderQty={totalInOrderQty}
             draftQty={draftQty}
+            sellableLocationCode={sellableLocationCode}
+            stockResolving={stockResolving}
             mainStoreStockQty={mainStoreStockQty}
             jabalpurStockQty={jabalpurStockQty}
           />
@@ -1516,8 +1566,10 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
                     e.stopPropagation();
                     handleConfirmQty();
                   }}
-                  className="flex h-11 w-11 items-center justify-center rounded-[14px] bg-[var(--bg-accent)] text-[var(--content-on-color)] hover:opacity-90"
-                  aria-label={`Add ${item.name}`}
+                  className={`flex h-11 w-11 items-center justify-center rounded-[14px] text-[var(--content-on-color)] hover:opacity-90 ${
+                    draftGoesToPo ? 'bg-[var(--bg-warning)]' : 'bg-[var(--bg-accent)]'
+                  }`}
+                  aria-label={draftGoesToPo ? `Add ${item.name} to purchase order` : `Add ${item.name}`}
                 >
                   <Check size={18} weight="bold" />
                 </button>
@@ -1542,6 +1594,7 @@ const ItemRow = memo(function ItemRow({
   price,
   sellableStockQty,
   sellableLocationCode,
+  stockResolving,
   mainStoreStockQty,
   jabalpurStockQty,
   hasSpecialLine,
@@ -1552,14 +1605,21 @@ const ItemRow = memo(function ItemRow({
   const productCode = (item.alias1 ?? item.alias ?? '').toString().trim();
   const productCodeValue = productCode || '—';
   const showQtyEditor = isPendingAdd;
-  const isOutOfStock = getStockTier(sellableStockQty) === 'out';
+  const sellableQty = sellableStockQty == null ? null : Number(sellableStockQty);
+  const nextAddGoesToPo =
+    !stockResolving &&
+    (
+      sellableQty == null ||
+      !Number.isFinite(sellableQty) ||
+      sellableQty <= totalInOrderQty
+    );
 
   return (
     <li
       className={`overflow-hidden rounded-2xl border bg-[var(--bg-secondary)] px-3 py-2.5 transition-[border-color,box-shadow] duration-200 ease-out cursor-pointer ${
         showQtyEditor
           ? 'border-[var(--bg-accent)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--bg-accent)_12%,transparent)]'
-          : isOutOfStock
+          : nextAddGoesToPo
             ? 'border-[color-mix(in_srgb,var(--border-warning)_45%,var(--border-subtle))]'
             : 'border-[var(--border-subtle)]'
       }`}
@@ -1579,6 +1639,8 @@ const ItemRow = memo(function ItemRow({
           price={price}
           totalInOrderQty={totalInOrderQty}
           sellableStockQty={sellableStockQty}
+          sellableLocationCode={sellableLocationCode}
+          stockResolving={stockResolving}
           mainStoreStockQty={mainStoreStockQty}
           jabalpurStockQty={jabalpurStockQty}
           hasSpecialLine={hasSpecialLine}
@@ -1607,6 +1669,7 @@ const ItemRow = memo(function ItemRow({
               stockQty={sellableStockQty}
               totalInOrderQty={totalInOrderQty}
               sellableLocationCode={sellableLocationCode}
+              stockResolving={stockResolving}
               mainStoreStockQty={mainStoreStockQty}
               jabalpurStockQty={jabalpurStockQty}
             />
@@ -1632,13 +1695,13 @@ const ItemRow = memo(function ItemRow({
                 onStartAdd(item);
               }}
               className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-sm transition-all duration-200 active:scale-95 ${
-                isOutOfStock
+                nextAddGoesToPo
                   ? 'bg-[var(--bg-warning)] text-[var(--content-on-color)] hover:opacity-95'
                   : justAdded
                     ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] hover:opacity-95'
                     : 'bg-[var(--bg-accent)] text-[var(--content-on-color)] hover:opacity-95'
               }`}
-              aria-label={isOutOfStock ? 'Add to purchase order' : 'Add to cart'}
+              aria-label={nextAddGoesToPo ? 'Add to purchase order' : 'Add to cart'}
             >
               {justAdded ? <Check size={18} weight="bold" /> : <Plus size={20} weight="bold" />}
             </button>
@@ -1656,6 +1719,7 @@ const ItemRow = memo(function ItemRow({
     prevProps.price === nextProps.price &&
     prevProps.sellableStockQty === nextProps.sellableStockQty &&
     prevProps.sellableLocationCode === nextProps.sellableLocationCode &&
+    prevProps.stockResolving === nextProps.stockResolving &&
     prevProps.mainStoreStockQty === nextProps.mainStoreStockQty &&
     prevProps.jabalpurStockQty === nextProps.jabalpurStockQty &&
     prevProps.hasSpecialLine === nextProps.hasSpecialLine &&
@@ -1678,6 +1742,7 @@ function ResultSection({
   getTotalInOrderQty,
   getPrice,
   getSellableStockQty,
+  getStockResolving,
   sellableLocationCode,
   getMainStoreStockQty,
   getJabalpurStockQty,
@@ -1695,6 +1760,7 @@ function ResultSection({
   getTotalInOrderQty: (id: number) => number;
   getPrice: (item: Item) => number;
   getSellableStockQty: (item: Item) => number | null | undefined;
+  getStockResolving: (item: Item) => boolean;
   sellableLocationCode: StockLocationCode;
   getMainStoreStockQty: (item: Item) => number | null | undefined;
   getJabalpurStockQty: (item: Item) => number | null | undefined;
@@ -1721,6 +1787,7 @@ function ResultSection({
             price={getPrice(r.item)}
             sellableStockQty={getSellableStockQty(r.item)}
             sellableLocationCode={sellableLocationCode}
+            stockResolving={getStockResolving(r.item)}
             mainStoreStockQty={getMainStoreStockQty(r.item)}
             jabalpurStockQty={getJabalpurStockQty(r.item)}
             hasSpecialLine={hasSpecialLine(r.item.id)}
@@ -1746,7 +1813,10 @@ export default function NewOrderPage(): React.JSX.Element | null {
   }, [navigate, routes.cart]);
   const { data: items = [], isLoading: itemsLoading } = useItems();
   const { userId: orderAuthorUserId, userName: orderAuthorUserName } = useOrderAuthor();
-  const { data: sellableLocationCode = 'main_store' } = useUserStockLocation(
+  const {
+    data: sellableLocationCode = 'main_store',
+    isLoading: stockLocationLoading,
+  } = useUserStockLocation(
     orderAuthorUserId,
     orderAuthorUserName,
   );
@@ -1941,7 +2011,10 @@ export default function NewOrderPage(): React.JSX.Element | null {
     () => searchResults.map((result) => result.item.busy_code),
     [searchResults],
   );
-  const { data: locationwiseStock = {} } = useLocationwiseStock(visibleBusyCodes);
+  const {
+    data: locationwiseStock = {},
+    isLoading: locationwiseStockLoading,
+  } = useLocationwiseStock(visibleBusyCodes);
 
 
   const cartQtyByItem = useMemo(() => {
@@ -1976,6 +2049,10 @@ export default function NewOrderPage(): React.JSX.Element | null {
     const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
     if (!Number.isFinite(busyCode)) return null;
     return getStockQtyForLocation(locationwiseStock[busyCode], sellableLocationCode);
+  };
+  const getStockResolving = (item: Item) => {
+    const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
+    return stockLocationLoading || (Number.isFinite(busyCode) && locationwiseStockLoading);
   };
   const hasSpecialLine = (id: number) => specialLineItemIds.has(id);
   const isJustAdded = (id: number) => recentlyAddedItemId === id;
@@ -2215,6 +2292,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
               getTotalInOrderQty={getTotalInOrderQty}
               getPrice={getPrice}
               getSellableStockQty={getSellableStockQty}
+              getStockResolving={getStockResolving}
               sellableLocationCode={sellableLocationCode}
               getMainStoreStockQty={getMainStoreStockQty}
               getJabalpurStockQty={getJabalpurStockQty}

@@ -3,7 +3,8 @@ import { getStockTier } from './stockDisplay';
 
 /**
  * Max units this line can ship from on-hand stock.
- * OOS → 0. Unknown stock → full qty (no cap).
+ * Legacy helper for callers that intentionally use the catalog's global stock.
+ * Sales checkout should pass a location-wise available quantity instead.
  */
 export function qtyShippableFromStock(item: Item, cartQty: number): number {
   return qtyShippableFromStockQty(item.stock_qty, cartQty);
@@ -23,9 +24,8 @@ export function qtyShippableFromStockQty(
 
 /** One stock read: shippable vs PO gap (avoids double tier/qty work in UI loops). */
 export function splitCartLine(
-  item: Item,
   cartQty: number,
-  stockQty: number | null | undefined = item.stock_qty,
+  stockQty: number | null | undefined,
 ): { ship: number; po: number } {
   const ship = qtyShippableFromStockQty(stockQty, cartQty);
   return { ship, po: Math.max(0, cartQty - ship) };
@@ -33,17 +33,17 @@ export function splitCartLine(
 
 /** PO gap = total requested minus what ships from stock. */
 export function poQtyForLine(item: Item, cartQty: number): number {
-  return splitCartLine(item, cartQty).po;
+  return splitCartLine(cartQty, item.stock_qty).po;
 }
 
 /** Does this line have a PO gap? */
 export function hasPo(item: Item, cartQty: number): boolean {
-  return splitCartLine(item, cartQty).po > 0;
+  return splitCartLine(cartQty, item.stock_qty).po > 0;
 }
 
 /** Is this line fully PO (nothing from stock)? */
 export function isFullyPo(item: Item, cartQty: number): boolean {
-  return cartQty > 0 && splitCartLine(item, cartQty).ship === 0;
+  return cartQty > 0 && splitCartLine(cartQty, item.stock_qty).ship === 0;
 }
 
 /** Quantity picker should physically pick (cap by shippable, then approval). */
