@@ -80,6 +80,18 @@ function localDateKey(value: string): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function cleanDateParam(value: string | null): string {
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : '';
+}
+
+function formatDateRangeLabel(from: string, to: string): string {
+  if (from && to && from === to) return formatShortDate(from);
+  if (from && to) return `${formatShortDate(from)} - ${formatShortDate(to)}`;
+  if (from) return `From ${formatShortDate(from)}`;
+  if (to) return `Until ${formatShortDate(to)}`;
+  return 'All active pending orders';
+}
+
 function MetricCard({
   label,
   value,
@@ -135,7 +147,11 @@ export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
   const { itemId: itemIdParam } = useParams();
   const [searchParams] = useSearchParams();
   const itemId = Number(itemIdParam);
-  const selectedDate = searchParams.get('date') ?? '';
+  const legacyDate = cleanDateParam(searchParams.get('date'));
+  const selectedDateFrom = cleanDateParam(searchParams.get('from')) || legacyDate;
+  const selectedDateTo = cleanDateParam(searchParams.get('to')) || legacyDate;
+  const activeRangeLabel = formatDateRangeLabel(selectedDateFrom, selectedDateTo);
+  const hasDateRange = Boolean(selectedDateFrom || selectedDateTo);
   const fromTab = searchParams.get('fromTab') === 'sku' ? 'sku' : 'brand';
 
   const { data: rawLines = [], isLoading, error } = useOpenPoDemandLines();
@@ -153,11 +169,15 @@ export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
     () =>
       openLines.filter((row) => {
         if (!Number.isInteger(itemId) || row.item_id !== itemId) return false;
-        if (!selectedDate) return true;
+        if (!selectedDateFrom && !selectedDateTo) return true;
         const order = normalizeEmbeddedOrder(row.orders);
-        return Boolean(order?.created_at && localDateKey(order.created_at) === selectedDate);
+        if (!order?.created_at) return false;
+        const orderDate = localDateKey(order.created_at);
+        if (selectedDateFrom && orderDate < selectedDateFrom) return false;
+        if (selectedDateTo && orderDate > selectedDateTo) return false;
+        return true;
       }),
-    [itemId, openLines, selectedDate],
+    [itemId, openLines, selectedDateFrom, selectedDateTo],
   );
 
   const summary = useMemo(() => {
@@ -194,7 +214,8 @@ export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
   const backToSummary = () => {
     const next = new URLSearchParams();
     next.set('tab', fromTab);
-    if (selectedDate) next.set('date', selectedDate);
+    if (selectedDateFrom) next.set('from', selectedDateFrom);
+    if (selectedDateTo) next.set('to', selectedDateTo);
     navigate(`/admin/supply?${next.toString()}`);
   };
 
@@ -246,7 +267,7 @@ export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
               <p className="text-lg font-semibold text-[var(--content-primary)]">{itemName}</p>
               <p className="mt-2 text-sm text-[var(--content-tertiary)]">
                 {brandLabel ?? 'Item detail'}
-                {selectedDate ? ` · ${formatShortDate(selectedDate)}` : ' · All active pending orders'}
+                {` · ${activeRangeLabel}`}
               </p>
             </div>
             {summary.oldestCreatedAt && <AgePill createdAt={summary.oldestCreatedAt} />}
@@ -272,7 +293,7 @@ export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
             <p className="text-sm text-[var(--content-negative)]">Could not load order lines for this SKU.</p>
           ) : skuLines.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--border-subtle)] p-5 text-sm text-[var(--content-tertiary)]">
-              No live pending order lines matched this SKU{selectedDate ? ` on ${formatShortDate(selectedDate)}` : ''}.
+              No live pending order lines matched this SKU{hasDateRange ? ` for ${activeRangeLabel}` : ''}.
             </div>
           ) : (
             <ul className="space-y-3">

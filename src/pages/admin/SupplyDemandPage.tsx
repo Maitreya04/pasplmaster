@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -144,10 +144,36 @@ function countLabel(count: number, singular: string, plural = `${singular}s`): s
 
 function localDateKey(value: string): string {
   const d = new Date(value);
+  return dateKeyFromDate(d);
+}
+
+function dateKeyFromDate(d: Date): string {
   const yyyy = d.getFullYear();
   const mm = `${d.getMonth() + 1}`.padStart(2, '0');
   const dd = `${d.getDate()}`.padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function addDays(dateKey: string, days: number): string {
+  const d = new Date(`${dateKey}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return dateKeyFromDate(d);
+}
+
+function monthStart(dateKey: string): string {
+  return `${dateKey.slice(0, 7)}-01`;
+}
+
+function cleanDateParam(value: string | null): string {
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : '';
+}
+
+function formatDateRangeLabel(from: string, to: string): string {
+  if (from && to && from === to) return formatShortDate(from);
+  if (from && to) return `${formatShortDate(from)} - ${formatShortDate(to)}`;
+  if (from) return `From ${formatShortDate(from)}`;
+  if (to) return `Until ${formatShortDate(to)}`;
+  return 'All active pending orders';
 }
 
 function isToday(value: string): boolean {
@@ -326,10 +352,23 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
 
   const [repFilter, setRepFilter] = useState<string | null>(null);
   const tab = isTabId(searchParams.get('tab')) ? searchParams.get('tab') : 'brand';
-  const selectedDemandDate = searchParams.get('date') ?? '';
+  const legacyDate = cleanDateParam(searchParams.get('date'));
+  const selectedDateFrom = cleanDateParam(searchParams.get('from')) || legacyDate;
+  const selectedDateTo = cleanDateParam(searchParams.get('to')) || legacyDate;
+  const activeRangeLabel = formatDateRangeLabel(selectedDateFrom, selectedDateTo);
+  const hasDateRange = Boolean(selectedDateFrom || selectedDateTo);
+  const [draftDateFrom, setDraftDateFrom] = useState(selectedDateFrom);
+  const [draftDateTo, setDraftDateTo] = useState(selectedDateTo);
+  const todayKey = useMemo(() => dateKeyFromDate(new Date()), []);
+  const dateRangeInvalid = Boolean(draftDateFrom && draftDateTo && draftDateFrom > draftDateTo);
 
   const { data: rawLines = [], isLoading: linesLoading, error: linesError } = useOpenPoDemandLines();
   const { data: pendingItemsRaw = [], isLoading: pendingLoading } = usePendingItems({ status: 'pending' });
+
+  useEffect(() => {
+    setDraftDateFrom(selectedDateFrom);
+    setDraftDateTo(selectedDateTo);
+  }, [selectedDateFrom, selectedDateTo]);
 
   const openLines = useMemo(() => {
     return rawLines.filter((row) => {
@@ -348,12 +387,16 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
   }, [openLines]);
 
   const demandLines = useMemo(() => {
-    if (!selectedDemandDate) return openLines;
+    if (!selectedDateFrom && !selectedDateTo) return openLines;
     return openLines.filter((row) => {
       const order = normalizeEmbeddedOrder(row.orders);
-      return order?.created_at && localDateKey(order.created_at) === selectedDemandDate;
+      if (!order?.created_at) return false;
+      const orderDate = localDateKey(order.created_at);
+      if (selectedDateFrom && orderDate < selectedDateFrom) return false;
+      if (selectedDateTo && orderDate > selectedDateTo) return false;
+      return true;
     });
-  }, [openLines, selectedDemandDate]);
+  }, [openLines, selectedDateFrom, selectedDateTo]);
 
   const byBrand = useMemo<BrandSummary[]>(() => {
     const brandMap = new Map<
@@ -646,18 +689,40 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
     );
   };
 
-  const updateSearchParams = (updates: { tab?: TabId; date?: string | null }) => {
+  const updateSearchParams = (updates: { tab?: TabId }) => {
     const next = new URLSearchParams(searchParams);
     if (updates.tab) next.set('tab', updates.tab);
-    if (updates.date) next.set('date', updates.date);
-    else if (updates.date === null) next.delete('date');
     setSearchParams(next, { replace: true });
+  };
+
+  const applyDateRange = (from: string, to: string) => {
+    if (from && to && from > to) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('date');
+    if (from) next.set('from', from);
+    else next.delete('from');
+    if (to) next.set('to', to);
+    else next.delete('to');
+    setSearchParams(next, { replace: true });
+  };
+
+  const clearDateRange = () => {
+    setDraftDateFrom('');
+    setDraftDateTo('');
+    applyDateRange('', '');
+  };
+
+  const applyPresetRange = (from: string, to: string) => {
+    setDraftDateFrom(from);
+    setDraftDateTo(to);
+    applyDateRange(from, to);
   };
 
   const openSkuDetail = (itemId: number, fromTab: 'brand' | 'sku') => {
     const next = new URLSearchParams();
     next.set('fromTab', fromTab);
-    if (selectedDemandDate) next.set('date', selectedDemandDate);
+    if (selectedDateFrom) next.set('from', selectedDateFrom);
+    if (selectedDateTo) next.set('to', selectedDateTo);
     navigate(`/admin/supply/sku/${itemId}?${next.toString()}`);
   };
 
@@ -705,56 +770,133 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
         </section>
 
         <section className="mt-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-[var(--content-primary)]">Filter by order date</p>
-              <p className="mt-1 text-sm text-[var(--content-tertiary)]">
-                Use this to see the brand-wise purchase demand for one day only.
-              </p>
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
-                  Order date
-                </span>
-                <input
-                  type="date"
-                  value={selectedDemandDate}
-                  onChange={(event) => updateSearchParams({ date: event.target.value || null })}
-                  className="h-11 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--content-primary)]"
-                />
-              </label>
-              {selectedDemandDate && (
-                <button
-                  type="button"
-                  onClick={() => updateSearchParams({ date: null })}
-                  className="inline-flex h-11 items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 text-sm font-semibold text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]"
-                >
-                  Show all dates
-                </button>
-              )}
-            </div>
-          </div>
-
-          {demandDates.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {demandDates.slice(0, 7).map((dateKey) => (
-                <button
-                  key={dateKey}
-                  type="button"
-                  onClick={() => updateSearchParams({ date: dateKey })}
-                  className={`inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
-                    selectedDemandDate === dateKey
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-[var(--content-primary)]">Order date range</p>
+                <p className="mt-1 text-sm text-[var(--content-tertiary)]">
+                  Filter pending demand by when orders were created.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${
+                    hasDateRange
                       ? 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
-                      : 'border-[var(--border-subtle)] bg-[var(--bg-primary)] text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'
+                      : 'border-[var(--border-subtle)] bg-[var(--bg-primary)] text-[var(--content-secondary)]'
                   }`}
                 >
-                  {formatShortDate(dateKey)}
-                </button>
-              ))}
+                  {activeRangeLabel}
+                </span>
+                {hasDateRange && (
+                  <button
+                    type="button"
+                    onClick={clearDateRange}
+                    className="inline-flex h-8 items-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-xs font-semibold text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
-          )}
+
+            <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
+                    From
+                  </span>
+                  <input
+                    type="date"
+                    value={draftDateFrom}
+                    onChange={(event) => setDraftDateFrom(event.target.value)}
+                    className="h-11 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--content-primary)]"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
+                    To
+                  </span>
+                  <input
+                    type="date"
+                    value={draftDateTo}
+                    onChange={(event) => setDraftDateTo(event.target.value)}
+                    className="h-11 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--content-primary)]"
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                onClick={() => applyDateRange(draftDateFrom, draftDateTo)}
+                disabled={dateRangeInvalid}
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] px-4 text-sm font-semibold text-[var(--content-accent)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Apply
+              </button>
+            </div>
+
+            {dateRangeInvalid && (
+              <p className="text-sm text-[var(--content-negative)]">Start date must be before end date.</p>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              {[
+                ['Today', todayKey, todayKey],
+                ['Yesterday', addDays(todayKey, -1), addDays(todayKey, -1)],
+                ['Last 7 days', addDays(todayKey, -6), todayKey],
+                ['This month', monthStart(todayKey), todayKey],
+              ].map(([label, from, to]) => {
+                const active = selectedDateFrom === from && selectedDateTo === to;
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => applyPresetRange(from, to)}
+                    className={`inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
+                      active
+                        ? 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--bg-primary)] text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {demandDates.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">Recent order dates</p>
+                <div className="flex flex-wrap gap-2">
+                  {demandDates.slice(0, 7).map((dateKey) => {
+                    const active = selectedDateFrom === dateKey && selectedDateTo === dateKey;
+                    return (
+                      <button
+                        key={dateKey}
+                        type="button"
+                        onClick={() => applyPresetRange(dateKey, dateKey)}
+                        className={`inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
+                          active
+                            ? 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+                            : 'border-[var(--border-subtle)] bg-[var(--bg-primary)] text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'
+                        }`}
+                      >
+                        {formatShortDate(dateKey)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </section>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--content-secondary)]">
+          <span className="font-semibold text-[var(--content-primary)]">{activeRangeLabel}</span>
+          <span>{countLabel(totals.skuCount, 'item')}</span>
+          <span>{countLabel(totals.brandCount, 'brand')}</span>
+          <span>{countLabel(totals.orderCount, 'order')}</span>
+        </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2 font-ds-micro text-[var(--content-quaternary)]">
           <span>Age:</span>
@@ -800,7 +942,8 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
               rows={byBrand}
               loading={linesLoading}
               error={linesError}
-              selectedDate={selectedDemandDate}
+              activeRangeLabel={activeRangeLabel}
+              hasDateRange={hasDateRange}
               onCopyAllBrands={handleCopyAllBrands}
               onCopyBrand={handleCopyBrand}
               onOpenSku={openSkuDetail}
@@ -811,7 +954,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
           {tab === 'lines' && (
             <LinesTab
               lines={filteredLines}
-              allLines={openLines}
+              allLines={demandLines}
               allReps={allReps}
               repFilter={repFilter}
               onRepFilter={setRepFilter}
@@ -837,7 +980,8 @@ function BrandTab({
   rows,
   loading,
   error,
-  selectedDate,
+  activeRangeLabel,
+  hasDateRange,
   onCopyAllBrands,
   onCopyBrand,
   onOpenSku,
@@ -846,7 +990,8 @@ function BrandTab({
   rows: BrandSummary[];
   loading: boolean;
   error: Error | null;
-  selectedDate: string;
+  activeRangeLabel: string;
+  hasDateRange: boolean;
   onCopyAllBrands: () => void;
   onCopyBrand: (brand: BrandSummary) => void;
   onOpenSku: (itemId: number, fromTab: 'brand' | 'sku') => void;
@@ -855,7 +1000,7 @@ function BrandTab({
   if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading brands...</p>;
   if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load brand demand.</p>;
   if (rows.length === 0) {
-    return <EmptyBlock text={selectedDate ? `No purchase demand for ${formatShortDate(selectedDate)}.` : 'No open PO demand on active orders.'} />;
+    return <EmptyBlock text={hasDateRange ? `No purchase demand for ${activeRangeLabel}.` : 'No open PO demand on active orders.'} />;
   }
 
   return (
@@ -863,8 +1008,8 @@ function BrandTab({
       <SectionCard
         title="Brand-wise split"
         subtitle={
-          selectedDate
-            ? `Showing brand-wise purchase demand for ${formatShortDate(selectedDate)}.`
+          hasDateRange
+            ? `Showing brand-wise purchase demand for ${activeRangeLabel}.`
             : 'Use this view to see each brand total and which items make up that brand total.'
         }
       >
