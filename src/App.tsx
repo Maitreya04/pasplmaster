@@ -217,6 +217,16 @@ export default function App(): React.JSX.Element | null {
           }
         />
         <Route
+          path="/admin/barcode-mapping"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <BarcodeMappingPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
           path="/admin/pick-scan-lab"
           element={
             <RequireRole>
