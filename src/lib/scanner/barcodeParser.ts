@@ -133,12 +133,23 @@ export function varrocKDerivedLookupKeys(normalizedK: string): string[] {
 /** Printed Varroc part number on label/challan (e.g. `BLKR-DSVR-JD07`). */
 const VARROC_PRINTED_CODE = /^[A-Z]{3,5}-[A-Z0-9]+-[A-Z0-9]+$/i;
 
+/** Prefer K-code, then printed Varroc, then other URL tokens (avoids picking 6-char batch first). */
+function prioritizeUrlPartCandidates(candidates: string[]): string[] {
+  const upper = candidates.map((c) => c.trim().toUpperCase());
+  const kCodes = upper.filter((c) => /^K\d{9,14}$/.test(c)).sort((a, b) => b.length - a.length);
+  const printed = upper.filter((c) => VARROC_PRINTED_CODE.test(c));
+  const rest = upper.filter((c) => !kCodes.includes(c) && !printed.includes(c));
+  return [...kCodes, ...printed, ...rest];
+}
+
 function tryParseVarrocVrstBang(raw: string): ParsedBarcode | null {
   if (!/vrst\.in\/bt\//i.test(raw)) return null;
-  const m = raw.match(/!([A-Z0-9]{4,8})!(K\d{10,14})\s*$/i);
-  if (!m) return null;
-  const short = m[1].toUpperCase();
-  const k = m[2].toUpperCase();
+  // Last `!batch!Kdigits` wins (path may contain noise earlier; K may be 9–14 digits; trailing query ok).
+  const matches = [...raw.matchAll(/!([A-Z0-9]{4,8})!(K\d{9,14})/gi)];
+  if (matches.length === 0) return null;
+  const m = matches[matches.length - 1]!;
+  const short = m[1]!.toUpperCase();
+  const k = m[2]!.toUpperCase();
   const derived = varrocKDerivedLookupKeys(k);
   return {
     raw,
@@ -237,7 +248,7 @@ function extractPartCandidatesFromUrl(rawValue: string): string[] {
       out.push(maybe);
     }
 
-    return out;
+    return prioritizeUrlPartCandidates(out);
   } catch {
     // Fallback: many QR generators embed "URL-ish" strings that include unescaped
     // characters in the path (e.g. `]a$[@!E9...`). In that case, still attempt
@@ -258,7 +269,7 @@ function extractPartCandidatesFromUrl(rawValue: string): string[] {
       seen.add(maybe);
       out.push(maybe);
     }
-    return out;
+    return prioritizeUrlPartCandidates(out);
   }
 }
 
