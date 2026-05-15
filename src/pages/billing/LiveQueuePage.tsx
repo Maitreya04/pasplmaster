@@ -389,35 +389,29 @@ export default function LiveQueuePage() {
       });
 
       const approvedAt = new Date().toISOString();
-      const notifyTasks: Promise<unknown>[] = [
-        sendPickerReadyNotification({
-          eventType: 'order_ready_to_pick',
-          orderId: order.id,
-          orderNumber: order.order_number,
-          customerName: order.customer_name,
-          priority: order.priority,
-          approvedAt,
-        }).catch(() => { /* silent */ }),
-      ];
+      void sendPickerReadyNotification({
+        eventType: 'order_ready_to_pick',
+        orderId: order.id,
+        orderNumber: order.order_number,
+        customerName: order.customer_name,
+        priority: order.priority,
+        approvedAt,
+      }).catch(() => { /* silent */ });
 
-      notifyTasks.push(
-        sendInternalNotification({
-          eventType: 'order_update_for_sales',
-          orderId: order.id,
-          orderNumber: order.order_number,
-          customerName: order.customer_name,
-          salespersonName: order.salesperson_name,
-          messageBody: customerMessageText,
-          billingCustomerUpdateId: (customerUpdateRow as { id: number }).id,
-        }).catch((e) => {
-          console.error('order_update_for_sales', e);
-          toast.error(
-            `Sales notification failed: ${formatInternalNotificationError(e)}`,
-          );
-        }),
-      );
-
-      await Promise.all(notifyTasks);
+      void sendInternalNotification({
+        eventType: 'order_update_for_sales',
+        orderId: order.id,
+        orderNumber: order.order_number,
+        customerName: order.customer_name,
+        salespersonName: order.salesperson_name,
+        messageBody: customerMessageText,
+        billingCustomerUpdateId: (customerUpdateRow as { id: number }).id,
+      }).catch((e) => {
+        console.error('order_update_for_sales', e);
+        toast.error(
+          `Sales notification failed: ${formatInternalNotificationError(e)}`,
+        );
+      });
 
       return reportSnapshot;
     },
