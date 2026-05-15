@@ -1,4 +1,14 @@
-export type MatchStrategy = 'exact' | 'prefix_hyphen' | 'prefix_space' | 'slash_separated' | 'structured_field' | 'manual';
+export type MatchStrategy =
+  | 'exact'
+  | 'prefix_hyphen'
+  | 'prefix_space'
+  | 'slash_separated'
+  | 'structured_field'
+  | 'manual'
+  | 'varroc_url'
+  | 'varroc_k'
+  | 'varroc_printed'
+  | 'varroc_sap_compact';
 
 export interface ParsedBarcode {
   raw: string;
@@ -96,6 +106,94 @@ function looksLikePartKey(value: string): boolean {
   return false;
 }
 
+function dedupeBarcodeCandidates(keys: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const k of keys) {
+    const u = k.trim().toUpperCase();
+    if (!u || seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}
+
+/**
+ * Varroc box QR URLs often end with `!{batch}!{K-code}`. Challan/SAP may list only `K` + first 9 digits
+ * of a 13-digit body — when we have the full K from a scan, expose the compact key as an extra lookup.
+ */
+export function varrocKDerivedLookupKeys(normalizedK: string): string[] {
+  const m = normalizedK.trim().toUpperCase().match(/^K(\d+)$/);
+  if (!m) return [];
+  const digits = m[1];
+  if (digits.length !== 13) return [];
+  return [`K${digits.slice(0, 9)}`];
+}
+
+/** Printed Varroc part number on label/challan (e.g. `BLKR-DSVR-JD07`). */
+const VARROC_PRINTED_CODE = /^[A-Z]{3,5}-[A-Z0-9]+-[A-Z0-9]+$/i;
+
+function tryParseVarrocVrstBang(raw: string): ParsedBarcode | null {
+  if (!/vrst\.in\/bt\//i.test(raw)) return null;
+  const m = raw.match(/!([A-Z0-9]{4,8})!(K\d{10,14})\s*$/i);
+  if (!m) return null;
+  const short = m[1].toUpperCase();
+  const k = m[2].toUpperCase();
+  const derived = varrocKDerivedLookupKeys(k);
+  return {
+    raw,
+    key: k,
+    strategy: 'varroc_url',
+    looksSerialised: false,
+    strippedSuffix: null,
+    candidates: dedupeBarcodeCandidates([k, short, ...derived]),
+  };
+}
+
+function tryParseBareVarrocK(raw: string): ParsedBarcode | null {
+  const m = raw.match(/^K(\d{10,14})$/i);
+  if (!m) return null;
+  const k = `K${m[1]}`.toUpperCase();
+  const derived = varrocKDerivedLookupKeys(k);
+  return {
+    raw,
+    key: k,
+    strategy: 'varroc_k',
+    looksSerialised: false,
+    strippedSuffix: null,
+    candidates: dedupeBarcodeCandidates([k, ...derived]),
+  };
+}
+
+/** Nine-digit body after K — common on Varroc SAP/challan extracts (differs from 13-digit scan payload). */
+function tryParseVarrocSapCompact(raw: string): ParsedBarcode | null {
+  const m = raw.match(/^K(\d{9})$/i);
+  if (!m) return null;
+  const k = `K${m[1]}`.toUpperCase();
+  return {
+    raw,
+    key: k,
+    strategy: 'varroc_sap_compact',
+    looksSerialised: false,
+    strippedSuffix: null,
+    candidates: dedupeBarcodeCandidates([k]),
+  };
+}
+
+function tryParseVarrocPrinted(raw: string): ParsedBarcode | null {
+  if (/^https?:\/\//i.test(raw)) return null;
+  if (!VARROC_PRINTED_CODE.test(raw)) return null;
+  const key = raw.toUpperCase();
+  return {
+    raw,
+    key,
+    strategy: 'varroc_printed',
+    looksSerialised: false,
+    strippedSuffix: null,
+    candidates: dedupeBarcodeCandidates([key]),
+  };
+}
+
 function extractPartCandidatesFromUrl(rawValue: string): string[] {
   const urlStr = ensureUrlScheme(rawValue);
   if (!urlStr) return [];
@@ -167,6 +265,18 @@ function extractPartCandidatesFromUrl(rawValue: string): string[] {
 export function parseManufacturerBarcode(raw: string): ParsedBarcode {
   const trimmed = raw.trim();
   const candidates: string[] = [];
+
+  const varrocBang = tryParseVarrocVrstBang(trimmed);
+  if (varrocBang) return varrocBang;
+
+  const bareVarrocK = tryParseBareVarrocK(trimmed);
+  if (bareVarrocK) return bareVarrocK;
+
+  const varrocSapCompact = tryParseVarrocSapCompact(trimmed);
+  if (varrocSapCompact) return varrocSapCompact;
+
+  const varrocPrinted = tryParseVarrocPrinted(trimmed);
+  if (varrocPrinted) return varrocPrinted;
 
   // If the QR payload is a URL/redirect, extract the part-number candidate from it
   // so admin mapping can proceed without treating the whole URL as "noisy QR data".

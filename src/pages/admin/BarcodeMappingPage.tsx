@@ -37,6 +37,7 @@ import {
   parseManufacturerBarcode,
   type ParsedBarcode,
 } from '../../lib/scanner/barcodeParser';
+import { buildSaveInputForScan } from '../../lib/scanner/oemBarcodeEngine';
 import { classifyScanPayload, normalizeScanCode, parseRackPayload } from '../../lib/scanner/qrPayload';
 import { resolveScannedCatalogItem, getScanCatalogItemById, patchBarcodeMappingEntry } from '../../stores/itemScanIndex';
 
@@ -433,15 +434,15 @@ export default function BarcodeMappingPage(): React.JSX.Element {
     setSaving(true);
     setStep('saving');
     try {
-      const result = await saveBarcodeMapping({
-        barcodeRaw: pendingBarcode.raw,
-        barcodeKey: pendingBarcode.key,
-        matchStrategy: pendingBarcode.strategy,
+      const input = buildSaveInputForScan(pendingBarcode, {
         skuBusyCode: selectedSku.skuBusyCode,
         binId: currentBinId,
         manufacturer,
         mappedByUserId: userId,
         mappedByName: userName,
+      });
+      const result = await saveBarcodeMapping({
+        ...input,
         force,
       });
 
@@ -552,7 +553,7 @@ export default function BarcodeMappingPage(): React.JSX.Element {
   return (
     <div className={`${isPickingContext ? 'role-picking' : 'role-admin'} min-h-screen bg-[var(--bg-primary)]`}>
       <div className="mx-auto max-w-3xl px-4 py-4 lg:px-6">
-        <div className="mb-5 flex items-start justify-between gap-3">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <button
               type="button"
@@ -569,6 +570,16 @@ export default function BarcodeMappingPage(): React.JSX.Element {
               Map manufacturer barcodes to Busy SKUs so future scans can verify the physical item.
             </p>
           </div>
+          {!isPickingContext && (
+            <button
+              type="button"
+              onClick={() => navigate('/admin/barcode-mapping/import')}
+              className={`${secondaryButton} shrink-0`}
+            >
+              <DatabaseIcon size={18} weight="bold" />
+              Import from challan
+            </button>
+          )}
         </div>
 
         <div className="mb-5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
@@ -1138,7 +1149,13 @@ export default function BarcodeMappingPage(): React.JSX.Element {
                         Raw: {pendingBarcode.raw}
                       </p>
                       <p className="mt-1 break-all font-mono text-sm font-semibold text-[var(--content-primary)]">
-                        Saved key: {pendingBarcode.key}
+                        Saved key (canonical): {pendingBarcode.key}
+                      </p>
+                      <p className="mt-1 break-all font-mono text-xs text-[var(--content-tertiary)]">
+                        Lookup-only candidates (not saved as separate rows):{' '}
+                        {pendingBarcode.candidates.filter((c) => c !== pendingBarcode.key).length > 0
+                          ? pendingBarcode.candidates.filter((c) => c !== pendingBarcode.key).join(', ')
+                          : '—'}
                       </p>
                       <p className="mt-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
                         Part Number {'->'} Alias Mapping

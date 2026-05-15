@@ -37,6 +37,7 @@ const OcrOrderLabPage = lazy(() => import('./pages/admin/OcrOrderLabPage'));
 const SupplyDemandPage = lazy(() => import('./pages/admin/SupplyDemandPage'));
 const SupplyDemandSkuDetailPage = lazy(() => import('./pages/admin/SupplyDemandSkuDetailPage'));
 const BarcodeMappingPage = lazy(() => import('./pages/admin/BarcodeMappingPage'));
+const ProcessChallanPage = lazy(() => import('./pages/admin/ProcessChallanPage'));
 
 const ROLE_HOME: Record<string, string> = {
   sales: '/sales',
@@ -206,11 +207,11 @@ export default function App(): React.JSX.Element | null {
           }
         />
         <Route
-          path="/admin/barcode-mapping"
+          path="/admin/barcode-mapping/import"
           element={
             <RequireRole>
               <RequireAdminUnlock>
-                <BarcodeMappingPage />
+                <ProcessChallanPage />
               </RequireAdminUnlock>
             </RequireRole>
           }
