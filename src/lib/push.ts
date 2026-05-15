@@ -31,7 +31,7 @@ export function isStandaloneDisplayMode(): boolean {
 
 export async function registerPushServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (!isPushSupported()) return null;
-  return navigator.serviceWorker.register('/sw.js');
+  return navigator.serviceWorker.register('/sw.js', { scope: '/' });
 }
 
 export function getPushDeviceId(): string {

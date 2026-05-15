@@ -6,11 +6,11 @@ import { Analytics } from '@vercel/analytics/react';
 import { queryClient } from './lib/queryClient';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
-import { registerPushServiceWorker } from './lib/push';
+import { registerSW } from 'virtual:pwa-register';
 import './index.css';
 import App from './App';
 
-void registerPushServiceWorker().catch(() => undefined);
+registerSW({ immediate: true });
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

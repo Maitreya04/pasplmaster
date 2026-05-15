@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CameraRotate, CheckCircle, Lightning, Package, WarningCircle, X } from '@phosphor-icons/react';
+import {
+  CameraRotate,
+  CheckCircle,
+  HandGrabbing,
+  HandPalm,
+  Lightning,
+  Package,
+  SpeakerSimpleHigh,
+  SpeakerSimpleSlash,
+  WarningCircle,
+  X,
+} from '@phosphor-icons/react';
 import {
   initializeItemScanIndex,
   resolveScannedCatalogItem,
@@ -17,17 +28,21 @@ import {
   captureRoiImageData,
   getNextRoiLevel,
 } from '../../lib/scanner/roiProcessor';
-
-type BarcodeDetectorResult = {
-  rawValue?: string | null;
-  format?: string;
-  boundingBox?: { x: number; y: number; width: number; height: number };
-  cornerPoints?: ReadonlyArray<{ x: number; y: number }>;
-};
-
-type BarcodeDetectorLike = {
-  detect(source: HTMLVideoElement | ImageBitmap): Promise<BarcodeDetectorResult[]>;
-};
+import type { BarcodeDetectorLike, BarcodeDetectorResult } from '../../context/CameraContext';
+import { useOptionalPickingCamera } from '../../context/CameraContext';
+import { REQUESTED_BARCODE_FORMATS } from '../../lib/scanner/barcodeFormats';
+import { detectScannerPlatform } from '../../lib/scanner/scannerPlatform';
+import {
+  acquireCameraStream,
+  applyContinuousCameraEnhancements,
+} from '../../lib/scanner/acquireCamera';
+import {
+  getScannerFeedbackPrefs,
+  playErrorBuzz,
+  playSuccessBeep,
+  setScannerFeedbackPrefs,
+  vibrateIfEnabled,
+} from '../../lib/scanner/feedback';
 
 type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => BarcodeDetectorLike;
 type BarcodeDetectorStatic = BarcodeDetectorCtor & {
@@ -45,21 +60,7 @@ const AUTO_RETRY_DELAY_MS = 1000;
 const RESET_COOLDOWN_MS = 350;
 const STABLE_SCAN_MIN_FRAMES = 1;
 const STABLE_SCAN_TTL_MS = 600;
-const REQUESTED_BARCODE_FORMATS = [
-  'qr_code',
-  'code_128',
-  'code_39',
-  'code_93',
-  'codabar',
-  'data_matrix',
-  'aztec',
-  'ean_13',
-  'ean_8',
-  'itf',
-  'pdf417',
-  'upc_a',
-  'upc_e',
-];
+const LAST_PAYLOAD_DEBOUNCE_MS = 1200;
 
 function isLikelyPartNumber(raw: string): boolean {
   const value = raw.trim().toUpperCase();
@@ -103,21 +104,6 @@ interface DisplayBox {
   width: number;
   height: number;
   areaRatio: number;
-}
-
-function detectScannerPlatform() {
-  const ua = navigator.userAgent;
-  const isIOS = /iPad|iPhone|iPod/i.test(ua);
-  /** Chromium exposes a fast on-device path; WebKit's implementation is spottier, so we keep WASM there. */
-  const isLikelyChromium =
-    typeof (window as Window & { chrome?: unknown }).chrome !== 'undefined' ||
-    /Chrome|Chromium|Edg|OPR|Brave/i.test(ua);
-
-  return {
-    /** Prefer native on any non-iOS Chromium (desktop Chrome, Edge, etc.), not only Android. */
-    preferNativeDetector: !isIOS && isLikelyChromium,
-    isIOS,
-  };
 }
 
 function getBoundingBoxArea(entry: BarcodeDetectorResult): number | null {
@@ -301,13 +287,6 @@ function extractNumericCandidates(values: Array<string | null | undefined>): num
   return [...out];
 }
 
-function vibrate(pattern: number | number[]) {
-  if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
-  navigator.vibrate(pattern);
-}
-
-
-
 export function LiveQrScanner({
   title,
   eyebrow,
@@ -355,6 +334,30 @@ export function LiveQrScanner({
   const sheetAnimFrameRef = useRef<number | null>(null);
   const scanIndexStatus = useItemScanIndexStore((state) => state.status);
   const scanIndexError = useItemScanIndexStore((state) => state.error);
+  const pickingCamera = useOptionalPickingCamera();
+  const pickingCameraRef = useRef(pickingCamera);
+
+  useEffect(() => {
+    pickingCameraRef.current = pickingCamera;
+  });
+
+  const lastFiredPayloadRef = useRef<{ key: string; at: number } | null>(null);
+
+  const [feedbackSoundEnabled, setFeedbackSoundEnabled] = useState(() => getScannerFeedbackPrefs().sound);
+  const [feedbackHapticsEnabled, setFeedbackHapticsEnabled] = useState(() => getScannerFeedbackPrefs().haptics);
+
+  const toggleFeedbackSound = useCallback(() => {
+    const next = !getScannerFeedbackPrefs().sound;
+    setScannerFeedbackPrefs({ sound: next });
+    setFeedbackSoundEnabled(next);
+  }, []);
+
+  const toggleFeedbackHaptics = useCallback(() => {
+    const next = !getScannerFeedbackPrefs().haptics;
+    setScannerFeedbackPrefs({ haptics: next });
+    setFeedbackHapticsEnabled(next);
+  }, []);
+
   const collectMode = mode === 'collect';
   const scannerPickItem = useMemo<LiveQrScannerPickItem>(
     () =>
@@ -394,15 +397,27 @@ export function LiveQrScanner({
       cancelAnimationFrame(sheetAnimFrameRef.current);
       sheetAnimFrameRef.current = null;
     }
-    if (streamRef.current) {
+
+    const sharedCameraSession = pickingCameraRef.current != null;
+
+    if (!sharedCameraSession && streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
-    if (engineRef.current?.type === 'worker') {
-      engineRef.current.worker.terminate();
+
+    const engine = engineRef.current;
+    if (engine?.type === 'worker') {
+      if (!sharedCameraSession) {
+        engine.worker.terminate();
+      } else {
+        engine.worker.onmessage = null;
+      }
     }
+
     scanInFlightRef.current = false;
     engineRef.current = null;
+    const video = videoRef.current;
+    if (video) video.srcObject = null;
   }, []);
 
   const flashViewport = useCallback((color: 'green' | 'red') => {
@@ -470,6 +485,18 @@ export function LiveQrScanner({
   }, [applyCameraZoom]);
 
   const handleResolvedScan = useCallback((rawValue: string) => {
+    const debounceKey = normalizeScanCode(rawValue) || rawValue.trim();
+    const debounceNow = Date.now();
+    const prevFire = lastFiredPayloadRef.current;
+    if (
+      prevFire &&
+      prevFire.key === debounceKey &&
+      debounceNow - prevFire.at < LAST_PAYLOAD_DEBOUNCE_MS
+    ) {
+      return;
+    }
+    lastFiredPayloadRef.current = { key: debounceKey, at: debounceNow };
+
     const classified = classifyScanPayload(rawValue);
     const candidates = classified.normalizedCandidates;
     const packPayload = classified.packPayload;
@@ -571,7 +598,8 @@ export function LiveQrScanner({
     onResolved(result);
 
     if (collectMode) {
-      vibrate(60);
+      vibrateIfEnabled(60);
+      playSuccessBeep();
       flashViewport('green');
       setErrorMessage(null);
       setStatus('Scan logged. Point at the next label...');
@@ -593,14 +621,16 @@ export function LiveQrScanner({
     if (matchesPickItem) {
       completedRef.current = true;
       stopScanner();
-      vibrate(100);
+      vibrateIfEnabled(100);
+      playSuccessBeep();
       flashViewport('green');
       setErrorMessage(null);
       setStatus('Shelf verified');
       return;
     }
 
-    vibrate([100, 50, 100]);
+    vibrateIfEnabled([100, 50, 100]);
+    playErrorBuzz();
     flashViewport('red');
     setErrorMessage(result.reason);
     setStatus(`Verification failed. Retrying in ${AUTO_RETRY_DELAY_MS / 1000}s...`);
@@ -741,43 +771,13 @@ export function LiveQrScanner({
           throw new Error('Camera access is not available on this device.');
         }
 
-        const Detector = (window as Window & typeof globalThis & {
-          BarcodeDetector?: BarcodeDetectorStatic;
-        }).BarcodeDetector;
-        const platform = detectScannerPlatform();
-
-        let useFallback = false;
-        if (Detector) {
-          const supportedFormats = await Detector.getSupportedFormats?.();
-          const formats = supportedFormats
-            ? REQUESTED_BARCODE_FORMATS.filter((format) => supportedFormats.includes(format))
-            : REQUESTED_BARCODE_FORMATS;
-          if (formats.length === 0 || !platform.preferNativeDetector) {
-            useFallback = true;
-          } else {
-            engineRef.current = { type: 'native', detector: new Detector({ formats }) };
-          }
-        } else {
-          useFallback = true;
-        }
-
-        if (useFallback) {
-          const worker = new Worker(new URL('../../workers/qrScanner.worker', import.meta.url), { type: 'module' });
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d', { willReadFrequently: true });
-          if (!ctx) {
-            setSupportMessage('Canvas 2D context is required for QR scanning.');
-            setStatus('Live QR is not available in this browser');
-            return;
-          }
-          engineRef.current = { type: 'worker', worker, workerCanvas: canvas, workerCtx: ctx, pending: new Set() };
-          
+        const attachWorkerOnMessage = (worker: Worker) => {
           worker.onmessage = (event) => {
             const data = event.data;
             if (data.type === 'scan-result') {
-              const engine = engineRef.current;
-              if (engine?.type === 'worker') {
-                engine.pending.delete(data.frameId);
+              const engineNow = engineRef.current;
+              if (engineNow?.type === 'worker') {
+                engineNow.pending.delete(data.frameId);
               }
               if (data.rawValue && !cancelled && !completedRef.current && !lockedRef.current) {
                 noHitFrameCountRef.current = 0;
@@ -805,43 +805,143 @@ export function LiveQrScanner({
               }
             } else if (data.type === 'error') {
               console.error('QR Worker error:', data.message);
-              const engine = engineRef.current;
-              if (engine?.type === 'worker') {
-                engine.pending.clear();
+              const engineNow = engineRef.current;
+              if (engineNow?.type === 'worker') {
+                engineNow.pending.clear();
               }
             }
           };
+        };
+
+        const pickingCtx = pickingCameraRef.current;
+        if (pickingCtx) {
+          const deadline = Date.now() + 10000;
+          while (Date.now() < deadline && !cancelled) {
+            if (pickingCameraRef.current?.enginesReady) break;
+            await new Promise((r) => setTimeout(r, 40));
+          }
+          if (cancelled) return;
+
+          const warm = pickingCameraRef.current?.warmEngines;
+          if (!warm) {
+            setSupportMessage('Scanner engine could not start in this browser.');
+            setStatus('Live QR is not available in this browser');
+            return;
+          }
+
+          setStatus('Starting camera...');
+          const mediaStream = await pickingCtx.ensureCamera();
+          if (cancelled) return;
+
+          streamRef.current = mediaStream;
+
+          if (warm.kind === 'native') {
+            engineRef.current = { type: 'native', detector: warm.detector };
+          } else {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            if (!ctx) {
+              setSupportMessage('Canvas 2D context is required for QR scanning.');
+              setStatus('Live QR is not available in this browser');
+              return;
+            }
+            engineRef.current = {
+              type: 'worker',
+              worker: warm.worker,
+              workerCanvas: canvas,
+              workerCtx: ctx,
+              pending: new Set(),
+            };
+            attachWorkerOnMessage(warm.worker);
+          }
+
+          const video = videoRef.current;
+          if (!video) {
+            throw new Error('Scanner video element is not available.');
+          }
+
+          video.srcObject = mediaStream;
+          video.setAttribute('playsinline', 'true');
+          await video.play();
+
+          const vtrack = mediaStream.getVideoTracks()[0];
+          const capabilities = (vtrack.getCapabilities?.() ?? {}) as CameraCapabilities;
+          setTorchAvailable(Boolean(capabilities.torch));
+          maxZoomRef.current = capabilities.zoom?.max ?? null;
+
+          const settings = vtrack.getSettings?.() as { zoom?: number };
+          if (settings?.zoom != null && Number.isFinite(settings.zoom)) {
+            currentZoomRef.current = settings.zoom;
+            setZoomLevel(settings.zoom);
+          } else if (capabilities.zoom?.max && capabilities.zoom.max > 1) {
+            const initialZoom = Math.min(2.25, capabilities.zoom.max);
+            currentZoomRef.current = initialZoom;
+            setZoomLevel(initialZoom);
+          }
+
+          setStatus(idleStatus ?? 'Point the QR inside the frame');
+          scheduleScan(scanFrame);
+          return;
+        }
+
+        const Detector = (window as Window & typeof globalThis & {
+          BarcodeDetector?: BarcodeDetectorStatic;
+        }).BarcodeDetector;
+        const platform = detectScannerPlatform();
+
+        let useFallback = false;
+        if (Detector) {
+          const supportedFormats = await Detector.getSupportedFormats?.();
+          const formats = supportedFormats
+            ? REQUESTED_BARCODE_FORMATS.filter((format) => supportedFormats.includes(format))
+            : [...REQUESTED_BARCODE_FORMATS];
+          if (formats.length === 0 || !platform.preferNativeDetector) {
+            useFallback = true;
+          } else {
+            engineRef.current = { type: 'native', detector: new Detector({ formats }) };
+          }
+        } else {
+          useFallback = true;
+        }
+
+        if (useFallback) {
+          const worker = new Worker(new URL('../../workers/qrScanner.worker', import.meta.url), {
+            type: 'module',
+          });
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          if (!ctx) {
+            setSupportMessage('Canvas 2D context is required for QR scanning.');
+            setStatus('Live QR is not available in this browser');
+            return;
+          }
+          engineRef.current = { type: 'worker', worker, workerCanvas: canvas, workerCtx: ctx, pending: new Set() };
+
+          attachWorkerOnMessage(worker);
         }
 
         setStatus('Starting camera...');
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-            frameRate: { ideal: 30, min: 24 },
-          },
-        });
+        const { stream: legacyStream, track: legacyTrack } = await acquireCameraStream();
 
         if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
+          legacyStream.getTracks().forEach((t) => t.stop());
           return;
         }
 
-        streamRef.current = stream;
+        await applyContinuousCameraEnhancements(legacyTrack);
+
+        streamRef.current = legacyStream;
         const video = videoRef.current;
         if (!video) {
           throw new Error('Scanner video element is not available.');
         }
 
-        video.srcObject = stream;
+        video.srcObject = legacyStream;
         video.setAttribute('playsinline', 'true');
         await video.play();
 
-        const track = stream.getVideoTracks()[0];
-        const capabilities = (track.getCapabilities?.() ?? {}) as CameraCapabilities;
+        const capabilities = (legacyTrack.getCapabilities?.() ?? {}) as CameraCapabilities;
         setTorchAvailable(Boolean(capabilities.torch));
         maxZoomRef.current = capabilities.zoom?.max ?? null;
 
@@ -857,7 +957,7 @@ export function LiveQrScanner({
             currentZoomRef.current = initialZoom;
             setZoomLevel(initialZoom);
           }
-          await track.applyConstraints({
+          await legacyTrack.applyConstraints({
             advanced: [advanced as MediaTrackConstraintSet],
           });
         } catch {
@@ -974,6 +1074,32 @@ export function LiveQrScanner({
                 {scanCount} scanned
               </span>
             )}
+            <button
+              type="button"
+              onClick={toggleFeedbackSound}
+              aria-label={feedbackSoundEnabled ? 'Mute scan beep' : 'Enable scan beep'}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 active:scale-95"
+              style={{ transition: 'transform 120ms ease-out' }}
+            >
+              {feedbackSoundEnabled ? (
+                <SpeakerSimpleHigh size={17} weight="bold" />
+              ) : (
+                <SpeakerSimpleSlash size={17} weight="bold" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={toggleFeedbackHaptics}
+              aria-label={feedbackHapticsEnabled ? 'Disable vibration' : 'Enable vibration'}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 active:scale-95 disabled:opacity-35"
+              style={{ transition: 'transform 120ms ease-out' }}
+            >
+              {feedbackHapticsEnabled ? (
+                <HandGrabbing size={17} weight="bold" />
+              ) : (
+                <HandPalm size={17} weight="bold" />
+              )}
+            </button>
             <button
               type="button"
               onClick={handleClose}

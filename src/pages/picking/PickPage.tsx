@@ -2211,7 +2211,6 @@ export default function PickPage(): React.JSX.Element | null {
 
       {liveScanSession && (
         <LiveQrScanner
-          key={`${liveScanSession.orderItem.id}-${scannerMode}`}
           title={
             scannerMode === 'rack'
               ? `Scan rack ${liveScanSession.orderItem.rack_no ?? ''}`.trim()
