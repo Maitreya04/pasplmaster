@@ -43,4 +43,5 @@ export const SALES_NAMES = [
   'Neeraj',
   'Shashank',
   'Satish',
+  'Deepak Sharma',
 ];

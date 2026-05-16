@@ -106,7 +106,8 @@ WITH desired_sales(full_name, role, station_label) AS (
     ('Manish', 'sales', NULL),
     ('Hardeep', 'sales', NULL),
     ('Shashank', 'sales', NULL),
-    ('Awasthi', 'sales', NULL)
+    ('Awasthi', 'sales', NULL),
+    ('Deepak Sharma', 'sales', NULL)
 )
 INSERT INTO users (full_name, role, station_label, is_active)
 SELECT full_name, role, station_label, true
@@ -148,7 +149,8 @@ WHERE role = 'sales'
     'Manish',
     'Hardeep',
     'Shashank',
-    'Awasthi'
+    'Awasthi',
+    'Deepak Sharma'
   );
 
 COMMIT;

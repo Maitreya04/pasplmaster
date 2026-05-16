@@ -15,19 +15,19 @@ const NAME_MAP_4WF: Record<string, string> = {
   MANISH: 'Manish Sharma',
   HARDEEPJI: 'Hardeep Singh',
   MAHENDRA: 'Mahendra Rajput',
-  DEEPAK: 'Deepak',
+  DEEPAK: 'Deepak Sharma',
   VINOD: 'Vinod',
   AWASTHIJI: 'Anand Awasthi',
 };
 
 // 2W people (for category assignment when on combined sheet)
-const PEOPLE_2W = new Set(['Mahendra Rajput', 'Deepak', 'Vinod', 'Anand Awasthi']);
+const PEOPLE_2W = new Set(['Mahendra Rajput', 'Deepak Sharma', 'Vinod', 'Anand Awasthi']);
 
 // 2Wf sheet (separate sheet): column index -> display name
 const COL_TO_NAME_2WF: Record<number, string> = {
   1: 'Mankar',
   3: 'Mahendra Rajput',
-  5: 'Deepak',
+  5: 'Deepak Sharma',
   7: 'Vinod',
   9: 'Anand Awasthi',
 };
