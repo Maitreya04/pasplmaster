@@ -4,7 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Barcode,
   CaretLeft,
+  CaretRight,
   CheckCircle,
+  MapPin,
   Package,
   Scales,
   Sparkle,
@@ -18,10 +20,13 @@ import {
   fetchBarcodeCoverage,
   fetchMappedSkuSummaries,
   fetchPackDefsForBusyCodes,
+  fetchShelfSiblingBinIds,
+  inferShelfRowPrefix,
   loadSkuOptionsFromBin,
   normalizeBinCode,
   type BarcodeSkuOption,
   type SaveBarcodeMappingResult,
+  type ShelfSiblingBinsPayload,
 } from '../../lib/barcodeMapping';
 import { classifyScanPayload, parseRackPayload } from '../../lib/scanner/qrPayload';
 import { parseManufacturerBarcode } from '../../lib/scanner/barcodeParser';
@@ -34,6 +39,7 @@ import { initializeItemScanIndex } from '../../stores/itemScanIndex';
 const MAPPED_SKUS_KEY = ['mapped-sku-summaries'] as const;
 const BARCODE_COV_KEY = ['barcode-coverage-global'] as const;
 const UOM_GAPS_KEY = ['uom-coverage-gaps-bin-wizard'] as const;
+const SHELF_ROW_QUERY_KEY = 'bin-onboarding-shelf-row' as const;
 
 function isLikelyManufacturerPartKey(value: string): boolean {
   const key = value.trim().toUpperCase();
@@ -49,6 +55,151 @@ function isLikelyManufacturerPartKey(value: string): boolean {
 function formatPct(n: number): string {
   if (!Number.isFinite(n)) return '—';
   return `${Math.round(n)}%`;
+}
+
+function SkuAliasBlock({ sku }: { sku: BarcodeSkuOption }): ReactElement {
+  const a1 = sku.alias1?.trim();
+  const a = sku.alias?.trim();
+  if (!a1 && !a) {
+    return (
+      <p className="mt-1 text-sm text-[var(--content-warning)]">
+        No Alias 1 / Alias on file yet — add in catalog for faster shelf ID.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-1 space-y-1">
+      {a1 ? (
+        <p className="text-sm leading-snug">
+          <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--content-accent)]">
+            Alias 1
+          </span>{' '}
+          <span className="font-mono font-semibold text-[var(--content-primary)]">{a1}</span>
+        </p>
+      ) : null}
+      {a ? (
+        <p className="text-sm leading-snug">
+          <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--content-accent)]">
+            Alias
+          </span>{' '}
+          <span className="font-mono font-semibold text-[var(--content-primary)]">{a}</span>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** One-line floor ID for “next SKU” preview (aliases first; falls back to truncated name). */
+function skuQuickLabel(o: BarcodeSkuOption): string {
+  const a1 = o.alias1?.trim();
+  const a = o.alias?.trim();
+  if (a1 && a) return `${a1} · ${a}`;
+  if (a1) return a1;
+  if (a) return a;
+  return o.itemName.length > 44 ? `${o.itemName.slice(0, 42)}…` : o.itemName;
+}
+
+interface ShelfRowTourStripProps {
+  payload: ShelfSiblingBinsPayload | undefined;
+  loading: boolean;
+  currentBinNorm: string;
+  nextShelfBinId: string | null;
+  prevShelfBinId: string | null;
+  onLoadShelf: (id: string) => void;
+  variant?: 'default' | 'compact';
+}
+
+function ShelfRowTourStrip({
+  payload,
+  loading,
+  currentBinNorm,
+  nextShelfBinId,
+  prevShelfBinId,
+  onLoadShelf,
+  variant = 'default',
+}: ShelfRowTourStripProps): ReactElement | null {
+  if (loading) {
+    return (
+      <Skeleton className={`w-full rounded-2xl ${variant === 'compact' ? 'h-14' : 'h-[4.5rem]'}`} />
+    );
+  }
+  if (!payload?.rowPrefix || payload.binIds.length < 2) return null;
+
+  const { rowPrefix, binIds } = payload;
+  const compact = variant === 'compact';
+
+  return (
+    <div
+      className={`rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] ${
+        compact ? 'p-2.5' : 'p-3'
+      }`}
+    >
+      <div className="flex items-start gap-2">
+        <MapPin
+          size={compact ? 18 : 20}
+          weight="bold"
+          className="mt-0.5 shrink-0 text-[var(--content-accent)]"
+          aria-hidden
+        />
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--content-accent)]">
+            Shelf tour · rack row <span className="font-mono">{rowPrefix}</span>
+          </p>
+          {!compact ? (
+            <p className="mt-1 text-xs leading-snug text-[var(--content-secondary)]">
+              Same aisle slots ending with a letter after digits (e.g. …1E, …1F). Tap a label or use Prev /
+              Next shelf — wraps around.
+            </p>
+          ) : (
+            <p className="mt-1 text-[11px] leading-snug text-[var(--content-secondary)]">
+              Same rack row (<span className="font-mono">{rowPrefix}</span>) — tap a code or Prev / Next.
+            </p>
+          )}
+          <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+            {binIds.map((id) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => onLoadShelf(id)}
+                className={`shrink-0 rounded-full border px-3 py-1.5 font-mono text-xs font-semibold transition-colors ${
+                  id === currentBinNorm
+                    ? 'border-[var(--border-accent)] bg-[var(--bg-accent)] text-[var(--content-on-color)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-primary)] hover:bg-[var(--bg-tertiary)]'
+                }`}
+              >
+                {id}
+              </button>
+            ))}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <BigButton
+              type="button"
+              variant="secondary"
+              className="min-h-11 shrink-0"
+              disabled={!prevShelfBinId}
+              onClick={() => prevShelfBinId && onLoadShelf(prevShelfBinId)}
+            >
+              <CaretLeft size={20} weight="bold" className="mr-1 inline align-middle" aria-hidden />
+              Prev shelf
+            </BigButton>
+            <BigButton
+              type="button"
+              variant="primary"
+              className="min-h-11 flex-1 bg-[var(--bg-accent)] text-[var(--content-on-color)]"
+              disabled={!nextShelfBinId}
+              onClick={() => nextShelfBinId && onLoadShelf(nextShelfBinId)}
+            >
+              Next shelf
+              <CaretRight size={20} weight="bold" className="ml-1 inline align-middle" aria-hidden />
+              {nextShelfBinId ? (
+                <span className="ml-1 font-mono text-sm opacity-95">{nextShelfBinId}</span>
+              ) : null}
+            </BigButton>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 type ScanTarget = 'bin' | 'box' | 'packet' | 'piece';
@@ -108,6 +259,13 @@ export default function BinOnboardingPage(): ReactElement {
     [skuOptions],
   );
 
+  const currentBinNorm = useMemo(
+    () => (currentBinId ? normalizeBinCode(currentBinId) : ''),
+    [currentBinId],
+  );
+
+  const shelfRowPatternMatched = Boolean(currentBinNorm && inferShelfRowPrefix(currentBinNorm));
+
   const {
     data: packDefMap = new Map<number, ItemPackDefinition>(),
     isLoading: packDefsLoading,
@@ -116,6 +274,31 @@ export default function BinOnboardingPage(): ReactElement {
     queryFn: () => fetchPackDefsForBusyCodes(busyCodesInBin),
     enabled: busyCodesInBin.length > 0,
   });
+
+  const {
+    data: shelfRowPayload,
+    isLoading: shelfRowLoading,
+  } = useQuery({
+    queryKey: [SHELF_ROW_QUERY_KEY, currentBinId],
+    queryFn: () => fetchShelfSiblingBinIds(currentBinId!),
+    enabled: shelfRowPatternMatched,
+    staleTime: 120_000,
+  });
+
+  const nextShelfBinId = useMemo(() => {
+    if (!shelfRowPayload || shelfRowPayload.binIds.length < 2 || !currentBinNorm) return null;
+    const idx = shelfRowPayload.binIds.indexOf(currentBinNorm);
+    if (idx < 0) return shelfRowPayload.binIds[0] ?? null;
+    return shelfRowPayload.binIds[(idx + 1) % shelfRowPayload.binIds.length] ?? null;
+  }, [shelfRowPayload, currentBinNorm]);
+
+  const prevShelfBinId = useMemo(() => {
+    if (!shelfRowPayload || shelfRowPayload.binIds.length < 2 || !currentBinNorm) return null;
+    const n = shelfRowPayload.binIds.length;
+    const idx = shelfRowPayload.binIds.indexOf(currentBinNorm);
+    if (idx < 0) return shelfRowPayload.binIds[n - 1] ?? null;
+    return shelfRowPayload.binIds[(idx - 1 + n) % n] ?? null;
+  }, [shelfRowPayload, currentBinNorm]);
 
   const { data: mappedRows = [], isLoading: mappedLoading } = useQuery({
     queryKey: MAPPED_SKUS_KEY,
@@ -169,6 +352,20 @@ export default function BinOnboardingPage(): ReactElement {
   );
 
   const worksheetOpen = selectedSku != null;
+
+  const worksheetBinNav = useMemo(() => {
+    if (!selectedSku || skuOptions.length === 0) return null;
+    const idx = skuOptions.findIndex((o) => o.skuBusyCode === selectedSku.skuBusyCode);
+    if (idx < 0) return null;
+    const total = skuOptions.length;
+    const nextIdx = total > 1 ? (idx + 1) % total : idx;
+    return {
+      position: idx + 1,
+      total,
+      nextSku: skuOptions[nextIdx],
+      canAdvance: total > 1,
+    };
+  }, [selectedSku, skuOptions]);
 
   const manufacturer = useMemo(
     () => selectedSku?.mainGroup ?? selectedSku?.parentGroup ?? null,
@@ -238,6 +435,15 @@ export default function BinOnboardingPage(): ReactElement {
     },
     onError: (e: Error) => toast.error(e.message || 'Could not load bin.'),
   });
+
+  const handleLoadShelfBin = useCallback(
+    (id: string) => {
+      setCelebrateOpen(false);
+      setSelectedBusyCode(null);
+      loadBinMutation.mutate(id);
+    },
+    [loadBinMutation],
+  );
 
   const handleResolveBinFromScan = useCallback((raw: string): string => {
     const trimmed = raw.trim();
@@ -530,6 +736,12 @@ export default function BinOnboardingPage(): ReactElement {
     toast.warning('Skipped — remember to come back to this SKU.');
   }, [selectedSku, nextIncompleteBusyCode, toast]);
 
+  const handleNextSkuInBin = useCallback(() => {
+    if (!worksheetBinNav?.canAdvance || !worksheetBinNav.nextSku) return;
+    setSelectedBusyCode(worksheetBinNav.nextSku.skuBusyCode);
+    setTierConflict(null);
+  }, [worksheetBinNav]);
+
   const pillsForRow = useCallback(
     (bc: number) => {
       const barcodeOk = mappedSkuSet.has(bc);
@@ -660,7 +872,11 @@ export default function BinOnboardingPage(): ReactElement {
             <div className="min-w-0 flex-1">
               <p className="font-semibold text-[var(--content-primary)]">1. Scan bin QR</p>
               <p className="mt-1 text-sm text-[var(--content-tertiary)]">
-                Loads every SKU in this bin from inventory / rack.
+                Loads every SKU in this bin from inventory / rack. Bins named like{' '}
+                <span className="font-mono text-[var(--content-secondary)]">GGR-1E</span>,{' '}
+                <span className="font-mono text-[var(--content-secondary)]">GGR-1F</span> open a{' '}
+                <span className="font-semibold text-[var(--content-primary)]">shelf tour</span> below so you can
+                walk the whole rack row without re-scanning.
               </p>
               <BigButton
                 type="button"
@@ -707,13 +923,31 @@ export default function BinOnboardingPage(): ReactElement {
               Bin <span className="font-mono">{currentBinId}</span> · {skuOptions.length} SKU(s)
             </p>
           )}
+          {shelfRowPatternMatched ? (
+            <div className="mt-3">
+              <ShelfRowTourStrip
+                payload={shelfRowPayload}
+                loading={shelfRowLoading}
+                currentBinNorm={currentBinNorm}
+                nextShelfBinId={nextShelfBinId}
+                prevShelfBinId={prevShelfBinId}
+                onLoadShelf={handleLoadShelfBin}
+              />
+            </div>
+          ) : null}
         </section>
 
         {skuOptions.length > 0 && !worksheetOpen && (
           <section className="mt-6 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-              Pick SKU
-            </p>
+            <div className="mb-1">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                Pick SKU
+              </p>
+              <p className="mt-0.5 text-xs text-[var(--content-secondary)]">
+                Spot parts using <span className="font-semibold text-[var(--content-primary)]">Alias 1</span>{' '}
+                and <span className="font-semibold text-[var(--content-primary)]">Alias</span> — not Busy codes.
+              </p>
+            </div>
             {(mappedLoading || packDefsLoading) && <Skeleton className="h-24 w-full rounded-2xl" />}
             {!mappedLoading &&
               !packDefsLoading &&
@@ -733,10 +967,8 @@ export default function BinOnboardingPage(): ReactElement {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="font-semibold text-[var(--content-primary)]">{o.itemName}</p>
-                        <p className="mt-0.5 font-mono text-sm text-[var(--content-secondary)]">
-                          Busy {o.skuBusyCode}
-                        </p>
+                        <p className="font-semibold text-[var(--content-primary)] leading-snug">{o.itemName}</p>
+                        <SkuAliasBlock sku={o} />
                       </div>
                       {complete && (
                         <CheckCircle
@@ -785,12 +1017,10 @@ export default function BinOnboardingPage(): ReactElement {
                 <p className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
                   Worksheet · Bin {selectedSku.binId}
                 </p>
-                <p className="mt-1 text-lg font-bold text-[var(--content-primary)]">
+                <p className="mt-1 text-lg font-bold text-[var(--content-primary)] leading-snug">
                   {selectedSku.itemName}
                 </p>
-                <p className="font-mono text-sm text-[var(--content-secondary)]">
-                  Busy {selectedSku.skuBusyCode}
-                </p>
+                <SkuAliasBlock sku={selectedSku} />
               </div>
               <button
                 type="button"
@@ -904,6 +1134,62 @@ export default function BinOnboardingPage(): ReactElement {
                 Back to bin
               </BigButton>
             </div>
+
+            <div className="border-t border-[var(--border-subtle)] pt-4 space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--content-tertiary)]">
+                Move along
+              </p>
+              {worksheetBinNav && (
+                <div className="rounded-2xl border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] p-3">
+                  <div className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--content-accent)]">
+                        Bin queue · {worksheetBinNav.position} / {worksheetBinNav.total}
+                      </p>
+                      {worksheetBinNav.canAdvance ? (
+                        <p className="mt-1 line-clamp-2 text-sm leading-snug text-[var(--content-secondary)]">
+                          Next SKU:{' '}
+                          <span className="font-mono font-semibold text-[var(--content-primary)]">
+                            {skuQuickLabel(worksheetBinNav.nextSku)}
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-sm text-[var(--content-secondary)]">
+                          Only SKU loaded for this bin — save or map, then load another bin when done.
+                        </p>
+                      )}
+                    </div>
+                    <BigButton
+                      type="button"
+                      variant="primary"
+                      className="shrink-0 min-h-12 min-w-[7.5rem] bg-[var(--bg-accent)] px-4 text-[var(--content-on-color)]"
+                      disabled={!worksheetBinNav.canAdvance}
+                      onClick={handleNextSkuInBin}
+                    >
+                      Next
+                      <CaretRight size={22} weight="bold" className="ml-1 inline align-middle" aria-hidden />
+                    </BigButton>
+                  </div>
+                  {worksheetBinNav.canAdvance ? (
+                    <p className="mt-2 text-xs text-[var(--content-tertiary)]">
+                      Next SKU in this bin — wraps from last back to first.
+                    </p>
+                  ) : null}
+                </div>
+              )}
+
+              {shelfRowPatternMatched ? (
+                <ShelfRowTourStrip
+                  variant="compact"
+                  payload={shelfRowPayload}
+                  loading={shelfRowLoading}
+                  currentBinNorm={currentBinNorm}
+                  nextShelfBinId={nextShelfBinId}
+                  prevShelfBinId={prevShelfBinId}
+                  onLoadShelf={handleLoadShelfBin}
+                />
+              ) : null}
+            </div>
           </section>
         )}
 
@@ -969,6 +1255,20 @@ export default function BinOnboardingPage(): ReactElement {
             >
               Continue
             </BigButton>
+            {nextShelfBinId &&
+            shelfRowPayload &&
+            shelfRowPayload.binIds.length > 1 &&
+            nextShelfBinId !== currentBinNorm ? (
+              <BigButton
+                type="button"
+                variant="secondary"
+                className="mt-3 w-full border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]"
+                onClick={() => handleLoadShelfBin(nextShelfBinId)}
+              >
+                Next shelf ·{' '}
+                <span className="font-mono font-semibold">{nextShelfBinId}</span>
+              </BigButton>
+            ) : null}
           </div>
         </div>
       )}

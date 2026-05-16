@@ -93,6 +93,59 @@ export function normalizeBinCode(value: string): string {
   return value.trim().toUpperCase().replace(/\s+/g, '');
 }
 
+/**
+ * Rack-row prefix when bin IDs look like shelf strips: last segment is one letter A–Z
+ * immediately after digits (e.g. GGR-1E → GGR-1, GGR-11F → GGR-11).
+ * Used to discover sibling bins in `bin_inventory` for guided onboarding walks.
+ */
+const SHELF_LETTER_BIN_PATTERN = /^(.*\d)([A-Z])$/;
+
+export interface ShelfSiblingBinsPayload {
+  /** Prefix shared by sibling bins, e.g. GGR-1 */
+  rowPrefix: string | null;
+  /** Distinct bin_ids on this shelf row, sorted for shelf-order walks */
+  binIds: string[];
+}
+
+export function inferShelfRowPrefix(binId: string): string | null {
+  const u = normalizeBinCode(binId);
+  const m = u.match(SHELF_LETTER_BIN_PATTERN);
+  return m ? m[1] : null;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Pull sibling bins from warehouse inventory where IDs match `{rowPrefix}[A-Z]`. */
+export async function fetchShelfSiblingBinIds(seedBinId: string): Promise<ShelfSiblingBinsPayload> {
+  const normalized = normalizeBinCode(seedBinId);
+  const rowPrefix = inferShelfRowPrefix(normalized);
+  if (!rowPrefix) {
+    return { rowPrefix: null, binIds: [normalized] };
+  }
+
+  const { data, error } = await supabase
+    .from('bin_inventory')
+    .select('bin_id')
+    .like('bin_id', `${rowPrefix}%`)
+    .limit(800);
+
+  if (error) throw error;
+
+  const suffixPattern = new RegExp(`^${escapeRegExp(rowPrefix)}[A-Z]$`);
+  const uniq = new Set<string>();
+  for (const row of data ?? []) {
+    const id = normalizeBinCode(String((row as { bin_id: string }).bin_id ?? ''));
+    if (!id || !suffixPattern.test(id)) continue;
+    uniq.add(id);
+  }
+  uniq.add(normalized);
+
+  const binIds = [...uniq].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return { rowPrefix, binIds };
+}
+
 function toSkuOption({
   binId,
   skuBusyCode,
