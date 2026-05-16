@@ -57,6 +57,8 @@ interface ActiveClaimInfo {
 export interface OrderWithClaimInfo extends Order {
   /** Null if no active claim, otherwise claim details */
   claim_info: ActiveClaimInfo | null;
+  /** Active sales_edit lock (submitted orders being edited by salesperson) — billing stage only */
+  sales_edit_claim_info: ActiveClaimInfo | null;
   /** Is this order claimed by the current user? */
   is_mine: boolean;
   /** Number of lines where quoted price differs from book price. */
@@ -66,14 +68,16 @@ export interface OrderWithClaimInfo extends Order {
 }
 
 interface UseClaimableOrdersReturn {
-  /** Orders with no active claim — available to claim */
+  /** Orders with no active billing claim and no fresh sales_edit lock */
   available: OrderWithClaimInfo[];
   /** Orders claimed by the current user */
   myActive: OrderWithClaimInfo[];
-  /** Orders claimed by someone else (fresh) */
+  /** Orders claimed by someone else (fresh billing claim) */
   otherActive: OrderWithClaimInfo[];
-  /** Orders with stale claims (heartbeat expired, can be taken over) */
+  /** Orders with stale billing claims (heartbeat expired, can be taken over) */
   stale: OrderWithClaimInfo[];
+  /** Submitted orders locked while a salesperson edits lines (fresh sales_edit claim) */
+  salesLocked: OrderWithClaimInfo[];
   /** All orders combined */
   all: OrderWithClaimInfo[];
   /** Loading state */
@@ -114,6 +118,12 @@ type BillingQueueSnapshotRow = {
   claimed_at: string | null;
   last_heartbeat_at: string | null;
   claim_is_stale: boolean | null;
+  sales_edit_claim_id?: number | null;
+  sales_edit_claimed_by_user_id?: number | null;
+  sales_edit_claimed_by_name?: string | null;
+  sales_edit_claimed_at?: string | null;
+  sales_edit_last_heartbeat_at?: string | null;
+  sales_edit_claim_is_stale?: boolean | null;
 };
 
 function getTodayStartIso(): string {
@@ -185,33 +195,43 @@ async function fetchLegacyClaimableOrders(
     }
   }
 
+  const claimStages = stage === 'billing' ? ['billing', 'sales_edit'] : [stage];
+
   const { data: claims, error: claimError } = await supabase
     .from('work_claims')
-    .select('id, order_id, claimed_by_user_id, claimed_at, last_heartbeat_at, status, users!work_claims_claimed_by_user_id_fkey(full_name)')
+    .select('id, order_id, stage, claimed_by_user_id, claimed_at, last_heartbeat_at, status, users!work_claims_claimed_by_user_id_fkey(full_name)')
     .in('order_id', orderIds)
-    .eq('stage', stage)
+    .in('stage', claimStages)
     .eq('status', 'active');
 
   if (claimError) throw claimError;
 
   const claimMap = new Map<number, ActiveClaimInfo>();
+  const salesEditClaimMap = new Map<number, ActiveClaimInfo>();
   const now = Date.now();
 
   for (const claim of claims ?? []) {
     const heartbeatAge = now - new Date(claim.last_heartbeat_at).getTime();
     const userRecord = claim.users as unknown as { full_name: string } | null;
-    claimMap.set(claim.order_id, {
-      claim_id: claim.id,
-      claimed_by_user_id: claim.claimed_by_user_id,
+    const info: ActiveClaimInfo = {
+      claim_id: Number(claim.id),
+      claimed_by_user_id: Number(claim.claimed_by_user_id),
       claimed_by_name: userRecord?.full_name ?? 'Unknown',
       claimed_at: claim.claimed_at,
       last_heartbeat_at: claim.last_heartbeat_at,
       is_stale: heartbeatAge > STALE_THRESHOLD_MS,
-    });
+    };
+    const claimStage = claim.stage as string;
+    if (claimStage === 'sales_edit') {
+      salesEditClaimMap.set(claim.order_id, info);
+    } else if (claimStage === stage) {
+      claimMap.set(claim.order_id, info);
+    }
   }
 
   return orders.map((order): OrderWithClaimInfo => {
     const claimInfo = claimMap.get(order.id) ?? null;
+    const salesEditInfo = salesEditClaimMap.get(order.id) ?? null;
     return {
       ...order,
       customer_address:
@@ -219,6 +239,7 @@ async function fetchLegacyClaimableOrders(
           ? (customerAddressMap.get(order.customer_id) ?? null)
           : null,
       claim_info: claimInfo,
+      sales_edit_claim_info: salesEditInfo,
       is_mine: claimInfo?.claimed_by_user_id === userId,
     };
   });
@@ -252,6 +273,21 @@ async function fetchBillingQueueSnapshot(
           }
         : null;
 
+    const salesEditInfo =
+      row.sales_edit_claim_id != null &&
+      row.sales_edit_claimed_by_user_id != null &&
+      row.sales_edit_claimed_at != null &&
+      row.sales_edit_last_heartbeat_at != null
+        ? {
+            claim_id: Number(row.sales_edit_claim_id),
+            claimed_by_user_id: Number(row.sales_edit_claimed_by_user_id),
+            claimed_by_name: row.sales_edit_claimed_by_name ?? 'Unknown',
+            claimed_at: row.sales_edit_claimed_at,
+            last_heartbeat_at: row.sales_edit_last_heartbeat_at,
+            is_stale: Boolean(row.sales_edit_claim_is_stale),
+          }
+        : null;
+
     return {
       id: Number(row.id),
       order_number: row.order_number,
@@ -280,6 +316,7 @@ async function fetchBillingQueueSnapshot(
       completed_at: row.completed_at,
       dispatched_at: row.dispatched_at,
       claim_info: claimInfo,
+      sales_edit_claim_info: salesEditInfo,
       is_mine: claimInfo?.claimed_by_user_id === userId,
     };
   });
@@ -528,24 +565,37 @@ export function useClaimableOrders(
     const myActive: OrderWithClaimInfo[] = [];
     const otherActive: OrderWithClaimInfo[] = [];
     const stale: OrderWithClaimInfo[] = [];
+    const salesLocked: OrderWithClaimInfo[] = [];
 
     for (const order of all) {
-      if (!order.claim_info) {
-        available.push(order);
-      } else if (order.is_mine) {
+      const billing = order.claim_info;
+      const se = order.sales_edit_claim_info;
+      const freshSalesLock = Boolean(se && !se.is_stale);
+
+      if (billing && order.is_mine) {
         myActive.push(order);
-      } else if (order.claim_info.is_stale) {
+      } else if (billing && billing.is_stale) {
         stale.push(order);
-      } else {
+      } else if (billing && !billing.is_stale) {
         otherActive.push(order);
+      } else if (freshSalesLock) {
+        salesLocked.push(order);
+      } else {
+        available.push(order);
       }
     }
 
-    return { available, myActive, otherActive, stale, all };
+    return { available, myActive, otherActive, stale, salesLocked, all };
   }, [result.data]);
 
   return {
     ...categorized,
     isLoading: result.isLoading,
   };
+}
+
+/** True when a salesperson holds a fresh sales_edit lock — billing should treat the row as frozen. */
+export function isSalesEditFreshLock(order: OrderWithClaimInfo): boolean {
+  const se = order.sales_edit_claim_info;
+  return Boolean(se && !se.is_stale);
 }

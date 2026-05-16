@@ -11,11 +11,16 @@ type ItemCatalogJoin = {
   alias1: string | null;
   main_group: string | null;
   parent_group: string | null;
+  busy_code: number | null;
 };
 
 type OrderItemRow = Omit<
   OrderItem,
-  'catalog_alias' | 'catalog_alias1' | 'catalog_main_group' | 'catalog_parent_group'
+  | 'catalog_alias'
+  | 'catalog_alias1'
+  | 'catalog_main_group'
+  | 'catalog_parent_group'
+  | 'catalog_busy_code'
 > & {
   items?: ItemCatalogJoin | ItemCatalogJoin[] | null;
 };
@@ -41,6 +46,7 @@ function mapOrderItemsWithCatalog(rows: OrderItemRow[] | null): OrderItem[] {
       catalog_alias1: c?.alias1 ?? null,
       catalog_main_group: c?.main_group ?? null,
       catalog_parent_group: c?.parent_group ?? null,
+      catalog_busy_code: c?.busy_code ?? null,
     };
   });
 }
@@ -69,7 +75,8 @@ export function useOrderDetail(orderId: number | null) {
             alias,
             alias1,
             main_group,
-            parent_group
+            parent_group,
+            busy_code
           )
         `,
         )

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import type { OrderItem } from '../types';
-import { flagsFromOrderItems } from '../lib/billing/liveQueueDraft';
+import { flagsFromOrderItems, type BillingLineEdit } from '../lib/billing/liveQueueDraft';
 
 export type BillingFlowState = 'queue' | 'orderSheet' | 'report';
 
@@ -9,11 +9,20 @@ export interface ItemFlag {
   availableQty?: number; // only for partial
 }
 
+export type { BillingLineEdit } from '../lib/billing/liveQueueDraft';
+
 export function useBillingFlow() {
   const [state, setState] = useState<BillingFlowState>('queue');
+  /** Keyed by `order_items.id`. */
   const [flags, setFlags] = useState<Record<number, ItemFlag>>({});
-  /** True after the user edits flags; false after hydrate or successful draft persist. */
+  /** Keyed by `order_items.id`. */
+  const [lineEdits, setLineEdits] = useState<Record<number, BillingLineEdit>>({});
+  /** True after the user edits flags or lines; false after hydrate or successful draft persist. */
   const draftDirtyRef = useRef(false);
+
+  const markDraftDirty = useCallback(() => {
+    draftDirtyRef.current = true;
+  }, []);
 
   const resetDraftDirty = useCallback(() => {
     draftDirtyRef.current = false;
@@ -25,24 +34,28 @@ export function useBillingFlow() {
 
   const openOrder = useCallback(() => {
     setFlags({});
+    setLineEdits({});
     draftDirtyRef.current = false;
     setState('orderSheet');
   }, []);
 
   const finishBilling = useCallback(() => {
     setFlags({});
+    setLineEdits({});
     draftDirtyRef.current = false;
     setState('report');
   }, []);
 
   const nextOrder = useCallback(() => {
     setFlags({});
+    setLineEdits({});
     draftDirtyRef.current = false;
     setState('queue');
   }, []);
 
   const returnToQueue = useCallback(() => {
     setFlags({});
+    setLineEdits({});
     draftDirtyRef.current = false;
     setState('queue');
   }, []);
@@ -53,27 +66,89 @@ export function useBillingFlow() {
     draftDirtyRef.current = false;
   }, []);
 
-  // --- Flag Actions (keyed by item index) ---
+  // --- Flag Actions (keyed by order_items.id) ---
 
-  const flagNoStock = useCallback((itemIndex: number) => {
+  const flagNoStock = useCallback((orderItemId: number) => {
     draftDirtyRef.current = true;
-    setFlags(prev => ({ ...prev, [itemIndex]: { type: 'no_stock' } }));
+    setFlags((prev) => ({ ...prev, [orderItemId]: { type: 'no_stock' } }));
   }, []);
 
-  const flagPartial = useCallback((itemIndex: number, availableQty: number) => {
+  const flagPartial = useCallback((orderItemId: number, availableQty: number) => {
     draftDirtyRef.current = true;
-    setFlags(prev => ({
+    setFlags((prev) => ({
       ...prev,
-      [itemIndex]: { type: 'partial', availableQty },
+      [orderItemId]: { type: 'partial', availableQty },
     }));
   }, []);
 
-  const clearFlag = useCallback((itemIndex: number) => {
+  const clearFlag = useCallback((orderItemId: number) => {
     draftDirtyRef.current = true;
-    setFlags(prev => {
+    setFlags((prev) => {
       const next = { ...prev };
-      delete next[itemIndex];
+      delete next[orderItemId];
       return next;
+    });
+  }, []);
+
+  // --- Line edits ---
+
+  const editLineQty = useCallback((orderItemId: number, qty: number) => {
+    draftDirtyRef.current = true;
+    setLineEdits((prev) => ({
+      ...prev,
+      [orderItemId]: { ...prev[orderItemId], qtyRequested: qty },
+    }));
+  }, []);
+
+  const editLineRate = useCallback((orderItemId: number, rate: number) => {
+    draftDirtyRef.current = true;
+    setLineEdits((prev) => ({
+      ...prev,
+      [orderItemId]: { ...prev[orderItemId], priceQuoted: rate },
+    }));
+  }, []);
+
+  const removeLine = useCallback((orderItemId: number) => {
+    draftDirtyRef.current = true;
+    setLineEdits((prev) => ({
+      ...prev,
+      [orderItemId]: { ...prev[orderItemId], removed: true },
+    }));
+    setFlags((prev) => {
+      const next = { ...prev };
+      delete next[orderItemId];
+      return next;
+    });
+  }, []);
+
+  const restoreLine = useCallback((orderItemId: number) => {
+    draftDirtyRef.current = true;
+    setLineEdits((prev) => {
+      const cur = prev[orderItemId];
+      if (!cur) return prev;
+      const { removed: _removed, ...rest } = cur;
+      const next = { ...prev };
+      if (Object.keys(rest).length === 0) {
+        delete next[orderItemId];
+      } else {
+        next[orderItemId] = rest;
+      }
+      return next;
+    });
+  }, []);
+
+  /** Drop edit entries for rows no longer returned by the server (e.g. after draft persist deleted lines). */
+  const pruneLineEditsForRemovedRows = useCallback((existingOrderItemIds: Set<number>) => {
+    setLineEdits((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of Object.keys(next).map(Number)) {
+        if (!existingOrderItemIds.has(id)) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
     });
   }, []);
 
@@ -82,11 +157,22 @@ export function useBillingFlow() {
   const flagCount = Object.keys(flags).length;
   const hasFlags = flagCount > 0;
 
+  const removedCount = Object.values(lineEdits).filter((e) => e.removed).length;
+
+  const editCount = Object.entries(lineEdits).filter(
+    ([, e]) =>
+      !e.removed &&
+      (e.qtyRequested !== undefined || e.priceQuoted !== undefined),
+  ).length;
+
   return {
     state,
     flags,
+    lineEdits,
     flagCount,
     hasFlags,
+    removedCount,
+    editCount,
 
     // Transitions
     openOrder,
@@ -99,6 +185,14 @@ export function useBillingFlow() {
     flagNoStock,
     flagPartial,
     clearFlag,
+
+    // Line edits
+    editLineQty,
+    editLineRate,
+    removeLine,
+    restoreLine,
+    pruneLineEditsForRemovedRows,
+    markDraftDirty,
 
     isDraftDirty,
     resetDraftDirty,

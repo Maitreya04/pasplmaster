@@ -36,8 +36,8 @@ function buildReportText(params: {
   const noStockItems: string[] = [];
   let billedCount = 0;
 
-  items.forEach((item, index) => {
-    const flag = flags[index];
+  items.forEach((item) => {
+    const flag = flags[item.id];
     if (!flag) {
       billedCount++;
       return;
@@ -82,8 +82,7 @@ export function ReportView({
     [orderNumber, orderName, salesperson, items, flags],
   );
 
-  const flagCount = Object.keys(flags).length;
-  const billedCount = items.length - flagCount;
+  const billedCount = items.filter((item) => !flags[item.id]).length;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -149,7 +148,7 @@ export function ReportView({
             {orderName} — billed
           </h2>
           <p className="text-xs text-[var(--content-secondary)]">
-            {billedCount} billed · {flagCount} flagged
+            {billedCount} billed · {items.filter((item) => !!flags[item.id]).length} flagged
           </p>
         </div>
 

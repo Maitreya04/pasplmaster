@@ -1,6 +1,7 @@
 import { useState, useEffect, type ReactElement } from 'react';
-import { Tray } from '@phosphor-icons/react';
+import { Lock, Tray } from '@phosphor-icons/react';
 import type { OrderWithClaimInfo } from '../../../hooks/useClaimableOrders';
+import { isSalesEditFreshLock } from '../../../hooks/useClaimableOrders';
 import { StatusBadge, EmptyState } from '../../../components/shared';
 import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
 
@@ -9,6 +10,7 @@ interface QueueViewProps {
   otherActive: OrderWithClaimInfo[];
   stale: OrderWithClaimInfo[];
   myActive: OrderWithClaimInfo[];
+  salesLocked: OrderWithClaimInfo[];
   isLoading: boolean;
   onSelect: (orderId: number) => void;
   onTakeover: (orderId: number) => void;
@@ -28,11 +30,18 @@ function SectionHeader({ label, count }: { label: string; count: number }) {
   );
 }
 
+function rowSelectable(order: OrderWithClaimInfo): boolean {
+  if (isSalesEditFreshLock(order)) return false;
+  if (!order.claim_info) return true;
+  return order.is_mine || order.claim_info.is_stale;
+}
+
 function OrderRow({
   order,
   isSelected,
   isClaimed,
   isStale,
+  freezeHint,
   onClick,
   onTakeover,
 }: {
@@ -40,9 +49,12 @@ function OrderRow({
   isSelected: boolean;
   isClaimed: boolean;
   isStale: boolean;
+  freezeHint?: string | null;
   onClick: () => void;
   onTakeover?: () => void;
 }) {
+  const isFrozen = Boolean(freezeHint);
+  const isBlocked = (isClaimed && !isStale) || isFrozen;
   const isUrgent = order.priority === 'urgent';
   const hasSpecialRate = order.special_rate_line_count > 0;
   const customerAddress = order.customer_address?.trim() ?? '';
@@ -52,10 +64,10 @@ function OrderRow({
 
   return (
     <button
-      onClick={isClaimed && !isStale ? undefined : onClick}
-      disabled={isClaimed && !isStale}
+      onClick={isBlocked ? undefined : onClick}
+      disabled={isBlocked}
       className={`ds-card ds-card--pressable w-full text-left p-4 transition-all ${
-        isClaimed && !isStale
+        isBlocked
           ? 'opacity-50 cursor-not-allowed'
           : isSelected
             ? 'ds-row--selected ring-1 ring-[var(--role-primary)]'
@@ -72,7 +84,7 @@ function OrderRow({
               </span>
             )}
             <h3 className={`text-base font-semibold truncate ${
-              isClaimed && !isStale ? 'text-[var(--content-tertiary)]' : 'text-[var(--content-primary)]'
+              isBlocked ? 'text-[var(--content-tertiary)]' : 'text-[var(--content-primary)]'
             }`}>
               {order.customer_name}
             </h3>
@@ -98,7 +110,7 @@ function OrderRow({
         </div>
         <div className="text-right shrink-0">
           <p className={`text-sm font-mono font-semibold tabular-nums ${
-            isClaimed && !isStale ? 'text-[var(--content-quaternary)]' : 'text-[var(--content-primary)]'
+            isBlocked ? 'text-[var(--content-quaternary)]' : 'text-[var(--content-primary)]'
           }`}>
             {formatCurrency(order.total_value)}
           </p>
@@ -126,6 +138,14 @@ function OrderRow({
             {notePreview}
           </p>
         </div>
+      )}
+
+      {/* Frozen — sales editing */}
+      {isFrozen && freezeHint && (
+        <p className="font-ds-label-size text-[var(--content-secondary)] mt-2 flex items-center gap-1.5">
+          <Lock size={14} weight="bold" className="shrink-0 text-[var(--content-tertiary)]" />
+          {freezeHint}
+        </p>
       )}
 
       {/* Being billed by someone else */}
@@ -164,12 +184,13 @@ export function QueueView({
   otherActive,
   stale,
   myActive,
+  salesLocked,
   isLoading,
   onSelect,
   onTakeover,
 }: QueueViewProps): ReactElement {
-  // Flat list for keyboard navigation: myActive → available → stale
-  const navigable = [...myActive, ...available, ...stale];
+  // Keyboard navigation includes frozen rows (visible but not selectable via Enter)
+  const navigable = [...myActive, ...available, ...stale, ...salesLocked];
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   useEffect(() => {
@@ -191,7 +212,7 @@ export function QueueView({
       if (e.key === 'Enter' && navigable.length > 0) {
         e.preventDefault();
         const order = navigable[selectedIndex];
-        if (order && (!order.claim_info || order.is_mine || order.claim_info.is_stale)) {
+        if (order && rowSelectable(order)) {
           onSelect(order.id);
         }
       }
@@ -200,7 +221,7 @@ export function QueueView({
     return () => window.removeEventListener('keydown', onKey);
   }, [navigable, selectedIndex, onSelect]);
 
-  const totalCount = available.length + stale.length + myActive.length;
+  const totalCount = available.length + stale.length + myActive.length + salesLocked.length;
 
   if (isLoading) {
     return (
@@ -217,7 +238,7 @@ export function QueueView({
     );
   }
 
-  if (totalCount === 0 && otherActive.length === 0) {
+  if (totalCount === 0 && otherActive.length === 0 && salesLocked.length === 0) {
     return (
       <div className="density-compact min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
         <EmptyState
@@ -291,6 +312,30 @@ export function QueueView({
                       setSelectedIndex(idx);
                       onSelect(order.id);
                     }}
+                  />
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {/* Frozen — salesperson editing lines */}
+        {salesLocked.length > 0 && (
+          <>
+            <SectionHeader label="Sales editing (frozen)" count={salesLocked.length} />
+            <div className="space-y-2">
+              {salesLocked.map((order) => {
+                const idx = navIndex++;
+                const who = order.sales_edit_claim_info?.claimed_by_name ?? 'Sales';
+                return (
+                  <OrderRow
+                    key={order.id}
+                    order={order}
+                    isSelected={idx === selectedIndex}
+                    isClaimed={false}
+                    isStale={false}
+                    freezeHint={`Locked — ${who} is editing this order`}
+                    onClick={() => {}}
                   />
                 );
               })}

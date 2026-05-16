@@ -15,6 +15,8 @@ interface ClaimResult {
   claimed_by?: string;
   claimed_at?: string;
   last_heartbeat_at?: string;
+  /** Present when reason is locked_by_sales_edit */
+  locked_by_name?: string;
 }
 
 interface UseWorkClaimReturn {

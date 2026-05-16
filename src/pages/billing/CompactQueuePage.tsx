@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase/client';
-import { useClaimableOrders } from '../../hooks/useClaimableOrders';
+import { useClaimableOrders, isSalesEditFreshLock } from '../../hooks/useClaimableOrders';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { useAuth } from '../../context/AuthContext';
@@ -570,7 +570,7 @@ export default function CompactQueuePage() {
   const push = useRolePushNotifications({ role, userId, userName });
 
   // 1. Queue Data
-  const { available, myActive, stale, isLoading: queueLoading } = useClaimableOrders({
+  const { available, myActive, stale, salesLocked, isLoading: queueLoading } = useClaimableOrders({
     stage: 'billing',
     workflowStatus: 'submitted',
   });
@@ -587,10 +587,12 @@ export default function CompactQueuePage() {
     if (currentOrderId) {
       const found = queue.find((o) => o.id === currentOrderId);
       if (found) return found;
+      const frozen = salesLocked.find((o) => o.id === currentOrderId);
+      if (frozen) return frozen;
     }
     if (myActive.length > 0) return myActive[0];
     return queue[0] ?? null;
-  }, [myActive, currentOrderId, queue]);
+  }, [myActive, currentOrderId, queue, salesLocked]);
 
   const effectiveOrderId = activeInQueue?.id ?? null;
 
@@ -606,17 +608,37 @@ export default function CompactQueuePage() {
 
   // Auto-claim on commit
   const claimAttempted = useRef<number | null>(null);
+  const resetMachine = machine.reset;
+  // Block commit when sales has frozen the order in My Orders
   useEffect(() => {
-    if (
-      machine.state === 'commit' &&
-      effectiveOrderId &&
-      !isClaimedByMe &&
-      claimAttempted.current !== effectiveOrderId
-    ) {
-      claimAttempted.current = effectiveOrderId;
-      claim();
-    }
-  }, [machine.state, effectiveOrderId, isClaimedByMe, claim]);
+    if (!activeInQueue || machine.state !== 'commit') return;
+    if (!isSalesEditFreshLock(activeInQueue)) return;
+    const who = activeInQueue.sales_edit_claim_info?.claimed_by_name ?? 'Sales';
+    toast.warning(`This order is frozen — ${who} is editing it from My Orders.`);
+    claimAttempted.current = null;
+    resetMachine();
+    setSelectedOrderId(null);
+  }, [activeInQueue, machine.state, toast, resetMachine]);
+
+  useEffect(() => {
+    if (machine.state !== 'commit' || !effectiveOrderId || isClaimedByMe) return;
+    if (activeInQueue && isSalesEditFreshLock(activeInQueue)) return;
+    if (claimAttempted.current === effectiveOrderId) return;
+    claimAttempted.current = effectiveOrderId;
+    void (async () => {
+      const result = await claim();
+      if (!result.success && result.reason === 'locked_by_sales_edit') {
+        const who =
+          typeof result.locked_by_name === 'string' && result.locked_by_name.trim()
+            ? result.locked_by_name.trim()
+            : 'Sales';
+        toast.warning(`Locked — ${who} is editing this order from sales.`);
+        claimAttempted.current = null;
+        resetMachine();
+        setSelectedOrderId(null);
+      }
+    })();
+  }, [machine.state, effectiveOrderId, isClaimedByMe, claim, toast, resetMachine, activeInQueue]);
 
   // Skip / Release
   const handleSkip = useCallback(async () => {

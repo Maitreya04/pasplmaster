@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase/client';
-import { useClaimableOrders } from '../../hooks/useClaimableOrders';
+import { useClaimableOrders, isSalesEditFreshLock } from '../../hooks/useClaimableOrders';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { useAuth } from '../../context/AuthContext';
@@ -17,14 +17,18 @@ import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
 import {
   captureBillingLiveQueueBaseline,
   persistBillingLiveQueueDraft,
+  type BillingLineEdit,
 } from '../../lib/billing/liveQueueDraft';
 
 import { useBillingFlow } from '../../hooks/useBillingFlow';
+import { useBillingStockFreshness } from '../../hooks/useBillingStockFreshness';
 import { QueueView } from './LiveQueue/QueueView';
 import { OrderSheetView } from './LiveQueue/OrderSheetView';
 import { ReportView } from './LiveQueue/ReportView';
+import { AddLineSheet } from './LiveQueue/AddLineSheet';
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 import type { OrderItem } from '../../types';
+import type { ItemFlag } from '../../hooks/useBillingFlow';
 
 /** Frozen at approve time so the report/WhatsApp text stays correct after the order drops off the submitted queue. */
 type BillingReportSnapshot = {
@@ -33,6 +37,7 @@ type BillingReportSnapshot = {
   orderName: string;
   salesperson: string | null;
   items: OrderItem[];
+  flags: Record<number, ItemFlag>;
 };
 
 type LiveQueueLineState = {
@@ -41,6 +46,15 @@ type LiveQueueLineState = {
   pendingSource: 'billing' | 'sales' | null;
   pendingNote: string | null;
 };
+
+function mergeOrderLine(item: OrderItem, edit?: BillingLineEdit): OrderItem {
+  if (!edit || edit.removed) return item;
+  return {
+    ...item,
+    qty_requested: edit.qtyRequested ?? item.qty_requested,
+    price_quoted: edit.priceQuoted ?? item.price_quoted,
+  };
+}
 
 function deriveLiveQueueLineState(
   item: OrderItem,
@@ -99,7 +113,7 @@ export default function LiveQueuePage() {
     : null;
 
   // 1. Queue Data
-  const { available, myActive, otherActive, stale, isLoading: queueLoading } = useClaimableOrders({
+  const { available, myActive, otherActive, stale, salesLocked, isLoading: queueLoading } = useClaimableOrders({
     stage: 'billing',
     workflowStatus: 'submitted',
   });
@@ -124,10 +138,12 @@ export default function LiveQueuePage() {
     if (currentOrderId) {
       const found = queue.find((o) => o.id === currentOrderId);
       if (found) return found;
+      const frozen = salesLocked.find((o) => o.id === currentOrderId);
+      if (frozen) return frozen;
     }
     if (myActive.length > 0) return myActive[0];
     return queue[0] ?? null;
-  }, [myActive, currentOrderId, queue]);
+  }, [myActive, currentOrderId, queue, salesLocked]);
 
   const effectiveOrderId = activeInQueue?.id ?? null;
 
@@ -147,17 +163,39 @@ export default function LiveQueuePage() {
   const draftBaselineRef = useRef<Map<number, { qty_shippable: number; qty_po: number }>>(new Map());
   const hydratedSessionRef = useRef<{ orderId: number } | null>(null);
   const itemsRef = useRef<OrderItem[]>([]);
-  const flagsRef = useRef(flow.flags);
   const orderRef = useRef(order);
   itemsRef.current = items;
-  flagsRef.current = flow.flags;
   orderRef.current = order;
+
+  const [addLineOpen, setAddLineOpen] = useState(false);
+  const [sessionNewOrderItemIds, setSessionNewOrderItemIds] = useState<Set<number>>(() => new Set());
+
+  const claimAttempted = useRef<number | null>(null);
+  const billingReportSnapshotRef = useRef<BillingReportSnapshot | null>(null);
+
+  useEffect(() => {
+    setSessionNewOrderItemIds(new Set());
+    setAddLineOpen(false);
+  }, [effectiveOrderId]);
+
+  useEffect(() => {
+    if (flow.state !== 'orderSheet') return;
+    if (items.length === 0) return;
+    flow.pruneLineEditsForRemovedRows(new Set(items.map((i) => i.id)));
+  }, [items, flow.state, flow.pruneLineEditsForRemovedRows]);
+
+  const freshnessQuery = useBillingStockFreshness(
+    flow.state === 'orderSheet' ? effectiveOrderId : null,
+    items,
+    order?.stock_location_code,
+  );
 
   const persistLiveQueueDraftIfDirty = useCallback(async () => {
     if (!flowRef.current.isDraftDirty()) return;
     const oid = orderRef.current?.id ?? null;
     const itemsSnap = itemsRef.current;
-    const flagsSnap = flagsRef.current;
+    const flagsSnap = flowRef.current.flags;
+    const lineEditsSnap = flowRef.current.lineEdits;
     const baseline = draftBaselineRef.current;
     if (!oid || itemsSnap.length === 0 || baseline.size === 0) return;
 
@@ -165,6 +203,7 @@ export default function LiveQueuePage() {
       items: itemsSnap,
       flags: flagsSnap,
       baseline,
+      lineEdits: lineEditsSnap,
     });
     if (error) {
       console.error('[LiveQueue] draft persist failed', error);
@@ -175,6 +214,50 @@ export default function LiveQueuePage() {
       void queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
     }
   }, [queryClient, toast]);
+
+  const handleApplyLiveStock = useCallback(
+    async (orderItemId: number, liveCapacity: number) => {
+      const o = orderRef.current;
+      if (!o?.id) return;
+
+      const row = itemsRef.current.find((i) => i.id === orderItemId);
+      if (!row) return;
+
+      const edits = flowRef.current.lineEdits[orderItemId];
+      const qtyReq = edits?.qtyRequested ?? row.qty_requested;
+
+      const qtyPo = Math.max(0, qtyReq - liveCapacity);
+      const patch = {
+        qty_shippable: liveCapacity,
+        qty_po: qtyPo,
+        qty_approved: liveCapacity,
+      };
+
+      const { error } = await supabase.from('order_items').update(patch).eq('id', orderItemId);
+      if (error) {
+        toast.error(error.message ?? 'Could not apply live stock');
+        return;
+      }
+
+      draftBaselineRef.current.set(orderItemId, {
+        qty_shippable: liveCapacity,
+        qty_po: qtyPo,
+      });
+
+      if (liveCapacity <= 0 && qtyReq > 0) {
+        flowRef.current.flagNoStock(orderItemId);
+      } else if (liveCapacity < qtyReq) {
+        flowRef.current.flagPartial(orderItemId, liveCapacity);
+      } else {
+        flowRef.current.clearFlag(orderItemId);
+      }
+      flowRef.current.markDraftDirty();
+
+      await queryClient.invalidateQueries({ queryKey: ['order', o.id] });
+      await queryClient.invalidateQueries({ queryKey: ['billing-stock-freshness'] });
+    },
+    [queryClient, toast],
+  );
 
   // Reset sheet hydration when the targeted order changes
   useEffect(() => {
@@ -225,22 +308,37 @@ export default function LiveQueuePage() {
     flow.state !== 'queue' &&
     activeInQueue?.priority !== 'urgent';
 
-  // Track auto-claiming
-  const claimAttempted = useRef<number | null>(null);
-  const billingReportSnapshotRef = useRef<BillingReportSnapshot | null>(null);
-
-  // When entering orderSheet, fire the background claim
+  // Block billing sheet when order is frozen by sales edit (e.g. URL preselect).
   useEffect(() => {
-    if (
-      flow.state === 'orderSheet' &&
-      effectiveOrderId &&
-      !isClaimedByMe &&
-      claimAttempted.current !== effectiveOrderId
-    ) {
-      claimAttempted.current = effectiveOrderId;
-      claim();
-    }
-  }, [flow.state, effectiveOrderId, isClaimedByMe, claim]);
+    if (flow.state !== 'orderSheet' || !activeInQueue) return;
+    if (!isSalesEditFreshLock(activeInQueue)) return;
+    const who = activeInQueue.sales_edit_claim_info?.claimed_by_name ?? 'Sales';
+    toast.warning(`This order is frozen — ${who} is editing it from My Orders.`);
+    claimAttempted.current = null;
+    flow.returnToQueue();
+    setCurrentOrderId(null);
+  }, [flow.state, activeInQueue, flow, toast]);
+
+  useEffect(() => {
+    if (flow.state !== 'orderSheet' || !effectiveOrderId || isClaimedByMe) return;
+    if (activeInQueue && isSalesEditFreshLock(activeInQueue)) return;
+    if (claimAttempted.current === effectiveOrderId) return;
+
+    claimAttempted.current = effectiveOrderId;
+    void (async () => {
+      const result = await claim();
+      if (!result.success && result.reason === 'locked_by_sales_edit') {
+        const who =
+          typeof result.locked_by_name === 'string' && result.locked_by_name.trim()
+            ? result.locked_by_name.trim()
+            : 'Sales';
+        toast.warning(`Locked — ${who} is editing this order from sales.`);
+        claimAttempted.current = null;
+        flow.returnToQueue();
+        setCurrentOrderId(null);
+      }
+    })();
+  }, [flow.state, effectiveOrderId, isClaimedByMe, claim, toast, flow, activeInQueue]);
 
   // ── Skip / Release ──
   const handleSkip = useCallback(async () => {
@@ -277,23 +375,117 @@ export default function LiveQueuePage() {
     toast.info(`Switching to urgent order: ${urgentOrder.customer_name}`);
   }, [urgentInQueue, claimId, userId, release, flow, toast, persistLiveQueueDraftIfDirty]);
 
-  // ── Complete Billing (Approve) — simplified from flags only ──
+  // ── Complete Billing (Approve): merges flags + local line edits, deletes removed rows, audits order_events ──
   const approveMutation = useMutation({
     mutationFn: async () => {
       if (!order || !userId) throw new Error('Cannot approve. Missing billing context.');
       const reviewer = userName || 'Billing';
+
+      const flags = flowRef.current.flags;
+      const lineEdits = flowRef.current.lineEdits;
+      const serverItems = itemsRef.current;
+
+      const removedLines = serverItems.filter((it) => lineEdits[it.id]?.removed);
+      const visibleLines = serverItems.filter((it) => !lineEdits[it.id]?.removed);
+
+      if (visibleLines.length === 0) {
+        throw new Error('Cannot approve an empty order. Use Reject instead.');
+      }
+
+      const nowIso = new Date().toISOString();
+
+      for (const line of removedLines) {
+        const { error: evErr } = await supabase.from('order_events').insert({
+          order_id: order.id,
+          event_type: 'billing_line_removed',
+          actor_user_id: userId,
+          stage: 'billing',
+          payload: {
+            order_item_id: line.id,
+            item_id: line.item_id,
+            item_name: line.item_name,
+            qty_requested: line.qty_requested,
+          },
+        });
+        if (evErr) throw evErr;
+
+        const { error: pendErr } = await supabase
+          .from('pending_items')
+          .update({
+            status: 'cancelled',
+            resolved_at: nowIso,
+            resolved_by: reviewer,
+            note: 'Line removed by billing',
+          })
+          .eq('order_id', order.id)
+          .eq('item_id', line.item_id)
+          .eq('status', 'pending');
+        if (pendErr) throw pendErr;
+
+        const { error: delErr } = await supabase.from('order_items').delete().eq('id', line.id);
+        if (delErr) throw delErr;
+      }
+
+      const editEvents: Array<{
+        order_id: number;
+        event_type: string;
+        actor_user_id: number;
+        stage: string;
+        payload: Record<string, unknown>;
+      }> = [];
+
+      for (const line of visibleLines) {
+        const merged = mergeOrderLine(line, lineEdits[line.id]);
+        const qtyChanged = merged.qty_requested !== line.qty_requested;
+        const priceChanged = merged.price_quoted !== line.price_quoted;
+        if (qtyChanged || priceChanged) {
+          editEvents.push({
+            order_id: order.id,
+            event_type: 'billing_line_edited',
+            actor_user_id: userId,
+            stage: 'billing',
+            payload: {
+              order_item_id: line.id,
+              item_id: line.item_id,
+              before: {
+                qty_requested: line.qty_requested,
+                price_quoted: line.price_quoted,
+              },
+              after: {
+                qty_requested: merged.qty_requested,
+                price_quoted: merged.price_quoted,
+              },
+            },
+          });
+        }
+      }
+
+      if (editEvents.length > 0) {
+        const { error: eeErr } = await supabase.from('order_events').insert(editEvents);
+        if (eeErr) throw eeErr;
+      }
+
+      const visibleMergedForReport = visibleLines.map((l) =>
+        mergeOrderLine(l, lineEdits[l.id]),
+      );
+
+      const snapFlags: Record<number, ItemFlag> = {};
+      for (const it of visibleMergedForReport) {
+        const f = flags[it.id];
+        if (f) snapFlags[it.id] = f;
+      }
 
       const reportSnapshot: BillingReportSnapshot = {
         orderId: order.id,
         orderNumber: order.order_number?.trim() || '',
         orderName: order.customer_name?.trim() || 'Customer',
         salesperson: order.salesperson_name?.trim() || null,
-        items: items.map((line) => ({ ...line })),
+        items: visibleMergedForReport.map((line) => ({ ...line })),
+        flags: snapFlags,
       };
 
-      // Resolve approved qty per line (sync)
-      const lineResults = items.map((item, i) => {
-        const flag = flow.flags[i];
+      const lineResults = visibleMergedForReport.map((item) => {
+        const flag = flags[item.id];
         let approvedQty = item.qty_requested;
         if (flag?.type === 'no_stock') approvedQty = 0;
         else if (flag?.type === 'partial' && flag.availableQty != null) {
@@ -303,12 +495,17 @@ export default function LiveQueuePage() {
         return { item, approvedQty, flag, finalState };
       });
 
-      // Parallel updates — sequential await per row was the main latency source (N round trips).
       const updateResponses = await Promise.all(
         lineResults.map(({ item, finalState }) =>
           supabase
             .from('order_items')
-            .update({ qty_approved: finalState.qtyBilled, qty_po: finalState.qtyPending })
+            .update({
+              qty_approved: finalState.qtyBilled,
+              qty_po: finalState.qtyPending,
+              qty_shippable: finalState.qtyBilled,
+              qty_requested: item.qty_requested,
+              price_quoted: item.price_quoted,
+            })
             .eq('id', item.id),
         ),
       );
@@ -319,7 +516,7 @@ export default function LiveQueuePage() {
         .from('pending_items')
         .update({
           status: 'resolved',
-          resolved_at: new Date().toISOString(),
+          resolved_at: nowIso,
           resolved_by: reviewer,
         })
         .eq('order_id', order.id)
@@ -342,6 +539,8 @@ export default function LiveQueuePage() {
             source: finalState.pendingSource,
             created_by: reviewer,
             note: finalState.pendingNote,
+            stock_location_code:
+              order.stock_location_code ?? item.stock_location_code ?? 'main_store',
           };
         })
         .filter((row): row is NonNullable<typeof row> => row != null);
@@ -350,6 +549,21 @@ export default function LiveQueuePage() {
         const { error: pendingError } = await supabase.from('pending_items').insert(pendingRows);
         if (pendingError) throw pendingError;
       }
+
+      const nextItemCount = lineResults.length;
+      const nextTotalValue = lineResults.reduce((acc, { item, finalState }) => {
+        const rate = Number(item.price_quoted ?? 0);
+        return acc + rate * Math.max(0, finalState.qtyBilled);
+      }, 0);
+
+      const { error: orderTotalsErr } = await supabase
+        .from('orders')
+        .update({
+          item_count: nextItemCount,
+          total_value: nextTotalValue,
+        })
+        .eq('id', order.id);
+      if (orderTotalsErr) throw orderTotalsErr;
 
       const { messageText: customerMessageText, summary: customerMessageSummary } =
         buildBillingCustomerUpdate({
@@ -421,12 +635,14 @@ export default function LiveQueuePage() {
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', snapshot.orderId] });
       queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
+      queryClient.invalidateQueries({ queryKey: ['billing-stock-freshness'] });
 
       // Move to report screen
       flow.finishBilling();
     },
-    onError: () => {
-      toast.error('Failed to approve order');
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : '';
+      toast.error(msg ? msg : 'Failed to approve order');
     },
   });
 
@@ -517,7 +733,10 @@ export default function LiveQueuePage() {
 
     // If there are more orders, auto-claim next
     const remainingOrders = queue.filter(
-      o => o.id !== completedOrderId && (!o.claim_info || o.is_mine)
+      (o) =>
+        o.id !== completedOrderId &&
+        (!o.claim_info || o.is_mine) &&
+        !isSalesEditFreshLock(o),
     );
 
     if (remainingOrders.length > 0) {
@@ -540,6 +759,7 @@ export default function LiveQueuePage() {
         otherActive={otherActive}
         stale={stale}
         myActive={myActive}
+        salesLocked={salesLocked}
         isLoading={queueLoading}
         onSelect={(orderId) => {
           setCurrentOrderId(orderId);
@@ -574,18 +794,44 @@ export default function LiveQueuePage() {
           createdAt={order.created_at}
           items={items}
           flags={flow.flags}
+          lineEdits={flow.lineEdits}
+          freshnessMap={freshnessQuery.data ?? undefined}
+          sessionNewOrderItemIds={sessionNewOrderItemIds}
+          addedLinesSessionCount={sessionNewOrderItemIds.size}
           isClaiming={!isClaimedByMe}
           isApproving={approveMutation.isPending}
           isRejecting={rejectMutation.isPending}
           onFlagNoStock={flow.flagNoStock}
           onFlagPartial={flow.flagPartial}
           onClearFlag={flow.clearFlag}
+          onEditLineQty={flow.editLineQty}
+          onEditLineRate={flow.editLineRate}
+          onRemoveLine={flow.removeLine}
+          onRestoreLine={flow.restoreLine}
+          onApplyLiveStock={handleApplyLiveStock}
+          onOpenAddLine={() => setAddLineOpen(true)}
           onFinish={() => {
             if (!isClaimedByMe || approveMutation.isPending || rejectMutation.isPending) return;
             approveMutation.mutate();
           }}
           onReject={(reason) => rejectMutation.mutate(reason)}
           onSkip={handleSkip}
+        />
+        <AddLineSheet
+          isOpen={addLineOpen}
+          onClose={() => setAddLineOpen(false)}
+          orderId={order.id}
+          stockLocationCode={order.stock_location_code}
+          claimId={claimId}
+          userId={userId}
+          existingItems={items.map((i) => ({
+            item_id: i.item_id,
+            qty_requested: i.qty_requested,
+            item_name: i.item_name,
+          }))}
+          onAdded={(orderItemId) => {
+            setSessionNewOrderItemIds((prev) => new Set(prev).add(orderItemId));
+          }}
         />
       </>
     );
@@ -600,8 +846,16 @@ export default function LiveQueuePage() {
         orderNumber={snap?.orderNumber ?? order?.order_number ?? ''}
         salesperson={snap?.salesperson ?? order?.salesperson_name ?? null}
         items={snap?.items ?? items}
-        flags={flow.flags}
-        totalWaiting={Math.max(0, queue.filter(o => (!o.claim_info || o.is_mine) && o.id !== completedId).length)}
+        flags={snap?.flags ?? {}}
+        totalWaiting={Math.max(
+          0,
+          queue.filter(
+            (o) =>
+              (!o.claim_info || o.is_mine) &&
+              !isSalesEditFreshLock(o) &&
+              o.id !== completedId,
+          ).length,
+        )}
         onNext={handleNext}
       />
     );

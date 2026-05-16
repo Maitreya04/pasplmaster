@@ -1,10 +1,11 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CaretDown, CaretUp, Check, Copy, Package, Warning } from '@phosphor-icons/react';
+import { CaretDown, CaretUp, Check, Copy, Package, Trash, Warning } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useOrders } from '../../hooks/useOrders';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
+import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { useBillingCustomerUpdate } from '../../hooks/useBillingCustomerUpdate';
 import { usePendingItems } from '../../hooks/usePendingItems';
 import { useUserNotifications } from '../../hooks/useUserNotifications';
@@ -21,6 +22,29 @@ import {
   pendingRecoveryLabel,
 } from '../../lib/pendingRecovery';
 import { supabase } from '../../lib/supabase/client';
+import { SalesEditAddLineSheet } from './SalesEditAddLineSheet';
+
+const SALES_CLAIM_MESSAGES: Record<string, string> = {
+  locked_by_billing: 'Billing is reviewing this order. Try again when they finish.',
+  not_owner: 'Only the salesperson on this order can edit lines.',
+  not_submitted: 'This order is no longer in submitted status.',
+  already_claimed: 'Another session holds this order.',
+  'User not found or inactive': 'Your session is invalid. Sign in again.',
+  'Order not found': 'Order could not be found.',
+  'Invalid stage': 'Cannot start edit.',
+};
+
+const REMOVE_SALES_LINE_MESSAGES: Record<string, string> = {
+  claim_lost: 'Edit lock lost — tap Done editing and try again.',
+  line_not_found: 'That line is no longer on the order.',
+  line_order_mismatch: 'That line does not belong to this order.',
+  order_not_found: 'Order could not be found.',
+  not_submitted: 'This order cannot be edited anymore.',
+  not_owner: 'You cannot remove lines on this order.',
+  invalid_salesperson: 'Your user cannot edit orders.',
+  last_line: 'Cannot remove the last line — ask billing to reject the order instead.',
+  submit_failed: 'Could not remove line. Try again.',
+};
 
 const BILLING_OOS_FLAG_REASON = 'Out of Stock (Billing)';
 const TEXT_STATUS_PARTIAL = 'text-[color:var(--content-warning-on-light)]';
@@ -222,6 +246,7 @@ function OrderLineRow({
   recoveryStatus,
   recoveryHelp,
   actions,
+  extraFooter,
 }: {
   name: string;
   variant: StockUiVariant;
@@ -236,6 +261,7 @@ function OrderLineRow({
   recoveryStatus?: PendingItem['recovery_status'] | null;
   recoveryHelp?: string | null;
   actions?: React.ReactNode;
+  extraFooter?: React.ReactNode;
 }): React.JSX.Element {
   const qtyColor =
     pickerFlagged
@@ -302,6 +328,7 @@ function OrderLineRow({
         <p className="text-xs text-[var(--content-tertiary)] leading-snug">{recoveryHelp}</p>
       )}
       {actions ? <div className="flex flex-wrap gap-2 pt-1">{actions}</div> : null}
+      {extraFooter ? <div className="pt-2">{extraFooter}</div> : null}
     </div>
   );
 }
@@ -412,6 +439,20 @@ function OrderDetailSheet({
   });
   const [messageCopied, setMessageCopied] = useState(false);
   const [showMessagePreview, setShowMessagePreview] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [addLineOpen, setAddLineOpen] = useState(false);
+
+  const {
+    claimId: salesEditClaimId,
+    claim: claimSalesEdit,
+    release: releaseSalesEdit,
+  } = useWorkClaim(orderId, 'sales_edit');
+
+  useEffect(() => {
+    void releaseSalesEdit();
+    setEditMode(false);
+    setAddLineOpen(false);
+  }, [orderId, releaseSalesEdit]);
 
   const recoveryActionMutation = useMutation({
     mutationFn: async ({
@@ -447,6 +488,32 @@ function OrderDetailSheet({
     },
     onError: () => {
       toast.error('Failed to update pending follow-up');
+    },
+  });
+
+  const removeLineMutation = useMutation({
+    mutationFn: async (orderItemId: number) => {
+      if (!orderId || !salesEditClaimId || !userId) throw new Error('Missing edit lock');
+      const { data, error } = await supabase.rpc('remove_sales_submitted_line', {
+        p_order_item_id: orderItemId,
+        p_claim_id: salesEditClaimId,
+        p_user_id: userId,
+      });
+      if (error) throw error;
+      const payload = data as { success?: boolean; error?: string };
+      if (!payload?.success) {
+        const code = typeof payload.error === 'string' ? payload.error : 'unknown';
+        throw new Error(REMOVE_SALES_LINE_MESSAGES[code] ?? code);
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      void queryClient.invalidateQueries({ queryKey: ['pending-items'] });
+      void queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+      toast.success('Line removed');
+    },
+    onError: (e: unknown) => {
+      toast.error(e instanceof Error ? e.message : 'Could not remove line');
     },
   });
 
@@ -524,10 +591,46 @@ function OrderDetailSheet({
     window.open(sendUrl, '_blank', 'noopener,noreferrer');
   }, [sendUrl]);
 
+  const handleSheetClose = useCallback(async () => {
+    await releaseSalesEdit();
+    setEditMode(false);
+    setAddLineOpen(false);
+    onClose();
+  }, [releaseSalesEdit, onClose]);
+
+  const handleStartEdit = useCallback(async () => {
+    const r = await claimSalesEdit();
+    if (!r.success) {
+      const raw = r.reason ?? '';
+      const msg = (SALES_CLAIM_MESSAGES[raw] ?? raw) || 'Could not start editing';
+      toast.error(msg);
+      return;
+    }
+    setEditMode(true);
+  }, [claimSalesEdit, toast]);
+
+  const handleDoneEdit = useCallback(async () => {
+    await releaseSalesEdit();
+    setEditMode(false);
+    setAddLineOpen(false);
+    await queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+    await queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+    toast.success('Finished editing');
+  }, [releaseSalesEdit, queryClient, orderId, toast]);
+
+  const canEditLines = useMemo(() => {
+    if (!order || userId == null) return false;
+    return (
+      order.workflow_status === 'submitted' &&
+      order.salesperson_user_id != null &&
+      order.salesperson_user_id === userId
+    );
+  }, [order, userId]);
+
   if (!isOpen) return null;
 
   return (
-    <BottomSheet isOpen={isOpen} onClose={onClose} closeOnly>
+    <BottomSheet isOpen={isOpen} onClose={() => void handleSheetClose()} closeOnly>
       {isLoading ? (
         <Skeleton variant="text" lines={6} />
       ) : order ? (
@@ -561,6 +664,48 @@ function OrderDetailSheet({
               </p>
             )}
           </div>
+
+          {canEditLines && !editMode && (
+            <div className="mb-4">
+              <button
+                type="button"
+                onClick={() => void handleStartEdit()}
+                className="w-full rounded-xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] py-3 text-sm font-semibold text-[var(--content-primary)] hover:bg-[var(--bg-tertiary)]"
+              >
+                Edit order lines
+              </button>
+              <p className="mt-1.5 text-center text-xs text-[var(--content-tertiary)]">
+                Pauses billing until you tap Done editing
+              </p>
+            </div>
+          )}
+
+          {editMode && (
+            <div className="mb-4 space-y-3">
+              <div className="rounded-xl border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-3 py-2">
+                <p className="text-sm font-semibold text-[var(--content-accent)]">Live Queue paused</p>
+                <p className="mt-0.5 text-xs text-[var(--content-secondary)]">
+                  Billing cannot claim this order while you edit lines.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAddLineOpen(true)}
+                  className="min-h-[44px] flex-1 min-w-[120px] rounded-xl bg-[var(--role-primary)] py-2.5 text-sm font-semibold text-[var(--role-content)]"
+                >
+                  Add line
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDoneEdit()}
+                  className="min-h-[44px] flex-1 min-w-[120px] rounded-xl border border-[var(--border-opaque)] bg-[var(--bg-primary)] py-2.5 text-sm font-semibold text-[var(--content-primary)]"
+                >
+                  Done editing
+                </button>
+              </div>
+            </div>
+          )}
 
           {billingMessage && (
             <div className="mb-5 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
@@ -766,6 +911,22 @@ function OrderDetailSheet({
                     recoveryPending ? pendingRecoveryHelpText(recoveryPending.recovery_status) : null
                   }
                   actions={recoveryActions}
+                  extraFooter={
+                    editMode ? (
+                      <button
+                        type="button"
+                        disabled={removeLineMutation.isPending || !salesEditClaimId}
+                        onClick={() => {
+                          if (!window.confirm(`Remove “${item.item_name}” from this order?`)) return;
+                          removeLineMutation.mutate(item.id);
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-negative)] bg-[var(--bg-negative-subtle)] px-3 py-2 text-xs font-semibold text-[var(--content-negative)] disabled:opacity-50"
+                      >
+                        <Trash size={14} weight="bold" />
+                        Remove line
+                      </button>
+                    ) : undefined
+                  }
                 />
               );
             })}
@@ -785,6 +946,23 @@ function OrderDetailSheet({
               </span>
             </div>
           </div>
+
+          <SalesEditAddLineSheet
+            isOpen={addLineOpen}
+            onClose={() => setAddLineOpen(false)}
+            orderId={order.id}
+            stockLocationCode={order.stock_location_code}
+            claimId={salesEditClaimId}
+            userId={userId}
+            existingItems={(order.items ?? []).map((i) => ({
+              item_id: i.item_id,
+              qty_requested: i.qty_requested,
+              item_name: i.item_name,
+            }))}
+            onAdded={() => {
+              void queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+            }}
+          />
         </div>
       ) : null}
     </BottomSheet>

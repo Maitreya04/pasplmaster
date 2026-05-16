@@ -93,6 +93,8 @@ export interface OrderItem {
   catalog_main_group?: string | null;
   /** From `items` join — Busy parent group. */
   catalog_parent_group?: string | null;
+  /** From `items` join — Busy ERP code for location-wise stock lookups. */
+  catalog_busy_code?: number | null;
   rack_no: string | null;
   qty_requested: number;
   /** Units to pick from on-hand stock (≤ qty_requested). Omitted on legacy rows. */
@@ -233,7 +235,7 @@ export interface AppUser {
 }
 
 export type ClaimStatus = 'active' | 'released' | 'completed' | 'expired';
-export type ClaimStage = 'billing' | 'picking';
+export type ClaimStage = 'billing' | 'picking' | 'sales_edit';
 
 export interface WorkClaim {
   id: number;
@@ -255,7 +257,8 @@ export interface OrderEvent {
   order_id: number;
   event_type: string;
   actor_user_id: number | null;
-  stage: ClaimStage | null;
+  /** Includes billing, picking, sales_edit, etc. */
+  stage: string | null;
   payload: Record<string, unknown>;
   created_at: string;
 }
