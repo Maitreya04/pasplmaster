@@ -51,6 +51,9 @@ interface ScanOnlyResult {
   codeType: LiveQrScannerResolved['codeType'];
   reason: string;
   timestamp: string;
+  uomTier: LiveQrScannerResolved['uomTier'];
+  baseQtyEa: number | null;
+  packetQtyEa: number | null;
 }
 
 function buildScanLabRecord(item: Item): ScanLabRecord | null {
@@ -96,6 +99,7 @@ function buildQuantityResult({
   targetQty,
   totalBefore,
   packDefinition,
+  resolvedEa,
 }: {
   item: ScanLabRecord;
   rawValue: string;
@@ -103,22 +107,30 @@ function buildQuantityResult({
   targetQty: number;
   totalBefore: number;
   packDefinition: ItemPackDefinition | null | undefined;
+  resolvedEa?: number | null;
 }): ScanLabQuantityResult {
   const remainingBefore = Math.max(0, targetQty - totalBefore);
   const pack = parsePackPickPayload(rawValue);
 
   if (pack) {
     const packQty = packQtyForType(packDefinition, pack.packType);
+    const effectivePackQty =
+      resolvedEa != null && resolvedEa > 1 ? Math.floor(resolvedEa) : packQty;
     const packMatchesItem = item.busy_code != null && Number(item.busy_code) === pack.busyCode;
-    const canAddPack = isMatch && packMatchesItem && packQty != null && packQty > 1 && remainingBefore > 0;
-    const requiresBreakConfirmation = Boolean(canAddPack && packQty > remainingBefore);
-    const qtyAdded = canAddPack && !requiresBreakConfirmation ? packQty : 0;
+    const canAddPack =
+      isMatch &&
+      packMatchesItem &&
+      effectivePackQty != null &&
+      effectivePackQty > 1 &&
+      remainingBefore > 0;
+    const requiresBreakConfirmation = Boolean(canAddPack && effectivePackQty > remainingBefore);
+    const qtyAdded = canAddPack && !requiresBreakConfirmation ? effectivePackQty : 0;
     const totalAfter = totalBefore + qtyAdded;
 
     return {
       scanKind: 'pack',
       packType: pack.packType,
-      packQty,
+      packQty: effectivePackQty,
       qtyAdded,
       targetQty,
       totalBefore,
@@ -213,6 +225,7 @@ export default function PickScanLabPage(): React.JSX.Element {
         targetQty,
         totalBefore: simulatedPickedQty,
         packDefinition,
+        resolvedEa: scan.baseQtyEa,
       });
 
       const result: ScanResult = {
@@ -258,6 +271,9 @@ export default function PickScanLabPage(): React.JSX.Element {
       codeType: scan.codeType,
       reason: scan.reason,
       timestamp: new Date().toISOString(),
+      uomTier: scan.uomTier,
+      baseQtyEa: scan.baseQtyEa,
+      packetQtyEa: scan.packetQtyEa,
     };
     setScanOnlyHistory((prev) => [entry, ...prev].slice(0, 20));
   }, []);
@@ -371,6 +387,12 @@ export default function PickScanLabPage(): React.JSX.Element {
                           {entry.recognizedBusyCode != null && (
                             <span className="rounded-full border border-[var(--border-subtle)] px-2 py-0.5 font-mono text-[11px] text-[var(--content-tertiary)]">
                               Busy {entry.recognizedBusyCode}
+                            </span>
+                          )}
+                          {entry.baseQtyEa != null && entry.baseQtyEa >= 1 && (
+                            <span className="rounded-full border border-[var(--border-subtle)] px-2 py-0.5 font-mono text-[11px] text-[var(--content-tertiary)]">
+                              UoM EA {entry.baseQtyEa}
+                              {entry.uomTier ? ` · ${entry.uomTier}` : ''}
                             </span>
                           )}
                           {entry.matchedBy && (

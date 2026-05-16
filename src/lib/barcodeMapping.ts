@@ -1,7 +1,7 @@
 import { supabase } from './supabase/client';
 import { parseRackPayload } from './scanner/qrPayload';
 import type { MatchStrategy } from './scanner/barcodeParser';
-import type { Item } from '../types';
+import type { Item, ItemPackDefinition } from '../types';
 
 const ITEM_SELECT = 'id,name,busy_code,parent_group,main_group,item_category,rack_no,alias,alias1';
 
@@ -236,6 +236,28 @@ export async function fetchBarcodeRackCoverage(): Promise<BarcodeRackCoveragePay
     },
     racks: Array.isArray(payload.racks) ? payload.racks : [],
   };
+}
+
+/** Pack definitions for a bounded set of Busy codes (bin worksheet / picker pills). */
+export async function fetchPackDefsForBusyCodes(
+  busyCodes: number[],
+): Promise<Map<number, ItemPackDefinition>> {
+  const uniq = [...new Set(busyCodes.filter((c) => Number.isFinite(c) && c > 0))];
+  if (uniq.length === 0) return new Map();
+
+  const { data, error } = await supabase
+    .from('item_pack_definitions')
+    .select('*')
+    .in('busy_code', uniq);
+
+  if (error) throw error;
+
+  const map = new Map<number, ItemPackDefinition>();
+  for (const row of data ?? []) {
+    const def = row as ItemPackDefinition;
+    map.set(Number(def.busy_code), def);
+  }
+  return map;
 }
 
 export async function fetchMappedSkuSummaries(): Promise<MappedSkuSummary[]> {

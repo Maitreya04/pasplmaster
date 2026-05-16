@@ -46,6 +46,7 @@ import {
   parseLpnPickPayload,
   rackCodesMatch,
 } from '../../lib/scanner/qrPayload';
+import { formatUomPickHint } from '../../lib/scanner/uomMapper';
 import {
   defaultPickItemTransitionAdapter,
   type PickItemTransition,
@@ -1057,13 +1058,22 @@ export default function PickPage(): React.JSX.Element | null {
       );
       const remainingBeforeScan = Math.max(0, targetQty - existingPickedBefore);
       const suggestedQty =
-        classified.kind === 'lpn' && Number.isFinite(lpnSuggested)
-          ? Math.max(1, Number(lpnSuggested))
-          : Number.isFinite(packQty) && (packQty ?? 0) > 0
-            ? Number(packQty)
-            : classified.extractedQuantity && classified.extractedQuantity > 0
-              ? classified.extractedQuantity
-              : 1;
+        scan.baseQtyEa != null && scan.baseQtyEa >= 1
+          ? Math.floor(scan.baseQtyEa)
+          : classified.kind === 'lpn' && Number.isFinite(lpnSuggested)
+            ? Math.max(1, Number(lpnSuggested))
+            : Number.isFinite(packQty) && (packQty ?? 0) > 0
+              ? Number(packQty)
+              : classified.extractedQuantity && classified.extractedQuantity > 0
+                ? classified.extractedQuantity
+                : 1;
+      const uomHint = formatUomPickHint({
+        suggestedQtyEa: suggestedQty,
+        tier: scan.uomTier,
+        packetQtyEa: scan.packetQtyEa,
+        packetsPerBox: scan.packetsPerBox,
+        packPayloadType: packPayload?.packType ?? null,
+      });
       const requiresBreakConfirmation = suggestedQty > remainingBeforeScan;
       const requiresLargeQtyConfirmation =
         suggestedQty > MAX_AUTO_SCAN_QTY && remainingBeforeScan > 1;
@@ -1086,10 +1096,10 @@ export default function PickPage(): React.JSX.Element | null {
         extractedDescription: scan.matchedItem?.name ?? undefined,
         reason: isPackMatch
           ? requiresBreakConfirmation
-            ? `Pack scan (${packPayload?.packType}) suggests ${suggestedQty} units. Confirm break-pack for target ${targetQty}.`
-            : `Pack scan (${packPayload?.packType}) verified for ${suggestedQty} units.`
+            ? `${uomHint ? `${uomHint}. ` : ''}Pack scan (${packPayload?.packType}) suggests ${suggestedQty} units. Confirm break-pack for target ${targetQty}.`
+            : `${uomHint ? `${uomHint}. ` : ''}Pack scan (${packPayload?.packType}) verified for ${suggestedQty} units.`
           : classified.kind === 'lpn'
-            ? `LPN scan ${lpnPayload?.lpnCode ?? ''} suggests ${suggestedQty} units.`
+            ? `${uomHint ? `${uomHint}. ` : ''}LPN scan ${lpnPayload?.lpnCode ?? ''} suggests ${suggestedQty} units.`
           : scan.reason,
         scannedText: scan.rawValue,
         matchedAgainst: scan.matchedBy ?? current.orderItem.item_name,
@@ -1104,6 +1114,12 @@ export default function PickPage(): React.JSX.Element | null {
         suggestedQty,
         requiresBreakConfirmation: requiresManualQtyConfirmation,
         lpnCode: lpnPayload?.lpnCode ?? null,
+        uomHint,
+        uomContext: {
+          tier: scan.uomTier,
+          packetQtyEa: scan.packetQtyEa,
+          packetsPerBox: scan.packetsPerBox,
+        },
         packAssist: isPackMatch
           ? {
               packType: packPayload!.packType,
@@ -2082,6 +2098,11 @@ export default function PickPage(): React.JSX.Element | null {
               This scan suggests picking {pendingPackConfirmation.suggestedQty} units while
               remaining qty is {pendingPackConfirmation.targetQty}. Confirm the qty before applying.
             </p>
+            {pendingPackConfirmation.scanResult.uomHint ? (
+              <p className="text-sm font-semibold text-[var(--content-primary)]">
+                {pendingPackConfirmation.scanResult.uomHint}
+              </p>
+            ) : null}
             <div className="flex gap-2">
               <BigButton
                 variant="secondary"

@@ -37,6 +37,8 @@ const OcrOrderLabPage = lazy(() => import('./pages/admin/OcrOrderLabPage'));
 const SupplyDemandPage = lazy(() => import('./pages/admin/SupplyDemandPage'));
 const SupplyDemandSkuDetailPage = lazy(() => import('./pages/admin/SupplyDemandSkuDetailPage'));
 const BarcodeMappingPage = lazy(() => import('./pages/admin/BarcodeMappingPage'));
+const UomOnboardingPage = lazy(() => import('./pages/admin/UomOnboardingPage'));
+const BinOnboardingPage = lazy(() => import('./pages/admin/BinOnboardingPage'));
 const ProcessChallanPage = lazy(() => import('./pages/admin/ProcessChallanPage'));
 
 const ROLE_HOME: Record<string, string> = {
@@ -222,6 +224,26 @@ export default function App(): React.JSX.Element | null {
             <RequireRole>
               <RequireAdminUnlock>
                 <BarcodeMappingPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/uom-onboarding"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <UomOnboardingPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/bin-onboarding"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <BinOnboardingPage />
               </RequireAdminUnlock>
             </RequireRole>
           }

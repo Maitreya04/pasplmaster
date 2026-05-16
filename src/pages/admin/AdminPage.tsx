@@ -1,5 +1,16 @@
 import { useNavigate } from 'react-router-dom';
-import { Upload, SignOut, ChartBar, Tag, Camera, MagicWand, Database, Barcode } from '@phosphor-icons/react';
+import {
+  Upload,
+  SignOut,
+  ChartBar,
+  Tag,
+  Camera,
+  MagicWand,
+  Database,
+  Barcode,
+  Scales,
+  Warehouse,
+} from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { NotificationDiagnosticsPanel } from '../../components/notifications/NotificationDiagnosticsPanel';
 
@@ -47,6 +58,24 @@ export default function AdminPage(): React.JSX.Element | null {
 
           <button
             type="button"
+            onClick={() => navigate('/admin/bin-onboarding')}
+            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
+          >
+            <div className="w-12 h-12 rounded-xl bg-[var(--role-primary-subtle)] flex items-center justify-center">
+              <Warehouse size={22} weight="regular" className="text-[var(--role-primary)]" />
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-[var(--content-primary)]">
+                SKU onboarding (bin + barcode + UoM)
+              </p>
+              <p className="text-sm text-[var(--content-tertiary)]">
+                Floor wizard: map tiers at the bin and confirm pack sizes in one worksheet
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
             onClick={() => navigate('/admin/barcode-mapping')}
             className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
           >
@@ -57,6 +86,22 @@ export default function AdminPage(): React.JSX.Element | null {
               <p className="font-semibold text-[var(--content-primary)]">Barcode mapping</p>
               <p className="text-sm text-[var(--content-tertiary)]">
                 Link manufacturer barcodes to Busy SKUs
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/admin/uom-onboarding')}
+            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
+          >
+            <div className="w-12 h-12 rounded-xl bg-[var(--bg-accent-subtle)] flex items-center justify-center">
+              <Scales size={22} weight="regular" className="text-[var(--content-accent)]" />
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-[var(--content-primary)]">UoM onboarding</p>
+              <p className="text-sm text-[var(--content-tertiary)]">
+                Scan-driven pack/box hierarchy per Busy code + coverage gaps
               </p>
             </div>
           </button>

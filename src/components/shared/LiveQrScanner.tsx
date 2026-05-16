@@ -23,6 +23,8 @@ import {
   classifyScanPayload,
   normalizeScanCode,
 } from '../../lib/scanner/qrPayload';
+import type { UomTier } from '../../lib/scanner/uomMapper';
+import { resolveScanToUom } from '../../lib/scanner/uomMapper';
 import {
   captureRoiBitmap,
   captureRoiImageData,
@@ -249,6 +251,12 @@ export interface LiveQrScannerResolved {
   suggestedQty: number;
   requiresBreakConfirmation: boolean;
   lpnCode?: string | null;
+  /** UoM mapper (resolve_scan_to_uom); EA counts for inventory/billing. */
+  uomTier: UomTier | null;
+  baseQtyEa: number | null;
+  packetQtyEa: number | null;
+  packetsPerBox: number | null;
+  uomSource: string | null;
 }
 
 interface LiveQrScannerProps {
@@ -484,7 +492,7 @@ export function LiveQrScanner({
     noHitFrameCountRef.current = 0;
   }, [applyCameraZoom]);
 
-  const handleResolvedScan = useCallback((rawValue: string) => {
+  const handleResolvedScan = useCallback(async (rawValue: string) => {
     const debounceKey = normalizeScanCode(rawValue) || rawValue.trim();
     const debounceNow = Date.now();
     const prevFire = lastFiredPayloadRef.current;
@@ -501,7 +509,9 @@ export function LiveQrScanner({
     const candidates = classified.normalizedCandidates;
     const packPayload = classified.packPayload;
     const lpnPayload = classified.lpnPayload;
-    
+
+    const uomResolved = await resolveScanToUom(rawValue);
+
     let matchesPickItem = false;
     let matchedBy: ScanMatchSource | null = null;
     let lookupCode: string | null = null;
@@ -539,6 +549,24 @@ export function LiveQrScanner({
       lookupCode = lookup.code;
     }
 
+    const uomTier = uomResolved.tier;
+    const baseQtyEa = uomResolved.baseQtyEa;
+    const packetQtyEa = uomResolved.packetQtyEa;
+    const packetsPerBox = uomResolved.packetsPerBox;
+    const uomSource = uomResolved.source;
+
+    const suggestedQty =
+      uomResolved.matched &&
+      baseQtyEa != null &&
+      Number.isFinite(baseQtyEa) &&
+      baseQtyEa >= 1
+        ? Math.floor(baseQtyEa)
+        : classified.kind === 'pack'
+          ? 1
+          : classified.kind === 'lpn'
+            ? Math.max(1, lpnPayload?.remainingQty ?? 1)
+            : 1;
+
     const result: LiveQrScannerResolved = {
       rawValue,
       matchedItem: matchesPickItem 
@@ -554,14 +582,14 @@ export function LiveQrScanner({
             ? String(lpnPayload.busyCode)
             : (lookup?.code ?? candidates[0] ?? null)),
       codeType: classified.kind,
-      suggestedQty:
-        classified.kind === 'pack'
-          ? 1
-          : classified.kind === 'lpn'
-            ? Math.max(1, lpnPayload?.remainingQty ?? 1)
-            : 1,
+      suggestedQty,
       requiresBreakConfirmation: false,
       lpnCode: lpnPayload?.lpnCode ?? null,
+      uomTier,
+      baseQtyEa,
+      packetQtyEa,
+      packetsPerBox,
+      uomSource,
       reason: matchesPickItem
         ? matchedBy === 'pack'
           ? `Verified reusable ${packPayload?.packType} pack QR.`
@@ -722,7 +750,9 @@ export function LiveQrScanner({
               };
               if (stableScanRef.current.count >= STABLE_SCAN_MIN_FRAMES) {
                 stableScanRef.current = { rawValue: null, count: 0, updatedAt: 0 };
-                handleResolvedScan(selected.rawValue);
+                void handleResolvedScan(selected.rawValue).catch(() => {
+                  setErrorMessage('Could not resolve scan. Try again.');
+                });
               }
             } else {
               noHitFrameCountRef.current += 1;
@@ -794,7 +824,9 @@ export function LiveQrScanner({
                 };
                 if (stableScanRef.current.count >= STABLE_SCAN_MIN_FRAMES) {
                   stableScanRef.current = { rawValue: null, count: 0, updatedAt: 0 };
-                  handleResolvedScan(data.rawValue);
+                  void handleResolvedScan(data.rawValue).catch(() => {
+                    setErrorMessage('Could not resolve scan. Try again.');
+                  });
                 }
               } else if (!data.rawValue) {
                 noHitFrameCountRef.current += 1;

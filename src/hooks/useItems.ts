@@ -34,7 +34,7 @@ interface SyncResult {
 
 /** Columns required by the UI + sync metadata. Keep this list narrow. */
 const ITEMS_SELECT =
-  'id,name,alias,alias1,busy_code,parent_group,main_group,item_category,' +
+  'id,name,alias,alias1,busy_code,selling_unit,parent_group,main_group,item_category,' +
   'sales_price,mrp,stock_qty,rack_no,updated_at,is_active';
 
 const IDB_KEY = 'items-cache-v1';

@@ -1,9 +1,13 @@
+/** Display preference only; stored qty remains EA (pieces). */
+export type ItemSellingUnit = 'piece' | 'packet' | 'box';
+
 export interface Item {
   id: number;
   name: string;
   alias: string | null;
   alias1: string | null;
   busy_code?: number | null;
+  selling_unit?: ItemSellingUnit | null;
   parent_group: string | null;
   main_group: string | null;
   item_category: string | null;
@@ -190,6 +194,13 @@ export interface ScanResult {
     requiresBreakConfirmation: boolean;
     busyCode: number;
   };
+  /** Pick scanner: human-readable UoM breakdown (EA remains authoritative). */
+  uomHint?: string | null;
+  uomContext?: {
+    tier: 'piece' | 'packet' | 'box' | null;
+    packetQtyEa: number | null;
+    packetsPerBox: number | null;
+  };
   operatorContext?: {
     pickerName: string | null;
     pickerUserId: number | null;
@@ -298,6 +309,10 @@ export interface ItemPackDefinition {
   item_name_snapshot: string;
   inner_pack_qty: number | null;
   outer_pack_qty: number | null;
+  packet_label?: string | null;
+  box_label?: string | null;
+  confirmed_by_user_id?: number | null;
+  confirmed_at?: string | null;
   source_file: string | null;
   updated_at: string;
 }
