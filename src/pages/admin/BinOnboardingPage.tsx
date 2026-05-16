@@ -10,6 +10,7 @@ import {
   Package,
   Scales,
   Sparkle,
+  Star,
 } from '@phosphor-icons/react';
 import { BigButton, LiveQrScanner, Skeleton } from '../../components/shared';
 import type { LiveQrScannerResolved } from '../../components/shared/LiveQrScanner';
@@ -33,8 +34,22 @@ import { parseManufacturerBarcode } from '../../lib/scanner/barcodeParser';
 import { fetchUomCoverageGaps, registerBarcodeWithTier, type UomTier } from '../../lib/scanner/uomMapper';
 import { PACK_DEFINITIONS_QUERY_KEY } from '../../lib/packLpn';
 import { ITEMS_QUERY_KEY, useItems } from '../../hooks/useItems';
-import type { ItemPackDefinition, ItemSellingUnit } from '../../types';
+import type { ItemPackDefinition } from '../../types';
 import { initializeItemScanIndex } from '../../stores/itemScanIndex';
+import {
+  applyTierScanToDraft,
+  computeDerivedPieces,
+  defaultHierarchyDraft,
+  derivedSellingUnit,
+  formatLayerLabel,
+  hydrateHierarchyDraftFromCatalog,
+  validateLayer1,
+  validateLayer2,
+  validateOuterScanGate,
+  validatePacketScanGate,
+  type HierarchyDraft,
+  type HierarchyStep,
+} from './binOnboardingHierarchy';
 
 const MAPPED_SKUS_KEY = ['mapped-sku-summaries'] as const;
 const BARCODE_COV_KEY = ['barcode-coverage-global'] as const;
@@ -220,11 +235,8 @@ export default function BinOnboardingPage(): ReactElement {
 
   const [scannerOpen, setScannerOpen] = useState<ScanTarget | null>(null);
 
-  const [innerEaStr, setInnerEaStr] = useState('');
-  const [outerEaStr, setOuterEaStr] = useState('');
-  const [packetLabel, setPacketLabel] = useState('');
-  const [boxLabel, setBoxLabel] = useState('');
-  const [sellingUnit, setSellingUnit] = useState<ItemSellingUnit>('piece');
+  const [hierarchyDraft, setHierarchyDraft] = useState<HierarchyDraft>(() => defaultHierarchyDraft());
+  const [hierarchyStep, setHierarchyStep] = useState<HierarchyStep>(1);
 
   const [tierConflict, setTierConflict] = useState<{
     tier: UomTier;
@@ -235,8 +247,6 @@ export default function BinOnboardingPage(): ReactElement {
   const [sessionTierLabels, setSessionTierLabels] = useState<
     Record<number, SessionTierLabels>
   >({});
-
-  const [pieceSkippedByBusy, setPieceSkippedByBusy] = useState<Record<number, boolean>>({});
 
   const [sessionStats, setSessionStats] = useState({
     skusFullyOnboarded: 0,
@@ -525,9 +535,7 @@ export default function BinOnboardingPage(): ReactElement {
         },
       }));
 
-      if (tier === 'piece') {
-        setPieceSkippedByBusy((p) => ({ ...p, [selectedSku.skuBusyCode]: false }));
-      }
+      setHierarchyDraft((d) => applyTierScanToDraft(d, tier, scan.rawValue));
 
       void queryClient.invalidateQueries({ queryKey: MAPPED_SKUS_KEY });
       setScannerOpen(null);
@@ -576,7 +584,12 @@ export default function BinOnboardingPage(): ReactElement {
       return;
     }
 
-    if (res.ok && res.barcodeStatus === 'saved') {
+    if (!res.ok) {
+      toast.error('Could not save barcode.');
+      return;
+    }
+
+    if (res.barcodeStatus === 'saved') {
       setSessionStats((s) => ({ ...s, barcodesAdded: s.barcodesAdded + 1 }));
     }
 
@@ -589,70 +602,51 @@ export default function BinOnboardingPage(): ReactElement {
       },
     }));
 
-    if (tier === 'piece') {
-      setPieceSkippedByBusy((p) => ({ ...p, [selectedSku.skuBusyCode]: false }));
-    }
+    setHierarchyDraft((d) => applyTierScanToDraft(d, tier, raw));
 
     void queryClient.invalidateQueries({ queryKey: MAPPED_SKUS_KEY });
     toast.success(`${tier} label forced for this SKU (${displayKey}).`);
   }, [tierConflict, selectedSku, manufacturer, userId, userName, toast, queryClient]);
 
-  const packetsPerBoxPreview = useMemo(() => {
-    const inner = Number(innerEaStr);
-    const outer = Number(outerEaStr);
-    if (!Number.isFinite(inner) || inner < 2 || !Number.isFinite(outer) || outer < 2) return null;
-    if (outer % inner !== 0) return null;
-    return outer / inner;
-  }, [innerEaStr, outerEaStr]);
-
-  const outerInnerMismatch = useMemo(() => {
-    const inner = Number(innerEaStr);
-    const outer = Number(outerEaStr);
-    if (!Number.isFinite(inner) || inner < 2 || !Number.isFinite(outer) || outer < 2) return false;
-    return outer % inner !== 0;
-  }, [innerEaStr, outerEaStr]);
-
   useEffect(() => {
     if (!selectedSku) return;
     const bc = selectedSku.skuBusyCode;
     const def = packDefMap.get(bc);
-    setInnerEaStr(def?.inner_pack_qty != null ? String(def.inner_pack_qty) : '');
-    setOuterEaStr(def?.outer_pack_qty != null ? String(def.outer_pack_qty) : '');
-    setPacketLabel(def?.packet_label ?? '');
-    setBoxLabel(def?.box_label ?? '');
     const itemRow = items.find((i) => Number(i.busy_code) === bc);
     const su = itemRow?.selling_unit;
-    if (su === 'packet' || su === 'box' || su === 'piece') {
-      setSellingUnit(su);
-    } else {
-      setSellingUnit('piece');
-    }
-  }, [selectedSku, packDefMap, items]);
+    const normalizedSu =
+      su === 'packet' || su === 'box' || su === 'piece' ? su : undefined;
+    setHierarchyDraft(
+      hydrateHierarchyDraftFromCatalog({
+        def,
+        sellingUnit: normalizedSu,
+      }),
+    );
+    setHierarchyStep(1);
+  }, [selectedSku?.skuBusyCode, packDefMap, items]);
 
   const saveSkuMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (draft: HierarchyDraft) => {
       if (!selectedSku) throw new Error('Pick a SKU first.');
 
-      const innerN = innerEaStr.trim() === '' ? null : Number(innerEaStr);
-      const outerN = outerEaStr.trim() === '' ? null : Number(outerEaStr);
+      const err1 = validateLayer1(draft);
+      if (err1) throw new Error(err1);
+      const err2 = validateLayer2(draft);
+      if (err2) throw new Error(err2);
 
-      if (innerN != null && (!Number.isFinite(innerN) || innerN <= 1)) {
-        throw new Error('Pieces per packet must be blank or an integer > 1.');
-      }
-      if (outerN != null && (!Number.isFinite(outerN) || outerN <= 1)) {
-        throw new Error('Pieces per box must be blank or an integer > 1.');
+      const derived = computeDerivedPieces(draft);
+      if (!derived) throw new Error('Could not derive pack math — check inner counts.');
+
+      const innerN = derived.piecesPerPacket;
+      const outerN = derived.piecesPerBox;
+      const sellingUnit = derivedSellingUnit(draft);
+
+      if (sellingUnit !== 'piece' && innerN <= 1) {
+        throw new Error('Selling in packs requires pieces-per-packet > 1.');
       }
 
-      if (
-        (innerN == null || !Number.isFinite(innerN)) &&
-        (outerN == null || !Number.isFinite(outerN))
-      ) {
-        throw new Error('Enter at least pieces-per-packet or pieces-per-box.');
-      }
-
-      if (sellingUnit !== 'piece' && innerN == null) {
-        throw new Error('Selling in packets/boxes requires pieces-per-packet.');
-      }
+      const packetLabel = formatLayerLabel(draft.packet.labelPreset, draft.packet.labelCustom);
+      const boxLabel = formatLayerLabel(draft.box.labelPreset, draft.box.labelCustom);
 
       const bc = selectedSku.skuBusyCode;
       const hadBarcodeAtSaveStart = mappedSkuSet.has(bc);
@@ -660,8 +654,8 @@ export default function BinOnboardingPage(): ReactElement {
 
       const { data, error } = await supabase.rpc('upsert_uom_definition', {
         p_busy_code: bc,
-        p_inner_pack_qty: innerN != null && Number.isFinite(innerN) ? Math.floor(innerN) : null,
-        p_outer_pack_qty: outerN != null && Number.isFinite(outerN) ? Math.floor(outerN) : null,
+        p_inner_pack_qty: Math.floor(innerN),
+        p_outer_pack_qty: Math.floor(outerN),
         p_packet_label: packetLabel.trim() || null,
         p_box_label: boxLabel.trim() || null,
         p_selling_unit: sellingUnit,
@@ -719,13 +713,63 @@ export default function BinOnboardingPage(): ReactElement {
       const next = nextIncompleteBusyCode(bc, defsAfterSave);
       setSelectedBusyCode(next);
       setTierConflict(null);
+      setHierarchyStep(1);
+      setHierarchyDraft(defaultHierarchyDraft());
     },
     onError: (e: Error) => toast.error(e.message || 'Could not save.'),
   });
 
   const handleSaveSku = useCallback(() => {
-    saveSkuMutation.mutate();
-  }, [saveSkuMutation]);
+    saveSkuMutation.mutate(hierarchyDraft);
+  }, [saveSkuMutation, hierarchyDraft]);
+
+  const handleHierarchyContinue = useCallback(() => {
+    if (hierarchyStep === 1) {
+      const a = validateOuterScanGate(hierarchyDraft);
+      if (a) {
+        toast.warning(a);
+        return;
+      }
+      const b = validateLayer1(hierarchyDraft);
+      if (b) {
+        toast.warning(b);
+        return;
+      }
+      setHierarchyStep(2);
+      return;
+    }
+    if (hierarchyStep === 2) {
+      const a = validatePacketScanGate(hierarchyDraft);
+      if (a) {
+        toast.warning(a);
+        return;
+      }
+      const b = validateLayer2(hierarchyDraft);
+      if (b) {
+        toast.warning(b);
+        return;
+      }
+      setHierarchyStep(3);
+      return;
+    }
+    if (hierarchyStep === 3) {
+      setHierarchyStep('review');
+    }
+  }, [hierarchyStep, hierarchyDraft, toast]);
+
+  const handleHierarchyBack = useCallback(() => {
+    if (hierarchyStep === 'review') {
+      setHierarchyStep(3);
+      return;
+    }
+    if (hierarchyStep === 3) {
+      setHierarchyStep(2);
+      return;
+    }
+    if (hierarchyStep === 2) {
+      setHierarchyStep(1);
+    }
+  }, [hierarchyStep]);
 
   const handleSkipSkuFixed = useCallback(() => {
     if (!selectedSku) return;
@@ -754,67 +798,22 @@ export default function BinOnboardingPage(): ReactElement {
     [mappedSkuSet, packDefMap],
   );
 
-  function tierSlots(tier: UomTier, label: string, optional?: boolean): ReactElement {
-    if (!selectedSku) return <></>;
-    const bc = selectedSku.skuBusyCode;
-    const saved =
-      tier === 'box'
-        ? sessionTierLabels[bc]?.box
-        : tier === 'packet'
-          ? sessionTierLabels[bc]?.packet
-          : sessionTierLabels[bc]?.piece;
-
-    const skippedPiece = tier === 'piece' && pieceSkippedByBusy[bc];
-
-    return (
-      <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
-        <p className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-          {label}
-          {optional ? ' (optional)' : ''}
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <BigButton
-            type="button"
-            variant="secondary"
-            className="min-h-11 shrink-0"
-            disabled={skippedPiece}
-            onClick={() => setScannerOpen(tier === 'box' ? 'box' : tier === 'packet' ? 'packet' : 'piece')}
-          >
-            Scan label
-          </BigButton>
-          {optional && (
-            <BigButton
-              type="button"
-              variant="ghost"
-              className="min-h-11"
-              onClick={() => {
-                setPieceSkippedByBusy((p) => ({ ...p, [bc]: true }));
-                setSessionTierLabels((prev) => {
-                  const next = { ...prev };
-                  const row = { ...(next[bc] ?? {}) };
-                  delete row.piece;
-                  next[bc] = row;
-                  return next;
-                });
-              }}
-            >
-              No piece label
-            </BigButton>
-          )}
-        </div>
-        {saved && (
-          <p className="mt-2 font-mono text-sm text-[var(--content-positive)]">
-            Saved: {saved} → {tier}
-          </p>
-        )}
-        {skippedPiece && (
-          <p className="mt-2 text-sm text-[var(--content-tertiary)]">Piece scan skipped for this SKU.</p>
-        )}
-      </div>
-    );
-  }
-
   const barcodePct = barcodeCoverage?.coverage_pct ?? null;
+
+  const bcForWorksheet = selectedSku?.skuBusyCode;
+  const tierDisplay = bcForWorksheet
+    ? sessionTierLabels[bcForWorksheet]
+    : undefined;
+
+  const derivedPreview = useMemo(
+    () => computeDerivedPieces(hierarchyDraft),
+    [hierarchyDraft],
+  );
+
+  const sellingPreview = useMemo(
+    () => derivedSellingUnit(hierarchyDraft),
+    [hierarchyDraft],
+  );
 
   return (
     <div className="role-admin min-h-screen bg-[var(--bg-primary)] pb-28">
@@ -1053,84 +1052,474 @@ export default function BinOnboardingPage(): ReactElement {
               </div>
             )}
 
-            <div className="grid gap-3">
-              {tierSlots('box', '1. BOX label (outer)')}
-              {tierSlots('packet', '2. PACKET label (inner)')}
-              {tierSlots('piece', '3. PIECE label', true)}
-            </div>
+            {hierarchyStep !== 'review' ? (
+              <p className="text-center text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--content-tertiary)]">
+                Step {hierarchyStep} of 3 · Peel outer → inner → optional piece
+              </p>
+            ) : (
+              <p className="text-center text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--content-accent)]">
+                Review — confirm before saving
+              </p>
+            )}
 
-            <div className="space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
-              <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-                  Pieces per packet
-                </span>
-                <input
-                  type="number"
-                  min={2}
-                  value={innerEaStr}
-                  onChange={(e) => setInnerEaStr(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--content-primary)]"
-                />
-              </label>
-              <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-                  Pieces per box
-                </span>
-                <input
-                  type="number"
-                  min={2}
-                  value={outerEaStr}
-                  onChange={(e) => setOuterEaStr(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--content-primary)]"
-                />
-              </label>
-              {outerInnerMismatch && (
-                <p className="text-sm font-medium text-[var(--content-warning)]">
-                  Outer is not a multiple of inner — double-check pack quantities.
+            {hierarchyStep === 1 && (
+              <div className="space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4">
+                <p className="text-sm font-semibold text-[var(--content-primary)]">Outer carton</p>
+                <p className="text-xs text-[var(--content-secondary)]">
+                  Scan the manufacturer barcode on the outer pack, or say there isn&apos;t one.
                 </p>
-              )}
-              {packetsPerBoxPreview != null && (
-                <p className="text-sm text-[var(--content-secondary)]">
-                  → {packetsPerBoxPreview} packets per box
-                </p>
-              )}
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-                  Selling unit
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {(['piece', 'packet', 'box'] as const).map((u) => (
+                <div className="flex flex-wrap gap-2">
+                  <BigButton
+                    type="button"
+                    variant="secondary"
+                    className="min-h-12 flex-1"
+                    disabled={hierarchyDraft.box.noLabel}
+                    onClick={() => setScannerOpen('box')}
+                  >
+                    Scan outer label
+                  </BigButton>
+                  <BigButton
+                    type="button"
+                    variant={hierarchyDraft.box.noLabel ? 'primary' : 'ghost'}
+                    className="min-h-12 flex-1"
+                    onClick={() =>
+                      setHierarchyDraft((d) => ({
+                        ...d,
+                        box: { ...d.box, noLabel: true, scanRaw: null },
+                      }))
+                    }
+                  >
+                    No outer barcode
+                  </BigButton>
+                </div>
+                {(tierDisplay?.box || hierarchyDraft.box.scanRaw) && !hierarchyDraft.box.noLabel ? (
+                  <p className="font-mono text-sm text-[var(--content-positive)]">
+                    Saved key: {tierDisplay?.box ?? '…'} → box
+                  </p>
+                ) : null}
+                {hierarchyDraft.box.noLabel ? (
+                  <div className="flex flex-col gap-1">
+                    <p className="text-sm text-[var(--content-tertiary)]">Outer tier marked as no barcode.</p>
                     <button
-                      key={u}
                       type="button"
-                      onClick={() => setSellingUnit(u)}
-                      className={`rounded-full px-3 py-1.5 text-sm font-medium ${
-                        sellingUnit === u
-                          ? 'bg-[var(--bg-accent)] text-[var(--content-on-color)]'
-                          : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
-                      }`}
+                      className="text-left text-sm font-medium text-[var(--content-accent)]"
+                      onClick={() =>
+                        setHierarchyDraft((d) => ({
+                          ...d,
+                          box: { ...d.box, noLabel: false },
+                        }))
+                      }
                     >
-                      {u === 'piece' ? 'Piece' : u === 'packet' ? 'Packet' : 'Box'}
+                      Undo — scan a barcode instead
                     </button>
+                  </div>
+                ) : null}
+
+                <label className="block pt-1">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                    Inner packs inside this outer
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    inputMode="numeric"
+                    value={hierarchyDraft.box.packetsInside === '' ? '' : hierarchyDraft.box.packetsInside}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setHierarchyDraft((d) => ({
+                        ...d,
+                        box: {
+                          ...d.box,
+                          packetsInside: v === '' ? '' : Number(v),
+                        },
+                      }));
+                    }}
+                    className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3 text-lg font-semibold tabular-nums text-[var(--content-primary)]"
+                    placeholder="e.g. 12"
+                  />
+                </label>
+
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                    Label shown for outer (catalog)
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(['Box', 'Carton', 'Outer'] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() =>
+                          setHierarchyDraft((d) => ({
+                            ...d,
+                            box: { ...d.box, labelPreset: p },
+                          }))
+                        }
+                        className={`rounded-full px-3 py-2 text-sm font-medium ${
+                          hierarchyDraft.box.labelPreset === p
+                            ? 'bg-[var(--bg-accent)] text-[var(--content-on-color)]'
+                            : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    value={hierarchyDraft.box.labelCustom}
+                    onChange={(e) =>
+                      setHierarchyDraft((d) => ({
+                        ...d,
+                        box: { ...d.box, labelCustom: e.target.value },
+                      }))
+                    }
+                    placeholder="Optional override text"
+                    className="mt-2 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--content-primary)]"
+                  />
+                </div>
+
+                <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+                  <input
+                    type="checkbox"
+                    checked={hierarchyDraft.box.sellThisUnit}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      setHierarchyDraft((d) => ({
+                        ...d,
+                        box: { ...d.box, sellThisUnit: on },
+                        packet: { ...d.packet, sellThisUnit: on ? false : d.packet.sellThisUnit },
+                      }));
+                    }}
+                    className="h-5 w-5 accent-[var(--bg-accent)]"
+                  />
+                  <span className="text-sm font-medium text-[var(--content-primary)]">
+                    We sell at <strong>outer / box</strong> unit
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {hierarchyStep === 2 && (
+              <div className="space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4">
+                <p className="text-sm font-semibold text-[var(--content-primary)]">Inner packet</p>
+                <p className="text-xs text-[var(--content-secondary)]">
+                  Scan the sleeve or inner multi-pack barcode when present.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <BigButton
+                    type="button"
+                    variant="secondary"
+                    className="min-h-12 flex-1"
+                    disabled={hierarchyDraft.packet.noLabel}
+                    onClick={() => setScannerOpen('packet')}
+                  >
+                    Scan inner label
+                  </BigButton>
+                  <BigButton
+                    type="button"
+                    variant={hierarchyDraft.packet.noLabel ? 'primary' : 'ghost'}
+                    className="min-h-12 flex-1"
+                    onClick={() =>
+                      setHierarchyDraft((d) => ({
+                        ...d,
+                        packet: { ...d.packet, noLabel: true, scanRaw: null },
+                      }))
+                    }
+                  >
+                    No inner barcode
+                  </BigButton>
+                </div>
+                {(tierDisplay?.packet || hierarchyDraft.packet.scanRaw) && !hierarchyDraft.packet.noLabel ? (
+                  <p className="font-mono text-sm text-[var(--content-positive)]">
+                    Saved key: {tierDisplay?.packet ?? '…'} → packet
+                  </p>
+                ) : null}
+                {hierarchyDraft.packet.noLabel ? (
+                  <div className="flex flex-col gap-1">
+                    <p className="text-sm text-[var(--content-tertiary)]">Inner tier marked as no barcode.</p>
+                    <button
+                      type="button"
+                      className="text-left text-sm font-medium text-[var(--content-accent)]"
+                      onClick={() =>
+                        setHierarchyDraft((d) => ({
+                          ...d,
+                          packet: { ...d.packet, noLabel: false },
+                        }))
+                      }
+                    >
+                      Undo — scan a barcode instead
+                    </button>
+                  </div>
+                ) : null}
+
+                <label className="block">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                    Pieces inside one inner pack
+                  </span>
+                  <input
+                    type="number"
+                    min={2}
+                    step={1}
+                    inputMode="numeric"
+                    value={
+                      hierarchyDraft.packet.piecesInside === '' ? '' : hierarchyDraft.packet.piecesInside
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setHierarchyDraft((d) => ({
+                        ...d,
+                        packet: {
+                          ...d.packet,
+                          piecesInside: v === '' ? '' : Number(v),
+                        },
+                      }));
+                    }}
+                    className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3 text-lg font-semibold tabular-nums text-[var(--content-primary)]"
+                    placeholder="e.g. 10"
+                  />
+                </label>
+
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                    Label for inner pack
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(['Packet', 'Set', 'Strip'] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() =>
+                          setHierarchyDraft((d) => ({
+                            ...d,
+                            packet: { ...d.packet, labelPreset: p },
+                          }))
+                        }
+                        className={`rounded-full px-3 py-2 text-sm font-medium ${
+                          hierarchyDraft.packet.labelPreset === p
+                            ? 'bg-[var(--bg-accent)] text-[var(--content-on-color)]'
+                            : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="text"
+                    value={hierarchyDraft.packet.labelCustom}
+                    onChange={(e) =>
+                      setHierarchyDraft((d) => ({
+                        ...d,
+                        packet: { ...d.packet, labelCustom: e.target.value },
+                      }))
+                    }
+                    placeholder="Optional override text"
+                    className="mt-2 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--content-primary)]"
+                  />
+                </div>
+
+                <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+                  <input
+                    type="checkbox"
+                    checked={hierarchyDraft.packet.sellThisUnit}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      setHierarchyDraft((d) => ({
+                        ...d,
+                        packet: { ...d.packet, sellThisUnit: on },
+                        box: { ...d.box, sellThisUnit: on ? false : d.box.sellThisUnit },
+                      }));
+                    }}
+                    className="h-5 w-5 accent-[var(--bg-accent)]"
+                  />
+                  <span className="text-sm font-medium text-[var(--content-primary)]">
+                    We sell at <strong>inner / packet</strong> unit
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {hierarchyStep === 3 && (
+              <div className="space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4">
+                <p className="text-sm font-semibold text-[var(--content-primary)]">Single piece (optional)</p>
+                <p className="text-xs text-[var(--content-secondary)]">
+                  Scan a manufacturer barcode on the individual piece when it exists.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <BigButton
+                    type="button"
+                    variant="secondary"
+                    className="min-h-12 flex-1"
+                    disabled={hierarchyDraft.piece.noLabel}
+                    onClick={() => setScannerOpen('piece')}
+                  >
+                    Scan piece label
+                  </BigButton>
+                  <BigButton
+                    type="button"
+                    variant={hierarchyDraft.piece.noLabel ? 'primary' : 'ghost'}
+                    className="min-h-12 flex-1"
+                    onClick={() =>
+                      setHierarchyDraft((d) => ({
+                        ...d,
+                        piece: { ...d.piece, noLabel: true, scanRaw: null },
+                      }))
+                    }
+                  >
+                    No piece barcode
+                  </BigButton>
+                </div>
+                {(tierDisplay?.piece || hierarchyDraft.piece.scanRaw) && !hierarchyDraft.piece.noLabel ? (
+                  <p className="font-mono text-sm text-[var(--content-positive)]">
+                    Saved key: {tierDisplay?.piece ?? '…'} → piece
+                  </p>
+                ) : null}
+                {hierarchyDraft.piece.noLabel ? (
+                  <div className="flex flex-col gap-1">
+                    <p className="text-sm text-[var(--content-tertiary)]">Piece tier marked as no barcode.</p>
+                    <button
+                      type="button"
+                      className="text-left text-sm font-medium text-[var(--content-accent)]"
+                      onClick={() =>
+                        setHierarchyDraft((d) => ({
+                          ...d,
+                          piece: { ...d.piece, noLabel: false },
+                        }))
+                      }
+                    >
+                      Undo — scan a barcode instead
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            {hierarchyStep === 'review' && (
+              <div className="space-y-4 rounded-2xl border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] p-4">
+                <p className="text-sm font-semibold text-[var(--content-primary)]">Pack preview</p>
+                <div className="flex flex-wrap items-stretch justify-center gap-2 sm:justify-between">
+                  {(
+                    [
+                      {
+                        key: 'box',
+                        icon: '📦',
+                        title: 'Outer',
+                        scanned: Boolean(tierDisplay?.box || hierarchyDraft.box.scanRaw),
+                        noLbl: hierarchyDraft.box.noLabel,
+                        sell: sellingPreview === 'box',
+                      },
+                      {
+                        key: 'packet',
+                        icon: '🗂',
+                        title: 'Inner',
+                        scanned: Boolean(tierDisplay?.packet || hierarchyDraft.packet.scanRaw),
+                        noLbl: hierarchyDraft.packet.noLabel,
+                        sell: sellingPreview === 'packet',
+                      },
+                      {
+                        key: 'piece',
+                        icon: '🔩',
+                        title: 'Piece',
+                        scanned: Boolean(tierDisplay?.piece || hierarchyDraft.piece.scanRaw),
+                        noLbl: hierarchyDraft.piece.noLabel,
+                        sell: sellingPreview === 'piece',
+                      },
+                    ] as const
+                  ).map((cell) => (
+                    <div
+                      key={cell.key}
+                      className="flex min-w-[5.5rem] flex-1 flex-col items-center rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-3 text-center"
+                    >
+                      <span className="text-2xl" aria-hidden>
+                        {cell.icon}
+                      </span>
+                      <span className="mt-1 text-[10px] font-bold uppercase tracking-wide text-[var(--content-tertiary)]">
+                        {cell.title}
+                      </span>
+                      <span className="mt-1 text-xs font-medium text-[var(--content-secondary)]">
+                        {cell.noLbl ? 'No barcode' : cell.scanned ? 'QR ✓' : 'No scan'}
+                      </span>
+                      {cell.sell ? (
+                        <span className="mt-1 inline-flex items-center gap-0.5 text-[11px] font-bold uppercase tracking-wide text-[var(--content-accent)]">
+                          <Star size={14} weight="fill" className="text-[var(--content-accent)]" aria-hidden />
+                          Selling
+                        </span>
+                      ) : (
+                        <span className="mt-1 text-[10px] text-[var(--content-tertiary)]"> </span>
+                      )}
+                    </div>
                   ))}
                 </div>
+                <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--content-secondary)]">
+                  {derivedPreview ? (
+                    <p>
+                      <span className="font-semibold text-[var(--content-primary)]">
+                        {derivedPreview.piecesPerBox}
+                      </span>{' '}
+                      pieces per outer · {derivedPreview.packetsPerBox} inner packs ×{' '}
+                      {derivedPreview.piecesPerPacket} pieces each
+                    </p>
+                  ) : (
+                    <p className="text-[var(--content-warning)]">
+                      Pack math incomplete — go back and fix inner counts.
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs">
+                    Outer label:{' '}
+                    <span className="font-medium text-[var(--content-primary)]">
+                      {formatLayerLabel(hierarchyDraft.box.labelPreset, hierarchyDraft.box.labelCustom)}
+                    </span>{' '}
+                    · Inner:{' '}
+                    <span className="font-medium text-[var(--content-primary)]">
+                      {formatLayerLabel(hierarchyDraft.packet.labelPreset, hierarchyDraft.packet.labelCustom)}
+                    </span>
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="flex flex-wrap gap-2">
-              <BigButton
-                type="button"
-                variant="primary"
-                className="flex-1 bg-[var(--bg-positive)] text-[var(--content-on-color)]"
-                disabled={saveSkuMutation.isPending}
-                onClick={handleSaveSku}
-              >
-                Save SKU
-              </BigButton>
+              {hierarchyStep !== 'review' ? (
+                <>
+                  <BigButton
+                    type="button"
+                    variant="secondary"
+                    className="min-h-12"
+                    disabled={hierarchyStep === 1}
+                    onClick={handleHierarchyBack}
+                  >
+                    Back
+                  </BigButton>
+                  <BigButton
+                    type="button"
+                    variant="primary"
+                    className="min-h-12 flex-1 bg-[var(--bg-accent)] text-[var(--content-on-color)]"
+                    onClick={handleHierarchyContinue}
+                  >
+                    Continue
+                  </BigButton>
+                </>
+              ) : (
+                <>
+                  <BigButton type="button" variant="secondary" className="min-h-12" onClick={handleHierarchyBack}>
+                    Back
+                  </BigButton>
+                  <BigButton
+                    type="button"
+                    variant="primary"
+                    className="min-h-12 flex-1 bg-[var(--bg-positive)] text-[var(--content-on-color)]"
+                    disabled={saveSkuMutation.isPending}
+                    onClick={handleSaveSku}
+                  >
+                    Save SKU
+                  </BigButton>
+                </>
+              )}
               <BigButton type="button" variant="ghost" onClick={handleSkipSkuFixed}>
                 Skip
               </BigButton>
-              <BigButton type="button" variant="secondary" onClick={() => setSelectedBusyCode(null)}>
+              <BigButton type="button" variant="ghost" onClick={() => setSelectedBusyCode(null)}>
                 Back to bin
               </BigButton>
             </div>
