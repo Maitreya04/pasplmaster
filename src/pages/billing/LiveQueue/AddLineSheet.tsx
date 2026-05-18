@@ -7,6 +7,7 @@ import { buildSearchIndex } from '../../../lib/search/searchIndex';
 import { searchItems } from '../../../lib/search/itemSearch';
 import { useItems } from '../../../hooks/useItems';
 import { fetchLocationwiseAvailableForBusyCodes } from '../../../hooks/useBillingStockFreshness';
+import { invalidateLocationwiseStockQueries } from '../../../hooks/useLocationwiseStock';
 import { formatCurrency } from '../../../utils/formatters';
 import { formatSupabaseUserMessage } from '../../../lib/supabase/formatUserMessage';
 
@@ -159,7 +160,7 @@ export function AddLineSheet({
       void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       void queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       void queryClient.invalidateQueries({ queryKey: ['billing-stock-freshness'] });
-      void queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
+      void invalidateLocationwiseStockQueries(queryClient);
       onAdded(orderItemId);
       onClose();
     },

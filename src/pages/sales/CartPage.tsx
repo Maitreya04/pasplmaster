@@ -29,6 +29,9 @@ import { useTransports } from '../../hooks/useTransports';
 import {
   getStockQtyForLocation,
   stockLocationLabel,
+  invalidateLocationwiseStockQueries,
+  isLocationwiseStockResolving,
+  normalizeBusyCodes,
   useLocationwiseStock,
 } from '../../hooks/useLocationwiseStock';
 import { useUserStockLocation } from '../../hooks/useUserStockLocation';
@@ -998,11 +1001,20 @@ export default function CartPage(): React.JSX.Element | null {
     () => visibleBusyCodes.some((code) => code != null && Number.isFinite(Number(code))),
     [visibleBusyCodes],
   );
+  const normalizedVisibleBusyCodes = useMemo(
+    () => normalizeBusyCodes(visibleBusyCodes),
+    [visibleBusyCodes],
+  );
   const {
     data: locationwiseStock = {},
-    isLoading: locationwiseStockLoading,
+    isFetching: locationwiseStockFetching,
   } = useLocationwiseStock(visibleBusyCodes);
-  const stockSplitLoading = stockLocationLoading || (hasLocationwiseLines && locationwiseStockLoading);
+  const stockSplitLoading =
+    stockLocationLoading ||
+    (hasLocationwiseLines &&
+      normalizedVisibleBusyCodes.some((code) =>
+        isLocationwiseStockResolving(code, locationwiseStockFetching),
+      ));
 
   /** Single pass over lines: splits, billing/PO lists, totals (one stock calc per line). */
   const {
@@ -1251,7 +1263,7 @@ export default function CartPage(): React.JSX.Element | null {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['pending-items'] });
       queryClient.invalidateQueries({ queryKey: ['open-po-demand-lines'] });
-      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
+      void invalidateLocationwiseStockQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ['customer_quick_reorder'] });
       queryClient.invalidateQueries({ queryKey: ['salesperson_top_customers'] });

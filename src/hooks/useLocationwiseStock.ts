@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, type QueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import type { StockLocationCode } from '../types';
 
@@ -22,12 +22,115 @@ export type StockLocationRow = {
 
 const POLL_INTERVAL_MS = 30_000;
 
+/** Per-SKU cache survives React Query key changes (e.g. search result churn). */
+const stockByBusyCodeCache = new Map<number, { stock: ItemLocationStock; fetchedAt: number }>();
+
+function emptyItemLocationStock(): ItemLocationStock {
+  return {
+    jabalpurStockQty: null,
+    mainStoreStockQty: null,
+    jabalpurPhysicalQty: null,
+    mainStorePhysicalQty: null,
+    jabalpurReservedQty: null,
+    mainStoreReservedQty: null,
+  };
+}
+
 export function normalizeBusyCodes(busyCodes: Array<number | null | undefined>): number[] {
   return [...new Set(
     busyCodes
       .map((code) => (code == null ? null : Number(code)))
       .filter((code): code is number => Number.isFinite(code)),
   )].sort((a, b) => a - b);
+}
+
+export function busyCodesQueryKey(busyCodes: number[]): string {
+  return busyCodes.join(',');
+}
+
+function isCacheFresh(busyCode: number, now = Date.now()): boolean {
+  const entry = stockByBusyCodeCache.get(busyCode);
+  return entry != null && now - entry.fetchedAt < POLL_INTERVAL_MS;
+}
+
+/** Call before invalidateQueries so the next fetch bypasses the in-memory SKU cache. */
+export function clearLocationwiseStockCache(busyCodes?: number[]): void {
+  if (!busyCodes?.length) {
+    stockByBusyCodeCache.clear();
+    return;
+  }
+  for (const code of busyCodes) {
+    stockByBusyCodeCache.delete(code);
+  }
+}
+
+export async function invalidateLocationwiseStockQueries(
+  queryClient: QueryClient,
+  busyCodes?: number[],
+): Promise<void> {
+  clearLocationwiseStockCache(busyCodes);
+  await queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
+}
+
+export function snapshotLocationwiseStockFromCache(busyCodes: number[]): Record<number, ItemLocationStock> {
+  const out: Record<number, ItemLocationStock> = {};
+  for (const code of busyCodes) {
+    const entry = stockByBusyCodeCache.get(code);
+    if (entry) out[code] = entry.stock;
+  }
+  return out;
+}
+
+function applyStockRow(
+  stockByBusyCode: Record<number, ItemLocationStock>,
+  row: StockLocationRow,
+): void {
+  const busyCode = row.busy_code == null ? NaN : Number(row.busy_code);
+  if (!Number.isFinite(busyCode)) return;
+
+  const stockQty = row.available_qty == null || !Number.isFinite(Number(row.available_qty))
+    ? null
+    : Number(row.available_qty);
+  const physicalQty = row.physical_qty == null || !Number.isFinite(Number(row.physical_qty))
+    ? null
+    : Number(row.physical_qty);
+  const reservedQty = row.reserved_qty == null || !Number.isFinite(Number(row.reserved_qty))
+    ? null
+    : Number(row.reserved_qty);
+
+  const existing = stockByBusyCode[busyCode] ?? emptyItemLocationStock();
+
+  if (row.stock_location_code === 'jabalpur') {
+    existing.jabalpurStockQty = stockQty;
+    existing.jabalpurPhysicalQty = physicalQty;
+    existing.jabalpurReservedQty = reservedQty;
+  }
+  if (row.stock_location_code === 'main_store') {
+    existing.mainStoreStockQty = stockQty;
+    existing.mainStorePhysicalQty = physicalQty;
+    existing.mainStoreReservedQty = reservedQty;
+  }
+
+  stockByBusyCode[busyCode] = existing;
+}
+
+function writeCacheFromRows(rows: StockLocationRow[], fetchedAt: number): Record<number, ItemLocationStock> {
+  const batch: Record<number, ItemLocationStock> = {};
+  for (const row of rows) {
+    applyStockRow(batch, row);
+  }
+  for (const [code, stock] of Object.entries(batch)) {
+    stockByBusyCodeCache.set(Number(code), { stock, fetchedAt });
+  }
+  return batch;
+}
+
+async function fetchLocationwiseStockRows(busyCodes: number[]): Promise<StockLocationRow[]> {
+  const { data, error } = await supabase.rpc('get_locationwise_stock_for_busy_codes', {
+    p_busy_codes: busyCodes,
+  });
+  if (error) throw error;
+  return (data ?? []) as StockLocationRow[];
 }
 
 export function normalizeLocationLabel(stockLocation: string | null | undefined): string | null {
@@ -51,69 +154,48 @@ export function getStockQtyForLocation(
     : stock?.mainStoreStockQty ?? null;
 }
 
+/**
+ * Fetches sellable location-wise stock only for SKUs that are missing or stale
+ * in the in-memory cache; returns a snapshot for the requested busy_codes.
+ */
 export async function fetchLocationwiseStock(
   busyCodes: number[],
 ): Promise<Record<number, ItemLocationStock>> {
   if (busyCodes.length === 0) return {};
 
-  const { data, error } = await supabase
-    .from('locationwise_stock_available')
-    .select('busy_code,stock_location_code,available_qty,physical_qty,reserved_qty')
-    .in('busy_code', busyCodes);
-
-  if (error) throw error;
-
-  const rows = (data ?? []) as StockLocationRow[];
-  const stockByBusyCode: Record<number, ItemLocationStock> = {};
-
-  for (const row of rows) {
-    const busyCode = row.busy_code == null ? NaN : Number(row.busy_code);
-    if (!Number.isFinite(busyCode)) continue;
-
-    const stockQty = row.available_qty == null || !Number.isFinite(Number(row.available_qty))
-      ? null
-      : Number(row.available_qty);
-    const physicalQty = row.physical_qty == null || !Number.isFinite(Number(row.physical_qty))
-      ? null
-      : Number(row.physical_qty);
-    const reservedQty = row.reserved_qty == null || !Number.isFinite(Number(row.reserved_qty))
-      ? null
-      : Number(row.reserved_qty);
-
-    const existing = stockByBusyCode[busyCode] ?? {
-      jabalpurStockQty: null,
-      mainStoreStockQty: null,
-      jabalpurPhysicalQty: null,
-      mainStorePhysicalQty: null,
-      jabalpurReservedQty: null,
-      mainStoreReservedQty: null,
-    };
-
-    if (row.stock_location_code === 'jabalpur') {
-      existing.jabalpurStockQty = stockQty;
-      existing.jabalpurPhysicalQty = physicalQty;
-      existing.jabalpurReservedQty = reservedQty;
-    }
-    if (row.stock_location_code === 'main_store') {
-      existing.mainStoreStockQty = stockQty;
-      existing.mainStorePhysicalQty = physicalQty;
-      existing.mainStoreReservedQty = reservedQty;
-    }
-
-    stockByBusyCode[busyCode] = existing;
+  const now = Date.now();
+  const staleCodes = busyCodes.filter((code) => !isCacheFresh(code, now));
+  if (staleCodes.length > 0) {
+    const rows = await fetchLocationwiseStockRows(staleCodes);
+    writeCacheFromRows(rows, now);
   }
 
-  return stockByBusyCode;
+  return snapshotLocationwiseStockFromCache(busyCodes);
+}
+
+/** True while we have no fresh cached qty for this SKU (not the whole batch). */
+export function isLocationwiseStockResolving(
+  busyCode: number | null | undefined,
+  isFetching: boolean,
+): boolean {
+  if (busyCode == null || !Number.isFinite(busyCode)) return false;
+  if (isCacheFresh(busyCode)) return false;
+  return isFetching;
 }
 
 export function useLocationwiseStock(busyCodes: Array<number | null | undefined>) {
   const normalizedBusyCodes = useMemo(() => normalizeBusyCodes(busyCodes), [busyCodes]);
+  const busyCodesKey = busyCodesQueryKey(normalizedBusyCodes);
 
   return useQuery<Record<number, ItemLocationStock>>({
-    queryKey: ['stock_locationwise', normalizedBusyCodes],
+    queryKey: ['stock_locationwise', busyCodesKey],
     queryFn: () => fetchLocationwiseStock(normalizedBusyCodes),
     enabled: normalizedBusyCodes.length > 0,
-    staleTime: 0,
+    staleTime: POLL_INTERVAL_MS,
+    placeholderData: () => {
+      const cached = snapshotLocationwiseStockFromCache(normalizedBusyCodes);
+      return Object.keys(cached).length > 0 ? cached : undefined;
+    },
     refetchInterval: POLL_INTERVAL_MS,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,

@@ -24,6 +24,7 @@ import type { OrderItem, PendingItem } from '../../types';
 import { formatCurrency, formatTimestamp } from '../../utils/formatters';
 import { isFocOrderItem } from '../../lib/specialPricing';
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
+import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseStock';
 
 interface EditableItem extends OrderItem {
   qty_approved: number;
@@ -573,7 +574,7 @@ export default function ReviewPage(): React.JSX.Element | null {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       queryClient.invalidateQueries({ queryKey: ['pending-items'] });
       queryClient.invalidateQueries({ queryKey: ['open-po-demand-lines'] });
-      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
+      void invalidateLocationwiseStockQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: ['billing-customer-update', orderId] });
       toast.success(
         order?.workflow_status === 'flagged'
@@ -608,7 +609,7 @@ export default function ReviewPage(): React.JSX.Element | null {
       setRejectReason('');
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
-      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
+      void invalidateLocationwiseStockQueries(queryClient);
       toast.success('Order rejected', {
         action: {
           label: 'Undo',
@@ -627,7 +628,7 @@ export default function ReviewPage(): React.JSX.Element | null {
               .then(() => {
                 queryClient.invalidateQueries({ queryKey: ['orders'] });
                 queryClient.invalidateQueries({ queryKey: ['order', orderId] });
-                queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
+                void invalidateLocationwiseStockQueries(queryClient);
                 toast.success('Rejection undone');
               });
           },

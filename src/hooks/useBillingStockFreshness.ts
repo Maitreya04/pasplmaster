@@ -2,7 +2,11 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import type { OrderItem, StockLocationCode } from '../types';
-import { normalizeBusyCodes } from './useLocationwiseStock';
+import {
+  fetchLocationwiseStock,
+  getStockQtyForLocation,
+  normalizeBusyCodes,
+} from './useLocationwiseStock';
 
 export type BillingFreshnessRow = {
   orderItemId: number;
@@ -34,28 +38,20 @@ export async function fetchStockReservationsByOrderItem(
   return m;
 }
 
-/** Available qty per busy_code at one warehouse location (from `locationwise_stock_available`). */
+/** Available qty per busy_code at one warehouse (shared locationwise stock fetch). */
 export async function fetchLocationwiseAvailableForBusyCodes(
   busyCodes: number[],
   stockLocationCode: StockLocationCode | string | null | undefined,
 ): Promise<Map<number, number>> {
-  const loc = (stockLocationCode ?? 'main_store') as string;
+  const loc = (stockLocationCode === 'jabalpur' ? 'jabalpur' : 'main_store') as StockLocationCode;
   if (busyCodes.length === 0) return new Map();
 
-  const { data, error } = await supabase
-    .from('locationwise_stock_available')
-    .select('busy_code, available_qty')
-    .eq('stock_location_code', loc)
-    .in('busy_code', busyCodes);
-
-  if (error) throw error;
-
+  const stockByBusyCode = await fetchLocationwiseStock(busyCodes);
   const m = new Map<number, number>();
-  for (const row of data ?? []) {
-    const bc = Number(row.busy_code);
-    if (!Number.isFinite(bc)) continue;
-    const aq = row.available_qty == null ? 0 : Math.floor(Number(row.available_qty));
-    m.set(bc, Number.isFinite(aq) ? Math.max(0, aq) : 0);
+  for (const code of busyCodes) {
+    const raw = getStockQtyForLocation(stockByBusyCode[code], loc);
+    const aq = raw == null ? 0 : Math.floor(Number(raw));
+    m.set(code, Number.isFinite(aq) ? Math.max(0, aq) : 0);
   }
   return m;
 }

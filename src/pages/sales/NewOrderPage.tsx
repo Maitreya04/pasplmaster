@@ -28,6 +28,7 @@ import { useItems } from '../../hooks/useItems';
 import {
   getStockQtyForLocation,
   stockLocationLabel,
+  isLocationwiseStockResolving,
   useLocationwiseStock,
 } from '../../hooks/useLocationwiseStock';
 import { useUserStockLocation } from '../../hooks/useUserStockLocation';
@@ -2165,7 +2166,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   );
   const {
     data: locationwiseStock = {},
-    isLoading: locationwiseStockLoading,
+    isFetching: locationwiseStockFetching,
   } = useLocationwiseStock(visibleBusyCodes);
 
 
@@ -2227,7 +2228,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   };
   const getStockResolving = (item: Item) => {
     const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
-    return stockLocationLoading || (Number.isFinite(busyCode) && locationwiseStockLoading);
+    return stockLocationLoading || isLocationwiseStockResolving(busyCode, locationwiseStockFetching);
   };
   const hasSpecialLine = (id: number) => specialLineItemIds.has(id);
   const isJustAdded = (id: number) => recentlyAddedItemId === id;

@@ -19,6 +19,7 @@ import {
   type SalesPendingRecoveryLine,
   useSalesPendingRecovery,
 } from '../../hooks/useSalesPendingRecovery';
+import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseStock';
 import { BottomSheet, EmptyState, Skeleton, BigButton } from '../../components/shared';
 import { formatCurrency, formatTimeAgo } from '../../utils/formatters';
 import { formatStockQty, type StockTier } from '../../lib/stockDisplay';
@@ -717,7 +718,7 @@ export default function PendingRecoveryPage(): React.JSX.Element | null {
       queryClient.invalidateQueries({ queryKey: ['pending-items'] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
+      void invalidateLocationwiseStockQueries(queryClient);
       setActivePartyKey(null);
       toast.success(
         result?.order_number

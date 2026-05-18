@@ -16,6 +16,7 @@ import {
   sendPickerReadyNotification,
 } from '../../lib/pickerPush';
 import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
+import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseStock';
 import { buildSalesCommunicateDraft } from '../../lib/buildSalesCommunicateDraft';
 import { NotificationBell } from '../../components/notifications/NotificationBell';
 import { useRolePushNotifications } from '../../hooks/useRolePushNotifications';
@@ -776,7 +777,7 @@ export default function CompactQueuePage() {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', effectiveOrderId] });
-      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
+      void invalidateLocationwiseStockQueries(queryClient);
       machine.confirmCommunication();
     },
     onError: () => toast.error('Failed to approve order'),

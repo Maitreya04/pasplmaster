@@ -22,6 +22,7 @@ import {
 
 import { useBillingFlow } from '../../hooks/useBillingFlow';
 import { useBillingStockFreshness } from '../../hooks/useBillingStockFreshness';
+import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseStock';
 import { QueueView } from './LiveQueue/QueueView';
 import { OrderSheetView } from './LiveQueue/OrderSheetView';
 import { ReportView } from './LiveQueue/ReportView';
@@ -634,7 +635,7 @@ export default function LiveQueuePage() {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', snapshot.orderId] });
-      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
+      void invalidateLocationwiseStockQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: ['billing-stock-freshness'] });
 
       // Move to report screen
@@ -680,7 +681,7 @@ export default function LiveQueuePage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
+      void invalidateLocationwiseStockQueries(queryClient);
       if (order) {
         queryClient.invalidateQueries({ queryKey: ['order', order.id] });
       }
