@@ -22,6 +22,7 @@ import {
 } from '../../components/shared';
 import type { OrderItem, PendingItem } from '../../types';
 import { formatCurrency, formatTimestamp } from '../../utils/formatters';
+import { isFocOrderItem } from '../../lib/specialPricing';
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 
 interface EditableItem extends OrderItem {
@@ -153,7 +154,11 @@ export default function ReviewPage(): React.JSX.Element | null {
       setPriceResolutionByItemId(
         Object.fromEntries(
           order.items
-            .filter((i) => i.flag_reason === 'Price Mismatch')
+            .filter(
+              (i) =>
+                i.flag_reason === 'Price Mismatch' &&
+                !isFocOrderItem(i),
+            )
             .map((i) => [i.id, null]),
         ),
       );
@@ -182,7 +187,9 @@ export default function ReviewPage(): React.JSX.Element | null {
   const priceMismatchCount = useMemo(
     () =>
       visibleItems.filter(
-        (item) => item.flag_reason && item.flag_reason === 'Price Mismatch',
+        (item) =>
+          Boolean(item.flag_reason && item.flag_reason === 'Price Mismatch') &&
+          !isFocOrderItem(item),
       ).length,
     [visibleItems],
   );
@@ -197,6 +204,7 @@ export default function ReviewPage(): React.JSX.Element | null {
       visibleItems.filter(
         (item) =>
           item.flag_reason === 'Price Mismatch' &&
+          !isFocOrderItem(item) &&
           !priceResolutionByItemId[item.id],
       ).length,
     [priceResolutionByItemId, visibleItems],
@@ -800,9 +808,16 @@ export default function ReviewPage(): React.JSX.Element | null {
                     }`}
                   >
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-[var(--content-primary)] text-base lg:text-lg">
-                          {item.item_name}
-                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-semibold text-[var(--content-primary)] text-base lg:text-lg">
+                            {item.item_name}
+                          </p>
+                          {isFocOrderItem(item) && (
+                            <span className="inline-flex items-center rounded-full border border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-[var(--content-positive)]">
+                              FOC
+                            </span>
+                          )}
+                        </div>
                         <p className="text-sm text-[var(--content-secondary)] mt-1">
                           Requested: {item.qty_requested} · Unit: ₹
                           {price.toLocaleString('en-IN')}

@@ -1,5 +1,13 @@
 import type { CartItem, Customer, Transport } from '../types';
 
+function normalizeCartItem(row: CartItem): CartItem {
+  const foc =
+    typeof row.focQty === 'number' && Number.isFinite(row.focQty)
+      ? Math.max(0, Math.floor(row.focQty))
+      : 0;
+  return { ...row, focQty: foc };
+}
+
 const DRAFT_VERSION = 1 as const;
 /** Drop drafts older than this (stale catalog / forgotten tabs). */
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -109,7 +117,7 @@ export function readCartDraft(
   }
 
   const payload: CartDraftPayload = {
-    items: items as CartItem[],
+    items: (items as CartItem[]).map(normalizeCartItem),
     nextLineId:
       typeof rec.nextLineId === 'number' && rec.nextLineId >= 1
         ? rec.nextLineId

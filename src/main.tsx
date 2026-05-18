@@ -7,11 +7,9 @@ import { queryClient } from './lib/queryClient';
 import { CameraProvider } from './context/CameraContext';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
-import { registerSW } from 'virtual:pwa-register';
 import './index.css';
 import App from './App';
-
-registerSW({ immediate: true });
+import { PwaUpdatePrompt } from './components/PwaUpdatePrompt.tsx';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -20,6 +18,7 @@ createRoot(document.getElementById('root')!).render(
         <AuthProvider>
           <CameraProvider>
             <ToastProvider>
+              <PwaUpdatePrompt />
               <App />
               <Analytics />
             </ToastProvider>

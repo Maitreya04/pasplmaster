@@ -8,6 +8,9 @@ import {
   Trash,
   Copy,
   Check,
+  CaretDown,
+  CaretUp,
+  ShoppingCart as ShoppingCartIcon,
 } from '@phosphor-icons/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCart } from '../../context/CartContext';
@@ -40,7 +43,7 @@ import {
 import type { Customer, CartItem } from '../../types';
 
 import { formatCurrencyRaw as formatCurrency } from '../../utils/formatters';
-import { splitCartLine } from '../../lib/cartSupply';
+import { splitCartLinePaidFoc } from '../../lib/cartSupply';
 import { appHaptics } from '../../lib/haptics';
 import {
   buildOrderCustomerMessage,
@@ -68,6 +71,30 @@ function submitSalesOrderErrorMessage(code: string | undefined, detail?: string)
     default:
       return detail?.trim() || 'Order could not be submitted.';
   }
+}
+
+function reconcileLineToTotalPieces(
+  ci: CartItem,
+  newTotalPieces: number,
+  actions: {
+    updateQty: (lineId: string, qty: number) => void;
+    updateFocQty: (lineId: string, focQty: number) => void;
+    removeItem: (lineId: string) => void;
+  },
+): void {
+  if (newTotalPieces < 1) {
+    actions.removeItem(ci.lineId);
+    return;
+  }
+  const foc = Math.max(0, ci.focQty ?? 0);
+  const nextFoc = Math.min(foc, Math.max(0, newTotalPieces - 1));
+  const nextPaid = newTotalPieces - nextFoc;
+  if (nextPaid < 1) {
+    actions.removeItem(ci.lineId);
+    return;
+  }
+  actions.updateFocQty(ci.lineId, nextFoc);
+  actions.updateQty(ci.lineId, nextPaid);
 }
 
 // ---------------------------------------------------------------------------
@@ -483,6 +510,14 @@ function SpecialRateChip() {
   );
 }
 
+function FocChip({ qty }: { qty: number }) {
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-full border border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] px-3 py-1.5 font-ds-caption-size font-semibold leading-none text-[var(--content-positive)]">
+      FOC ×{qty}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // BillingItemCard — shows items that ship from stock. Qty remains editable,
 // while any PO remainder on the same line is preserved in the split cart.
@@ -492,6 +527,11 @@ interface BillingItemCardProps {
   item: CartItem;
   shipQty: number;
   poQty: number;
+  shippedPaid: number;
+  shippedFoc: number;
+  focQty: number;
+  showFocControls: boolean;
+  onChangeFocQty: (lineId: string, next: number) => void;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onChangeShipQty: (lineId: string, newShipQty: number) => void;
@@ -504,6 +544,11 @@ const BillingItemCard = memo(function BillingItemCard({
   item: cartItem,
   shipQty,
   poQty,
+  shippedPaid,
+  shippedFoc,
+  focQty,
+  showFocControls,
+  onChangeFocQty,
   isOpen,
   onOpenChange,
   onChangeShipQty,
@@ -596,7 +641,8 @@ const BillingItemCard = memo(function BillingItemCard({
   const price = cartItem.specialRate ?? cartItem.item.sales_price;
   const partNo = cartItem.item.alias1 ?? cartItem.item.alias;
   const hasSpecialRate = cartItem.specialRate !== null;
-  const lineTotal = price * shipQty;
+  const hasFoc = focQty > 0;
+  const lineTotal = price * shippedPaid;
 
   return (
     <li className="relative overflow-hidden">
@@ -648,12 +694,18 @@ const BillingItemCard = memo(function BillingItemCard({
 
               <div className="mt-2.5 flex flex-wrap items-center gap-2">
                 {hasSpecialRate && <SpecialRateChip />}
+                {hasFoc && <FocChip qty={focQty} />}
                 {hasSpecialRate && (
                   <span className="font-mono font-ds-micro text-[var(--content-tertiary)] line-through">
                     {formatCurrency(cartItem.item.sales_price)}
                   </span>
                 )}
               </div>
+              {shippedFoc > 0 && (
+                <p className="mt-1.5 font-ds-micro font-medium text-[var(--content-positive)]">
+                  Includes {shippedFoc} FOC from stock (₹0)
+                </p>
+              )}
             </div>
 
             <div className="shrink-0 flex min-w-[142px] flex-col items-end gap-3.5 pl-4">
@@ -678,6 +730,21 @@ const BillingItemCard = memo(function BillingItemCard({
               </div>
             </div>
           </div>
+          {showFocControls && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] px-3 py-2">
+              <p className="text-xs font-semibold text-[var(--content-positive)]">Free qty (FOC)</p>
+              <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+                <NumberStepper
+                  value={focQty}
+                  onChange={(n) => onChangeFocQty(cartItem.lineId, n)}
+                  min={0}
+                  presets={[]}
+                  variant="compact"
+                  colorScheme="positive"
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </li>
@@ -693,6 +760,11 @@ interface PurchaseOrderCardProps {
   cartItem: CartItem;
   poQty: number;
   shipQty: number;
+  poPaid: number;
+  poFoc: number;
+  focQty: number;
+  showFocControls: boolean;
+  onChangeFocQty: (lineId: string, next: number) => void;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onChangePoQty: (lineId: string, newPoQty: number) => void;
@@ -704,6 +776,11 @@ const PurchaseOrderCard = memo(function PurchaseOrderCard({
   cartItem,
   poQty,
   shipQty,
+  poPaid,
+  poFoc,
+  focQty,
+  showFocControls,
+  onChangeFocQty,
   isOpen,
   onOpenChange,
   onChangePoQty,
@@ -811,28 +888,51 @@ const PurchaseOrderCard = memo(function PurchaseOrderCard({
           }
         }}
       >
-        <div className="flex items-center gap-3">
-          <div className="flex-1 min-w-0">
-            {partNo && (
-              <span className="inline-flex max-w-full shrink-0 items-center truncate rounded-full border border-[color-mix(in_srgb,var(--content-primary)_12%,var(--border-subtle))] bg-[var(--bg-secondary)] px-3 py-1 font-mono font-ds-label-size font-semibold tracking-[0.04em] text-[var(--content-primary)]">
-                {partNo}
-              </span>
-            )}
-            <p className="mt-1.5 font-ds-body-size font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
-              {cartItem.item.name}
-            </p>
+        <div>
+          <div className="flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              {partNo && (
+                <span className="inline-flex max-w-full shrink-0 items-center truncate rounded-full border border-[color-mix(in_srgb,var(--content-primary)_12%,var(--border-subtle))] bg-[var(--bg-secondary)] px-3 py-1 font-mono font-ds-label-size font-semibold tracking-[0.04em] text-[var(--content-primary)]">
+                  {partNo}
+                </span>
+              )}
+              <p className="mt-1.5 font-ds-body-size font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
+                {cartItem.item.name}
+              </p>
+              {poFoc > 0 && (
+                <p className="mt-1 font-ds-micro font-medium text-[var(--content-positive)]">
+                  {poPaid > 0 ? `${poPaid} paid · ` : ''}
+                  {poFoc} FOC on PO (₹0)
+                </p>
+              )}
+            </div>
+            <div className="shrink-0">
+              <NumberStepper
+                value={poQty}
+                onChange={(q) => onChangePoQty(cartItem.lineId, q)}
+                min={fullyPo ? 1 : 0}
+                presets={[]}
+                variant="compact"
+                showRemoveAtMin={fullyPo}
+                onRemove={fullyPo ? () => onDeletePress(cartItem) : undefined}
+              />
+            </div>
           </div>
-          <div className="shrink-0">
-            <NumberStepper
-              value={poQty}
-              onChange={(q) => onChangePoQty(cartItem.lineId, q)}
-              min={fullyPo ? 1 : 0}
-              presets={[]}
-              variant="compact"
-              showRemoveAtMin={fullyPo}
-              onRemove={fullyPo ? () => onDeletePress(cartItem) : undefined}
-            />
-          </div>
+          {showFocControls && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border-positive)] bg-[color-mix(in_srgb,var(--bg-positive-subtle)_85%,var(--bg-warning-subtle))] px-3 py-2">
+              <p className="text-xs font-semibold text-[var(--content-positive)]">Free qty (FOC)</p>
+              <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+                <NumberStepper
+                  value={focQty}
+                  onChange={(n) => onChangeFocQty(cartItem.lineId, n)}
+                  min={0}
+                  presets={[]}
+                  variant="compact"
+                  colorScheme="positive"
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </li>
@@ -852,6 +952,7 @@ export default function CartPage(): React.JSX.Element | null {
   const {
     items,
     updateQty,
+    updateFocQty,
     removeItem,
     setSpecialRate,
     clearCart,
@@ -914,7 +1015,17 @@ export default function CartPage(): React.JSX.Element | null {
   } = useMemo(() => {
     const billingSplits: { ci: CartItem; ship: number; po: number }[] = [];
     const poSplits: { ci: CartItem; ship: number; po: number }[] = [];
-    const splitByLineId = new Map<string, { ship: number; po: number }>();
+    const splitByLineId = new Map<
+      string,
+      {
+        ship: number;
+        po: number;
+        shippedPaid: number;
+        shippedFoc: number;
+        poPaid: number;
+        poFoc: number;
+      }
+    >();
     const remainingByBusyCode = new Map<number, number | null>();
     let billingCount = 0;
     let billingTotal = 0;
@@ -929,15 +1040,16 @@ export default function CartPage(): React.JSX.Element | null {
           stockQty = getStockQtyForLocation(locationwiseStock[busyCode], sellableLocationCode);
         }
       }
-      const { ship, po } = splitCartLine(ci.qty, stockQty);
+      const split = splitCartLinePaidFoc(ci.qty, ci.focQty ?? 0, stockQty);
+      const { ship, po, shippedPaid } = split;
       if (Number.isFinite(busyCode) && stockQty != null) {
         remainingByBusyCode.set(busyCode, Math.max(0, stockQty - ship));
       }
-      splitByLineId.set(ci.lineId, { ship, po });
+      splitByLineId.set(ci.lineId, split);
       if (ship > 0) billingSplits.push({ ci, ship, po });
       if (po > 0) poSplits.push({ ci, ship, po });
       billingCount += ship;
-      billingTotal += (ci.specialRate ?? ci.item.sales_price) * ship;
+      billingTotal += (ci.specialRate ?? ci.item.sales_price) * shippedPaid;
       poPiecesTotal += po;
     }
     return {
@@ -950,35 +1062,41 @@ export default function CartPage(): React.JSX.Element | null {
     };
   }, [items, locationwiseStock, sellableLocationCode]);
 
+  const billingLineIdsWithShip = useMemo(
+    () => new Set(billingSplits.map((r) => r.ci.lineId)),
+    [billingSplits],
+  );
+
   /** When PO stepper changes, adjust total qty; ship from stock stays implied by item + stock. */
   const handlePoQtyChange = useCallback(
     (lineId: string, newPoQty: number) => {
       const ci = items.find((c) => c.lineId === lineId);
       if (!ci) return;
-      const { ship } = splitByLineId.get(lineId) ?? { ship: 0 };
-      const newTotal = ship + Math.max(0, newPoQty);
-      if (newTotal < 1) {
-        removeItem(lineId);
-      } else {
-        updateQty(lineId, newTotal);
-      }
+      const split = splitByLineId.get(lineId);
+      if (!split) return;
+      const newTotal = split.ship + Math.max(0, newPoQty);
+      reconcileLineToTotalPieces(ci, newTotal, { updateQty, updateFocQty, removeItem });
     },
-    [items, splitByLineId, updateQty, removeItem],
+    [items, splitByLineId, updateQty, updateFocQty, removeItem],
   );
 
   const handleShipQtyChange = useCallback(
     (lineId: string, newShipQty: number) => {
       const ci = items.find((c) => c.lineId === lineId);
       if (!ci) return;
-      const { po } = splitByLineId.get(lineId) ?? { po: 0 };
-      const newTotal = Math.max(0, newShipQty) + po;
-      if (newTotal < 1) {
-        removeItem(lineId);
-      } else {
-        updateQty(lineId, newTotal);
-      }
+      const split = splitByLineId.get(lineId);
+      if (!split) return;
+      const newTotal = Math.max(0, newShipQty) + split.po;
+      reconcileLineToTotalPieces(ci, newTotal, { updateQty, updateFocQty, removeItem });
     },
-    [items, splitByLineId, updateQty, removeItem],
+    [items, splitByLineId, updateQty, updateFocQty, removeItem],
+  );
+
+  const handleFocQtyChange = useCallback(
+    (lineId: string, next: number) => {
+      updateFocQty(lineId, Math.max(0, Math.floor(next)));
+    },
+    [updateFocQty],
   );
 
   const openRateSheet = useCallback((cartItem: CartItem) => {
@@ -1018,12 +1136,37 @@ export default function CartPage(): React.JSX.Element | null {
         salesperson_user_id: userId,
         priority,
         notes: notes.trim() || null,
-        lines: items.map((ci) => ({
-          item_id: ci.item.id,
-          qty_requested: ci.qty,
-          price_quoted: ci.specialRate ?? ci.item.sales_price,
-          price_system: ci.item.sales_price,
-        })),
+        lines: items.flatMap((ci) => {
+          const foc = Math.max(0, ci.focQty ?? 0);
+          const paid = ci.qty;
+          const sys = ci.item.sales_price;
+          const rows: Array<{
+            item_id: number;
+            qty_requested: number;
+            price_quoted: number;
+            price_system: number;
+            is_foc: boolean;
+          }> = [];
+          if (paid > 0) {
+            rows.push({
+              item_id: ci.item.id,
+              qty_requested: paid,
+              price_quoted: ci.specialRate ?? sys,
+              price_system: sys,
+              is_foc: false,
+            });
+          }
+          if (foc > 0) {
+            rows.push({
+              item_id: ci.item.id,
+              qty_requested: foc,
+              price_quoted: 0,
+              price_system: sys,
+              is_foc: true,
+            });
+          }
+          return rows;
+        }),
       };
 
       const { data: rpcData, error: rpcError } = await supabase.rpc('submit_sales_order', {
@@ -1043,6 +1186,7 @@ export default function CartPage(): React.JSX.Element | null {
           qty_requested: number;
           qty_ship: number;
           qty_po: number;
+          is_foc?: boolean;
         }>;
       };
 
@@ -1064,6 +1208,7 @@ export default function CartPage(): React.JSX.Element | null {
         qtyRequested: row.qty_requested,
         qtyShip: row.qty_ship,
         qtyPo: row.qty_po,
+        isFoc: row.is_foc ?? false,
       }));
 
       const shareTextFinal = buildOrderCustomerMessage({
@@ -1213,9 +1358,12 @@ export default function CartPage(): React.JSX.Element | null {
               href={waUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full min-h-14 flex items-center justify-center rounded-2xl font-semibold bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border border-[var(--border-subtle)] hover:opacity-95 transition-opacity"
+              className="w-full min-h-14 flex items-center justify-center gap-2 rounded-2xl font-semibold bg-[var(--bg-positive)] text-[var(--content-on-color)] hover:opacity-95 active:scale-[0.99] transition-all"
             >
-              WhatsApp
+              <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20" aria-hidden="true">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+              </svg>
+              Send via WhatsApp
             </a>
             <BigButton
               variant="primary"
@@ -1241,12 +1389,18 @@ export default function CartPage(): React.JSX.Element | null {
 
       <div className={`flex-1 space-y-6 p-4 ${items.length > 0 ? 'pb-48' : ''}`}>
         {items.length === 0 ? (
-          <div className="py-12 text-center">
-            <p className="text-[var(--content-tertiary)] mb-4">
-              Cart is empty. Add items from New Order.
-            </p>
+          <div className="py-16 flex flex-col items-center gap-4 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--bg-tertiary)]">
+              <ShoppingCartIcon size={30} weight="light" className="text-[var(--content-quaternary)]" />
+            </div>
+            <div>
+              <p className="font-semibold text-[var(--content-primary)]">No items yet</p>
+              <p className="mt-1 text-sm text-[var(--content-tertiary)]">
+                Search for products and tap the + button to add them.
+              </p>
+            </div>
             <BigButton variant="secondary" onClick={goToNewOrderWithSearchFocus}>
-              Add Items
+              Browse Items
             </BigButton>
           </div>
         ) : (
@@ -1268,23 +1422,33 @@ export default function CartPage(): React.JSX.Element | null {
                   </p>
                 </div>
                 <ul className="overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] divide-y divide-[var(--border-subtle)]">
-                  {billingSplits.map((row) => (
-                    <BillingItemCard
-                      key={row.ci.lineId}
-                      item={row.ci}
-                      shipQty={row.ship}
-                      poQty={row.po}
-                      isOpen={openActionsItemId === row.ci.lineId}
-                      onOpenChange={(open) => {
-                        if (open) setOpenPoActionsItemId(null);
-                        setOpenActionsItemId(open ? row.ci.lineId : null);
-                      }}
-                      onChangeShipQty={handleShipQtyChange}
-                      onRatePress={openRateSheet}
-                      onDeletePress={openDeleteSheet}
-                      previewOnMount={row === billingSplits[0]}
-                    />
-                  ))}
+                  {billingSplits.map((row) => {
+                    const split = splitByLineId.get(row.ci.lineId);
+                    const shippedPaid = split?.shippedPaid ?? Math.min(row.ci.qty, row.ship);
+                    const shippedFoc = split?.shippedFoc ?? Math.max(0, row.ship - shippedPaid);
+                    return (
+                      <BillingItemCard
+                        key={row.ci.lineId}
+                        item={row.ci}
+                        shipQty={row.ship}
+                        poQty={row.po}
+                        shippedPaid={shippedPaid}
+                        shippedFoc={shippedFoc}
+                        focQty={row.ci.focQty ?? 0}
+                        showFocControls
+                        onChangeFocQty={handleFocQtyChange}
+                        isOpen={openActionsItemId === row.ci.lineId}
+                        onOpenChange={(open) => {
+                          if (open) setOpenPoActionsItemId(null);
+                          setOpenActionsItemId(open ? row.ci.lineId : null);
+                        }}
+                        onChangeShipQty={handleShipQtyChange}
+                        onRatePress={openRateSheet}
+                        onDeletePress={openDeleteSheet}
+                        previewOnMount={row === billingSplits[0]}
+                      />
+                    );
+                  })}
                 </ul>
                 <button
                   type="button"
@@ -1314,10 +1478,15 @@ export default function CartPage(): React.JSX.Element | null {
                 <ul className="space-y-2">
                   {poSplits.map((row) => (
                     <PurchaseOrderCard
-                      key={row.ci.lineId}
+                      key={`${row.ci.lineId}-po`}
                       cartItem={row.ci}
                       poQty={row.po}
                       shipQty={row.ship}
+                      poPaid={splitByLineId.get(row.ci.lineId)?.poPaid ?? row.ci.qty}
+                      poFoc={splitByLineId.get(row.ci.lineId)?.poFoc ?? (row.ci.focQty ?? 0)}
+                      focQty={row.ci.focQty ?? 0}
+                      showFocControls={!billingLineIdsWithShip.has(row.ci.lineId)}
+                      onChangeFocQty={handleFocQtyChange}
                       isOpen={openPoActionsItemId === row.ci.lineId}
                       onOpenChange={(open) => {
                         if (open) setOpenActionsItemId(null);
@@ -1360,21 +1529,28 @@ export default function CartPage(): React.JSX.Element | null {
                 <label className="mb-2 block text-sm font-semibold text-[var(--content-secondary)]">
                   Transport
                 </label>
-                <select
-                  value={transport?.id ?? ''}
-                  onChange={(e) => {
-                    const id = e.target.value ? Number(e.target.value) : null;
-                    setTransport(id ? transports.find((t) => t.id === id) ?? null : null);
-                  }}
-                  className="h-14 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 text-[var(--content-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
-                >
-                  <option value="">Select Transport</option>
-                  {transports.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <select
+                    value={transport?.id ?? ''}
+                    onChange={(e) => {
+                      const id = e.target.value ? Number(e.target.value) : null;
+                      setTransport(id ? transports.find((t) => t.id === id) ?? null : null);
+                    }}
+                    className="h-14 w-full appearance-none rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] pl-4 pr-10 text-[var(--content-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
+                  >
+                    <option value="">Select Transport</option>
+                    {transports.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                  <CaretDown
+                    size={16}
+                    className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[var(--content-tertiary)]"
+                    aria-hidden
+                  />
+                </div>
               </div>
 
               {/* Priority */}
@@ -1463,25 +1639,24 @@ export default function CartPage(): React.JSX.Element | null {
                     {transport ? transport.name : 'Not selected'}
                   </p>
                 </div>
-                <span className="font-mono text-[var(--content-primary)]">
-                  {formatCurrency(0)}
-                </span>
+                <span className="text-[var(--content-quaternary)]">—</span>
               </div>
-              <div className="border-t border-[var(--border-subtle)] pt-3 mt-2 flex justify-between text-base font-semibold text-[var(--content-primary)]">
-                <span>Grand Total</span>
-                <span className="font-mono">
+              <div className="border-t-2 border-[var(--border-subtle)] pt-3 mt-3 flex justify-between items-baseline">
+                <span className="text-base font-bold text-[var(--content-primary)]">Grand Total</span>
+                <span className="font-mono text-xl font-bold text-[var(--content-primary)]">
                   {formatCurrency(billingTotal)}
                 </span>
               </div>
               <button
                 type="button"
-                className="mt-2 w-full flex items-center justify-between text-xs text-[var(--content-secondary)] hover:text-[var(--content-primary)]"
+                className="mt-2 w-full flex items-center justify-between text-xs text-[var(--content-secondary)] hover:text-[var(--content-primary)] transition-colors"
                 onClick={() => setShowItemBreakdown((prev) => !prev)}
               >
-                <span>{showItemBreakdown ? 'Hide item-wise calculation' : 'Show item-wise calculation'}</span>
-                <span className="text-xs">
-                  {showItemBreakdown ? '▲' : '▼'}
-                </span>
+                <span>{showItemBreakdown ? 'Hide item-wise breakdown' : 'Show item-wise breakdown'}</span>
+                {showItemBreakdown
+                  ? <CaretUp size={12} aria-hidden />
+                  : <CaretDown size={12} aria-hidden />
+                }
               </button>
               {showItemBreakdown && (
                 <div className="mt-1 pt-2 border-t border-dashed border-[var(--border-subtle)] space-y-1.5">
@@ -1547,9 +1722,14 @@ export default function CartPage(): React.JSX.Element | null {
             >
               Submit Order
             </BigButton>
+            {!customer && !submitMutation.isPending && (
+              <p className="mt-2 text-center text-xs font-medium text-[var(--content-tertiary)]">
+                Select a customer above to continue
+              </p>
+            )}
             {stockSplitLoading && (
               <p className="mt-2 text-center text-xs font-medium text-[var(--content-tertiary)]">
-                Loading {stockLocationLabel(sellableLocationCode)} stock split...
+                Loading {stockLocationLabel(sellableLocationCode)} stock…
               </p>
             )}
           </div>

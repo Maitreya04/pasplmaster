@@ -12,6 +12,8 @@ interface NumberStepperProps {
   variant?: 'default' | 'compact';
   showRemoveAtMin?: boolean;
   onRemove?: () => void;
+  /** 'positive' renders white buttons for high-contrast use on green/positive backgrounds. */
+  colorScheme?: 'default' | 'positive';
 }
 
 export function NumberStepper({
@@ -23,7 +25,16 @@ export function NumberStepper({
   variant = 'default',
   showRemoveAtMin = false,
   onRemove,
+  colorScheme = 'default',
 }: NumberStepperProps): React.JSX.Element | null {
+  const btnBase =
+    colorScheme === 'positive'
+      ? 'bg-white/80 text-[var(--content-positive)] border border-white/40'
+      : 'bg-[var(--bg-tertiary)] text-[var(--content-primary)]';
+  const btnDisabled =
+    colorScheme === 'positive'
+      ? 'bg-white/40 text-[var(--content-positive)] opacity-40 cursor-not-allowed'
+      : 'bg-[var(--bg-tertiary)] text-[var(--content-primary)] opacity-30 cursor-not-allowed';
   const clamp = useCallback(
     (v: number) => {
       let clamped = Math.max(min, v);
@@ -63,7 +74,7 @@ export function NumberStepper({
     <button
       type="button"
       disabled
-      className="min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] opacity-30 cursor-not-allowed"
+      className={`min-w-11 min-h-11 flex items-center justify-center rounded-lg ${btnDisabled}`}
       aria-label="Minimum quantity"
     >
       <Trash size={trashIconSize} weight="regular" />
@@ -72,7 +83,7 @@ export function NumberStepper({
     <button
       type="button"
       onClick={decrement}
-      className="min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] hover:opacity-90 active:opacity-80 transition-opacity duration-150"
+      className={`min-w-11 min-h-11 flex items-center justify-center rounded-lg ${btnBase} hover:opacity-90 active:opacity-80 transition-opacity duration-150`}
       aria-label="Decrease quantity"
     >
       <Minus size={minusIconSize} weight="regular" />
@@ -96,7 +107,7 @@ export function NumberStepper({
         <button
           onClick={increment}
           disabled={max !== undefined && value >= max}
-          className="min-w-11 min-h-11 flex items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)] hover:opacity-90 active:opacity-80 transition-opacity duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
+          className={`min-w-11 min-h-11 flex items-center justify-center rounded-lg ${btnBase} hover:opacity-90 active:opacity-80 transition-opacity duration-150 disabled:opacity-30 disabled:cursor-not-allowed`}
           aria-label="Increase quantity"
         >
           <Plus size={16} weight="regular" />
@@ -122,13 +133,7 @@ export function NumberStepper({
         <button
           onClick={increment}
           disabled={max !== undefined && value >= max}
-          className="
-            w-12 h-12 flex items-center justify-center
-            rounded-lg bg-[var(--bg-tertiary)] text-[var(--content-primary)]
-            hover:opacity-90 active:opacity-80
-            transition-opacity duration-150
-            disabled:opacity-30 disabled:cursor-not-allowed
-          "
+          className={`w-12 h-12 flex items-center justify-center rounded-lg ${btnBase} hover:opacity-90 active:opacity-80 transition-opacity duration-150 disabled:opacity-30 disabled:cursor-not-allowed`}
           aria-label="Increase quantity"
         >
           <Plus size={20} weight="regular" />

@@ -23,6 +23,7 @@ import { PushAlertsCompact } from '../../components/notifications/PushAlertsComp
 import { Check, Copy, Lightning, CheckCircle, Warning, Question, CaretLeft, CaretRight } from '@phosphor-icons/react';
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 import type { OrderItem } from '../../types';
+import { isFocOrderItem } from '../../lib/specialPricing';
 
 function sortByUrgencyAndAge(orders: OrderWithClaimInfo[]): OrderWithClaimInfo[] {
   return [...orders].sort((a, b) => {
@@ -316,6 +317,14 @@ function CompactProcess({
         >
           {activeItem!.item_name}
         </button>
+
+        {isFocOrderItem(activeItem!) && (
+          <div className="flex justify-center mb-3">
+            <span className="inline-flex items-center rounded-full border border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--content-positive)]">
+              FOC · ₹0
+            </span>
+          </div>
+        )}
 
         {/* Qty + Rate row */}
         <div className="flex items-center gap-6">

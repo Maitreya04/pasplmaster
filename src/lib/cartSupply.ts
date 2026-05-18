@@ -31,6 +31,48 @@ export function splitCartLine(
   return { ship, po: Math.max(0, cartQty - ship) };
 }
 
+/** Paid + FOC pieces on one cart row. */
+export function cartLineTotalPieces(ci: { qty: number; focQty?: number | null }): number {
+  const foc = Math.max(0, Math.floor(ci.focQty ?? 0));
+  return Math.max(0, ci.qty) + foc;
+}
+
+/** Allocate shipped units: paid first, then FOC (same convention as checkout submission order). */
+export function splitShippedPaidFoc(
+  paidQty: number,
+  _focQty: number,
+  shipTotal: number,
+): { shippedPaid: number; shippedFoc: number } {
+  const p = Math.max(0, paidQty);
+  const ship = Math.max(0, shipTotal);
+  const shippedPaid = Math.min(p, ship);
+  const shippedFoc = ship - shippedPaid;
+  return { shippedPaid, shippedFoc };
+}
+
+/** Stock split for a cart line with optional FOC qty (same SKU). */
+export function splitCartLinePaidFoc(
+  paidQty: number,
+  focQty: number,
+  stockQty: number | null | undefined,
+): {
+  ship: number;
+  po: number;
+  shippedPaid: number;
+  shippedFoc: number;
+  poPaid: number;
+  poFoc: number;
+} {
+  const p = Math.max(0, paidQty);
+  const f = Math.max(0, focQty);
+  const total = p + f;
+  const { ship, po } = splitCartLine(total, stockQty);
+  const { shippedPaid, shippedFoc } = splitShippedPaidFoc(p, f, ship);
+  const poPaid = Math.max(0, p - shippedPaid);
+  const poFoc = Math.max(0, f - shippedFoc);
+  return { ship, po, shippedPaid, shippedFoc, poPaid, poFoc };
+}
+
 /** PO gap = total requested minus what ships from stock. */
 export function poQtyForLine(item: Item, cartQty: number): number {
   return splitCartLine(cartQty, item.stock_qty).po;

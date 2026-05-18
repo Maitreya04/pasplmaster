@@ -58,14 +58,14 @@ export function stockAfterOrderLine(
   const remaining = stockQty - totalInOrderQty;
   if (remaining > 0) {
     return {
-      text: `${formatStockQty(remaining)} still on hand after this cart`,
+      text: `${formatStockQty(remaining)} left`,
       tone: 'muted',
       variant: 'line',
     };
   }
   if (remaining === 0) {
     return {
-      text: 'This cart uses all units currently in stock.',
+      text: 'All stock in cart',
       tone: 'muted',
       variant: 'line',
     };

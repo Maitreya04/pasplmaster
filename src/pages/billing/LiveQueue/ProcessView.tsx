@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, type ReactElement } from 'rea
 import { Copy, Check, CheckCircle, Warning, XCircle } from '@phosphor-icons/react';
 import type { OrderItem } from '../../../types';
 import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
-import { getBookPrice, getQuotedPrice, isSpecialRateItem } from '../../../lib/specialPricing';
+import { getBookPrice, getQuotedPrice, isFocOrderItem, isSpecialRateItem } from '../../../lib/specialPricing';
 import { formatCurrency } from '../../../utils/formatters';
 import type { ManualFlagType, ManualFlag } from '../../../hooks/useBillingFlowMachine';
 
@@ -27,6 +27,7 @@ export function ProcessView({ orderName, items, activeIndex, isSubmitting, manua
   const activeQuotedPrice = activeItem ? getQuotedPrice(activeItem) : null;
   const activeBookPrice = activeItem ? getBookPrice(activeItem) : null;
   const activeHasSpecialRate = activeItem ? isSpecialRateItem(activeItem) : false;
+  const activeIsFoc = activeItem ? isFocOrderItem(activeItem) : false;
   const previousItems = items.slice(0, activeIndex).reverse();
   const flagCount = Object.keys(manualFlags).length;
   
@@ -150,6 +151,17 @@ export function ProcessView({ orderName, items, activeIndex, isSubmitting, manua
               </div>
               
               <div className="bg-[var(--bg-secondary)] rounded-3xl p-8 lg:p-12 shadow-[var(--shadow-card-hover)] border border-[var(--border-subtle)]">
+                {activeIsFoc && (
+                  <div className="mb-6 rounded-2xl border border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] px-4 py-3 text-center">
+                    <p className="text-sm font-bold uppercase tracking-[0.18em] text-[var(--content-positive)]">
+                      Free of charge (FOC)
+                    </p>
+                    <p className="mt-1 text-sm text-[var(--content-positive)]">
+                      Bill at ₹0
+                      {activeBookPrice != null ? ` · Catalog reference ${formatCurrency(activeBookPrice)}` : ''}.
+                    </p>
+                  </div>
+                )}
                 {activeHasSpecialRate && (
                   <div className="mb-6 rounded-2xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-4 py-3 text-center">
                     <p className="text-sm font-bold uppercase tracking-[0.18em] text-[var(--content-warning)]">

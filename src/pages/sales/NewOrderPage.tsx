@@ -11,7 +11,18 @@ import {
   type ReactNode,
 } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, ShoppingCart, CaretRight, Check, FunnelSimple, Trash, CurrencyInr, MagnifyingGlass, CaretLeft } from '@phosphor-icons/react';
+import {
+  Plus,
+  ShoppingCart,
+  CaretRight,
+  Check,
+  FunnelSimple,
+  Trash,
+  CurrencyInr,
+  MagnifyingGlass,
+  CaretLeft,
+  Gift,
+} from '@phosphor-icons/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import {
@@ -1100,11 +1111,13 @@ interface ItemRowProps {
   result: SearchResult;
   query: string;
   onStartAdd: (item: Item) => void;
-  onConfirmAdd: (item: Item, qty: number) => void;
+  onConfirmAdd: (item: Item, qty: number, focQty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
   onCancelAdd: () => void;
   pendingAddItemId: number | null;
   totalInOrderQty: number;
+  paidQtyInCart: number;
+  focQtyInCart: number;
   price: number;
   sellableStockQty?: number | null;
   sellableLocationCode: StockLocationCode;
@@ -1120,6 +1133,27 @@ function SpecialRateChip() {
   return (
     <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--bg-accent-subtle)] px-3 py-1.5 font-ds-caption-size font-semibold leading-none text-[var(--content-accent)]">
       Special rate
+    </span>
+  );
+}
+
+function FocChip({ qty }: { qty: number }) {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] px-3 py-1.5 font-ds-caption-size font-semibold leading-none text-[var(--content-positive)]">
+      <Gift size={11} weight="fill" aria-hidden />
+      FOC ×{qty}
+    </span>
+  );
+}
+
+/** Billable qty already in cart — compact ×N format, soft blue tint. */
+function CartPaidQtyChip({ qty }: { qty: number }) {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center rounded-full border border-[color-mix(in_srgb,var(--bg-accent)_45%,var(--border-subtle))] bg-[var(--bg-accent-subtle)] px-3 py-1.5 font-mono font-ds-caption-size font-semibold tracking-[0.04em] text-[var(--content-accent)]"
+      aria-label={`×${qty} in cart (billable qty)`}
+    >
+      ×{qty}
     </span>
   );
 }
@@ -1167,9 +1201,11 @@ function StockStatusDot({ tier }: { tier: StockTier }) {
 function LocationStockLine({
   label,
   stockQty,
+  suffix,
 }: {
   label: string;
   stockQty: number | null | undefined;
+  suffix?: string;
 }) {
   if (stockQty == null || !Number.isFinite(Number(stockQty))) return null;
 
@@ -1192,9 +1228,15 @@ function LocationStockLine({
           : 'text-[var(--content-tertiary)]';
 
   return (
-    <p className="flex min-w-0 items-center gap-1.5 font-ds-caption-size font-semibold leading-snug">
-      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden />
-      <span className={`min-w-0 ${textClass}`}>{formatStockQty(Number(stockQty))} in {label}</span>
+    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 font-ds-caption-size leading-snug">
+      {/* dot + primary text stay together as a non-breaking unit */}
+      <span className="inline-flex shrink-0 items-center gap-1.5">
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden />
+        <span className={`font-semibold ${textClass}`}>{formatStockQty(Number(stockQty))} in {label}</span>
+      </span>
+      {suffix && (
+        <span className="font-medium text-[var(--content-tertiary)]">· {suffix}</span>
+      )}
     </p>
   );
 }
@@ -1373,10 +1415,20 @@ function ItemStockBlock({
       ? stockAfterOrderLine(Number(stockQty), totalInOrderQty, tier)
       : null;
 
+  const inlineSuffix = secondary?.variant === 'line' ? secondary.text : undefined;
+
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
-      <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} />
-      <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
+      <LocationStockLine
+        label="Main Store"
+        stockQty={mainStoreStockQty}
+        suffix={sellableLocationCode === 'main_store' ? inlineSuffix : undefined}
+      />
+      <LocationStockLine
+        label="Jabalpur"
+        stockQty={jabalpurStockQty}
+        suffix={sellableLocationCode === 'jabalpur' ? inlineSuffix : undefined}
+      />
       {stockResolving && (
         <p className="pl-3 font-ds-label-size font-medium leading-[1.35] text-[var(--content-secondary)]">
           Checking {stockLocationLabel(sellableLocationCode)} stock...
@@ -1389,22 +1441,11 @@ function ItemStockBlock({
           </p>
         </div>
       )}
-      {secondary &&
-        (secondary.variant === 'shortfall' ? (
-          <div className="mt-1 rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5">
-            <p className="font-ds-caption-size font-semibold leading-snug text-[var(--content-warning)]">{secondary.text}</p>
-          </div>
-        ) : (
-          <p
-            className={`pl-3 font-ds-label-size font-medium leading-[1.35] ${
-              secondary.tone === 'negative'
-                ? 'text-content-signal-out'
-                : 'text-[var(--content-secondary)]'
-            }`}
-          >
-            {secondary.text}
-          </p>
-        ))}
+      {secondary?.variant === 'shortfall' && (
+        <div className="mt-1 rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5">
+          <p className="font-ds-caption-size font-semibold leading-snug text-[var(--content-warning)]">{secondary.text}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1441,12 +1482,15 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   mainStoreStockQty?: number | null;
   jabalpurStockQty?: number | null;
   hasSpecialLine: boolean;
-  onConfirmAdd: (item: Item, qty: number) => void;
+  onConfirmAdd: (item: Item, qty: number, focQty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
   onCancelAdd: () => void;
 }) {
   const qtyInputRef = useRef<HTMLInputElement | null>(null);
   const [draftQtyInput, setDraftQtyInput] = useState('1');
+  const [focPanelOpen, setFocPanelOpen] = useState(false);
+  const [committedFocQty, setCommittedFocQty] = useState(0);
+  const [panelFocDraft, setPanelFocDraft] = useState(1);
 
   const getDraftQty = useCallback(() => {
     const parsed = parseInt(draftQtyInput.trim(), 10);
@@ -1459,21 +1503,46 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
     qtyInputRef.current?.select();
   }, [item.id]);
 
+  useEffect(() => {
+    setDraftQtyInput('1');
+    setFocPanelOpen(false);
+    setCommittedFocQty(0);
+    setPanelFocDraft(1);
+  }, [item.id]);
+
   const handleConfirmQty = useCallback(() => {
-    onConfirmAdd(item, getDraftQty());
-  }, [getDraftQty, item, onConfirmAdd]);
+    onConfirmAdd(item, getDraftQty(), committedFocQty);
+  }, [committedFocQty, getDraftQty, item, onConfirmAdd]);
 
   const handleSpecialRate = useCallback(() => {
     onConfirmSpecialRateAdd(item, getDraftQty());
   }, [getDraftQty, item, onConfirmSpecialRateAdd]);
 
+  const openFocPanel = useCallback(() => {
+    appHaptics.impactLight();
+    setPanelFocDraft(Math.max(1, committedFocQty || 1));
+    setFocPanelOpen(true);
+  }, [committedFocQty]);
+
+  const confirmFocPanel = useCallback(() => {
+    appHaptics.impactMedium();
+    setCommittedFocQty(panelFocDraft);
+    setFocPanelOpen(false);
+  }, [panelFocDraft]);
+
+  const cancelFocPanel = useCallback(() => {
+    appHaptics.warning();
+    setFocPanelOpen(false);
+  }, []);
+
   const draftQty = getDraftQty();
+  const piecesForStock = draftQty + committedFocQty;
   const draftGoesToPo =
     !stockResolving &&
     (
       sellableStockQty == null ||
       !Number.isFinite(Number(sellableStockQty)) ||
-      totalInOrderQty + draftQty > Number(sellableStockQty)
+      totalInOrderQty + piecesForStock > Number(sellableStockQty)
     );
 
   return (
@@ -1488,6 +1557,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
               placeholder={!hasProductCode}
             />
             {hasSpecialLine && <SpecialRateChip />}
+            {committedFocQty > 0 && <FocChip qty={committedFocQty} />}
           </div>
           <p className="font-ds-body-size font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
             {highlightText(item.name, query)}
@@ -1495,7 +1565,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
           <PendingItemStockLine
             stockQty={sellableStockQty}
             totalInOrderQty={totalInOrderQty}
-            draftQty={draftQty}
+            draftQty={piecesForStock}
             sellableLocationCode={sellableLocationCode}
             stockResolving={stockResolving}
             mainStoreStockQty={mainStoreStockQty}
@@ -1510,19 +1580,33 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
       <div className="mt-2.5 grid grid-rows-[1fr] opacity-100 translate-y-0 transition-[grid-template-rows,opacity,transform,margin-top,padding-top] duration-200 ease-out">
         <div className="overflow-hidden">
           <div className="border-t border-[var(--border-subtle)] pt-3">
-            <div className="flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleSpecialRate();
-                }}
-                className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-0 font-ds-prose font-semibold text-[var(--content-accent)]"
-                aria-label={`${hasSpecialLine ? 'Edit' : 'Set'} special rate for ${item.name}`}
-              >
-                <CurrencyInr size={14} weight="bold" />
-                {hasSpecialLine ? 'Edit rate' : 'Special rate'}
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleSpecialRate();
+                  }}
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-0 font-ds-prose font-semibold text-[var(--content-accent)]"
+                  aria-label={`${hasSpecialLine ? 'Edit' : 'Set'} special rate for ${item.name}`}
+                >
+                  <CurrencyInr size={14} weight="bold" />
+                  {hasSpecialLine ? 'Edit rate' : 'Special rate'}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openFocPanel();
+                  }}
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-0 font-ds-prose font-semibold text-[var(--content-positive)]"
+                  aria-label={`${committedFocQty > 0 ? 'Edit' : 'Add'} free-of-charge qty for ${item.name}`}
+                >
+                  <Gift size={14} weight="bold" />
+                  {committedFocQty > 0 ? `FOC ×${committedFocQty}` : 'Add FOC'}
+                </button>
+              </div>
 
               <div className="flex items-center gap-2">
                 <button
@@ -1556,7 +1640,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
                       onCancelAdd();
                     }
                   }}
-                  aria-label="Quantity"
+                  aria-label="Paid quantity"
                   className="h-11 w-14 rounded-[14px] border border-[var(--bg-accent)] bg-[var(--bg-secondary)] text-center font-mono text-lg font-semibold text-[var(--content-primary)] outline-none focus:ring-1 focus:ring-[var(--bg-accent)]"
                 />
 
@@ -1575,6 +1659,71 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
                 </button>
               </div>
             </div>
+
+            {focPanelOpen && (
+              <div
+                className="mt-3 rounded-xl border border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] px-3 py-3"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="text-sm font-semibold text-[var(--content-positive)]">
+                    How many units are FOC?
+                  </p>
+                  <button
+                    type="button"
+                    onClick={cancelFocPanel}
+                    className="shrink-0 text-xs font-semibold text-[var(--content-tertiary)] hover:text-[var(--content-secondary)]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <NumberStepper
+                    value={panelFocDraft}
+                    min={1}
+                    presets={[]}
+                    variant="compact"
+                    colorScheme="positive"
+                    onChange={setPanelFocDraft}
+                  />
+                  <button
+                    type="button"
+                    onClick={confirmFocPanel}
+                    className="rounded-xl bg-[var(--bg-positive)] px-4 py-2.5 text-sm font-semibold text-[var(--content-on-color)] shadow-sm hover:opacity-95 active:scale-[0.98]"
+                  >
+                    Add FOC
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {committedFocQty > 0 && !focPanelOpen && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border-positive)] bg-[color-mix(in_srgb,var(--bg-positive-subtle)_88%,transparent)] px-3 py-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-[var(--bg-positive)] px-2.5 py-0.5 font-ds-micro font-bold uppercase tracking-wide text-[var(--content-on-color)]">
+                    FOC
+                  </span>
+                  <span className="min-w-0 truncate font-ds-caption-size font-semibold text-[var(--content-primary)]">
+                    {item.name} ×{committedFocQty}
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="font-mono font-ds-caption-size font-semibold text-[var(--content-positive)]">
+                    {formatCurrency(0)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openFocPanel();
+                    }}
+                    className="text-xs font-semibold text-[var(--content-tertiary)] hover:text-[var(--content-secondary)]"
+                  >
+                    Edit
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1591,6 +1740,8 @@ const ItemRow = memo(function ItemRow({
   onCancelAdd,
   pendingAddItemId,
   totalInOrderQty,
+  paidQtyInCart,
+  focQtyInCart,
   price,
   sellableStockQty,
   sellableLocationCode,
@@ -1658,7 +1809,9 @@ const ItemRow = memo(function ItemRow({
                 matchedField={matchedField}
                 placeholder={!productCode}
               />
+              {paidQtyInCart > 0 && <CartPaidQtyChip qty={paidQtyInCart} />}
               {hasSpecialLine && <SpecialRateChip />}
+              {focQtyInCart > 0 && <FocChip qty={focQtyInCart} />}
             </div>
 
             <p className="font-ds-body-size font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
@@ -1673,15 +1826,6 @@ const ItemRow = memo(function ItemRow({
               mainStoreStockQty={mainStoreStockQty}
               jabalpurStockQty={jabalpurStockQty}
             />
-
-            {justAdded && (
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-positive-subtle)] px-3 py-1.5 font-ds-caption-size font-semibold leading-none text-[var(--content-positive)]">
-                  <Check size={12} weight="bold" />
-                  Added
-                </span>
-              </div>
-            )}
           </div>
 
           <div className="flex shrink-0 flex-col items-end justify-center gap-2 self-stretch">
@@ -1716,6 +1860,8 @@ const ItemRow = memo(function ItemRow({
     prevProps.query === nextProps.query &&
     prevProps.pendingAddItemId === nextProps.pendingAddItemId &&
     prevProps.totalInOrderQty === nextProps.totalInOrderQty &&
+    prevProps.paidQtyInCart === nextProps.paidQtyInCart &&
+    prevProps.focQtyInCart === nextProps.focQtyInCart &&
     prevProps.price === nextProps.price &&
     prevProps.sellableStockQty === nextProps.sellableStockQty &&
     prevProps.sellableLocationCode === nextProps.sellableLocationCode &&
@@ -1740,6 +1886,8 @@ function ResultSection({
   onCancelAdd,
   pendingAddItemId,
   getTotalInOrderQty,
+  getPaidQtyInCart,
+  getFocQtyInCart,
   getPrice,
   getSellableStockQty,
   getStockResolving,
@@ -1753,11 +1901,13 @@ function ResultSection({
   results: SearchResult[];
   query: string;
   onStartAdd: (item: Item) => void;
-  onConfirmAdd: (item: Item, qty: number) => void;
+  onConfirmAdd: (item: Item, qty: number, focQty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
   onCancelAdd: () => void;
   pendingAddItemId: number | null;
   getTotalInOrderQty: (id: number) => number;
+  getPaidQtyInCart: (id: number) => number;
+  getFocQtyInCart: (id: number) => number;
   getPrice: (item: Item) => number;
   getSellableStockQty: (item: Item) => number | null | undefined;
   getStockResolving: (item: Item) => boolean;
@@ -1784,6 +1934,8 @@ function ResultSection({
             onConfirmSpecialRateAdd={onConfirmSpecialRateAdd}
             onCancelAdd={onCancelAdd}
             totalInOrderQty={getTotalInOrderQty(r.item.id)}
+            paidQtyInCart={getPaidQtyInCart(r.item.id)}
+            focQtyInCart={getFocQtyInCart(r.item.id)}
             price={getPrice(r.item)}
             sellableStockQty={getSellableStockQty(r.item)}
             sellableLocationCode={sellableLocationCode}
@@ -2020,7 +2172,28 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const cartQtyByItem = useMemo(() => {
     const totals = new Map<number, number>();
     for (const line of cartItems) {
-      totals.set(line.item.id, (totals.get(line.item.id) ?? 0) + line.qty);
+      const pieces = line.qty + (line.focQty ?? 0);
+      totals.set(line.item.id, (totals.get(line.item.id) ?? 0) + pieces);
+    }
+    return totals;
+  }, [cartItems]);
+
+  const focQtyByItem = useMemo(() => {
+    const totals = new Map<number, number>();
+    for (const line of cartItems) {
+      const foc = Math.max(0, line.focQty ?? 0);
+      if (foc <= 0) continue;
+      totals.set(line.item.id, (totals.get(line.item.id) ?? 0) + foc);
+    }
+    return totals;
+  }, [cartItems]);
+
+  const paidQtyByItem = useMemo(() => {
+    const totals = new Map<number, number>();
+    for (const line of cartItems) {
+      const paid = Math.max(0, line.qty);
+      if (paid <= 0) continue;
+      totals.set(line.item.id, (totals.get(line.item.id) ?? 0) + paid);
     }
     return totals;
   }, [cartItems]);
@@ -2034,6 +2207,8 @@ export default function NewOrderPage(): React.JSX.Element | null {
   }, [cartItems]);
 
   const getTotalInOrderQty = (id: number) => cartQtyByItem.get(id) ?? 0;
+  const getPaidQtyInCart = (id: number) => paidQtyByItem.get(id) ?? 0;
+  const getFocQtyInCart = (id: number) => focQtyByItem.get(id) ?? 0;
   const getPrice = (item: Item) => item.sales_price;
   const getMainStoreStockQty = (item: Item) => {
     const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
@@ -2103,9 +2278,9 @@ export default function NewOrderPage(): React.JSX.Element | null {
     setPendingAddItemId(item.id);
   };
 
-  const handleConfirmAdd = (item: Item, qty: number) => {
+  const handleConfirmAdd = (item: Item, qty: number, focQty: number) => {
     appHaptics.impactMedium();
-    addItem(item, qty);
+    addItem(item, qty, null, focQty);
     setPendingAddItemId(null);
     showAddedFeedback(item.id);
   };
@@ -2290,6 +2465,8 @@ export default function NewOrderPage(): React.JSX.Element | null {
               onCancelAdd={handleCancelAdd}
               pendingAddItemId={pendingAddItemId}
               getTotalInOrderQty={getTotalInOrderQty}
+              getPaidQtyInCart={getPaidQtyInCart}
+              getFocQtyInCart={getFocQtyInCart}
               getPrice={getPrice}
               getSellableStockQty={getSellableStockQty}
               getStockResolving={getStockResolving}

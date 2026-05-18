@@ -87,6 +87,8 @@ export interface OrderItem {
   id: number;
   order_id: number;
   item_id: number;
+  /** True when this row is explicit free-of-charge qty from sales/billing. */
+  is_foc?: boolean | null;
   item_name: string;
   item_alias: string | null;
   /** From `items` join in useOrderDetail — catalog `alias` at read time. */
@@ -215,7 +217,10 @@ export interface OrderWithItems extends Order {
 export interface CartItem {
   lineId: string;
   item: Item;
+  /** Billable (paid) quantity. */
   qty: number;
+  /** Extra same-SKU units at ₹0 (FOC). */
+  focQty: number;
   specialRate: number | null;
 }
 

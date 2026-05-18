@@ -19,8 +19,14 @@ import {
 
 interface CartContextValue {
   items: CartItemType[];
-  addItem: (item: Item, qty: number, specialRate?: number | null) => void;
+  addItem: (
+    item: Item,
+    qty: number,
+    specialRate?: number | null,
+    focQty?: number,
+  ) => void;
   updateQty: (lineId: string, qty: number) => void;
+  updateFocQty: (lineId: string, focQty: number) => void;
   setSpecialRate: (lineId: string, rate: number | null) => void;
   removeItem: (lineId: string) => void;
   clearCart: () => void;
@@ -67,18 +73,32 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
   const [notes, setNotes] = useState(() => initialState.notes);
 
   const addItem = useCallback(
-    (item: Item, qty: number, specialRate: number | null = null) => {
+    (item: Item, qty: number, specialRate: number | null = null, focQty: number = 0) => {
       const lineId = `line-${nextLineIdRef.current++}`;
-      setItems((prev) => [...prev, { lineId, item, qty, specialRate }]);
+      const paid = Math.max(0, Math.floor(qty));
+      const foc = Math.max(0, Math.floor(focQty));
+      if (paid < 1) return;
+      setItems((prev) => [...prev, { lineId, item, qty: paid, focQty: foc, specialRate }]);
     },
     [],
   );
 
   const updateQty = useCallback((lineId: string, qty: number) => {
     setItems((prev) => {
-      if (qty < 1) return prev.filter((c) => c.lineId !== lineId);
-      return prev.map((c) => (c.lineId === lineId ? { ...c, qty } : c));
+      const next = prev.map((c) => {
+        if (c.lineId !== lineId) return c;
+        const paid = Math.max(0, Math.floor(qty));
+        return { ...c, qty: paid };
+      });
+      return next.filter((c) => c.qty >= 1);
     });
+  }, []);
+
+  const updateFocQty = useCallback((lineId: string, focQty: number) => {
+    const foc = Math.max(0, Math.floor(focQty));
+    setItems((prev) =>
+      prev.map((c) => (c.lineId === lineId ? { ...c, focQty: foc } : c)),
+    );
   }, []);
 
   const setSpecialRate = useCallback((lineId: string, rate: number | null) => {
@@ -130,7 +150,7 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
     let count = 0;
     let value = 0;
     for (const c of items) {
-      count += c.qty;
+      count += c.qty + (c.focQty ?? 0);
       const price = c.specialRate ?? c.item.sales_price;
       value += price * c.qty;
     }
@@ -142,6 +162,7 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
       items,
       addItem,
       updateQty,
+      updateFocQty,
       setSpecialRate,
       removeItem,
       clearCart,
@@ -160,6 +181,7 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
       items,
       addItem,
       updateQty,
+      updateFocQty,
       setSpecialRate,
       removeItem,
       clearCart,
