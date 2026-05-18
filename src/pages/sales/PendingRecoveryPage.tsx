@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
+  CalendarBlank,
   CaretDown,
   CaretUp,
   CheckCircle,
@@ -167,6 +168,30 @@ function stockTone(line: SalesPendingRecoveryLine): string {
   return 'text-[var(--content-tertiary)]';
 }
 
+/** Same pill shell as coverage / response badges — pairs with “Available now” on the header row. */
+const LINE_STATUS_PILL =
+  'inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold leading-none';
+
+function PendingDateChip({ createdAt }: { createdAt: string }) {
+  const d = new Date(createdAt);
+  const label = Number.isNaN(d.getTime())
+    ? '—'
+    : d.toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: '2-digit',
+      });
+
+  return (
+    <span
+      className={`${LINE_STATUS_PILL} shrink-0 gap-1 bg-[var(--bg-tertiary)] text-[var(--content-primary)]`}
+    >
+      <CalendarBlank size={13} weight="bold" className="shrink-0 opacity-80" aria-hidden />
+      {label}
+    </span>
+  );
+}
+
 function summaryCounts(parties: SalesPendingRecoveryParty[]) {
   return parties.reduce(
     (acc, party) => {
@@ -287,36 +312,33 @@ function LineCard({
         compact ? 'p-2.5' : 'p-4'
       }`}
     >
-      <div className="flex items-start justify-between gap-2.5">
-        <div className={`min-w-0 flex flex-col ${compact ? 'gap-1' : 'gap-1.5'}`}>
-          <div className="flex flex-wrap items-center gap-2">
-            {line.item_alias1 && (
-              <span className="font-mono text-xs font-semibold tracking-[0.04em] text-[var(--content-primary)] uppercase">
-                {line.item_alias1}
-              </span>
-            )}
-            <span className="text-xs text-[var(--content-secondary)]">
-              Order <span className="font-mono">{line.order_number}</span>
-            </span>
-          </div>
-          <p className={`${compact ? 'text-[13px] leading-5' : 'text-sm'} font-semibold text-[var(--content-primary)]`}>
-            {line.item_name}
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <span
-            className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${coverageClasses(line.coverage_status)}`}
-          >
+      {/* Meta row: pending date pairs with stock / response pills (same pill size) */}
+      <div className="flex items-start justify-between gap-2">
+        <PendingDateChip createdAt={line.created_at} />
+        <div className="flex min-w-0 shrink-0 flex-col items-end gap-1">
+          <span className={`${LINE_STATUS_PILL} ${coverageClasses(line.coverage_status)}`}>
             {coverageLabel(line.coverage_status)}
           </span>
           {response && (
-            <span
-              className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${responseClasses(line.response_state)}`}
-            >
-              {response}
-            </span>
+            <span className={`${LINE_STATUS_PILL} ${responseClasses(line.response_state)}`}>{response}</span>
           )}
         </div>
+      </div>
+
+      <div className={`mt-2.5 min-w-0 flex flex-col ${compact ? 'gap-1.5' : 'gap-2'}`}>
+        <div className="flex min-w-0 flex-col gap-1">
+          {line.item_alias1 && (
+            <span className="break-all font-mono text-[15px] font-bold leading-tight tracking-[0.03em] text-[var(--content-primary)] uppercase sm:text-base">
+              {line.item_alias1}
+            </span>
+          )}
+          <span className="text-[13px] text-[var(--content-secondary)] sm:text-sm">
+            Order <span className="font-mono font-semibold text-[var(--content-primary)]">{line.order_number}</span>
+          </span>
+        </div>
+        <p className={`${compact ? 'text-[13px] leading-5' : 'text-sm'} font-semibold text-[var(--content-primary)]`}>
+          {line.item_name}
+        </p>
       </div>
 
       <div className={`${compact ? 'mt-2 space-y-1' : 'mt-3 space-y-1.5'}`}>
