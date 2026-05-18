@@ -148,9 +148,6 @@ export function useCameraPermissionWarmup(): {
     const onChange = () => {
       if (!statusRef) return;
       setPermissionState(statusRef.state);
-      if (statusRef.state === 'granted') {
-        void ctxRef.current?.ensureCamera().catch(() => undefined);
-      }
     };
 
     void navigator.permissions
@@ -160,9 +157,6 @@ export function useCameraPermissionWarmup(): {
         statusRef = status;
         setPermissionState(status.state);
         status.addEventListener('change', onChange);
-        if (status.state === 'granted') {
-          void ctxRef.current?.ensureCamera().catch(() => undefined);
-        }
       })
       .catch(() => {
         if (!cancelled) setPermissionState('unsupported');
@@ -214,51 +208,6 @@ export function CameraProvider({ children }: { children: ReactNode }): React.JSX
       /* surface via itemScanIndexStore */
     });
   }, []);
-
-  /** If camera permission is already granted, warm the preview stream outside active scanner modals */
-  useEffect(() => {
-    let cancelled = false;
-    let idleHandle = 0;
-    let timeoutHandle = 0;
-
-    const run = () => {
-      if (!cancelled) void ensureCamera().catch(() => undefined);
-    };
-
-    const clearHandles = () => {
-      if (idleHandle !== 0 && typeof cancelIdleCallback !== 'undefined') cancelIdleCallback(idleHandle);
-      if (timeoutHandle !== 0) window.clearTimeout(timeoutHandle);
-      idleHandle = 0;
-      timeoutHandle = 0;
-    };
-
-    const scheduleWarm = () => {
-      clearHandles();
-      if (typeof requestIdleCallback !== 'undefined') {
-        idleHandle = requestIdleCallback(run, { timeout: 8000 });
-      } else {
-        timeoutHandle = window.setTimeout(run, 500);
-      }
-    };
-
-    void navigator.permissions
-      ?.query({ name: 'camera' as PermissionName })
-      .then((status) => {
-        if (cancelled) return;
-        if (status.state === 'granted') scheduleWarm();
-        status.addEventListener('change', () => {
-          if (!cancelled && status.state === 'granted') scheduleWarm();
-        });
-      })
-      .catch(() => {
-        /* no Permissions API — keep cold until user taps Enable */
-      });
-
-    return () => {
-      cancelled = true;
-      clearHandles();
-    };
-  }, [ensureCamera]);
 
   /** Warm native detector or WASM worker once per picking session */
   useEffect(() => {
