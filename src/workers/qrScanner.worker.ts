@@ -11,6 +11,7 @@ import {
   type ReaderOptions,
 } from 'zxing-wasm/reader';
 import zxingReaderWasmUrl from 'zxing-wasm/reader/zxing_reader.wasm?url';
+import { isLikelyPartNumber } from '../lib/scanner/scoring';
 
 type ScanRequestMessage = {
   type: 'scan';
@@ -60,7 +61,7 @@ function cropImageData(
   return new ImageData(out, w, h);
 }
 
-function upscaleNearest(source: ImageData, scale: number): ImageData {
+function upscaleNearestJs(source: ImageData, scale: number): ImageData {
   const targetWidth = Math.max(1, Math.floor(source.width * scale));
   const targetHeight = Math.max(1, Math.floor(source.height * scale));
   const out = new Uint8ClampedArray(targetWidth * targetHeight * 4);
@@ -82,17 +83,35 @@ function upscaleNearest(source: ImageData, scale: number): ImageData {
   return new ImageData(out, targetWidth, targetHeight);
 }
 
-function isLikelyPartNumber(raw: string): boolean {
-  const value = raw.trim().toUpperCase();
-  if (!value) return false;
-  if (value.length < 4 || value.length > 36) return false;
-  if (/\n/.test(value)) return false;
-  if (/\b(?:MRP|QTY|COMMODITY|NUMBER OF|PACKED)\b/.test(value)) return false;
-  if (/^[A-Z0-9][A-Z0-9.\-/]{3,}$/.test(value) && /[A-Z]/.test(value) && /\d/.test(value)) {
-    return true;
+let scratchCanvas: OffscreenCanvas | null = null;
+let targetCanvas: OffscreenCanvas | null = null;
+
+function upscaleNearest(source: ImageData, scale: number): ImageData {
+  if (typeof OffscreenCanvas === 'undefined') {
+    return upscaleNearestJs(source, scale);
   }
-  if (/^\d{6,18}$/.test(value)) return true;
-  return false;
+
+  const tw = Math.max(1, Math.floor(source.width * scale));
+  const th = Math.max(1, Math.floor(source.height * scale));
+
+  scratchCanvas ??= new OffscreenCanvas(1, 1);
+  targetCanvas ??= new OffscreenCanvas(1, 1);
+
+  scratchCanvas.width = source.width;
+  scratchCanvas.height = source.height;
+  const sctx = scratchCanvas.getContext('2d', { willReadFrequently: true });
+  if (!sctx) return upscaleNearestJs(source, scale);
+
+  sctx.putImageData(source, 0, 0);
+
+  targetCanvas.width = tw;
+  targetCanvas.height = th;
+  const tctx = targetCanvas.getContext('2d', { willReadFrequently: true });
+  if (!tctx) return upscaleNearestJs(source, scale);
+
+  tctx.imageSmoothingEnabled = false;
+  tctx.drawImage(scratchCanvas, 0, 0, source.width, source.height, 0, 0, tw, th);
+  return tctx.getImageData(0, 0, tw, th);
 }
 
 function scoreSymbol(symbol: { type: ZBarSymbolType; decode(): string }): number {
@@ -220,11 +239,9 @@ async function getBarcodeScanner(): Promise<ZBarScanner> {
     scannerPromise = ZBarScanner.create().then((scanner) => {
       scanner.enableCache(false);
 
-      // Density 1 scans every row/column (slow). 2–3 is much faster with minor miss trade-off.
       scanner.setConfig(ZBarSymbolType.ZBAR_NONE, ZBarConfigType.ZBAR_CFG_X_DENSITY, 2);
       scanner.setConfig(ZBarSymbolType.ZBAR_NONE, ZBarConfigType.ZBAR_CFG_Y_DENSITY, 2);
 
-      // Disable everything first, then enable the formats we want.
       scanner.setConfig(ZBarSymbolType.ZBAR_NONE, ZBarConfigType.ZBAR_CFG_ENABLE, 0);
       scanner.setConfig(ZBarSymbolType.ZBAR_QRCODE, ZBarConfigType.ZBAR_CFG_ENABLE, 1);
       scanner.setConfig(ZBarSymbolType.ZBAR_CODE128, ZBarConfigType.ZBAR_CFG_ENABLE, 1);
@@ -243,6 +260,12 @@ async function getBarcodeScanner(): Promise<ZBarScanner> {
 
   return scannerPromise;
 }
+
+/** Warm WASM + ZBar scanner before first frame (first scan awaits this implicitly). */
+const engineWarmPromise = Promise.all([prepareZXing(), getBarcodeScanner()]).catch((err: unknown) => {
+  console.error('[qrScanner.worker] engine warmup failed', err);
+  throw err;
+});
 
 async function handleScan(message: ScanRequestMessage) {
   const scanner = await getBarcodeScanner();
@@ -264,7 +287,6 @@ async function handleScan(message: ScanRequestMessage) {
     self.postMessage(response);
   };
 
-  // Phase 1: smallest buffers + ZXing fast only (one WASM entry per image).
   const fastPassImages: ImageData[] = [centerCrop, image];
   for (const img of fastPassImages) {
     const zxingResult = await scanBestZXing(img, false);
@@ -274,7 +296,6 @@ async function handleScan(message: ScanRequestMessage) {
     }
   }
 
-  // Phase 2: ZBar on the same cheap crops (often faster than ZXing "try harder" for 1D).
   for (const img of fastPassImages) {
     const symbol = await scanBestSymbol(scanner, img);
     if (symbol) {
@@ -283,7 +304,6 @@ async function handleScan(message: ScanRequestMessage) {
     }
   }
 
-  // Phase 3: upscaled / harder ZXing, then ZBar (skip heavy sharpen — pure JS O(n) was a major bottleneck).
   const hardVariants: Array<{ image: ImageData; tryHarder: boolean }> = [
     { image: upscaleNearest(centerCrop, 2), tryHarder: true },
   ];
@@ -314,11 +334,13 @@ self.onmessage = (event: MessageEvent<WorkerRequestMessage>) => {
   const message = event.data;
   if (message.type !== 'scan') return;
 
-  void handleScan(message).catch((error: unknown) => {
-    const response: WorkerResponseMessage = {
-      type: 'error',
-      message: error instanceof Error ? error.message : 'QR worker failed',
-    };
-    self.postMessage(response);
-  });
+  void engineWarmPromise
+    .then(() => handleScan(message))
+    .catch((error: unknown) => {
+      const response: WorkerResponseMessage = {
+        type: 'error',
+        message: error instanceof Error ? error.message : 'QR worker failed',
+      };
+      self.postMessage(response);
+    });
 };

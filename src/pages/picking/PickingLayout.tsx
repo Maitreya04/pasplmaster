@@ -3,7 +3,7 @@ import { Queue, ListChecks, Barcode } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
 import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
-import { CameraProvider, useCameraPermissionWarmup } from '../../context/CameraContext';
+import { useCameraPermissionWarmup } from '../../context/CameraContext';
 
 const preloadQueue = () => import('./QueuePage');
 const preloadBarcodeMapping = () => import('../admin/BarcodeMappingPage');
@@ -36,11 +36,7 @@ const NAV_ITEMS: BottomNavItem[] = [
 ];
 
 export default function PickingLayout(): React.JSX.Element | null {
-  return (
-    <CameraProvider>
-      <PickingLayoutInner />
-    </CameraProvider>
-  );
+  return <PickingLayoutInner />;
 }
 
 function PickingLayoutInner(): React.JSX.Element | null {

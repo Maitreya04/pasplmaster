@@ -15,6 +15,7 @@ import {
   acquireCameraStream,
   applyContinuousCameraEnhancements,
 } from '../lib/scanner/acquireCamera';
+import { initializeItemScanIndex } from '../stores/itemScanIndex';
 
 export type BarcodeDetectorResult = {
   rawValue?: string | null;
@@ -109,6 +110,9 @@ export function useOptionalPickingCamera(): PickingCameraContextValue | undefine
   return useContext(PickingCameraContext);
 }
 
+/** App-wide scanner env (camera stream + WASM/native engines). Alias for readability. */
+export const useScannerEnv = useOptionalPickingCamera;
+
 export function usePickingCamera(): PickingCameraContextValue {
   const ctx = useContext(PickingCameraContext);
   if (!ctx) {
@@ -142,7 +146,11 @@ export function useCameraPermissionWarmup(): {
     }
     let statusRef: PermissionStatus | null = null;
     const onChange = () => {
-      if (statusRef) setPermissionState(statusRef.state);
+      if (!statusRef) return;
+      setPermissionState(statusRef.state);
+      if (statusRef.state === 'granted') {
+        void ctxRef.current?.ensureCamera().catch(() => undefined);
+      }
     };
 
     void navigator.permissions
@@ -152,6 +160,9 @@ export function useCameraPermissionWarmup(): {
         statusRef = status;
         setPermissionState(status.state);
         status.addEventListener('change', onChange);
+        if (status.state === 'granted') {
+          void ctxRef.current?.ensureCamera().catch(() => undefined);
+        }
       })
       .catch(() => {
         if (!cancelled) setPermissionState('unsupported');
@@ -196,6 +207,58 @@ export function CameraProvider({ children }: { children: ReactNode }): React.JSX
     setStream(next);
     return next;
   }, []);
+
+  /** Warm item-scan catalog (used after decode) ASAP in parallel with camera engines. */
+  useEffect(() => {
+    void initializeItemScanIndex().catch(() => {
+      /* surface via itemScanIndexStore */
+    });
+  }, []);
+
+  /** If camera permission is already granted, warm the preview stream outside active scanner modals */
+  useEffect(() => {
+    let cancelled = false;
+    let idleHandle = 0;
+    let timeoutHandle = 0;
+
+    const run = () => {
+      if (!cancelled) void ensureCamera().catch(() => undefined);
+    };
+
+    const clearHandles = () => {
+      if (idleHandle !== 0 && typeof cancelIdleCallback !== 'undefined') cancelIdleCallback(idleHandle);
+      if (timeoutHandle !== 0) window.clearTimeout(timeoutHandle);
+      idleHandle = 0;
+      timeoutHandle = 0;
+    };
+
+    const scheduleWarm = () => {
+      clearHandles();
+      if (typeof requestIdleCallback !== 'undefined') {
+        idleHandle = requestIdleCallback(run, { timeout: 8000 });
+      } else {
+        timeoutHandle = window.setTimeout(run, 500);
+      }
+    };
+
+    void navigator.permissions
+      ?.query({ name: 'camera' as PermissionName })
+      .then((status) => {
+        if (cancelled) return;
+        if (status.state === 'granted') scheduleWarm();
+        status.addEventListener('change', () => {
+          if (!cancelled && status.state === 'granted') scheduleWarm();
+        });
+      })
+      .catch(() => {
+        /* no Permissions API — keep cold until user taps Enable */
+      });
+
+    return () => {
+      cancelled = true;
+      clearHandles();
+    };
+  }, [ensureCamera]);
 
   /** Warm native detector or WASM worker once per picking session */
   useEffect(() => {
@@ -259,7 +322,7 @@ export function CameraProvider({ children }: { children: ReactNode }): React.JSX
     };
   }, [releaseCameraTracks]);
 
-  /** Release tracks when leaving picking (engines torn down above too — remount resets engines) */
+  /** Release tracks when tearing down CameraProvider (engine worker cleanup is above) */
   useEffect(() => () => releaseCameraTracks(), [releaseCameraTracks]);
 
   const value = useMemo<PickingCameraContextValue>(

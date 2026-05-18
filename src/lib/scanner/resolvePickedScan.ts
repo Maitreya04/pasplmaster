@@ -1,0 +1,143 @@
+import {
+  resolveScannedCatalogItem,
+  getScanCatalogItemById,
+} from '../../stores/itemScanIndex';
+import { classifyScanPayload, normalizeScanCode } from './qrPayload';
+import { resolveScanToUom } from './uomMapper';
+import type { LiveQrScannerPickItem, LiveQrScannerResolved } from './liveQrScannerTypes';
+
+function uniqueCodes(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    output.push(trimmed);
+  }
+  return output;
+}
+
+function extractNumericCandidates(values: Array<string | null | undefined>): number[] {
+  const out = new Set<number>();
+  for (const value of values) {
+    if (!value) continue;
+    const digits = value.replace(/[^\d]/g, '');
+    if (!digits) continue;
+    const parsed = Number(digits);
+    if (Number.isFinite(parsed) && parsed > 0) out.add(parsed);
+  }
+  return [...out];
+}
+
+export async function buildResolvedScanPayload(
+  rawValue: string,
+  scannerPickItem: LiveQrScannerPickItem,
+): Promise<LiveQrScannerResolved> {
+  const classified = classifyScanPayload(rawValue);
+  const candidates = classified.normalizedCandidates;
+  const packPayload = classified.packPayload;
+  const lpnPayload = classified.lpnPayload;
+
+  const uomResolved = await resolveScanToUom(rawValue);
+
+  let matchesPickItem = false;
+  let matchedBy: LiveQrScannerResolved['matchedBy'] = null;
+  let lookupCode: string | null = null;
+
+  const busyCodeCandidates = extractNumericCandidates([
+    scannerPickItem.alias1,
+    scannerPickItem.alias,
+    scannerPickItem.itemCode,
+    scannerPickItem.busyCode != null ? String(scannerPickItem.busyCode) : null,
+  ]);
+
+  if (packPayload && busyCodeCandidates.includes(packPayload.busyCode)) {
+    matchesPickItem = true;
+    matchedBy = 'pack';
+    lookupCode = String(packPayload.busyCode);
+  } else {
+    for (const code of candidates) {
+      if (scannerPickItem.alias1 && normalizeScanCode(scannerPickItem.alias1) === code) {
+        matchesPickItem = true;
+        matchedBy = 'alias1';
+        lookupCode = code;
+        break;
+      }
+      if (scannerPickItem.alias && normalizeScanCode(scannerPickItem.alias) === code) {
+        matchesPickItem = true;
+        matchedBy = 'alias';
+        lookupCode = code;
+        break;
+      }
+      if (scannerPickItem.itemCode && normalizeScanCode(scannerPickItem.itemCode) === code) {
+        matchesPickItem = true;
+        matchedBy = 'item_code';
+        lookupCode = code;
+        break;
+      }
+    }
+  }
+
+  const lookup = resolveScannedCatalogItem(rawValue);
+
+  if (!matchesPickItem && lookup?.item.id === scannerPickItem.itemId) {
+    matchesPickItem = true;
+    matchedBy = lookup.source;
+    lookupCode = lookup.code;
+  }
+
+  const uomTier = uomResolved.tier;
+  const baseQtyEa = uomResolved.baseQtyEa;
+  const packetQtyEa = uomResolved.packetQtyEa;
+  const packetsPerBox = uomResolved.packetsPerBox;
+  const uomSource = uomResolved.source;
+
+  const suggestedQty =
+    uomResolved.matched &&
+    baseQtyEa != null &&
+    Number.isFinite(baseQtyEa) &&
+    baseQtyEa >= 1
+      ? Math.floor(baseQtyEa)
+      : classified.kind === 'pack'
+        ? 1
+        : classified.kind === 'lpn'
+          ? Math.max(1, lpnPayload?.remainingQty ?? 1)
+          : 1;
+
+  const result: LiveQrScannerResolved = {
+    rawValue,
+    matchedItem: matchesPickItem
+      ? (getScanCatalogItemById(scannerPickItem.itemId) ?? lookup?.item ?? null)
+      : (lookup?.item ?? null),
+    matchedBy: matchesPickItem ? matchedBy : (lookup?.source ?? null),
+    matchesPickItem,
+    lookupCode: matchesPickItem
+      ? lookupCode
+      : (packPayload
+        ? String(packPayload.busyCode)
+        : lpnPayload?.busyCode != null
+          ? String(lpnPayload.busyCode)
+          : (lookup?.code ?? candidates[0] ?? null)),
+    codeType: classified.kind,
+    suggestedQty,
+    requiresBreakConfirmation: false,
+    lpnCode: lpnPayload?.lpnCode ?? null,
+    uomTier,
+    baseQtyEa,
+    packetQtyEa,
+    packetsPerBox,
+    uomSource,
+    reason: matchesPickItem
+      ? matchedBy === 'pack'
+        ? `Verified reusable ${packPayload?.packType} pack QR.`
+        : `Verified against ${matchedBy}.`
+      : !lookup
+        ? 'QR decoded, but no catalog item matched alias1, alias, or item code.'
+        : `Scanned ${lookup.item.name}, but the picker is expected to verify ${scannerPickItem.name}.`,
+  };
+
+  return result;
+}
+
+export { uniqueCodes };

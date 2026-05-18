@@ -45,6 +45,25 @@ function withEnvelope(gain: GainNode, startTime: number, duration: number) {
   gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
 }
 
+/** Prime Web Audio on the same user gesture that opens the scanner (reduces first-beep latency on iOS). */
+export function primeScannerAudioContext(): void {
+  if (typeof window === 'undefined') return;
+  if (!getScannerFeedbackPrefs().sound) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') void ctx.resume();
+  try {
+    const buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start(ctx.currentTime);
+    source.stop(ctx.currentTime + 0.002);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Short success tone (≈1 kHz, 60 ms) */
 export function playSuccessBeep(): void {
   if (!getScannerFeedbackPrefs().sound) return;

@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { Analytics } from '@vercel/analytics/react';
 import { queryClient } from './lib/queryClient';
+import { CameraProvider } from './context/CameraContext';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { registerSW } from 'virtual:pwa-register';
@@ -17,10 +18,12 @@ createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <AuthProvider>
-          <ToastProvider>
-            <App />
-            <Analytics />
-          </ToastProvider>
+          <CameraProvider>
+            <ToastProvider>
+              <App />
+              <Analytics />
+            </ToastProvider>
+          </CameraProvider>
         </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>
