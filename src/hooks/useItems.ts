@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { queryClient } from '../lib/queryClient';
@@ -21,9 +22,12 @@ import type { Item } from '../types';
  *      `set_items_updated_at` trigger (migration 026) this is reliable for
  *      stock changes too. Typical payload: a handful of rows = a few KB.
  *
- *   4. **30s stock poll**: stock does not need per-row websocket fan-out.
- *      A short watermark poll gives users fresh stock while avoiding millions
- *      of Realtime messages during bulk item/stock imports.
+ *   4. **30s watermark poll**: reconciles catalog changes (`updated_at` deltas) via one shared
+ *      timer whenever any `useItems()` consumer has mounted after a successful load.
+ *
+ *   5. **Stale-while-revalidate**: IndexedDB restores the full catalog immediately; Postgres sync
+ *      (cold full snapshot vs delta after that) continues in the background so repeat visits skip
+ *      the multi‑second spinner on flaky mobile RTT — first‑time installs still require one full sync.
  */
 
 type ItemSyncRow = Item & { updated_at: string; is_active?: boolean | null };
@@ -69,6 +73,12 @@ let watermarkId = 0;
 /** Last array we handed to React Query — only swap reference when contents change. */
 let lastReturnedArray: Item[] = [];
 let syncPromise: Promise<Item[]> | null = null;
+/** Single in-flight catalog sync (delta or full snapshot) for stale-while-revalidate. */
+let catalogNetworkSyncPromise: Promise<void> | null = null;
+
+/** Singleton 30s poll — multiple `useItems()` mounts must share one timer. */
+let catalogPollSubscriberCount = 0;
+let catalogPollTimer: ReturnType<typeof setInterval> | null = null;
 
 let hydrated = false;
 let hydratePromise: Promise<void> | null = null;
@@ -162,6 +172,64 @@ async function persistToIdb(): Promise<void> {
   });
 }
 
+function finalizeCatalogMutation(result: SyncResult): void {
+  if (result.changed || lastReturnedArray.length === 0) {
+    lastReturnedArray = Array.from(cachedItems.values());
+    schedulePersist();
+  }
+  queryClient.setQueryData<Item[]>(ITEMS_QUERY_KEY, lastReturnedArray);
+}
+
+/**
+ * Loads or refreshes catalog from Postgres. Caller decides block vs fire-and-forget.
+ * Errors are swallowed for background reconciliation so a prior good IDB snapshot keeps working.
+ */
+async function syncCatalogFromNetwork(): Promise<void> {
+  await hydrateFromIdb();
+
+  try {
+    const result =
+      watermark == null
+        ? await fullSnapshot()
+        : await deltaSync(watermark, watermarkId);
+    finalizeCatalogMutation(result);
+  } catch (err) {
+    console.warn('[items] catalog sync failed', err);
+    throw err;
+  }
+}
+
+function scheduleCatalogNetworkSync(): void {
+  if (catalogNetworkSyncPromise) return;
+
+  catalogNetworkSyncPromise = (async () => {
+    try {
+      await syncCatalogFromNetwork();
+    } catch {
+      /* logged in syncCatalogFromNetwork */
+    }
+  })().finally(() => {
+    catalogNetworkSyncPromise = null;
+  });
+}
+
+function subscribeCatalogWatermarkPoll(): () => void {
+  catalogPollSubscriberCount += 1;
+  if (catalogPollSubscriberCount === 1 && catalogPollTimer === null) {
+    catalogPollTimer = window.setInterval(() => {
+      scheduleCatalogNetworkSync();
+    }, STOCK_SYNC_INTERVAL_MS);
+  }
+
+  return () => {
+    catalogPollSubscriberCount = Math.max(0, catalogPollSubscriberCount - 1);
+    if (catalogPollSubscriberCount === 0 && catalogPollTimer !== null) {
+      window.clearInterval(catalogPollTimer);
+      catalogPollTimer = null;
+    }
+  };
+}
+
 /** Full paginated pull. Used only when there is no local watermark yet. */
 async function fullSnapshot(): Promise<SyncResult> {
   let lastId = 0;
@@ -228,6 +296,23 @@ async function deltaSync(since: string, sinceId: number): Promise<SyncResult> {
   return { changed };
 }
 
+export const ITEMS_QUERY_KEY = ['items'] as const;
+
+async function fetchAllItemsInternal(): Promise<Item[]> {
+  await hydrateFromIdb();
+
+  const hasWarmCatalog = cachedItems.size > 0 && watermark != null;
+
+  if (hasWarmCatalog) {
+    lastReturnedArray = Array.from(cachedItems.values());
+    scheduleCatalogNetworkSync();
+    return lastReturnedArray;
+  }
+
+  await syncCatalogFromNetwork();
+  return lastReturnedArray;
+}
+
 export async function fetchAllItems(): Promise<Item[]> {
   if (syncPromise) return syncPromise;
   syncPromise = fetchAllItemsInternal().finally(() => {
@@ -236,25 +321,8 @@ export async function fetchAllItems(): Promise<Item[]> {
   return syncPromise;
 }
 
-async function fetchAllItemsInternal(): Promise<Item[]> {
-  await hydrateFromIdb();
-
-  const result = watermark == null
-    ? await fullSnapshot()
-    : await deltaSync(watermark, watermarkId);
-
-  if (result.changed || lastReturnedArray.length === 0) {
-    lastReturnedArray = Array.from(cachedItems.values());
-    schedulePersist();
-  }
-
-  return lastReturnedArray;
-}
-
-export const ITEMS_QUERY_KEY = ['items'] as const;
-
 export function useItems() {
-  return useQuery<Item[]>({
+  const query = useQuery<Item[]>({
     queryKey: ITEMS_QUERY_KEY,
     queryFn: fetchAllItems,
     /**
@@ -264,12 +332,9 @@ export function useItems() {
      */
     staleTime: STOCK_SYNC_INTERVAL_MS,
     /**
-     * Stock freshness uses watermark polling instead of `items` Realtime.
-     * This prevents bulk imports from fanning out one Realtime message per row
-     * per connected browser while still showing stock changes within 30s.
+     * Watermark deltas are polled from a refcounted singleton (see `subscribeCatalogWatermarkPoll`)
+     * so we only run one `setInterval` for the whole app, not per `useItems()` consumer.
      */
-    refetchInterval: STOCK_SYNC_INTERVAL_MS,
-    refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: true,
     /**
@@ -279,6 +344,13 @@ export function useItems() {
      */
     structuralSharing: false,
   });
+
+  useEffect(() => {
+    if (!query.isSuccess) return undefined;
+    return subscribeCatalogWatermarkPoll();
+  }, [query.isSuccess]);
+
+  return query;
 }
 
 /** Fire-and-forget prefetch — call early so items are warm before user needs them. */
