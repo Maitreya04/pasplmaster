@@ -14,6 +14,7 @@ import {
 } from '../../lib/pickerPush';
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
+import { formatSupabaseUserMessage } from '../../lib/supabase/formatUserMessage';
 import {
   captureBillingLiveQueueBaseline,
   persistBillingLiveQueueDraft,
@@ -148,8 +149,17 @@ export default function LiveQueuePage() {
 
   const effectiveOrderId = activeInQueue?.id ?? null;
 
+  const claimAttempted = useRef<number | null>(null);
+
+  const handleBillingClaimLost = useCallback(() => {
+    claimAttempted.current = null;
+    toast.warning('Billing claim expired — reclaiming this order…');
+  }, [toast]);
+
   // 2. Work Claim logic
-  const { claimId, isClaimedByMe, claim, release } = useWorkClaim(effectiveOrderId, 'billing');
+  const { claimId, isClaimedByMe, claim, release } = useWorkClaim(effectiveOrderId, 'billing', {
+    onClaimLost: handleBillingClaimLost,
+  });
 
   // 3. Order Details
   const { data: order, isLoading: orderLoading } = useOrderDetail(effectiveOrderId);
@@ -171,7 +181,6 @@ export default function LiveQueuePage() {
   const [addLineOpen, setAddLineOpen] = useState(false);
   const [sessionNewOrderItemIds, setSessionNewOrderItemIds] = useState<Set<number>>(() => new Set());
 
-  const claimAttempted = useRef<number | null>(null);
   const billingReportSnapshotRef = useRef<BillingReportSnapshot | null>(null);
 
   useEffect(() => {
@@ -328,16 +337,31 @@ export default function LiveQueuePage() {
     claimAttempted.current = effectiveOrderId;
     void (async () => {
       const result = await claim();
-      if (!result.success && result.reason === 'locked_by_sales_edit') {
+      if (result.success) return;
+
+      claimAttempted.current = null;
+
+      if (result.reason === 'locked_by_sales_edit') {
         const who =
           typeof result.locked_by_name === 'string' && result.locked_by_name.trim()
             ? result.locked_by_name.trim()
             : 'Sales';
         toast.warning(`Locked — ${who} is editing this order from sales.`);
-        claimAttempted.current = null;
         flow.returnToQueue();
         setCurrentOrderId(null);
+        return;
       }
+
+      if (result.reason === 'already_claimed') {
+        const who =
+          typeof result.claimed_by === 'string' && result.claimed_by.trim()
+            ? result.claimed_by
+            : 'someone else';
+        toast.warning(`Being billed by ${who}. Take over from the queue if their session is stale.`);
+        return;
+      }
+
+      toast.error(`Could not claim order: ${result.reason ?? 'unknown error'}`);
     })();
   }, [flow.state, effectiveOrderId, isClaimedByMe, claim, toast, flow, activeInQueue]);
 
@@ -379,7 +403,30 @@ export default function LiveQueuePage() {
   // ── Complete Billing (Approve): merges flags + local line edits, deletes removed rows, audits order_events ──
   const approveMutation = useMutation({
     mutationFn: async () => {
-      if (!order || !userId) throw new Error('Cannot approve. Missing billing context.');
+      if (!order) throw new Error('No order selected.');
+      if (!userId) {
+        throw new Error(
+          'Cannot approve — your billing user profile is not loaded. Log out, pick your name again, and retry.',
+        );
+      }
+
+      const claimResult = await claim();
+      if (!claimResult.success || !claimResult.claim_id) {
+        const who =
+          typeof claimResult.claimed_by === 'string' && claimResult.claimed_by.trim()
+            ? ` (${claimResult.claimed_by})`
+            : '';
+        if (claimResult.reason === 'already_claimed') {
+          throw new Error(
+            `Cannot approve — order is being billed by${who}. Take over from the queue if their session is stale.`,
+          );
+        }
+        throw new Error(
+          `Cannot approve — billing claim failed${who}: ${claimResult.reason ?? 'unknown error'}`,
+        );
+      }
+      const activeClaimId = claimResult.claim_id;
+
       const reviewer = userName || 'Billing';
 
       const flags = flowRef.current.flags;
@@ -497,21 +544,23 @@ export default function LiveQueuePage() {
       });
 
       const updateResponses = await Promise.all(
-        lineResults.map(({ item, finalState }) =>
-          supabase
+        lineResults.map(({ item, finalState }) => {
+          const qty_shippable = finalState.qtyBilled;
+          const qty_po = Math.max(0, item.qty_requested - qty_shippable);
+          return supabase
             .from('order_items')
             .update({
-              qty_approved: finalState.qtyBilled,
-              qty_po: finalState.qtyPending,
-              qty_shippable: finalState.qtyBilled,
+              qty_approved: qty_shippable,
+              qty_po,
+              qty_shippable,
               qty_requested: item.qty_requested,
               price_quoted: item.price_quoted,
             })
-            .eq('id', item.id),
-        ),
+            .eq('id', item.id);
+        }),
       );
       const updateError = updateResponses.find((r) => r.error)?.error;
-      if (updateError) throw updateError;
+      if (updateError) throw new Error(formatSupabaseUserMessage(updateError));
 
       const { error: resolvePendingError } = await supabase
         .from('pending_items')
@@ -597,7 +646,7 @@ export default function LiveQueuePage() {
       // Complete billing with claim retry so transient claim desync does not fail approval.
       await completeBillingWithClaim({
         orderId: order.id,
-        claimId,
+        claimId: activeClaimId,
         userId,
         claim,
         isResolvingFlags: false,
@@ -642,8 +691,9 @@ export default function LiveQueuePage() {
       flow.finishBilling();
     },
     onError: (err: unknown) => {
-      const msg = err instanceof Error ? err.message : '';
-      toast.error(msg ? msg : 'Failed to approve order');
+      console.error('[LiveQueue] approve failed', err);
+      const msg = formatSupabaseUserMessage(err);
+      toast.error(msg || 'Failed to approve order');
     },
   });
 

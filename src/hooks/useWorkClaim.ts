@@ -42,9 +42,15 @@ interface UseWorkClaimReturn {
  * - Release on unmount / navigation away
  * - Re-claiming when returning to page (same user)
  */
+interface UseWorkClaimOptions {
+  /** Fired when an active claim is lost (heartbeat expiry, external release). */
+  onClaimLost?: () => void;
+}
+
 export function useWorkClaim(
   orderId: number | null,
   stage: ClaimStage,
+  options?: UseWorkClaimOptions,
 ): UseWorkClaimReturn {
   const { userId } = useAuth();
   const [claimId, setClaimId] = useState<number | null>(null);
@@ -54,6 +60,10 @@ export function useWorkClaim(
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const claimIdRef = useRef<number | null>(null);
   const userIdRef = useRef<number | null>(null);
+  const onClaimLostRef = useRef(options?.onClaimLost);
+  useEffect(() => {
+    onClaimLostRef.current = options?.onClaimLost;
+  }, [options?.onClaimLost]);
 
   // Keep refs in sync
   useEffect(() => {
@@ -91,6 +101,7 @@ export function useWorkClaim(
         console.warn('[useWorkClaim] Heartbeat failed:', result.reason);
         setClaimId(null);
         stopHeartbeat();
+        onClaimLostRef.current?.();
       }
     } catch {
       // Silent fail — network issue, will retry on next interval

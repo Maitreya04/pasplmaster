@@ -1,4 +1,5 @@
 import { supabase } from '../supabase/client';
+import { formatSupabaseUserMessage } from '../supabase/formatUserMessage';
 
 interface ClaimResult {
   success: boolean;
@@ -47,7 +48,7 @@ async function callCompleteBilling(
     p_is_resolving_flags: isResolvingFlags,
   });
 
-  if (error) throw error;
+  if (error) throw new Error(formatSupabaseUserMessage(error));
   return data as CompleteBillingResult;
 }
 
@@ -57,14 +58,12 @@ export async function completeBillingWithClaim(options: CompleteBillingOptions):
 
   let activeClaimId = options.claimId ?? await claimForBilling(claim);
   let result = await callCompleteBilling(orderId, activeClaimId, userId, isResolvingFlags);
-
   if (result?.success) return;
 
-  if (result?.reason === 'No active billing claim found') {
-    activeClaimId = await claimForBilling(claim);
-    result = await callCompleteBilling(orderId, activeClaimId, userId, isResolvingFlags);
-    if (result?.success) return;
-  }
+  // Re-claim once (stale React claim id, heartbeat timeout, tab backgrounded, etc.)
+  activeClaimId = await claimForBilling(claim);
+  result = await callCompleteBilling(orderId, activeClaimId, userId, isResolvingFlags);
+  if (result?.success) return;
 
   throw billingApprovalError(result);
 }
