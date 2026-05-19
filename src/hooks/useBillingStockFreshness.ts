@@ -6,6 +6,7 @@ import {
   fetchLocationwiseStock,
   getStockQtyForLocation,
   normalizeBusyCodes,
+  stockLocationLabel,
 } from './useLocationwiseStock';
 
 export type BillingFreshnessRow = {
@@ -14,7 +15,41 @@ export type BillingFreshnessRow = {
   qtyRequested: number;
   liveCapacity: number | null;
   isStale: boolean;
+  /** Warehouse this order bills against (Main Store or Jabalpur). */
+  locationLabel: string;
+  /** Sellable qty at that warehouse (excludes this line's reservation add-back). */
+  locationAvailable: number;
+  /** Qty reserved for this order line at that warehouse. */
+  reservedForLine: number;
+  /** True when live stock can be applied — free qty exists at the order warehouse. */
+  canApplyLive: boolean;
 };
+
+/** Chip label for stale live-stock rows on the billing sheet. */
+export function billingFreshnessChipLabel(row: BillingFreshnessRow): string {
+  const loc = row.locationLabel;
+  if (row.canApplyLive && row.liveCapacity != null) {
+    return `${loc} · Live ${row.liveCapacity} · Use`;
+  }
+  if (row.locationAvailable <= 0 && row.reservedForLine > 0) {
+    return `${loc} · 0 free (${row.reservedForLine} res.)`;
+  }
+  if (row.liveCapacity != null) {
+    return `${loc} · Live ${row.liveCapacity}`;
+  }
+  return loc;
+}
+
+export function billingFreshnessChipTitle(row: BillingFreshnessRow): string | undefined {
+  if (row.canApplyLive) return undefined;
+  if (row.locationAvailable <= 0 && row.reservedForLine > 0) {
+    return `Only ${row.reservedForLine} reserved for this order at ${row.locationLabel} — not free warehouse stock. Other locations are not offered here.`;
+  }
+  if (row.isStale && row.liveCapacity != null) {
+    return `Busy stock at ${row.locationLabel} differs from what is saved on this line.`;
+  }
+  return undefined;
+}
 
 /** Active reservations linked to specific order lines (for add-back vs locationwise view). */
 export async function fetchStockReservationsByOrderItem(
@@ -60,8 +95,10 @@ export function computeBillingFreshnessByOrderItem(
   items: OrderItem[],
   availByBusyCode: Map<number, number>,
   reservedByOrderItemId: Map<number, number>,
+  stockLocationCode: StockLocationCode,
 ): Record<number, BillingFreshnessRow> {
   const out: Record<number, BillingFreshnessRow> = {};
+  const locationLabel = stockLocationLabel(stockLocationCode);
 
   for (const item of items) {
     const qtyReq = item.qty_requested;
@@ -76,13 +113,19 @@ export function computeBillingFreshnessByOrderItem(
         qtyRequested: qtyReq,
         liveCapacity: null,
         isStale: false,
+        locationLabel,
+        locationAvailable: 0,
+        reservedForLine: 0,
+        canApplyLive: false,
       };
       continue;
     }
 
-    const viewAvail = availByBusyCode.get(bc) ?? 0;
-    const reservedHere = reservedByOrderItemId.get(item.id) ?? 0;
-    const liveCapacity = Math.min(qtyReq, Math.max(0, viewAvail + reservedHere));
+    const locationAvailable = availByBusyCode.get(bc) ?? 0;
+    const reservedForLine = reservedByOrderItemId.get(item.id) ?? 0;
+    const liveCapacity = Math.min(qtyReq, Math.max(0, locationAvailable + reservedForLine));
+    const canApplyLive =
+      locationAvailable > 0 && liveCapacity > 0 && savedShippable !== liveCapacity;
 
     out[item.id] = {
       orderItemId: item.id,
@@ -90,6 +133,10 @@ export function computeBillingFreshnessByOrderItem(
       qtyRequested: qtyReq,
       liveCapacity,
       isStale: savedShippable !== liveCapacity,
+      locationLabel,
+      locationAvailable,
+      reservedForLine,
+      canApplyLive,
     };
   }
 
@@ -112,7 +159,7 @@ export function useBillingStockFreshness(
     return normalizeBusyCodes(codes);
   }, [items]);
 
-  const loc = stockLocationCode ?? 'main_store';
+  const loc = (stockLocationCode === 'jabalpur' ? 'jabalpur' : 'main_store') as StockLocationCode;
   const sig = itemsFreshnessSignature(items);
 
   return useQuery({
@@ -126,7 +173,7 @@ export function useBillingStockFreshness(
         fetchLocationwiseAvailableForBusyCodes(busyCodes, loc),
         fetchStockReservationsByOrderItem(orderId!),
       ]);
-      return computeBillingFreshnessByOrderItem(items, availMap, reservedMap);
+      return computeBillingFreshnessByOrderItem(items, availMap, reservedMap, loc);
     },
   });
 }

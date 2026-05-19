@@ -11,7 +11,11 @@ import {
 } from '@phosphor-icons/react';
 import type { OrderItem } from '../../../types';
 import type { BillingLineEdit, ItemFlag } from '../../../hooks/useBillingFlow';
-import type { BillingFreshnessRow } from '../../../hooks/useBillingStockFreshness';
+import {
+  billingFreshnessChipLabel,
+  billingFreshnessChipTitle,
+  type BillingFreshnessRow,
+} from '../../../hooks/useBillingStockFreshness';
 import { StatusBadge } from '../../../components/shared';
 import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
 import { getBookPrice, getQuotedPrice, isSpecialRateItem, summarizeSpecialPricing } from '../../../lib/specialPricing';
@@ -920,16 +924,26 @@ export function OrderSheetView({
                       <td className="text-right align-top pt-1">
                         <div className="flex flex-col items-end gap-1">
                           {fresh?.isStale && fresh.liveCapacity != null && (
-                            <button
-                              type="button"
-                              className="ds-chip ds-chip--sm bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border-[var(--border-accent)] max-w-[10rem]"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void onApplyLiveStock(item.id, fresh.liveCapacity!);
-                              }}
-                            >
-                              Live {fresh.liveCapacity} · Use
-                            </button>
+                            fresh.canApplyLive ? (
+                              <button
+                                type="button"
+                                className="ds-chip ds-chip--sm bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border-[var(--border-accent)] max-w-[11rem] text-left"
+                                title={billingFreshnessChipTitle(fresh)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void onApplyLiveStock(item.id, fresh.liveCapacity!);
+                                }}
+                              >
+                                {billingFreshnessChipLabel(fresh)}
+                              </button>
+                            ) : (
+                              <span
+                                className="ds-chip ds-chip--sm bg-[var(--bg-tertiary)] text-[var(--content-tertiary)] border-[var(--border-subtle)] max-w-[11rem] text-left"
+                                title={billingFreshnessChipTitle(fresh)}
+                              >
+                                {billingFreshnessChipLabel(fresh)}
+                              </span>
+                            )
                           )}
                           {isPartialInput ? (
                             <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
