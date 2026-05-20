@@ -1,5 +1,7 @@
 import { CheckCircle, Package, X } from '@phosphor-icons/react';
 import type { LiveQrScannerResolved } from '../../../lib/scanner/liveQrScannerTypes';
+import { parsePackPickPayload } from '../../../lib/scanner/qrPayload';
+import { partNoFromPickItem } from '../../../lib/scanner/pickScanQuantity';
 
 export interface CollectResultSheetProps {
   visible: boolean;
@@ -19,6 +21,24 @@ export function CollectResultSheet({
   if (!visible) return null;
 
   const isMatched = Boolean(lastScan.matchedItem);
+  const packPayload = parsePackPickPayload(lastScan.rawValue);
+  const partNo = lastScan.matchedItem
+    ? partNoFromPickItem({
+        alias1: lastScan.matchedItem.alias1,
+        alias: lastScan.matchedItem.alias,
+        pickCode: lastScan.matchedItem.itemCode,
+      })
+    : null;
+  const packTierLabel =
+    packPayload?.packType === 'outer'
+      ? 'Outer box'
+      : packPayload?.packType === 'inner'
+        ? 'Inner box'
+        : null;
+  const qtyHint =
+    lastScan.baseQtyEa != null && lastScan.baseQtyEa >= 1
+      ? `${Math.floor(lastScan.baseQtyEa)} pcs`
+      : null;
 
   return (
     <>
@@ -86,8 +106,21 @@ export function CollectResultSheet({
 
           {isMatched && lastScan.matchedItem ? (
             <div>
-              <p className="text-xl font-bold leading-tight text-white">{lastScan.matchedItem.name}</p>
+              {partNo && (
+                <p className="font-mono text-2xl font-black leading-none tracking-tight text-white">
+                  {partNo}
+                </p>
+              )}
+              <p className={`font-bold leading-tight text-white ${partNo ? 'mt-1 text-sm text-slate-400' : 'text-xl'}`}>
+                {lastScan.matchedItem.name}
+              </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
+                {packTierLabel && (
+                  <span className="rounded-full border border-sky-400/25 bg-sky-400/10 px-2.5 py-0.5 text-xs font-semibold text-sky-200">
+                    {packTierLabel}
+                    {qtyHint ? ` · ${qtyHint}` : ''}
+                  </span>
+                )}
                 {lastScan.matchedItem.busy_code != null && (
                   <span className="rounded-full border border-white/15 bg-white/8 px-2.5 py-0.5 font-mono text-xs text-slate-300">
                     Busy {lastScan.matchedItem.busy_code}

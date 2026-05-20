@@ -1,6 +1,7 @@
 import {
   resolveScannedCatalogItem,
   getScanCatalogItemById,
+  getScanCatalogItemByBusyCode,
 } from '../../stores/itemScanIndex';
 import { classifyScanPayload, normalizeScanCode } from './qrPayload';
 import { resolveScanToUom } from './uomMapper';
@@ -52,7 +53,16 @@ export async function buildResolvedScanPayload(
     scannerPickItem.busyCode != null ? String(scannerPickItem.busyCode) : null,
   ]);
 
-  if (packPayload && busyCodeCandidates.includes(packPayload.busyCode)) {
+  const packCatalogItem = packPayload ? getScanCatalogItemByBusyCode(packPayload.busyCode) : null;
+  const verifyingSpecificItem = scannerPickItem.itemId > 0;
+
+  if (packPayload && packCatalogItem) {
+    if (!verifyingSpecificItem || busyCodeCandidates.includes(packPayload.busyCode)) {
+      matchesPickItem = verifyingSpecificItem;
+      matchedBy = 'pack';
+      lookupCode = String(packPayload.busyCode);
+    }
+  } else if (packPayload && busyCodeCandidates.includes(packPayload.busyCode)) {
     matchesPickItem = true;
     matchedBy = 'pack';
     lookupCode = String(packPayload.busyCode);
@@ -79,7 +89,9 @@ export async function buildResolvedScanPayload(
     }
   }
 
-  const lookup = resolveScannedCatalogItem(rawValue);
+  const lookup = resolveScannedCatalogItem(rawValue) ?? (packCatalogItem
+    ? { code: String(packPayload!.busyCode), item: packCatalogItem, source: 'pack' as const }
+    : null);
 
   if (!matchesPickItem && lookup?.item.id === scannerPickItem.itemId) {
     matchesPickItem = true;
@@ -108,8 +120,8 @@ export async function buildResolvedScanPayload(
   const result: LiveQrScannerResolved = {
     rawValue,
     matchedItem: matchesPickItem
-      ? (getScanCatalogItemById(scannerPickItem.itemId) ?? lookup?.item ?? null)
-      : (lookup?.item ?? null),
+      ? (getScanCatalogItemById(scannerPickItem.itemId) ?? lookup?.item ?? packCatalogItem ?? null)
+      : (lookup?.item ?? packCatalogItem ?? null),
     matchedBy: matchesPickItem ? matchedBy : (lookup?.source ?? null),
     matchesPickItem,
     lookupCode: matchesPickItem
@@ -132,9 +144,15 @@ export async function buildResolvedScanPayload(
       ? matchedBy === 'pack'
         ? `Verified reusable ${packPayload?.packType} pack QR.`
         : `Verified against ${matchedBy}.`
-      : !lookup
-        ? 'QR decoded, but no catalog item matched alias1, alias, or item code.'
-        : `Scanned ${lookup.item.name}, but the picker is expected to verify ${scannerPickItem.name}.`,
+      : !lookup && !packCatalogItem
+        ? 'QR decoded, but no catalog item matched alias1, alias, busy code, or item code.'
+        : lookup && verifyingSpecificItem
+          ? `Scanned ${lookup.item.name}, but the picker is expected to verify ${scannerPickItem.name}.`
+          : packPayload && packCatalogItem
+            ? `Recognized ${packCatalogItem.name} via ${packPayload.packType} pack QR (Busy ${packPayload.busyCode}).`
+            : lookup
+              ? `Recognized ${lookup.item.name} via ${lookup.source}.`
+              : 'QR decoded, but no catalog item matched.',
   };
 
   return result;

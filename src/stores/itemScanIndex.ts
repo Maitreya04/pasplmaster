@@ -3,7 +3,11 @@ import { queryClient } from '../lib/queryClient';
 import { fetchAllItems, ITEMS_QUERY_KEY } from '../hooks/useItems';
 import type { Item } from '../types';
 import { itemPickCode } from '../utils/itemCodes';
-import { collectQrLookupCandidates, normalizeScanCode } from '../lib/scanner/qrPayload';
+import {
+  collectQrLookupCandidates,
+  normalizeScanCode,
+  parsePackPickPayload,
+} from '../lib/scanner/qrPayload';
 import { supabase } from '../lib/supabase/client';
 
 export interface ScanCatalogItem extends Item {
@@ -27,6 +31,7 @@ interface ItemScanIndexState {
   status: 'idle' | 'loading' | 'ready' | 'error';
   error: string | null;
   itemsById: Map<number, ScanCatalogItem>;
+  busyCodeMap: Map<number, ScanCatalogItem>;
   alias1Map: Map<string, ScanCatalogItem>;
   aliasMap: Map<string, ScanCatalogItem>;
   itemCodeMap: Map<string, ScanCatalogItem>;
@@ -34,6 +39,7 @@ interface ItemScanIndexState {
   setLoading: () => void;
   setReady: (payload: {
     itemsById: Map<number, ScanCatalogItem>;
+    busyCodeMap: Map<number, ScanCatalogItem>;
     alias1Map: Map<string, ScanCatalogItem>;
     aliasMap: Map<string, ScanCatalogItem>;
     itemCodeMap: Map<string, ScanCatalogItem>;
@@ -77,23 +83,25 @@ function buildIndex(items: Item[], barcodeMappings: BarcodeMappingRow[]) {
     barcodeMappingMap.set(normalizedKey, skuItem);
   }
 
-  return { itemsById, alias1Map, aliasMap, itemCodeMap, barcodeMappingMap };
+  return { itemsById, busyCodeMap: itemsByBusyCode, alias1Map, aliasMap, itemCodeMap, barcodeMappingMap };
 }
 
 export const useItemScanIndexStore = create<ItemScanIndexState>((set) => ({
   status: 'idle',
   error: null,
   itemsById: new Map(),
+  busyCodeMap: new Map(),
   alias1Map: new Map(),
   aliasMap: new Map(),
   itemCodeMap: new Map(),
   barcodeMappingMap: new Map(),
   setLoading: () => set({ status: 'loading', error: null }),
-  setReady: ({ itemsById, alias1Map, aliasMap, itemCodeMap, barcodeMappingMap }) =>
+  setReady: ({ itemsById, busyCodeMap, alias1Map, aliasMap, itemCodeMap, barcodeMappingMap }) =>
     set({
       status: 'ready',
       error: null,
       itemsById,
+      busyCodeMap,
       alias1Map,
       aliasMap,
       itemCodeMap,
@@ -146,8 +154,25 @@ export async function initializeItemScanIndex(): Promise<void> {
   return initializePromise;
 }
 
+export function getScanCatalogItemByBusyCode(busyCode: number): ScanCatalogItem | null {
+  return useItemScanIndexStore.getState().busyCodeMap.get(busyCode) ?? null;
+}
+
 export function resolveScannedCatalogItem(rawValue: string): ScanLookupResult | null {
-  const { alias1Map, aliasMap, itemCodeMap, barcodeMappingMap } = useItemScanIndexStore.getState();
+  const { alias1Map, aliasMap, itemCodeMap, barcodeMappingMap, busyCodeMap } =
+    useItemScanIndexStore.getState();
+
+  const packPayload = parsePackPickPayload(rawValue);
+  if (packPayload) {
+    const packItem = busyCodeMap.get(packPayload.busyCode);
+    if (packItem) {
+      return {
+        code: String(packPayload.busyCode),
+        item: packItem,
+        source: 'pack',
+      };
+    }
+  }
 
   for (const code of collectQrLookupCandidates(rawValue)) {
     const alias1Hit = alias1Map.get(code);
