@@ -32,7 +32,9 @@ import {
 import { classifyScanPayload, parseRackPayload } from '../../lib/scanner/qrPayload';
 import { parseManufacturerBarcode } from '../../lib/scanner/barcodeParser';
 import { fetchUomCoverageGaps, registerBarcodeWithTier, type UomTier } from '../../lib/scanner/uomMapper';
-import { PACK_DEFINITIONS_QUERY_KEY } from '../../lib/packLpn';
+import { PACK_DEFINITIONS_QUERY_KEY, fetchItemPackDefinitions } from '../../lib/packLpn';
+import { BIN_INVENTORY_QUERY_KEY, submitBinCount } from '../../lib/wms';
+import { StagingPromotePanel } from '../../components/admin/StagingPromotePanel';
 import { ITEMS_QUERY_KEY, useItems } from '../../hooks/useItems';
 import type { ItemPackDefinition } from '../../types';
 import { initializeItemScanIndex } from '../../stores/itemScanIndex';
@@ -257,6 +259,63 @@ export default function BinOnboardingPage(): ReactElement {
 
   const [celebrateOpen, setCelebrateOpen] = useState(false);
   const prevBinCompleteRef = useRef(false);
+
+  const [quickPlaceBin, setQuickPlaceBin] = useState('');
+  const [quickPlaceSkuBusy, setQuickPlaceSkuBusy] = useState('');
+  const [quickInnerPackQty, setQuickInnerPackQty] = useState('25');
+
+  const quickPlaceMutation = useMutation({
+    mutationFn: async () => {
+      const binId = normalizeBinCode(quickPlaceBin);
+      const bc = Number(quickPlaceSkuBusy);
+      if (!binId || !Number.isFinite(bc)) throw new Error('bin_and_busy_required');
+
+      let innerPackQty = Number(quickInnerPackQty);
+      if (!Number.isFinite(innerPackQty) || innerPackQty < 1) innerPackQty = 25;
+
+      let packs = queryClient.getQueryData<ItemPackDefinition[]>(PACK_DEFINITIONS_QUERY_KEY) ?? [];
+      if (packs.length === 0) {
+        packs = await fetchItemPackDefinitions();
+        queryClient.setQueryData(PACK_DEFINITIONS_QUERY_KEY, packs);
+      }
+      const defRow = packs.find((p) => Number(p.busy_code) === bc);
+      const fromDef =
+        defRow?.inner_pack_qty != null && defRow.inner_pack_qty >= 1 ? defRow.inner_pack_qty : null;
+      if (fromDef != null) innerPackQty = fromDef;
+
+      return submitBinCount({
+        binId,
+        skuBusyCode: bc,
+        innerPacks: 0,
+        looseEaQty: 0,
+        innerPackQty,
+        dailyTarget: null,
+        reorderPoint: null,
+        countType: 'initial_setup',
+        userId: userId ?? null,
+        userName: userName ?? null,
+        note: 'Quick place SKU',
+      });
+    },
+    onSuccess: async (result) => {
+      if (!result.success) {
+        toast.error(result.reason ?? 'Could not assign bin.');
+        return;
+      }
+      toast.success('SKU placed at bin.');
+      await queryClient.invalidateQueries({ queryKey: PACK_DEFINITIONS_QUERY_KEY });
+      await queryClient.invalidateQueries({ queryKey: BIN_INVENTORY_QUERY_KEY });
+      setQuickPlaceBin('');
+      setQuickPlaceSkuBusy('');
+    },
+    onError: () => toast.error('Could not assign bin.'),
+  });
+
+  const busyCodeOptions = useMemo(() => {
+    return [...items]
+      .filter((i) => i.busy_code != null && Number(i.busy_code) > 0)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+  }, [items]);
 
   useEffect(() => {
     void initializeItemScanIndex().catch(() => {
@@ -835,6 +894,51 @@ export default function BinOnboardingPage(): ReactElement {
           </div>
         </div>
 
+        <section className="mt-5 rounded-2xl border border-dashed border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--content-accent)]">
+            Quick assign
+          </p>
+          <p className="mt-1 text-sm text-[var(--content-secondary)]">
+            Place a SKU in a bin slot without running the tier wizard (Receiving). Uses inner pack qty from master
+            when available.
+          </p>
+          <div className="mt-3 space-y-2">
+            <input
+              placeholder="BIN e.g. GGR-1E"
+              className="min-h-11 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 font-mono text-sm"
+              value={quickPlaceBin}
+              onChange={(e) => setQuickPlaceBin(e.target.value)}
+            />
+            <select
+              className="min-h-11 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-sm"
+              value={quickPlaceSkuBusy}
+              onChange={(e) => setQuickPlaceSkuBusy(e.target.value)}
+            >
+              <option value="">Select SKU…</option>
+              {busyCodeOptions.map((it) => (
+                <option key={it.id} value={String(it.busy_code)}>
+                  {it.busy_code} — {it.name}
+                </option>
+              ))}
+            </select>
+            <input
+              placeholder="Fallback inner pack qty (EA per inner)"
+              className="min-h-11 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 font-mono text-sm"
+              value={quickInnerPackQty}
+              onChange={(e) => setQuickInnerPackQty(e.target.value)}
+            />
+            <BigButton
+              type="button"
+              variant="secondary"
+              className="w-full min-h-11"
+              disabled={quickPlaceMutation.isPending}
+              onClick={() => quickPlaceMutation.mutate()}
+            >
+              Place SKU at bin
+            </BigButton>
+          </div>
+        </section>
+
         <div className="mt-4 grid grid-cols-3 gap-2">
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
             <p className="text-[10px] font-medium uppercase tracking-wide text-[var(--content-tertiary)]">
@@ -1029,6 +1133,13 @@ export default function BinOnboardingPage(): ReactElement {
                 Back to list
               </button>
             </div>
+
+            <StagingPromotePanel
+              busyCode={selectedSku.skuBusyCode}
+              targetBinId={selectedSku.binId}
+              userId={userId ?? null}
+              userName={userName ?? null}
+            />
 
             {tierConflict && (
               <div className="rounded-2xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] p-4">

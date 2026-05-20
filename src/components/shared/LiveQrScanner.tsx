@@ -23,6 +23,12 @@ import { isScannerDebugEnabled, scannerDebugLog } from '../../lib/scanner/scanne
 import { ViewfinderOverlay } from './scanner/ViewfinderOverlay';
 import { ScannerControls } from './scanner/ScannerControls';
 import { CollectResultSheet } from './scanner/CollectResultSheet';
+import { PickScanLabResultSheet } from './scanner/PickScanLabResultSheet';
+import {
+  computePickScanQuantity,
+  type PickScanQuantityResult,
+} from '../../lib/scanner/pickScanQuantity';
+import type { ItemPackDefinition } from '../../types';
 
 export type { LiveQrScannerPickItem, LiveQrScannerResolved } from '../../lib/scanner/liveQrScannerTypes';
 
@@ -35,13 +41,22 @@ const LAST_PAYLOAD_DEBOUNCE_MS = 1200;
 const AUTO_RETRY_DELAY_MS = 1000;
 const RESET_COOLDOWN_MS = 350;
 
+export interface LiveQrScannerPickLabContext {
+  targetQty: number;
+  pickedSoFar: number;
+  partNo: string;
+  busyCode: number | null;
+  packDefinition: ItemPackDefinition | null;
+}
+
 interface LiveQrScannerProps {
   title?: string;
   eyebrow?: string;
   helpText?: string;
   idleStatus?: string;
-  mode?: 'verify' | 'collect';
+  mode?: 'verify' | 'collect' | 'pickLab';
   pickItem?: LiveQrScannerPickItem;
+  pickLabContext?: LiveQrScannerPickLabContext;
   onClose: () => void;
   onResolved: (result: LiveQrScannerResolved) => void;
   onError: (message: string) => void;
@@ -54,6 +69,7 @@ export function LiveQrScanner({
   idleStatus,
   mode = 'verify',
   pickItem,
+  pickLabContext,
   onClose,
   onResolved,
   onError,
@@ -67,6 +83,7 @@ export function LiveQrScanner({
   const [flashColor, setFlashColor] = useState<'green' | 'red' | null>(null);
   const [sheetState, setSheetState] = useState<'hidden' | 'open' | 'closing'>('hidden');
   const [scanCount, setScanCount] = useState(0);
+  const [pickLabQuantity, setPickLabQuantity] = useState<PickScanQuantityResult | null>(null);
 
   const completedRef = useRef(false);
   const lockedRef = useRef(false);
@@ -74,6 +91,7 @@ export function LiveQrScanner({
   const sheetDismissTimerRef = useRef<number | null>(null);
   const lastFiredPayloadRef = useRef<{ key: string; at: number } | null>(null);
   const onStableDecodeRef = useRef<(raw: string) => void>(() => {});
+  const pickLabPickedRef = useRef(0);
 
   const [feedbackSoundEnabled, setFeedbackSoundEnabled] = useState(() => getScannerFeedbackPrefs().sound);
   const [feedbackHapticsEnabled, setFeedbackHapticsEnabled] = useState(() => getScannerFeedbackPrefs().haptics);
@@ -86,6 +104,12 @@ export function LiveQrScanner({
   }, []);
 
   const collectMode = mode === 'collect';
+  const pickLabMode = mode === 'pickLab';
+  const sheetMode = collectMode || pickLabMode;
+
+  useEffect(() => {
+    pickLabPickedRef.current = pickLabContext?.pickedSoFar ?? 0;
+  }, [pickLabContext?.pickedSoFar]);
 
   useEffect(() => {
     if (isScannerDebugEnabled()) {
@@ -166,7 +190,7 @@ export function LiveQrScanner({
     stopScannerBase,
     applyCameraZoom,
   } = useQRScanner({
-    collectMode,
+    collectMode: collectMode || pickLabMode,
     completedRef,
     lockedRef,
     onStableRawDecode: (raw) => onStableDecodeRef.current(raw),
@@ -201,7 +225,25 @@ export function LiveQrScanner({
         const result = await buildResolvedScanPayload(rawValue, scannerPickItem);
 
         setLastScan(result);
-        if (collectMode) {
+
+        let labQuantity: PickScanQuantityResult | null = null;
+        if (pickLabMode && pickLabContext) {
+          labQuantity = computePickScanQuantity({
+            rawValue,
+            isMatch: result.matchesPickItem,
+            busyCode: pickLabContext.busyCode,
+            targetQty: pickLabContext.targetQty,
+            totalBefore: pickLabPickedRef.current,
+            packDefinition: pickLabContext.packDefinition,
+            resolvedEa: result.baseQtyEa,
+          });
+          if (labQuantity.qtyAdded > 0) {
+            pickLabPickedRef.current = labQuantity.totalAfter;
+          }
+          setPickLabQuantity(labQuantity);
+        }
+
+        if (sheetMode) {
           setScanCount((n) => n + 1);
           stopScannerTimers();
           setSheetState('open');
@@ -217,6 +259,34 @@ export function LiveQrScanner({
         setLockedUi(true);
         setCanReset(false);
         onResolved(result);
+
+        if (pickLabMode) {
+          vibrateIfEnabled(result.matchesPickItem ? 100 : [100, 50, 100]);
+          if (result.matchesPickItem) {
+            playSuccessBeep();
+            flashViewport('green');
+            setErrorMessage(null);
+            setStatus(
+              labQuantity && labQuantity.qtyAdded > 0
+                ? `+${labQuantity.qtyAdded} pcs · scan next label…`
+                : 'Verified — scan next label…',
+            );
+          } else {
+            playErrorBuzz();
+            flashViewport('red');
+            setErrorMessage(result.reason);
+            setStatus('Wrong label for this line — try again…');
+          }
+          window.setTimeout(() => {
+            lockedRef.current = false;
+            setLockedUi(false);
+            setCanReset(true);
+            setErrorMessage(null);
+            setStatus(idleLine);
+            resumeVideoLoop();
+          }, RESET_COOLDOWN_MS);
+          return;
+        }
 
         if (collectMode) {
           vibrateIfEnabled(60);
@@ -274,11 +344,14 @@ export function LiveQrScanner({
     },
     [
       collectMode,
+      pickLabMode,
+      pickLabContext,
       flashViewport,
       idleLine,
       onResolved,
       resumeVideoLoop,
       scannerPickItem,
+      sheetMode,
       stopScanner,
       stopScannerTimers,
     ],
@@ -358,6 +431,9 @@ export function LiveQrScanner({
 
   const sheetVisible = sheetState !== 'hidden';
   const sheetOpen = sheetState === 'open';
+
+  const pickLabOuterQty = pickLabContext?.packDefinition?.outer_pack_qty ?? null;
+  const pickLabInnerQty = pickLabContext?.packDefinition?.inner_pack_qty ?? null;
 
   return (
     <div className="fixed inset-0 z-[70] bg-slate-950 text-white">
@@ -468,7 +544,7 @@ export function LiveQrScanner({
             onClose={handleClose}
           />
 
-          {!collectMode && (
+          {!sheetMode && (
             <p className="px-1 text-center text-xs leading-relaxed text-slate-500">
               {helpText ?? 'Steady, fill the frame, use torch in dim aisles.'}
             </p>
@@ -481,6 +557,20 @@ export function LiveQrScanner({
             open={sheetOpen}
             lastScan={lastScan}
             scanCount={scanCount}
+            onDismiss={dismissSheet}
+          />
+        )}
+
+        {pickLabMode && sheetVisible && lastScan && pickLabContext && pickLabQuantity && (
+          <PickScanLabResultSheet
+            visible
+            open={sheetOpen}
+            partNo={pickLabContext.partNo}
+            itemName={scannerPickItem.name}
+            quantity={pickLabQuantity}
+            scanCount={scanCount}
+            outerCatalogQty={pickLabOuterQty}
+            innerCatalogQty={pickLabInnerQty}
             onDismiss={dismissSheet}
           />
         )}

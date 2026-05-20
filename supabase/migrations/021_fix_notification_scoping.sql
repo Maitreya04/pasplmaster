@@ -45,6 +45,9 @@ ALTER TABLE public.user_notifications ENABLE ROW LEVEL SECURITY;
 -- equality at the application query level via .eq('user_id', userId).
 -- Service role bypasses RLS for inserts from edge functions.
 
+DROP POLICY IF EXISTS user_notifications_select_own ON public.user_notifications;
+DROP POLICY IF EXISTS user_notifications_update_own ON public.user_notifications;
+
 -- Allow users to read only their own notifications.
 CREATE POLICY user_notifications_select_own
   ON public.user_notifications
@@ -64,6 +67,10 @@ CREATE POLICY user_notifications_update_own
 -- ── 3. Enable RLS on push_subscriptions ───────────────────────
 
 ALTER TABLE public.push_subscriptions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS push_subscriptions_select ON public.push_subscriptions;
+DROP POLICY IF EXISTS push_subscriptions_insert ON public.push_subscriptions;
+DROP POLICY IF EXISTS push_subscriptions_update ON public.push_subscriptions;
 
 -- Allow devices to manage their own subscriptions.
 CREATE POLICY push_subscriptions_select

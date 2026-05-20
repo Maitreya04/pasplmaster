@@ -1,5 +1,5 @@
-import { useCallback, useDeferredValue, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Camera,
@@ -17,29 +17,21 @@ import { BigButton, LiveQrScanner, SearchInput, Skeleton } from '../../component
 import type { Item, ItemPackDefinition, LicensePlatePackType, ScanResult } from '../../types';
 import { appHaptics } from '../../lib/haptics';
 import type { LiveQrScannerResolved } from '../../components/shared/LiveQrScanner';
+import {
+  computePickScanQuantity,
+  partNoFromPickItem,
+  type PickScanQuantityResult,
+} from '../../lib/scanner/pickScanQuantity';
 import { itemPickCode } from '../../utils/itemCodes';
 import {
   fetchItemPackDefinitions,
   PACK_DEFINITIONS_QUERY_KEY,
 } from '../../lib/packLpn';
-import { parsePackPickPayload } from '../../lib/scanner/qrPayload';
+import { initializeItemScanIndex, useItemScanIndexStore } from '../../stores/itemScanIndex';
 
 type ScanLabRecord = Item & {
   pickCode: string;
 };
-
-interface ScanLabQuantityResult {
-  scanKind: 'sku' | 'pack' | 'unknown';
-  packType: LicensePlatePackType | null;
-  packQty: number | null;
-  qtyAdded: number;
-  targetQty: number;
-  totalBefore: number;
-  totalAfter: number;
-  remainingBefore: number;
-  remainingAfter: number;
-  requiresBreakConfirmation: boolean;
-}
 
 type LabScannerMode = 'verify' | 'scan';
 
@@ -62,6 +54,11 @@ function buildScanLabRecord(item: Item): ScanLabRecord | null {
   return { ...item, pickCode };
 }
 
+function isLikelyVarrocLine(item: Pick<Item, 'main_group' | 'parent_group' | 'name'>): boolean {
+  const blob = `${item.main_group ?? ''} ${item.parent_group ?? ''} ${item.name ?? ''}`.toUpperCase();
+  return blob.includes('VARROC');
+}
+
 function matchesQuery(item: ScanLabRecord, query: string): boolean {
   if (!query) return true;
   const haystack = [
@@ -79,88 +76,18 @@ function matchesQuery(item: ScanLabRecord, query: string): boolean {
   return haystack.includes(query);
 }
 
-function packQtyForType(
-  definition: ItemPackDefinition | null | undefined,
-  packType: LicensePlatePackType,
-): number | null {
-  return packType === 'inner'
-    ? definition?.inner_pack_qty ?? null
-    : definition?.outer_pack_qty ?? null;
-}
-
 function packPayload(busyCode: number, packType: LicensePlatePackType): string {
   return `PASPL-PACK:${busyCode}:${packType}`;
-}
-
-function buildQuantityResult({
-  item,
-  rawValue,
-  isMatch,
-  targetQty,
-  totalBefore,
-  packDefinition,
-  resolvedEa,
-}: {
-  item: ScanLabRecord;
-  rawValue: string;
-  isMatch: boolean;
-  targetQty: number;
-  totalBefore: number;
-  packDefinition: ItemPackDefinition | null | undefined;
-  resolvedEa?: number | null;
-}): ScanLabQuantityResult {
-  const remainingBefore = Math.max(0, targetQty - totalBefore);
-  const pack = parsePackPickPayload(rawValue);
-
-  if (pack) {
-    const packQty = packQtyForType(packDefinition, pack.packType);
-    const effectivePackQty =
-      resolvedEa != null && resolvedEa > 1 ? Math.floor(resolvedEa) : packQty;
-    const packMatchesItem = item.busy_code != null && Number(item.busy_code) === pack.busyCode;
-    const canAddPack =
-      isMatch &&
-      packMatchesItem &&
-      effectivePackQty != null &&
-      effectivePackQty > 1 &&
-      remainingBefore > 0;
-    const requiresBreakConfirmation = Boolean(canAddPack && effectivePackQty > remainingBefore);
-    const qtyAdded = canAddPack && !requiresBreakConfirmation ? effectivePackQty : 0;
-    const totalAfter = totalBefore + qtyAdded;
-
-    return {
-      scanKind: 'pack',
-      packType: pack.packType,
-      packQty: effectivePackQty,
-      qtyAdded,
-      targetQty,
-      totalBefore,
-      totalAfter,
-      remainingBefore,
-      remainingAfter: Math.max(0, targetQty - totalAfter),
-      requiresBreakConfirmation,
-    };
-  }
-
-  const qtyAdded = isMatch && remainingBefore > 0 ? 1 : 0;
-  const totalAfter = totalBefore + qtyAdded;
-
-  return {
-    scanKind: isMatch ? 'sku' : 'unknown',
-    packType: null,
-    packQty: null,
-    qtyAdded,
-    targetQty,
-    totalBefore,
-    totalAfter,
-    remainingBefore,
-    remainingAfter: Math.max(0, targetQty - totalAfter),
-    requiresBreakConfirmation: false,
-  };
 }
 
 export default function PickScanLabPage(): React.JSX.Element {
   const navigate = useNavigate();
   const toast = useToast();
+  const [searchParams] = useSearchParams();
+  const preloadItemIdParam = searchParams.get('itemId');
+  const scrollTargetIdRef = useRef<number | null>(null);
+  const didApplyDeepLinkRef = useRef(false);
+  const barcodeMappingMap = useItemScanIndexStore((s) => s.barcodeMappingMap);
   const { data: items = [], isLoading, error, refetch, isFetching } = useItems();
   const { data: packDefinitions = [] } = useQuery({
     queryKey: PACK_DEFINITIONS_QUERY_KEY,
@@ -175,10 +102,20 @@ export default function PickScanLabPage(): React.JSX.Element {
   const [lastResult, setLastResult] = useState<{
     item: ScanLabRecord;
     result: ScanResult;
-    quantity: ScanLabQuantityResult;
+    quantity: PickScanQuantityResult;
   } | null>(null);
   const [scanOnlyHistory, setScanOnlyHistory] = useState<ScanOnlyResult[]>([]);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
+  const [focusedFromStudioItemId, setFocusedFromStudioItemId] = useState<number | null>(null);
+  const [studioHintVisible, setStudioHintVisible] = useState(false);
+
+  const oemBarcodeCountByItemId = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const sku of barcodeMappingMap.values()) {
+      counts.set(sku.id, (counts.get(sku.id) ?? 0) + 1);
+    }
+    return counts;
+  }, [barcodeMappingMap]);
 
   const labelableItems = useMemo(
     () => items.map(buildScanLabRecord).filter((item): item is ScanLabRecord => item !== null),
@@ -200,8 +137,29 @@ export default function PickScanLabPage(): React.JSX.Element {
     [deferredQuery, labelableItems],
   );
 
+  const pickLabContext = useMemo(() => {
+    if (!liveTarget) return undefined;
+    const packDefinition =
+      liveTarget.busy_code == null
+        ? null
+        : (packDefinitionByBusyCode.get(Number(liveTarget.busy_code)) ?? null);
+    return {
+      targetQty,
+      pickedSoFar: simulatedPickedQty,
+      partNo: partNoFromPickItem({
+        alias1: liveTarget.alias1,
+        alias: liveTarget.alias,
+        pickCode: liveTarget.pickCode,
+      }),
+      busyCode: liveTarget.busy_code != null ? Number(liveTarget.busy_code) : null,
+      packDefinition,
+    };
+  }, [liveTarget, targetQty, simulatedPickedQty, packDefinitionByBusyCode]);
+
   const startScan = useCallback((item: ScanLabRecord) => {
     appHaptics.impactLight();
+    setSimulatedPickedQty(0);
+    setLastResult(null);
     setLiveTarget(item);
   }, []);
 
@@ -213,52 +171,91 @@ export default function PickScanLabPage(): React.JSX.Element {
     setScanOnlyOpen(false);
   }, []);
 
+  useEffect(() => {
+    void initializeItemScanIndex().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (didApplyDeepLinkRef.current || !preloadItemIdParam || isLoading || !labelableItems.length) return;
+    const idNum = Number(preloadItemIdParam.trim());
+    if (!Number.isFinite(idNum) || idNum <= 0) {
+      didApplyDeepLinkRef.current = true;
+      return;
+    }
+    const row = labelableItems.find((i) => i.id === idNum) ?? null;
+    const record = row ? buildScanLabRecord(row) : null;
+    if (!record) {
+      toast.error('Could not find this item for verification.');
+      didApplyDeepLinkRef.current = true;
+      return;
+    }
+    const code = record.pickCode || record.name.trim();
+    setQuery(code.slice(0, 120));
+    setLabScannerMode('verify');
+    setFocusedFromStudioItemId(record.id);
+    setStudioHintVisible(true);
+    scrollTargetIdRef.current = record.id;
+    toast.success('Ready to verify this SKU from Label Studio.');
+    didApplyDeepLinkRef.current = true;
+  }, [preloadItemIdParam, isLoading, labelableItems, toast]);
+
+  useLayoutEffect(() => {
+    const id = scrollTargetIdRef.current;
+    if (id == null) return;
+    if (!filteredItems.some((item) => item.id === id)) return;
+    scrollTargetIdRef.current = null;
+    window.requestAnimationFrame(() => {
+      document.getElementById(`pick-scan-sku-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  }, [filteredItems]);
+
   const handleScanResolved = useCallback((scan: LiveQrScannerResolved) => {
     setLiveTarget((current) => {
       if (!current) return null;
       const packDefinition =
-        current.busy_code == null ? null : packDefinitionByBusyCode.get(Number(current.busy_code));
-      const quantity = buildQuantityResult({
-        item: current,
-        rawValue: scan.rawValue,
-        isMatch: scan.matchesPickItem,
-        targetQty,
-        totalBefore: simulatedPickedQty,
-        packDefinition,
-        resolvedEa: scan.baseQtyEa,
+        current.busy_code == null ? null : packDefinitionByBusyCode.get(Number(current.busy_code)) ?? null;
+
+      setSimulatedPickedQty((pickedBefore) => {
+        const quantity = computePickScanQuantity({
+          rawValue: scan.rawValue,
+          isMatch: scan.matchesPickItem,
+          busyCode: current.busy_code != null ? Number(current.busy_code) : null,
+          targetQty,
+          totalBefore: pickedBefore,
+          packDefinition,
+          resolvedEa: scan.baseQtyEa,
+        });
+
+        const result: ScanResult = {
+          scannedText: scan.rawValue,
+          confidence: scan.matchedItem ? 100 : 0,
+          isMatch: scan.matchesPickItem,
+          matchedAgainst: scan.matchedBy ?? current.name,
+          matchStrategy: scan.matchesPickItem
+            ? 'qr_catalog_hit'
+            : scan.matchedItem
+              ? 'qr_expected_mismatch'
+              : 'qr_catalog_miss',
+          ocrExtracted: {
+            partNumber: scan.lookupCode,
+            mrp: current.mrp ?? null,
+          },
+          method: 'qr_scan',
+          timestamp: new Date().toISOString(),
+          extractedCode: scan.lookupCode ?? undefined,
+          extractedDescription: scan.matchedItem?.name ?? undefined,
+          reason: scan.reason,
+        };
+
+        setLastResult({ item: current, result, quantity });
+        if (scan.matchesPickItem) appHaptics.success();
+        else appHaptics.warning();
+        return quantity.qtyAdded > 0 ? quantity.totalAfter : pickedBefore;
       });
 
-      const result: ScanResult = {
-        scannedText: scan.rawValue,
-        confidence: scan.matchedItem ? 100 : 0,
-        isMatch: scan.matchesPickItem,
-        matchedAgainst: scan.matchedBy ?? current.name,
-        matchStrategy: scan.matchesPickItem
-          ? 'qr_catalog_hit'
-          : scan.matchedItem
-            ? 'qr_expected_mismatch'
-            : 'qr_catalog_miss',
-        ocrExtracted: {
-          partNumber: scan.lookupCode,
-          mrp: current.mrp ?? null,
-        },
-        method: 'qr_scan',
-        timestamp: new Date().toISOString(),
-        extractedCode: scan.lookupCode ?? undefined,
-        extractedDescription: scan.matchedItem?.name ?? undefined,
-        reason: scan.reason,
-      };
-
-      setLastResult({ item: current, result, quantity });
-      if (quantity.qtyAdded > 0) {
-        setSimulatedPickedQty(quantity.totalAfter);
-      }
-      if (result.isMatch) appHaptics.success();
-      else appHaptics.warning();
-
-      return result.isMatch ? null : current;
+      return current;
     });
-  }, [packDefinitionByBusyCode, simulatedPickedQty, targetQty]);
+  }, [packDefinitionByBusyCode, targetQty]);
 
   const handleScanOnlyResolved = useCallback((scan: LiveQrScannerResolved) => {
     const entry: ScanOnlyResult = {
@@ -295,6 +292,22 @@ export default function PickScanLabPage(): React.JSX.Element {
             </p>
           </div>
         </div>
+
+        {studioHintVisible && preloadItemIdParam ? (
+          <div className="mt-5 flex flex-col gap-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-accent-subtle)] px-4 py-3 text-sm text-[var(--content-primary)]">
+            <p>
+              SKU opened from Label Studio (deep link). Search is narrowed to pick code; tap{' '}
+              <span className="font-semibold">Test Scan</span> after printing stickers.
+            </p>
+            <button
+              type="button"
+              className="self-start rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-1 text-xs font-semibold text-[var(--content-secondary)]"
+              onClick={() => setStudioHintVisible(false)}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
 
         <div className="mt-5 flex items-center gap-1 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-1">
           <button
@@ -434,6 +447,10 @@ export default function PickScanLabPage(): React.JSX.Element {
               <p>2. Set a target quantity here, then search the SKU and tap `Test Scan`.</p>
               <p>3. Scan ITEM, INNER, and MASTER. The lab will show the decoded payload and simulated quantity added.</p>
               <p>4. If a pack is larger than remaining qty, the lab flags the same break-confirmation case as picking.</p>
+              <p>
+                5. From Label Studio, use <span className="font-semibold">Pick Scan Lab</span> on a SKU row (or open{' '}
+                <span className="font-mono text-xs">/admin/pick-scan-lab?itemId=…</span>) to focus that line here.
+              </p>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               <label className="space-y-1">
@@ -505,7 +522,8 @@ export default function PickScanLabPage(): React.JSX.Element {
                         {lastResult.item.name}
                       </p>
                       <p className="mt-1 font-mono text-sm text-[var(--content-tertiary)]">
-                        Expected: {lastResult.item.pickCode}
+                        Part no: {partNoFromPickItem(lastResult.item)}
+                        {lastResult.quantity.tierLabel ? ` · ${lastResult.quantity.tierLabel}` : ''}
                       </p>
                     </div>
                     {lastResult.result.isMatch ? (
@@ -614,11 +632,16 @@ export default function PickScanLabPage(): React.JSX.Element {
                   busyCode != null && packDefinition?.outer_pack_qty
                     ? packPayload(busyCode, 'outer')
                     : null;
+                const oemMapCount = oemBarcodeCountByItemId.get(item.id) ?? 0;
+                const varrocLikely = isLikelyVarrocLine(item);
 
                 return (
                   <article
+                    id={`pick-scan-sku-${item.id}`}
                     key={item.id}
-                    className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4"
+                    className={`rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 transition-shadow ${
+                      focusedFromStudioItemId === item.id ? 'shadow-[inset_0_0_0_2px_var(--bg-accent)]' : ''
+                    }`}
                   >
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                       <div className="min-w-0">
@@ -639,14 +662,24 @@ export default function PickScanLabPage(): React.JSX.Element {
                               Rack {item.rack_no}
                             </span>
                           )}
+                          {oemMapCount > 0 && (
+                            <span className="rounded-full border border-[var(--border-subtle)] px-3 py-1 text-xs font-medium text-[var(--content-tertiary)]">
+                              OEM barcode keys ×{oemMapCount}
+                            </span>
+                          )}
+                          {varrocLikely && oemMapCount === 0 ? (
+                            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+                              Varroc hint: map SAP codes in Barcode Mapping for carton scans
+                            </span>
+                          ) : null}
                           {packDefinition?.inner_pack_qty && (
                             <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-                              Inner {packDefinition.inner_pack_qty}
+                              Inner {packDefinition.inner_pack_qty} pcs
                             </span>
                           )}
                           {packDefinition?.outer_pack_qty && (
                             <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-800">
-                              Master {packDefinition.outer_pack_qty}
+                              Outer {packDefinition.outer_pack_qty} pcs
                             </span>
                           )}
                         </div>
@@ -686,12 +719,12 @@ export default function PickScanLabPage(): React.JSX.Element {
                             onClick={() => {
                               navigator.clipboard
                                 .writeText(outerPayload)
-                                .then(() => toast.success('Master pack payload copied'))
+                                .then(() => toast.success('Outer pack payload copied'))
                                 .catch(() => toast.error('Could not copy pack payload'));
                             }}
                             className="flex h-11 items-center justify-center rounded-2xl bg-sky-100 px-4 text-sm font-semibold text-sky-800"
                           >
-                            Copy Master
+                            Copy Outer
                           </button>
                         )}
                         <button
@@ -714,10 +747,13 @@ export default function PickScanLabPage(): React.JSX.Element {
         )}
       </div>
 
-      {liveTarget && (
+      {liveTarget && pickLabContext && (
         <LiveQrScanner
           key={liveTarget.id}
+          mode="pickLab"
           title={liveTarget.name}
+          eyebrow="Pick Scan Lab"
+          idleStatus="Scan outer, inner, or piece QR"
           pickItem={{
             itemId: liveTarget.id,
             name: liveTarget.name,
@@ -726,6 +762,7 @@ export default function PickScanLabPage(): React.JSX.Element {
             itemCode: liveTarget.pickCode,
             busyCode: liveTarget.busy_code ?? null,
           }}
+          pickLabContext={pickLabContext}
           onClose={closeScan}
           onResolved={handleScanResolved}
           onError={(message) => {

@@ -6,6 +6,8 @@ This report documents how manufacturer barcode mappings currently work in PASPL 
 
 ## Executive Summary
 
+See also **`docs/LABEL_STUDIO_SCAN_CONTRACT.md`** — how PASPL-printed ITEM and pack-strip QRs relate to picker verification and OEM (e.g. Varroc SAP) mapping.
+
 - Storage table: `public.item_barcodes`.
 - Current live rows: 80 barcode rows.
 - Current live SKU coverage: 76 mapped SKUs out of 11,785 active SKUs, or 0.6%.

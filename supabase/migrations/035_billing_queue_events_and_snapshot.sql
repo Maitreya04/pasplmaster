@@ -154,6 +154,9 @@ AFTER INSERT ON public.order_events
 FOR EACH ROW
 EXECUTE FUNCTION public.enqueue_order_event_queue_event();
 
+DROP FUNCTION IF EXISTS public.get_billing_queue_snapshot(TEXT[], TIMESTAMPTZ, TIMESTAMPTZ) CASCADE;
+DROP FUNCTION IF EXISTS public.get_billing_queue_snapshot_v1(TEXT[], TIMESTAMPTZ, TIMESTAMPTZ) CASCADE;
+
 CREATE OR REPLACE FUNCTION public.get_billing_queue_snapshot(
   p_statuses TEXT[] DEFAULT NULL,
   p_created_from TIMESTAMPTZ DEFAULT NULL,

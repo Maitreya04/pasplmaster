@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { hasPurchasePoColumns } from './purchasePoImporter';
 
 export type DetectedFileType =
   | 'items_price'
@@ -7,6 +8,7 @@ export type DetectedFileType =
   | 'customers'
   | 'sales_plan'
   | 'sales_history'
+  | 'purchase_po'
   | 'unknown';
 
 export interface DetectionResult {
@@ -56,7 +58,7 @@ export function detectFileType(workbook: XLSX.WorkBook): DetectionResult {
   const data: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
   // Items / price file: scan first 10 rows for a header with a name-like column and Sales Price
-  const scanLimit = Math.min(10, data.length);
+  const scanLimit = Math.min(25, data.length);
   const hasNameLike = (r: string[]) =>
     r.some(h => /^name$/i.test(String(h).trim()) || /item\s*description/i.test(String(h)) || /^description$/i.test(String(h).trim()));
   const hasSalesPrice = (r: string[]) =>
@@ -67,6 +69,14 @@ export function detectFileType(workbook: XLSX.WorkBook): DetectionResult {
       return {
         type: 'item_pack_definitions',
         label: 'Item Pack Definitions',
+        rowCount: countDataRows(data, i + 1),
+        headerRowIndex: i,
+      };
+    }
+    if (hasPurchasePoColumns(row)) {
+      return {
+        type: 'purchase_po',
+        label: 'Purchase order (Description / Alias / Qty or ORD)',
         rowCount: countDataRows(data, i + 1),
         headerRowIndex: i,
       };

@@ -1,13 +1,24 @@
 -- Migration 030: Update match strategy constraint and RPC for new barcode parser strategies
 -- Adds 'slash_separated' and 'structured_field' to the allowed match strategies.
 
--- 1. Update the check constraint on the table
+-- Constraint must allow strategies already stored on replay (OEM variants from migration 044 onward).
 ALTER TABLE public.item_barcodes DROP CONSTRAINT IF EXISTS item_barcodes_match_strategy_check;
 
-ALTER TABLE public.item_barcodes ADD CONSTRAINT item_barcodes_match_strategy_check 
-  CHECK (match_strategy IN ('exact', 'prefix_hyphen', 'prefix_space', 'slash_separated', 'structured_field', 'manual'));
+ALTER TABLE public.item_barcodes ADD CONSTRAINT item_barcodes_match_strategy_check
+  CHECK (match_strategy IN (
+    'exact',
+    'prefix_hyphen',
+    'prefix_space',
+    'slash_separated',
+    'structured_field',
+    'manual',
+    'varroc_url',
+    'varroc_k',
+    'varroc_printed',
+    'varroc_sap_compact'
+  ));
 
--- 2. Update the RPC function to allow the new strategies
+-- 2. Update the RPC function to allow the new strategies (OEM list mirrored in migration 044)
 CREATE OR REPLACE FUNCTION public.save_barcode_mapping(
   p_barcode_raw TEXT,
   p_barcode_key TEXT,
@@ -36,7 +47,18 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'status', 'invalid', 'message', 'barcode_key is required');
   END IF;
 
-  IF p_match_strategy NOT IN ('exact', 'prefix_hyphen', 'prefix_space', 'slash_separated', 'structured_field', 'manual') THEN
+  IF p_match_strategy NOT IN (
+    'exact',
+    'prefix_hyphen',
+    'prefix_space',
+    'slash_separated',
+    'structured_field',
+    'manual',
+    'varroc_url',
+    'varroc_k',
+    'varroc_printed',
+    'varroc_sap_compact'
+  ) THEN
     RETURN jsonb_build_object('success', false, 'status', 'invalid', 'message', 'Invalid match strategy');
   END IF;
 

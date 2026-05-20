@@ -1,7 +1,7 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { startTransition, useEffect, useDeferredValue, useMemo, useCallback, useState, type CSSProperties } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeftIcon, ArrowsClockwiseIcon, PrinterIcon, TagIcon } from '@phosphor-icons/react';
+import { ArrowLeftIcon, ArrowsClockwiseIcon, Camera, CaretDown, CaretUp, PrinterIcon, TagIcon } from '@phosphor-icons/react';
 import QRCode from 'qrcode';
 import { useItems } from '../../hooks/useItems';
 import { useToast } from '../../context/ToastContext';
@@ -11,6 +11,7 @@ import {
 } from '../../lib/packLpn';
 import type { Item, ItemPackDefinition } from '../../types';
 import { itemAlternateCode, itemGroupLabel, itemPickCode } from '../../utils/itemCodes';
+import { initializeItemScanIndex, useItemScanIndexStore } from '../../stores/itemScanIndex';
 
 type LabelRecord = Item & {
   pickCode: string;
@@ -26,6 +27,8 @@ interface BinLocationLabel {
   groupLabel: string;
   busyCode: number | null;
   qrPayload: string;
+  /** Forward pick qty from pack defs — BIN label omits live stock qty. */
+  forwardPickQty: number | null;
 }
 
 type SortMode = 'group-rack-code' | 'code-rack';
@@ -52,7 +55,6 @@ interface GeneratedPackPickLabel {
 
 const RACK_STRIP_HEIGHT_MM = 30;
 const RACK_STRIP_QR_SIZE_MM = 16;
-const PACK_STRIP_HEIGHT_MM = 35;
 
 const PRINT_CSS = `
   @page {
@@ -101,8 +103,8 @@ const PRINT_CSS = `
     }
 
     .a4-label-card[data-preset="pack-strip"] {
-      min-height: 35mm;
-      height: 35mm;
+      min-height: 38mm;
+      height: auto;
       padding: 0;
     }
   }
@@ -161,7 +163,7 @@ const PRINT_CSS = `
 
   .pack-strip-shell {
     display: grid;
-    grid-template-rows: minmax(0, 1fr) 21.4mm;
+    grid-template-rows: minmax(0, 1fr) minmax(22mm, auto);
     gap: 0.8mm;
     height: 100%;
     padding: 1.4mm 2.2mm 1.6mm;
@@ -173,7 +175,36 @@ const PRINT_CSS = `
     display: flex;
     flex-direction: column;
     justify-content: center;
+    gap: 0.6mm;
     overflow: hidden;
+  }
+
+  .pack-strip-warehouse-rack {
+    font-variant-numeric: tabular-nums;
+    font-weight: 900;
+    font-size: 3mm;
+    letter-spacing: 0.04em;
+    color: #64748b;
+    text-transform: uppercase;
+  }
+
+  .pack-strip-warehouse-name {
+    font-weight: 800;
+    font-size: 2.8mm;
+    line-height: 1.12;
+    color: #0f172a;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .pack-strip-warehouse-aliasnote {
+    font-size: 2.3mm;
+    font-weight: 700;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 
   .pack-strip-code {
@@ -196,7 +227,7 @@ const PRINT_CSS = `
     grid-auto-flow: column;
     grid-auto-columns: minmax(0, 1fr);
     gap: 1.6mm;
-    align-items: end;
+    align-items: stretch;
     justify-content: stretch;
   }
 
@@ -208,6 +239,113 @@ const PRINT_CSS = `
     border: 0.25mm solid #cbd5e1;
     background: #ffffff;
     overflow: hidden;
+  }
+
+  .pack-strip-block-sku {
+    grid-template-rows: 3.2mm minmax(4mm, max-content) minmax(12.5mm, 1fr);
+    height: auto;
+    min-height: 22mm;
+    align-content: start;
+  }
+
+  .pack-strip-alias-heading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.6mm;
+    font-size: 2.5mm;
+    line-height: 1;
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    color: #0f172a;
+    text-transform: uppercase;
+    background: #e2e8f0;
+    border-bottom: 0.2mm solid #cbd5e1;
+  }
+
+  .pack-strip-alias-code {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.35mm 0.6mm 0.2mm;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-weight: 900;
+    font-variant-ligatures: none;
+    line-height: 1.05;
+    text-align: center;
+    color: #0f172a;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .pack-strip-qr-alias {
+    min-height: 0;
+    padding: 0.25mm;
+  }
+
+  .pack-strip-qr-alias svg {
+    width: 12.8mm !important;
+    height: 12.8mm !important;
+    max-width: 100%;
+    max-height: 100%;
+  }
+
+  .rack-strip-qr-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35mm;
+    min-width: 18mm;
+  }
+
+  .rack-strip-alias-over-qr {
+    font-size: 2.4mm;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    color: #334155;
+    text-transform: uppercase;
+    text-align: center;
+    line-height: 1;
+    max-width: 18mm;
+  }
+
+  .rack-strip-code-over-qr {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 2.9mm;
+    font-weight: 900;
+    line-height: 1.05;
+    text-align: center;
+    color: #0f172a;
+    max-width: 18mm;
+    word-break: break-all;
+  }
+
+  .compact-qr-scan-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1mm;
+  }
+
+  .compact-alias-over-qr {
+    font-size: 0.65rem;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    color: #475569;
+    text-transform: uppercase;
+    text-align: center;
+    line-height: 1.1;
+  }
+
+  .compact-code-over-qr {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.8rem;
+    font-weight: 900;
+    line-height: 1.05;
+    text-align: center;
+    color: #0f172a;
+    max-width: 7rem;
+    word-break: break-all;
   }
 
   .pack-strip-block-title {
@@ -351,11 +489,61 @@ function buildManifestCsv(items: LabelRecord[]): string {
 }
 
 function presetDescription(preset: PrintPreset): string {
-  if (preset === 'pack-strip') return '35mm item-code strip with item, inner, and master QRs';
+  if (preset === 'pack-strip') return '35mm strip · LOC + description · Alias 1 above piece QR (+ pack QRs)';
   if (preset === 'rack-strip') return '1.2 inch rack strip with bold name + big code';
   if (preset === 'compact') return 'Rack + canonical code only';
   if (preset === 'full') return 'Rack + canonical code + alternate code + description';
   return 'Rack + canonical code + description';
+}
+
+function isLikelyVarrocItem(item: Pick<Item, 'main_group' | 'parent_group' | 'name'>): boolean {
+  const blob = `${item.main_group ?? ''} ${item.parent_group ?? ''} ${item.name ?? ''}`.toUpperCase();
+  return blob.includes('VARROC');
+}
+
+function ScanVerifierHint({
+  item,
+  barcodeMappingCount,
+}: {
+  item: LabelRecord;
+  barcodeMappingCount: number;
+}) {
+  const warnVarroc = isLikelyVarrocItem(item) && barcodeMappingCount === 0;
+  const band = warehouseSkuScanBand(item);
+
+  return (
+    <div
+      data-print-hidden="true"
+      className="-mx-px rounded-t-md border border-b-0 border-slate-200 bg-slate-50 px-2 py-1 font-sans text-[2.4mm] leading-tight text-slate-600"
+    >
+      <span className="font-semibold text-slate-800">{band.heading}</span>{' '}
+      <span className="font-mono text-slate-900">{band.scanCode}</span>
+      {' · '}
+      OEM keys {barcodeMappingCount > 0 ? `×${barcodeMappingCount}` : 'none'}
+      {warnVarroc ? (
+        <span className="font-semibold text-amber-800">
+          {' '}
+          · Varroc: add SAP carton keys in Barcode Mapping if you rely on OEM scans.
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function VerifyInLabLink({ itemId, className }: { itemId: number; className?: string }) {
+  return (
+    <Link
+      to={`/admin/pick-scan-lab?itemId=${itemId}`}
+      className={
+        className ??
+        'inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-[var(--content-accent)] hover:bg-[var(--bg-accent-subtle)]'
+      }
+      onClick={(event) => event.stopPropagation()}
+    >
+      <Camera size={14} weight="bold" />
+      Pick Scan Lab
+    </Link>
+  );
 }
 
 function rackStripCodeStyle(code: string): CSSProperties {
@@ -366,18 +554,6 @@ function rackStripCodeStyle(code: string): CSSProperties {
   if (length <= 17) return { fontSize: '6.7mm', letterSpacing: '-0.045em', lineHeight: 0.88 };
   if (length <= 20) return { fontSize: '6.0mm', letterSpacing: '-0.04em', lineHeight: 0.88 };
   return { fontSize: '5.0mm', letterSpacing: '-0.03em', lineHeight: 0.84 };
-}
-
-function packStripCodeStyle(code: string): CSSProperties {
-  const length = code.trim().length;
-  if (length <= 10) return { fontSize: '10.2mm', letterSpacing: 0, lineHeight: 0.84, whiteSpace: 'nowrap' };
-  if (length <= 12) return { fontSize: '9.4mm', letterSpacing: 0, lineHeight: 0.84, whiteSpace: 'nowrap' };
-  if (length <= 14) return { fontSize: '8.6mm', letterSpacing: 0, lineHeight: 0.84, whiteSpace: 'nowrap' };
-  if (length <= 17) return { fontSize: '7.8mm', letterSpacing: 0, lineHeight: 0.84, whiteSpace: 'nowrap' };
-  if (length <= 20) return { fontSize: '6.6mm', letterSpacing: 0, lineHeight: 0.84, whiteSpace: 'nowrap' };
-  if (length <= 26) return { fontSize: '5.4mm', letterSpacing: 0, lineHeight: 0.82 };
-  if (length <= 34) return { fontSize: '4.45mm', letterSpacing: 0, lineHeight: 0.82 };
-  return { fontSize: '3.8mm', letterSpacing: 0, lineHeight: 0.82 };
 }
 
 function packStripPayloadKey(busyCode: number, packType: PackType): string {
@@ -393,6 +569,57 @@ function buildRecord(item: Item): LabelRecord | null {
     alternateCode: itemAlternateCode(item),
     groupLabel: itemGroupLabel(item),
   };
+}
+
+/** Human-readable band above the ITEM QR; scanCode always matches QR payload. */
+function warehouseSkuScanBand(item: LabelRecord): {
+  heading: string;
+  scanCode: string;
+  leftFootnote?: string;
+} {
+  const a1 = item.alias1?.trim() ?? '';
+  const alias = item.alias?.trim() ?? '';
+  const scan = item.pickCode.trim();
+  const busyDiffers = Boolean(alias && a1 && alias !== a1);
+
+  if (a1) {
+    return {
+      heading: 'Alias 1',
+      scanCode: scan,
+      leftFootnote: busyDiffers ? `Busy ${alias}` : undefined,
+    };
+  }
+  if (alias) {
+    return {
+      heading: 'Busy alias',
+      scanCode: scan,
+      leftFootnote: 'No Alias 1 in catalog',
+    };
+  }
+  return { heading: 'Scan code', scanCode: scan };
+}
+
+function packStripSkuAliasFontMm(code: string): string {
+  const len = code.trim().length;
+  if (len <= 8) return '4.1mm';
+  if (len <= 12) return '3.5mm';
+  if (len <= 16) return '3.05mm';
+  if (len <= 22) return '2.7mm';
+  return '2.35mm';
+}
+
+function rackStripCodeOverQrFontMm(code: string): string {
+  const len = code.trim().length;
+  if (len <= 10) return '3.1mm';
+  if (len <= 16) return '2.65mm';
+  return '2.3mm';
+}
+
+function compactCodeOverQrRem(code: string): string {
+  const len = code.trim().length;
+  if (len <= 10) return '0.88rem';
+  if (len <= 16) return '0.76rem';
+  return '0.64rem';
 }
 
 export default function LabelStudioPage(): React.JSX.Element {
@@ -419,6 +646,38 @@ export default function LabelStudioPage(): React.JSX.Element {
   const [qrByPackLabelKey, setQrByPackLabelKey] = useState<Record<string, string>>({});
   const [qrByPackStripPayload, setQrByPackStripPayload] = useState<Record<string, string>>({});
   const [qrByBinLabelKey, setQrByBinLabelKey] = useState<Record<string, string>>({});
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const barcodeMappingMap = useItemScanIndexStore((s) => s.barcodeMappingMap);
+  const effectiveSortMode = advancedOpen ? sortMode : 'group-rack-code';
+  const effectivePrintPreset: PrintPreset = advancedOpen ? printPreset : 'pack-strip';
+  const effectivePreviewScope: PreviewScope = advancedOpen ? previewScope : 'filtered';
+
+  useEffect(() => {
+    void initializeItemScanIndex().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!advancedOpen && labelMode !== 'sku') {
+      setLabelMode('sku');
+    }
+  }, [advancedOpen, labelMode]);
+
+  const setLabelModeTracked = useCallback(
+    (mode: LabelMode) => {
+      if ((mode === 'pack' || mode === 'bin') && !advancedOpen) setAdvancedOpen(true);
+      setLabelMode(mode);
+    },
+    [advancedOpen],
+  );
+
+  const oemBarcodeCountByItemId = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const sku of barcodeMappingMap.values()) {
+      counts.set(sku.id, (counts.get(sku.id) ?? 0) + 1);
+    }
+    return counts;
+  }, [barcodeMappingMap]);
 
   const labelableItems = useMemo<LabelRecord[]>(
     () =>
@@ -448,7 +707,7 @@ export default function LabelStudioPage(): React.JSX.Element {
       .filter((item) => matchesQuery(item, deferredQuery));
 
     return filtered.sort((a, b) => {
-      if (sortMode === 'code-rack') {
+      if (effectiveSortMode === 'code-rack') {
         const codeCompare = a.pickCode.localeCompare(b.pickCode, undefined, {
           numeric: true,
           sensitivity: 'base',
@@ -468,7 +727,7 @@ export default function LabelStudioPage(): React.JSX.Element {
         sensitivity: 'base',
       });
     });
-  }, [deferredQuery, groupFilter, labelableItems, onlyWithRack, sortMode]);
+  }, [deferredQuery, groupFilter, labelableItems, onlyWithRack, effectiveSortMode]);
 
   const packFilteredItems = useMemo(
     () =>
@@ -485,13 +744,20 @@ export default function LabelStudioPage(): React.JSX.Element {
     for (const item of filteredItems) {
       const binId = item.rack_no?.trim().toUpperCase();
       if (!binId) continue;
+      const bc = item.busy_code == null ? null : Number(item.busy_code);
+      const def = bc != null ? packDefinitionByBusyCode.get(bc) : undefined;
+      const fpq =
+        def?.bin_forward_pick_qty != null && def.bin_forward_pick_qty >= 1
+          ? def.bin_forward_pick_qty
+          : null;
       const label = {
         key: `${binId}:${item.busy_code ?? item.pickCode}`,
         binId,
         itemName: item.name,
         pickCode: item.pickCode,
         groupLabel: item.groupLabel,
-        busyCode: item.busy_code == null ? null : Number(item.busy_code),
+        busyCode: bc,
+        forwardPickQty: fpq,
       };
       labels.push({
         ...label,
@@ -499,7 +765,7 @@ export default function LabelStudioPage(): React.JSX.Element {
       });
     }
     return labels;
-  }, [filteredItems]);
+  }, [filteredItems, packDefinitionByBusyCode]);
 
   const selectedItems = useMemo(() => {
     const selectedSet = new Set(selectedIds);
@@ -507,12 +773,12 @@ export default function LabelStudioPage(): React.JSX.Element {
   }, [labelableItems, selectedIds]);
 
   const previewItems = useMemo(() => {
-    if (previewScope === 'selected') return selectedItems;
+    if (effectivePreviewScope === 'selected') return selectedItems;
     return filteredItems;
-  }, [filteredItems, previewScope, selectedItems]);
+  }, [filteredItems, effectivePreviewScope, selectedItems]);
 
   const packStripPayloads = useMemo(() => {
-    if (labelMode !== 'sku' || printPreset !== 'pack-strip') return [];
+    if (labelMode !== 'sku' || effectivePrintPreset !== 'pack-strip') return [];
 
     const payloads = new Set<string>();
     for (const item of previewItems) {
@@ -524,7 +790,7 @@ export default function LabelStudioPage(): React.JSX.Element {
     }
 
     return Array.from(payloads);
-  }, [labelMode, packDefinitionByBusyCode, previewItems, printPreset]);
+  }, [labelMode, packDefinitionByBusyCode, previewItems, effectivePrintPreset]);
 
   const packLabelRows = useMemo<PackLabelRequestRow[]>(() => {
     const rows: PackLabelRequestRow[] = [];
@@ -792,21 +1058,66 @@ export default function LabelStudioPage(): React.JSX.Element {
             <div className="max-w-3xl">
               <div className="inline-flex items-center gap-2 rounded-full bg-[var(--bg-accent-subtle)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-accent)]">
                 <TagIcon size={14} weight="fill" />
-                Alias Fallback
+                Batch SKU labels
               </div>
               <h1 className="mt-3 text-2xl font-bold text-[var(--content-primary)]">
-                SKU Label Studio
+                Warehouse label print
               </h1>
               <p className="mt-2 text-sm leading-6 text-[var(--content-secondary)]">
-                Generate SKU rack labels for loose picks, or create reusable inner/master pack-pick
-                labels for fast quantity scans. SKU labels keep the existing canonical code:
-                <span className="font-mono font-semibold"> alias1 ?? alias</span>.
+                Print A4 strips for putaway and picking: location, description, then a dedicated column with{' '}
+                <span className="font-semibold text-[var(--content-primary)]">Alias 1 printed above the QR</span>{' '}
+                (fallback: Busy alias / Scan code when Alias 1 is blank). Inner and master slots stay optional pack
+                scans.
               </p>
+
+              <details className="mt-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--content-secondary)]">
+                <summary className="cursor-pointer font-semibold text-[var(--content-primary)]">
+                  Scan symbols (PASPL-printed bins)
+                </summary>
+                <ul className="mt-2 list-disc space-y-1 pl-4 text-[var(--content-secondary)]">
+                  <li>
+                    <span className="font-semibold">Piece / bin sticker:</span> the first QR panel shows a header
+                    (Alias 1, Busy alias, or Scan code). The bold human-readable line{' '}
+                    <span className="font-semibold">always matches the QR</span>—that is the primary scan for PASPL
+                    labels.
+                  </li>
+                  <li>PASPL INNER/MASTER QR use <span className="font-mono">PASPL-PACK:busy:inner|outer</span>.</li>
+                  <li>
+                    Varroc carton / SAP-style scans route through mappings in{' '}
+                    <span className="font-semibold">item_barcodes</span> (
+                    <span className="font-mono whitespace-nowrap">Barcode Mapping</span> admin screen).
+                  </li>
+                  <li>
+                    Full playbook:{' '}
+                    <span className="font-mono text-xs text-[var(--content-tertiary)]">
+                      docs/LABEL_STUDIO_SCAN_CONTRACT.md
+                    </span>
+                  </li>
+                </ul>
+              </details>
             </div>
 
-            <div className="rounded-2xl border border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] px-4 py-3 text-sm text-[var(--content-accent)] lg:max-w-sm">
+            <div className="flex flex-col gap-3 lg:items-end lg:text-right">
+            <div className="rounded-2xl border border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] px-4 py-3 text-sm text-[var(--content-accent)] lg:max-w-sm lg:self-end">
               Pick a brand/group first, then the sheet prepares only that batch. That keeps QR
               rendering focused on the run you actually want to print.
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((open) => !open)}
+              className="inline-flex items-center gap-2 self-start rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm font-semibold text-[var(--content-secondary)] hover:text-[var(--content-primary)] lg:self-end"
+            >
+              {advancedOpen ? (
+                <>
+                  <CaretUp size={16} weight="bold" aria-hidden /> Hide advanced
+                </>
+              ) : (
+                <>
+                  <CaretDown size={16} weight="bold" aria-hidden /> Advanced: presets, CSV, pack/bin batches
+                </>
+              )}
+            </button>
             </div>
           </div>
 
@@ -836,31 +1147,45 @@ export default function LabelStudioPage(): React.JSX.Element {
             />
             <MetricCard
               label="Payload"
-              value={labelMode === 'pack' ? 'PASPL-PACK' : labelMode === 'bin' ? 'BIN' : 'alias1 -> alias'}
-              hint={labelMode === 'pack' ? 'Reusable pack-size pick QR' : labelMode === 'bin' ? 'Rack-gate compatible JSON QR' : 'Canonical QR code fallback rule'}
+              value={labelMode === 'pack' ? 'PASPL-PACK' : labelMode === 'bin' ? 'BIN' : 'Alias 1 + QR'}
+              hint={
+                labelMode === 'pack'
+                  ? 'Reusable pack-size pick QR'
+                  : labelMode === 'bin'
+                    ? 'Rack-gate compatible JSON QR'
+                  : 'Alias 1 (or Busy alias) printed bold above the SKU QR—the same characters the scanner reads'
+              }
             />
           </div>
 
-          <div className="mt-5 inline-flex rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-1">
-            {([
-              ['sku', 'SKU labels'],
-              ['pack', 'Pack pick labels'],
-              ['bin', 'Bin location labels'],
-            ] as const).map(([mode, label]) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setLabelMode(mode)}
-                className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
-                  labelMode === mode
-                    ? 'bg-[var(--bg-accent)] text-white'
-                    : 'text-[var(--content-secondary)] hover:text-[var(--content-primary)]'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          {advancedOpen ? (
+            <div className="mt-5 inline-flex rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-1">
+              {([
+                ['sku', 'SKU labels'],
+                ['pack', 'Pack pick labels'],
+                ['bin', 'Bin location labels'],
+              ] as const).map(([mode, tabLabel]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setLabelModeTracked(mode)}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+                    labelMode === mode
+                      ? 'bg-[var(--bg-accent)] text-white'
+                      : 'text-[var(--content-secondary)] hover:text-[var(--content-primary)]'
+                  }`}
+                >
+                  {tabLabel}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-5 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 py-3 text-sm text-[var(--content-tertiary)]">
+              <span className="font-semibold text-[var(--content-secondary)]">Quick path:</span>{' '}
+              <span className="font-mono">pack-strip</span> layout · filtered batch only · each label: LOC + description +
+              Alias 1 stack above QR · open Advanced for CSV, other presets, bin mode, or bulk pack-only runs.
+            </p>
+          )}
         </div>
 
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
@@ -871,18 +1196,22 @@ export default function LabelStudioPage(): React.JSX.Element {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <h2 className="text-base font-semibold text-[var(--content-primary)]">
-                  {labelMode === 'pack' ? 'Pack label batch' : labelMode === 'bin' ? 'Bin label batch' : 'Batch selection'}
+                  {labelMode === 'pack'
+                    ? 'Pack label batch'
+                    : labelMode === 'bin'
+                      ? 'Bin label batch'
+                      : 'Build today’s SKU batch'}
                 </h2>
                 <p className="mt-1 text-sm text-[var(--content-tertiary)]">
                   {labelMode === 'pack'
                     ? 'Choose a brand/group, enter how many reusable inner or master pick labels to print, then prepare the sheet.'
                     : labelMode === 'bin'
                       ? 'Choose a brand/group and print one bin label for each SKU kept at a rack.'
-                    : 'Pick a brand/group first, then search inside that batch and build the A4 run you want.'}
+                    : '1) Brand / group narrows the roster. 2) Search or filter (optional: only rows with LOC). 3) Print A4—the right column is always the scan column (Alias 1 + QR).'}
                 </p>
               </div>
 
-              <div className={`flex flex-wrap gap-2 ${labelMode !== 'sku' ? 'hidden' : ''}`}>
+              <div className={`flex flex-wrap gap-2 ${labelMode !== 'sku' || !advancedOpen ? 'hidden' : ''}`}>
                 <button
                   type="button"
                   onClick={selectFiltered}
@@ -920,7 +1249,7 @@ export default function LabelStudioPage(): React.JSX.Element {
               </label>
             </div>
 
-            <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <div className={`mt-3 grid gap-3 ${advancedOpen ? 'md:grid-cols-3' : 'grid-cols-1'}`}>
               <label className="space-y-1">
                   <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
                     Brand / Group
@@ -943,6 +1272,8 @@ export default function LabelStudioPage(): React.JSX.Element {
                 </select>
               </label>
 
+              {advancedOpen ? (
+                <>
               <label className="space-y-1">
                 <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
                   Sort
@@ -973,6 +1304,8 @@ export default function LabelStudioPage(): React.JSX.Element {
                   <option value="full">Canonical + alternate + description</option>
                 </select>
               </label>
+                </>
+              ) : null}
             </div>
 
             <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--border-subtle)]">
@@ -1106,53 +1439,106 @@ export default function LabelStudioPage(): React.JSX.Element {
                 <ul className="max-h-[34rem] divide-y divide-[var(--border-subtle)] overflow-y-auto">
                   {filteredItems.map((item) => {
                     const isSelected = selectedIds.includes(item.id);
+                    const oemN = oemBarcodeCountByItemId.get(item.id) ?? 0;
+                    const varrocLikely = isLikelyVarrocItem(item);
+
                     return (
                       <li key={item.id}>
-                        <button
-                          type="button"
-                          onClick={() => toggleSelected(item.id)}
-                          className={`grid w-full grid-cols-[auto_minmax(0,0.8fr)_minmax(0,0.95fr)_minmax(0,1.4fr)] gap-3 px-4 py-3 text-left transition-colors ${
+                        <div
+                          className={`flex gap-3 px-4 py-3 transition-colors ${
                             isSelected
                               ? 'bg-[var(--bg-accent-subtle)]'
                               : 'bg-[var(--bg-secondary)] hover:bg-[var(--bg-primary)]'
                           }`}
                         >
-                          <span className="flex items-center">
-                            <span
-                              className={`inline-flex h-5 w-5 items-center justify-center rounded border text-xs font-bold ${
-                                isSelected
-                                  ? 'border-[var(--bg-accent)] bg-[var(--bg-accent)] text-white'
-                                  : 'border-[var(--border-opaque)] bg-[var(--bg-primary)] text-transparent'
+                          {advancedOpen ? (
+                            <button
+                              type="button"
+                              aria-label={isSelected ? 'Deselect row' : 'Select row'}
+                              onClick={() => toggleSelected(item.id)}
+                              className="flex shrink-0 items-start pt-0.5 text-left"
+                            >
+                              <span
+                                className={`inline-flex h-5 w-5 items-center justify-center rounded border text-xs font-bold ${
+                                  isSelected
+                                    ? 'border-[var(--bg-accent)] bg-[var(--bg-accent)] text-white'
+                                    : 'border-[var(--border-opaque)] bg-[var(--bg-primary)] text-transparent'
+                                }`}
+                              >
+                                ✓
+                              </span>
+                            </button>
+                          ) : null}
+
+                          <button
+                            type="button"
+                            disabled={!advancedOpen}
+                            onClick={() => {
+                              if (advancedOpen) toggleSelected(item.id);
+                            }}
+                            className={`min-w-0 flex-1 text-left outline-none disabled:cursor-default ${
+                              advancedOpen ? 'cursor-pointer' : ''
+                            }`}
+                          >
+                            <div
+                              className={`${
+                                advancedOpen
+                                  ? 'grid gap-3 grid-cols-[minmax(0,0.8fr)_minmax(0,0.95fr)_minmax(0,1.4fr)]'
+                                  : 'flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-baseline sm:gap-x-3 sm:gap-y-1'
                               }`}
                             >
-                              ✓
-                            </span>
-                          </span>
-
-                          <span className="truncate font-mono text-sm text-[var(--content-primary)]">
-                            {item.rack_no ?? 'No rack'}
-                          </span>
-
-                          <span className="min-w-0">
-                            <span className="block truncate font-mono text-sm font-semibold text-[var(--content-accent)]">
-                              {item.pickCode}
-                            </span>
-                            {item.alternateCode && (
-                              <span className="block truncate text-xs text-[var(--content-tertiary)]">
-                                Alt: {item.alternateCode}
+                              <span className="truncate font-mono text-sm text-[var(--content-primary)]">
+                                {item.rack_no ?? 'No rack'}
                               </span>
-                            )}
-                          </span>
 
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-medium text-[var(--content-primary)]">
-                              {item.name}
-                            </span>
-                            <span className="block truncate text-xs text-[var(--content-tertiary)]">
-                              {item.groupLabel}
-                            </span>
-                          </span>
-                        </button>
+                              <span className="min-w-0 sm:max-w-[12rem]">
+                                <span className="block truncate font-mono text-sm font-semibold text-[var(--content-accent)]">
+                                  {item.pickCode}
+                                </span>
+                                {advancedOpen && item.alternateCode ? (
+                                  <span className="block truncate text-xs text-[var(--content-tertiary)]">
+                                    Alt: {item.alternateCode}
+                                  </span>
+                                ) : null}
+                              </span>
+
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-medium text-[var(--content-primary)]">
+                                  {item.name}
+                                </span>
+                                <span className="block truncate text-xs text-[var(--content-tertiary)]">
+                                  {item.groupLabel}
+                                  {!advancedOpen && item.alternateCode ? (
+                                    <>
+                                      {' '}
+                                      · Alt {item.alternateCode}
+                                    </>
+                                  ) : null}
+                                </span>
+                              </span>
+                            </div>
+
+                            {!advancedOpen ? (
+                              <p className="mt-2 text-[11px] leading-snug text-[var(--content-tertiary)]">
+                                Scan check: OEM keys mapped{' '}
+                                <span className="font-semibold text-[var(--content-secondary)]">
+                                  ×{oemN}
+                                </span>
+                                .
+                                {varrocLikely && oemN === 0 ? (
+                                  <span className="font-semibold text-amber-800">
+                                    {' '}
+                                    Varroc SKU — add barcode mapping for carton SAP scans if needed.
+                                  </span>
+                                ) : null}
+                              </p>
+                            ) : null}
+                          </button>
+
+                          <div className="flex shrink-0 flex-col justify-center gap-1">
+                            <VerifyInLabLink itemId={item.id} />
+                          </div>
+                        </div>
                       </li>
                     );
                   })}
@@ -1194,27 +1580,35 @@ export default function LabelStudioPage(): React.JSX.Element {
                     ? 'Print reusable pack-pick labels for shelf or floor locations.'
                     : labelMode === 'bin'
                       ? 'Print SKU-level bin labels for shelves that hold multiple products in separate slots.'
-                    : 'Choose whether the sheet is built from the filtered set or your manual selection, then print or save as PDF from the browser dialog.'}
+                    : advancedOpen
+                      ? 'Choose filtered vs manually selected SKUs or save CSV manifests.'
+                      : 'Quick mode prepares the filtered list as PDF-ready pack strips matching pick codes.'}
                 </p>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className={`space-y-1 ${labelMode !== 'sku' ? 'opacity-50' : ''}`}>
-                  <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
-                    Preview scope
-                  </span>
-                  <select
-                    value={previewScope}
-                    onChange={(event) => setPreviewScope(event.target.value as PreviewScope)}
-                    disabled={labelMode !== 'sku'}
-                    className="min-h-11 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--content-primary)]"
-                  >
-                    <option value="filtered" disabled={!brandChosen}>
-                      Filtered items
-                    </option>
-                    <option value="selected">Selected items</option>
-                  </select>
-                </label>
+              <div
+                className={`grid gap-3 ${
+                  labelMode === 'sku' && advancedOpen ? 'md:grid-cols-2' : 'grid-cols-1'
+                }`}
+              >
+                {advancedOpen && labelMode === 'sku' ? (
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--content-tertiary)]">
+                      Preview scope
+                    </span>
+                    <select
+                      value={previewScope}
+                      onChange={(event) => setPreviewScope(event.target.value as PreviewScope)}
+                      disabled={labelMode !== 'sku'}
+                      className="min-h-11 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--content-primary)]"
+                    >
+                      <option value="filtered" disabled={!brandChosen}>
+                        Filtered items
+                      </option>
+                      <option value="selected">Selected items</option>
+                    </select>
+                  </label>
+                ) : null}
 
                 <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
                   <p className="font-semibold text-[var(--content-primary)]">
@@ -1224,12 +1618,16 @@ export default function LabelStudioPage(): React.JSX.Element {
                         : 'No pack labels prepared'
                       : labelMode === 'bin'
                         ? `${formatCount(binLocationLabels.length)} bin labels`
-                      : previewScope === 'filtered'
-                        ? `${formatCount(filteredItems.length)} filtered labels`
-                        : `${formatCount(selectedItems.length)} selected labels`}
+                        : effectivePreviewScope === 'filtered'
+                          ? `${formatCount(filteredItems.length)} filtered labels`
+                          : `${formatCount(selectedItems.length)} selected labels`}
                   </p>
                   <p className="mt-1">
-                    {labelMode === 'pack' ? 'Color-coded inner/master pack pick labels' : labelMode === 'bin' ? 'One label per SKU slot on a rack' : presetDescription(printPreset)}
+                    {labelMode === 'pack'
+                      ? 'Color-coded inner/master pack pick labels'
+                      : labelMode === 'bin'
+                        ? 'One label per SKU slot on a rack'
+                        : presetDescription(effectivePrintPreset)}
                   </p>
                 </div>
               </div>
@@ -1238,36 +1636,46 @@ export default function LabelStudioPage(): React.JSX.Element {
                 <button
                   type="button"
                   onClick={printCurrentScope}
-                  disabled={labelMode === 'pack' ? generatedPackLabels.length === 0 : labelMode === 'bin' ? binLocationLabels.length === 0 : previewItems.length === 0}
+                  disabled={
+                    labelMode === 'pack'
+                      ? generatedPackLabels.length === 0
+                      : labelMode === 'bin'
+                        ? binLocationLabels.length === 0
+                        : previewItems.length === 0
+                  }
                   className="inline-flex items-center gap-2 rounded-xl bg-[var(--bg-accent)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 >
                   <PrinterIcon size={18} weight="bold" />
                   Print current A4 sheet
                 </button>
-                <button
-                  type="button"
-                  onClick={() => exportManifest(previewScope)}
-                  disabled={labelMode !== 'sku' || previewItems.length === 0}
-                  className={`rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm font-semibold text-[var(--content-secondary)] disabled:opacity-50 ${labelMode !== 'sku' ? 'hidden' : ''}`}
-                >
-                  Export current manifest CSV
-                </button>
-                <button
-                  type="button"
-                  onClick={() => exportManifest('filtered')}
-                  disabled={labelMode !== 'sku' || filteredItems.length === 0}
-                  className={`rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm font-semibold text-[var(--content-secondary)] disabled:opacity-50 ${labelMode !== 'sku' ? 'hidden' : ''}`}
-                >
-                  Export filtered CSV
-                </button>
-                <button
-                  type="button"
-                  onClick={() => exportManifest('selected')}
-                  disabled={labelMode !== 'sku' || selectedItems.length === 0}
-                  className={`rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm font-semibold text-[var(--content-secondary)] disabled:opacity-50 ${labelMode !== 'sku' ? 'hidden' : ''}`}
-                >
-                  Export selected CSV
-                </button>
+                {advancedOpen && labelMode === 'sku' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => exportManifest(previewScope)}
+                      disabled={previewItems.length === 0}
+                      className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm font-semibold text-[var(--content-secondary)] disabled:opacity-50"
+                    >
+                      Export current manifest CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => exportManifest('filtered')}
+                      disabled={filteredItems.length === 0}
+                      className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm font-semibold text-[var(--content-secondary)] disabled:opacity-50"
+                    >
+                      Export filtered CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => exportManifest('selected')}
+                      disabled={selectedItems.length === 0}
+                      className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm font-semibold text-[var(--content-secondary)] disabled:opacity-50"
+                    >
+                      Export selected CSV
+                    </button>
+                  </>
+                ) : null}
               </div>
             </div>
 
@@ -1366,6 +1774,15 @@ export default function LabelStudioPage(): React.JSX.Element {
                             </div>
                             <p className="font-mono text-[3.5mm] font-bold leading-none tracking-[0.08em] text-slate-500">
                               {label.pickCode}
+                              {label.forwardPickQty != null ? (
+                                <span className="ml-1 text-[3mm] font-semibold tracking-normal text-emerald-800">
+                                  · FPQ {label.forwardPickQty} EA
+                                </span>
+                              ) : (
+                                <span className="ml-1 text-[3mm] font-normal tracking-normal text-slate-400">
+                                  · FPQ not set
+                                </span>
+                              )}
                             </p>
                           </div>
 
@@ -1397,20 +1814,20 @@ export default function LabelStudioPage(): React.JSX.Element {
               )
             ) : previewItems.length === 0 ? (
               <div className="py-8 text-sm text-[var(--content-tertiary)]" data-print-hidden="true">
-                {previewScope === 'selected'
-                  ? 'Select one or more rows to build the A4 sheet.'
+                {effectivePreviewScope === 'selected'
+                  ? 'Select one or more rows to build the A4 sheet. (Advanced mode)'
                   : !brandChosen
                     ? 'Choose a brand/group first to prepare a filtered A4 batch.'
                   : 'Adjust the current filters to build the A4 sheet.'}
               </div>
             ) : (
-              <div className="a4-label-sheet mt-4 grid gap-4 sm:grid-cols-2" data-preset={printPreset}>
+              <div className="a4-label-sheet mt-4 grid gap-4 sm:grid-cols-2" data-preset={effectivePrintPreset}>
                 {previewItems.map((item) => {
                   const qrMarkup = qrByItemId[item.id];
-                  const isPackStrip = printPreset === 'pack-strip';
-                  const isRackStrip = printPreset === 'rack-strip';
-                  const showDescription = printPreset !== 'compact';
-                  const showAlternateCode = printPreset === 'full' && Boolean(item.alternateCode);
+                  const isPackStrip = effectivePrintPreset === 'pack-strip';
+                  const isRackStrip = effectivePrintPreset === 'rack-strip';
+                  const showDescription = effectivePrintPreset !== 'compact';
+                  const showAlternateCode = effectivePrintPreset === 'full' && Boolean(item.alternateCode);
                   const wrapRackCode = item.pickCode.trim().length > 12;
                   const busyCode = item.busy_code == null ? null : Number(item.busy_code);
                   const packDefinition = busyCode == null ? null : packDefinitionByBusyCode.get(busyCode);
@@ -1424,50 +1841,50 @@ export default function LabelStudioPage(): React.JSX.Element {
                     busyCode != null && outerPackQty
                       ? packStripPayloadKey(busyCode, 'outer')
                       : null;
-                  const showPackStripName = item.pickCode.trim().length <= 22;
+                  const oemBarcodeCountForItem = oemBarcodeCountByItemId.get(item.id) ?? 0;
+                  const scanBand = warehouseSkuScanBand(item);
 
                   return (
                     <article
                       key={item.id}
-                      data-preset={printPreset}
+                      data-preset={effectivePrintPreset}
                       className={`a4-label-card border border-[var(--border-opaque)] bg-white text-slate-900 shadow-sm ${
-                        isPackStrip || isRackStrip ? 'rounded-none' : 'rounded-3xl'
-                      } ${
-                        isPackStrip || isRackStrip ? 'overflow-hidden' : 'p-4'
+                        isPackStrip || isRackStrip ? 'rounded-none' : 'rounded-3xl p-4'
                       }`}
-                      style={
-                        isPackStrip
-                          ? { height: `${PACK_STRIP_HEIGHT_MM}mm` }
-                          : isRackStrip
-                            ? { height: `${RACK_STRIP_HEIGHT_MM}mm` }
-                            : undefined
-                      }
                     >
+                      <ScanVerifierHint
+                        item={item}
+                        barcodeMappingCount={oemBarcodeCountForItem}
+                      />
                       {isPackStrip ? (
                         <div className="pack-strip-shell">
                           <div className="pack-strip-copy">
-                            <p
-                              className="pack-strip-code block min-w-0 font-sans font-black uppercase text-slate-950"
-                              style={packStripCodeStyle(item.pickCode)}
-                            >
-                              {item.pickCode}
+                            <p className="pack-strip-warehouse-rack">
+                              {item.rack_no?.trim() ? `LOC ${item.rack_no.trim()}` : 'NO LOCATION'}
                             </p>
-                            {showPackStripName && (
-                              <p className="pack-strip-name text-[2.25mm] font-black leading-none text-slate-500">
-                                {item.name}
-                              </p>
-                            )}
+                            <p className="pack-strip-warehouse-name">{item.name}</p>
+                            {scanBand.leftFootnote ? (
+                              <p className="pack-strip-warehouse-aliasnote">{scanBand.leftFootnote}</p>
+                            ) : null}
                           </div>
 
                           <div className="pack-strip-qr-row">
-                            <div className="pack-strip-block">
-                              <div className="pack-strip-block-title" data-tone="item">
-                                ITEM
+                            <div className="pack-strip-block pack-strip-block-sku">
+                              <div className="pack-strip-alias-heading">{scanBand.heading}</div>
+                              <div
+                                className="pack-strip-alias-code"
+                                style={{ fontSize: packStripSkuAliasFontMm(scanBand.scanCode) }}
+                              >
+                                {scanBand.scanCode}
                               </div>
-                              <div className="pack-strip-qr" aria-label={`QR for ${item.pickCode}`} role="img">
+                              <div
+                                className="pack-strip-qr pack-strip-qr-alias"
+                                aria-label={`QR for ${scanBand.scanCode}`}
+                                role="img"
+                              >
                                 {qrMarkup ? (
                                   <span dangerouslySetInnerHTML={{ __html: qrMarkup }} />
-                              ) : (
+                                ) : (
                                   <span className="text-[2mm] font-semibold text-slate-500">QR</span>
                                 )}
                               </div>
@@ -1539,63 +1956,76 @@ export default function LabelStudioPage(): React.JSX.Element {
                           </div>
 
                           <div className="rack-strip-qr-shell">
-                            {qrMarkup ? (
-                              <div
-                                className="rack-strip-qr"
-                                aria-label={`QR for ${item.pickCode}`}
-                                role="img"
-                                dangerouslySetInnerHTML={{ __html: qrMarkup }}
-                              />
-                            ) : (
-                              <div
-                                className="flex items-center justify-center text-center text-xs text-slate-500"
-                                style={{
-                                  width: `${RACK_STRIP_QR_SIZE_MM}mm`,
-                                  height: `${RACK_STRIP_QR_SIZE_MM}mm`,
-                                }}
+                            <div className="rack-strip-qr-stack">
+                              <span className="rack-strip-alias-over-qr">{scanBand.heading}</span>
+                              <span
+                                className="rack-strip-code-over-qr"
+                                style={{ fontSize: rackStripCodeOverQrFontMm(scanBand.scanCode) }}
                               >
-                                Rendering QR...
-                              </div>
-                            )}
+                                {scanBand.scanCode}
+                              </span>
+                              {qrMarkup ? (
+                                <div
+                                  className="rack-strip-qr"
+                                  aria-label={`QR for ${scanBand.scanCode}`}
+                                  role="img"
+                                  dangerouslySetInnerHTML={{ __html: qrMarkup }}
+                                />
+                              ) : (
+                                <div
+                                  className="flex items-center justify-center text-center text-xs text-slate-500"
+                                  style={{
+                                    width: `${RACK_STRIP_QR_SIZE_MM}mm`,
+                                    height: `${RACK_STRIP_QR_SIZE_MM}mm`,
+                                  }}
+                                >
+                                  Rendering QR...
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       ) : (
-                        <div className="flex h-full items-stretch gap-3">
-                          <div className="flex min-w-0 flex-1 flex-col">
-                            <div className="flex items-start justify-end">
-                              <p className="font-mono text-2xl font-bold leading-none text-slate-500">
-                                {item.rack_no ?? 'NO-RACK'}
-                              </p>
-                            </div>
-
+                        <div className="flex h-full items-stretch gap-4">
+                          <div className="flex min-w-0 flex-1 flex-col justify-between">
+                            <p className="font-mono text-xl font-bold leading-none text-slate-500">
+                              {item.rack_no?.trim() ? `LOC ${item.rack_no.trim()}` : 'NO LOC'}
+                            </p>
                             <div className="min-w-0 mt-4 space-y-1">
-                              <p className="mt-2 font-mono text-base font-black tracking-[-0.04em] text-slate-900">
-                                {item.pickCode}
+                              <p className="line-clamp-3 text-base font-bold leading-snug text-slate-900">
+                                {item.name}
                               </p>
-                              {showAlternateCode && item.alternateCode && (
-                                <p className="mt-1 font-mono text-xs text-slate-500">
-                                  Alt: {item.alternateCode}
+                              {scanBand.leftFootnote ? (
+                                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                                  {scanBand.leftFootnote}
                                 </p>
-                              )}
-                              {showDescription && (
-                                <p className="line-clamp-3 text-sm font-medium text-slate-800">
-                                  {item.name}
-                                </p>
-                              )}
+                              ) : null}
+                              {showAlternateCode && item.alternateCode ? (
+                                <p className="mt-1 font-mono text-xs text-slate-500">Alt: {item.alternateCode}</p>
+                              ) : null}
                             </div>
                           </div>
 
-                          <div className="flex shrink-0 items-center justify-center">
-                            <div className="flex h-28 w-28 items-center justify-center rounded-[22px] border border-slate-200 bg-slate-50 p-2">
-                              {qrMarkup ? (
-                                <img
-                                  src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(qrMarkup)}`}
-                                  alt={`QR for ${item.pickCode}`}
-                                  className="h-24 w-24"
-                                />
-                              ) : (
-                                <div className="text-center text-xs text-slate-500">Rendering QR...</div>
-                              )}
+                          <div className="flex shrink-0 flex-col items-center justify-center">
+                            <div className="compact-qr-scan-stack">
+                              <span className="compact-alias-over-qr max-w-[10rem]">{scanBand.heading}</span>
+                              <span
+                                className="compact-code-over-qr max-w-[10rem]"
+                                style={{ fontSize: compactCodeOverQrRem(scanBand.scanCode) }}
+                              >
+                                {scanBand.scanCode}
+                              </span>
+                              <div className="flex h-28 w-28 items-center justify-center rounded-[22px] border border-slate-200 bg-slate-50 p-2">
+                                {qrMarkup ? (
+                                  <img
+                                    src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(qrMarkup)}`}
+                                    alt={`QR for ${scanBand.scanCode}`}
+                                    className="h-24 w-24"
+                                  />
+                                ) : (
+                                  <div className="text-center text-xs text-slate-500">Rendering QR…</div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>

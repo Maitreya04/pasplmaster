@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { supabase } from '../supabase/client';
+import { parseIndividualColumn } from '../packCatalog/operatorLabels';
 import type { ImportProgress, ProgressCallback } from './itemImporter';
 
 interface ItemLookupRow {
@@ -15,6 +16,7 @@ interface PackSourceRow {
   partNo: string | null;
   innerPackQty: number | null;
   outerPackQty: number | null;
+  sellUnit: 'EACH' | 'PACK' | 'BOTH';
 }
 
 const BATCH_SIZE = 500;
@@ -29,7 +31,8 @@ function packQty(val: unknown): number | null {
   if (val == null) return null;
   const raw = typeof val === 'string' ? val.replace(/,/g, '') : String(val);
   const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 1) return null;
+  // INNER.BOX = 1 is valid (TIDC: one piece per inner; MAST/INNER ratio = inners per outer)
+  if (!Number.isFinite(n) || n < 1) return null;
   return Math.trunc(n);
 }
 
@@ -54,6 +57,7 @@ function detectColumnIndices(headerRow: unknown[]) {
     partNo: find('part no.', 'part no', 'partno', 'alias', 'code'),
     outerPackQty: find('mast.box', 'master box', 'outer box', 'outer_pack_qty'),
     innerPackQty: find('inner.box', 'inner box', 'inner_pack_qty'),
+    individual: find('individual'),
   };
 }
 
@@ -89,11 +93,13 @@ function buildSourceRows(raw: unknown[][], headerRowIndex: number): PackSourceRo
       const innerPackQty = cols.innerPackQty >= 0 ? packQty(row[cols.innerPackQty]) : null;
       const outerPackQty = cols.outerPackQty >= 0 ? packQty(row[cols.outerPackQty]) : null;
       if (!innerPackQty && !outerPackQty) return null;
+      const individualRaw = cols.individual >= 0 ? row[cols.individual] : null;
       return {
         itemName,
         partNo: cols.partNo >= 0 ? str(row[cols.partNo]) : null,
         innerPackQty,
         outerPackQty,
+        sellUnit: parseIndividualColumn(individualRaw),
       };
     })
     .filter((row): row is PackSourceRow => row !== null);
@@ -186,10 +192,31 @@ function mapRowsToBusyCodes(sourceRows: PackSourceRow[], items: ItemLookupRow[])
       item_name: match.name,
       inner_pack_qty: source.innerPackQty,
       outer_pack_qty: source.outerPackQty,
+      sell_unit: source.sellUnit,
     });
   }
 
   return { mapped, unmatched, noBusyCode, ambiguous };
+}
+
+export interface PackDefinitionImportResult extends ImportProgress {
+  /** Rows in file with no MAST.BOX or INNER.BOX — not sent to database */
+  skippedNoPackQty: number;
+  fileRowCount: number;
+}
+
+function countFileRowsWithoutPackQty(raw: unknown[][], headerRowIndex: number): number {
+  const headerRow = raw[headerRowIndex] ?? [];
+  const cols = detectColumnIndices(headerRow);
+  let n = 0;
+  for (const row of raw.slice(headerRowIndex + 1)) {
+    const itemName = cols.itemName >= 0 ? str(row[cols.itemName]) : null;
+    if (!itemName) continue;
+    const innerPackQty = cols.innerPackQty >= 0 ? packQty(row[cols.innerPackQty]) : null;
+    const outerPackQty = cols.outerPackQty >= 0 ? packQty(row[cols.outerPackQty]) : null;
+    if (!innerPackQty && !outerPackQty) n += 1;
+  }
+  return n;
 }
 
 export async function importPackDefinitions(
@@ -197,9 +224,11 @@ export async function importPackDefinitions(
   fileName: string,
   headerRowIndex: number,
   onProgress: ProgressCallback,
-): Promise<ImportProgress> {
+): Promise<PackDefinitionImportResult> {
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const raw: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  const skippedNoPackQty = countFileRowsWithoutPackQty(raw, headerRowIndex);
+  const fileRowCount = Math.max(0, raw.length - headerRowIndex - 1);
   const sourceRows = buildSourceRows(raw, headerRowIndex);
   const total = sourceRows.length;
 
@@ -230,7 +259,7 @@ export async function importPackDefinitions(
     unmatched?: number;
   };
   const failedCount = unmatched + noBusyCode + ambiguous + (result.skipped ?? 0) + (result.unmatched ?? 0);
-  const progress: ImportProgress = {
+  const progress: PackDefinitionImportResult = {
     processed: mapped.length,
     total,
     newCount: result.inserted ?? 0,
@@ -238,6 +267,8 @@ export async function importPackDefinitions(
     batchIndex: 1,
     totalBatches: 1,
     failedCount,
+    skippedNoPackQty,
+    fileRowCount,
   };
 
   onProgress(progress);
@@ -254,6 +285,8 @@ export async function importPackDefinitions(
       unmatched,
       no_busy_code: noBusyCode,
       ambiguous,
+      skipped_no_pack_qty: skippedNoPackQty,
+      file_row_count: fileRowCount,
       rpc_skipped: result.skipped ?? 0,
       rpc_unmatched: result.unmatched ?? 0,
     },

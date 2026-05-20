@@ -4,12 +4,15 @@ import {
   SignOut,
   ChartBar,
   Tag,
+  Package,
   Camera,
   MagicWand,
   Database,
   Barcode,
   Scales,
   Warehouse,
+  Truck,
+  ShoppingBag,
 } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { NotificationDiagnosticsPanel } from '../../components/notifications/NotificationDiagnosticsPanel';
@@ -40,6 +43,38 @@ export default function AdminPage(): React.JSX.Element | null {
         </div>
 
         <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => navigate('/admin/receiving')}
+            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
+          >
+            <div className="w-12 h-12 rounded-xl bg-[var(--role-primary-subtle)] flex items-center justify-center">
+              <Truck size={22} weight="regular" className="text-[var(--role-primary)]" />
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-[var(--content-primary)]">Warehouse receiving</p>
+              <p className="text-sm text-[var(--content-tertiary)]">
+                Dock consignments, ratio confirm, pack labels, putaway scan events (walk-in)
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/purchase')}
+            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
+          >
+            <div className="w-12 h-12 rounded-xl bg-[var(--bg-tertiary)] flex items-center justify-center">
+              <ShoppingBag size={22} weight="regular" className="text-[var(--content-secondary)]" />
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-[var(--content-primary)]">Purchase</p>
+              <p className="text-sm text-[var(--content-tertiary)]">
+                Excel PO upload, invoice PDF OCR, and receiving job handoff
+              </p>
+            </div>
+          </button>
+
           <button
             type="button"
             onClick={() => navigate('/admin/cycle-count')}
@@ -138,6 +173,22 @@ export default function AdminPage(): React.JSX.Element | null {
 
           <button
             type="button"
+            onClick={() => navigate('/admin/pack-catalog')}
+            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
+          >
+            <div className="w-12 h-12 rounded-xl bg-[var(--role-primary-subtle)] flex items-center justify-center">
+              <Package size={22} weight="regular" className="text-[var(--role-primary)]" />
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-[var(--content-primary)]">Pack catalog</p>
+              <p className="text-sm text-[var(--content-tertiary)]">
+                Search SKUs · outer / inner / piece sizes · print three QR stickers · CSV sync
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
             onClick={() => navigate('/admin/labels')}
             className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
           >
@@ -147,7 +198,9 @@ export default function AdminPage(): React.JSX.Element | null {
             <div className="text-left">
               <p className="font-semibold text-[var(--content-primary)]">Label Studio</p>
               <p className="text-sm text-[var(--content-tertiary)]">
-                Print A4 SKU labels with alias fallback
+                PASPL pack strips · scan playbook in{' '}
+                <span className="font-mono text-xs text-[var(--content-secondary)]">docs/LABEL_STUDIO_SCAN_CONTRACT.md</span>{' '}
+                · Verify with Pick Scan Lab
               </p>
             </div>
           </button>

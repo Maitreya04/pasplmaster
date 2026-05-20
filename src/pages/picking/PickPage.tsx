@@ -40,6 +40,7 @@ import {
   fetchItemPackDefinitions,
   type ItemPackDefinition,
 } from '../../lib/packLpn';
+import { deriveBusyCodeCandidates } from '../../lib/scanner/deriveBusyCodeCandidates';
 import {
   classifyScanPayload,
   parsePackPickPayload,
@@ -51,6 +52,16 @@ import {
   defaultPickItemTransitionAdapter,
   type PickItemTransition,
 } from '../../lib/picking/itemTransitionAdapter';
+import {
+  binIdForPickItem,
+  consumeBinLayerForPick,
+  fetchBinPickerShelf,
+  orderItemUsesStagingOnly,
+  primaryBusyCodeForOrderItem,
+  rackGateBinIdForPickItem,
+  STAGING_BIN_DEFAULT,
+} from '../../lib/wms/binLayers';
+import type { BinPickerShelfLayer } from '../../types';
 
 type PickItemUiState =
   | 'pending'
@@ -167,17 +178,17 @@ function describePackSplit(
   if (breakdown.hasOuter && breakdown.outerQty > 0) {
     const size = packDef?.outer_pack_qty ?? 0;
     parts.push(
-      `${breakdown.outerQty} master${breakdown.outerQty === 1 ? '' : 's'}${size ? ` (×${size})` : ''}`,
+      `${breakdown.outerQty} outer box${breakdown.outerQty === 1 ? '' : 'es'}${size ? ` (${size} pcs each)` : ''}`,
     );
   }
   if (breakdown.hasInner && breakdown.innerQty > 0) {
     const size = packDef?.inner_pack_qty ?? 0;
     parts.push(
-      `${breakdown.innerQty} inner${breakdown.innerQty === 1 ? '' : 's'}${size ? ` (×${size})` : ''}`,
+      `${breakdown.innerQty} inner box${breakdown.innerQty === 1 ? '' : 'es'}${size ? ` (${size} pcs each)` : ''}`,
     );
   }
   if (breakdown.looseQty > 0) {
-    parts.push(`${breakdown.looseQty} loose`);
+    parts.push(`${breakdown.looseQty} piece${breakdown.looseQty === 1 ? '' : 's'}`);
   }
   if (parts.length === 0) return { text: '', hasMultipleTiers: false };
   return { text: `Pick ${parts.join(' + ')}`, hasMultipleTiers: parts.length > 1 };
@@ -222,23 +233,6 @@ function uiStateFromDb(oi: OrderItem): PickItemUiState {
     return 'error';
   }
   return 'pending';
-}
-
-function deriveBusyCodeCandidates(item: OrderItem): number[] {
-  const candidates = [
-    item.item_alias,
-    item.catalog_alias,
-    item.catalog_alias1,
-  ];
-  const values = new Set<number>();
-  for (const value of candidates) {
-    if (!value) continue;
-    const digits = value.replace(/[^\d]/g, '');
-    if (!digits) continue;
-    const parsed = Number(digits);
-    if (Number.isFinite(parsed) && parsed > 0) values.add(parsed);
-  }
-  return [...values];
 }
 
 function buildPriceMismatchNotes(rawNotes: string, boxPrice: number): string {
@@ -372,6 +366,24 @@ export default function PickPage(): React.JSX.Element | null {
   // scan_result + state so we can roll back both DB and local UI cleanly.
   const [undoSnapshot, setUndoSnapshot] = useState<UndoSnapshot | null>(null);
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
+  const [preferredPickLayer, setPreferredPickLayer] = useState<{
+    orderItemId: number;
+    layerId: number;
+  } | null>(null);
+  const [fifoOverrideSheet, setFifoOverrideSheet] = useState<{
+    orderItemId: number;
+    qtyDelta: number;
+    qtyToApply: number;
+    resume: 'manual' | 'scan';
+    scanFinalize?: {
+      progressedResult: ScanResult;
+      nextRemaining: number;
+      previousScanResult: ScanResult | null;
+      suggestedLabel: string;
+      classifiedKind: string;
+    };
+  } | null>(null);
+  const [fifoOverrideReason, setFifoOverrideReason] = useState('');
 
   const orderItems = order?.items;
 
@@ -709,6 +721,30 @@ export default function PickPage(): React.JSX.Element | null {
     return { kind: 'awaiting_rack', itemId: currentTarget.orderItem.id };
   }, [currentTarget, celebrating, briefAcknowledged, counts.picked, counts.flagged, rackVerifiedIds]);
 
+  const shelfBinId =
+    phase.kind === 'verified' && currentTarget
+      ? rackGateBinIdForPickItem(currentTarget.orderItem)
+      : null;
+  const shelfBusy =
+    phase.kind === 'verified' && currentTarget
+      ? primaryBusyCodeForOrderItem(currentTarget.orderItem)
+      : null;
+  const shelfQuery = useQuery({
+    queryKey: ['pickerShelf', shelfBinId, shelfBusy],
+    queryFn: () => fetchBinPickerShelf(shelfBinId!, shelfBusy!),
+    enabled: Boolean(phase.kind === 'verified' && shelfBinId && shelfBusy != null),
+  });
+
+  useEffect(() => {
+    if (!currentTarget) {
+      setPreferredPickLayer(null);
+      return;
+    }
+    setPreferredPickLayer((prev) =>
+      prev && prev.orderItemId !== currentTarget.orderItem.id ? null : prev,
+    );
+  }, [currentTarget?.orderItem.id]);
+
   /* ─── Mutations ──────────────────────────────────────────── */
 
   const itemTransitionMutation = useMutation({
@@ -799,6 +835,43 @@ export default function PickPage(): React.JSX.Element | null {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
     },
   });
+
+  const tryConsumeShelfStock = useCallback(
+    async (
+      orderItem: OrderItem,
+      qtyDelta: number,
+      overrideReason?: string | null,
+    ): Promise<'ok' | 'override_blocked' | 'abort'> => {
+      if (qtyDelta <= 0) return 'ok';
+      const busy = primaryBusyCodeForOrderItem(orderItem);
+      if (busy == null) return 'ok';
+      const bin = binIdForPickItem(orderItem) ?? STAGING_BIN_DEFAULT;
+      const preferredLayerId =
+        preferredPickLayer?.orderItemId === orderItem.id ? preferredPickLayer.layerId : null;
+      const res = await consumeBinLayerForPick({
+        orderItemId: orderItem.id,
+        qtyEa: qtyDelta,
+        userId,
+        binId: bin,
+        preferredLayerId,
+        overrideReason: overrideReason ?? null,
+      });
+      if (res.success) {
+        void queryClient.invalidateQueries({ queryKey: ['pickerShelf', bin, busy] });
+        return 'ok';
+      }
+      if (res.reason === 'override_reason_required') {
+        return 'override_blocked';
+      }
+      if (res.reason === 'insufficient_layer_stock') {
+        toast.warning('Shelf MRP layers short — pick still recorded. Reconcile stock if needed.');
+        return 'ok';
+      }
+      toast.error(res.reason);
+      return 'abort';
+    },
+    [preferredPickLayer, queryClient, toast, userId],
+  );
 
   const completeMutation = useMutation({
     mutationFn: async () => {
@@ -942,18 +1015,24 @@ export default function PickPage(): React.JSX.Element | null {
       if (scannerMode === 'rack') {
         const classified = classifyScanPayload(scan.rawValue);
         const expectedRack = current.orderItem.rack_no;
+        const stagingOnly = orderItemUsesStagingOnly(current.orderItem);
 
         let gateOk = false;
-        if (classified.kind === 'rack' && classified.rackPayload) {
+        if (stagingOnly && scan.matchesPickItem) {
+          gateOk = true;
+        } else if (classified.kind === 'rack' && classified.rackPayload) {
           const scannedCode = classified.rackPayload.rackCode;
-          if (!rackCodesMatch(scannedCode, expectedRack)) {
+          if (stagingOnly && rackCodesMatch(scannedCode, STAGING_BIN_DEFAULT)) {
+            gateOk = true;
+          } else if (!stagingOnly && expectedRack && !rackCodesMatch(scannedCode, expectedRack)) {
             setScannerHint(
               `Wrong shelf — scanned ${scannedCode}, expected ${expectedRack ?? '—'}. Walk to the right rack.`,
             );
             appHaptics.warning();
             return current;
+          } else {
+            gateOk = true;
           }
-          gateOk = true;
         } else if (scan.matchesPickItem) {
           gateOk = true;
         } else if (
@@ -965,9 +1044,11 @@ export default function PickPage(): React.JSX.Element | null {
 
         if (!gateOk) {
           setScannerHint(
-            expectedRack
-              ? 'Scan the bin license plate: ITEM or pack QR for this product, or a location QR that matches this rack. If it still fails, check order rack_no matches the big code on the label.'
-              : 'Scan the bin license plate (ITEM or pack QR) for this line.',
+            stagingOnly
+              ? 'Scan the carton: PASPL-PACK inner or ITEM alias on the label (stock may be in STAGING).'
+              : expectedRack
+                ? 'Scan the bin license plate: ITEM or pack QR for this product, or a location QR that matches this rack.'
+                : 'Scan the bin license plate (ITEM or pack QR) for this line.',
           );
           appHaptics.warning();
           return current;
@@ -1165,6 +1246,7 @@ export default function PickPage(): React.JSX.Element | null {
       if (result.isMatch && !requiresManualQtyConfirmation) {
         const nextPicked = Math.min(targetQty, existingPickedBefore + suggestedQty);
         const nextRemaining = Math.max(0, targetQty - nextPicked);
+        const delta = nextPicked - existingPickedBefore;
         const progressedResult: ScanResult = {
           ...result,
           progress: {
@@ -1173,47 +1255,65 @@ export default function PickPage(): React.JSX.Element | null {
             targetQty,
           },
         };
-        updateLocalItem(current.orderItem.id, {
-          scanResult: progressedResult,
-          uiState: nextRemaining === 0 ? 'picked' : 'matched',
-        });
-        itemTransitionMutation.mutate({
-          transition: {
-            kind: 'scan_saved',
-            itemId: current.orderItem.id,
+        void (async () => {
+          const inv = await tryConsumeShelfStock(current.orderItem, delta);
+          if (inv === 'override_blocked') {
+            setFifoOverrideSheet({
+              orderItemId: current.orderItem.id,
+              qtyDelta: delta,
+              qtyToApply: suggestedQty,
+              resume: 'scan',
+              scanFinalize: {
+                progressedResult,
+                nextRemaining,
+                previousScanResult: current.previousScanResult,
+                suggestedLabel: current.orderItem.item_name,
+                classifiedKind: classified.kind,
+              },
+            });
+            return;
+          }
+          if (inv === 'abort') return;
+          updateLocalItem(current.orderItem.id, {
             scanResult: progressedResult,
-          },
-        });
-        if (nextRemaining === 0) {
+            uiState: nextRemaining === 0 ? 'picked' : 'matched',
+          });
           itemTransitionMutation.mutate({
             transition: {
-              kind: 'picked',
+              kind: 'scan_saved',
               itemId: current.orderItem.id,
               scanResult: progressedResult,
             },
-            optimisticState: 'picked',
           });
-          // Mirror applyPickedQty: snapshot for undo + start the green dwell so
-          // the auto-advance lands on the next stop with motion, not a jump cut.
-          setUndoSnapshot({
-            itemId: current.orderItem.id,
-            itemName: current.orderItem.item_name,
-            itemCode: current.orderItem.item_alias ?? null,
-            previousScanResult: current.previousScanResult,
-            previousState: 'pending',
-            expiresAt: Date.now() + UNDO_DURATION_MS,
-          });
-          setCelebrating({
-            itemId: current.orderItem.id,
-            expiresAt: Date.now() + CELEBRATE_DURATION_MS,
-          });
-        }
-        appHaptics.success();
-        setScannerHint(
-          nextRemaining === 0
-            ? `Completed ${current.orderItem.item_name}.`
-            : `Matched ${classified.kind.toUpperCase()} scan. ${nextRemaining} remaining.`,
-        );
+          if (nextRemaining === 0) {
+            itemTransitionMutation.mutate({
+              transition: {
+                kind: 'picked',
+                itemId: current.orderItem.id,
+                scanResult: progressedResult,
+              },
+              optimisticState: 'picked',
+            });
+            setUndoSnapshot({
+              itemId: current.orderItem.id,
+              itemName: current.orderItem.item_name,
+              itemCode: current.orderItem.item_alias ?? null,
+              previousScanResult: current.previousScanResult,
+              previousState: 'pending',
+              expiresAt: Date.now() + UNDO_DURATION_MS,
+            });
+            setCelebrating({
+              itemId: current.orderItem.id,
+              expiresAt: Date.now() + CELEBRATE_DURATION_MS,
+            });
+          }
+          appHaptics.success();
+          setScannerHint(
+            nextRemaining === 0
+              ? `Completed ${current.orderItem.item_name}.`
+              : `Matched ${classified.kind.toUpperCase()} scan. ${nextRemaining} remaining.`,
+          );
+        })();
       } else {
         appHaptics.warning();
       }
@@ -1227,13 +1327,18 @@ export default function PickPage(): React.JSX.Element | null {
     packDefinitionByBusyCode,
     packDefinitionByItemId,
     scannerMode,
+    tryConsumeShelfStock,
     updateLocalItem,
     userId,
     userName,
   ]);
 
   const applyPickedQty = useCallback(
-    (itemId: number, qtyToApply: number) => {
+    async (
+      itemId: number,
+      qtyToApply: number,
+      opts?: { skipInventory?: boolean; overrideReason?: string | null },
+    ) => {
       if (!Number.isFinite(qtyToApply) || qtyToApply <= 0) return;
       appHaptics.impactMedium();
       const local = localItems.get(itemId);
@@ -1252,6 +1357,22 @@ export default function PickPage(): React.JSX.Element | null {
       );
       const nextPicked = Math.min(targetQty, existingPicked + Math.floor(qtyToApply));
       const nextRemaining = Math.max(0, targetQty - nextPicked);
+      const delta = nextPicked - existingPicked;
+
+      if (!opts?.skipInventory && delta > 0) {
+        const inv = await tryConsumeShelfStock(orderItem, delta, opts?.overrideReason ?? null);
+        if (inv === 'override_blocked') {
+          setFifoOverrideSheet({
+            orderItemId: itemId,
+            qtyDelta: delta,
+            qtyToApply: Math.floor(qtyToApply),
+            resume: 'manual',
+          });
+          return;
+        }
+        if (inv === 'abort') return;
+      }
+
       const manualScanResult: ScanResult = local?.scanResult ?? {
         scannedText: 'MANUAL_PICK',
         confidence: 100,
@@ -1297,8 +1418,6 @@ export default function PickPage(): React.JSX.Element | null {
           },
           optimisticState: 'picked',
         });
-        // Capture rollback data BEFORE the mutation flushes, so undo restores
-        // the exact pre-completion state (scan_result + 'pending' state).
         setUndoSnapshot({
           itemId,
           itemName: orderItem.item_name,
@@ -1307,8 +1426,6 @@ export default function PickPage(): React.JSX.Element | null {
           previousState,
           expiresAt: Date.now() + UNDO_DURATION_MS,
         });
-        // Hold on the green dwell so the picker sees the win. The next stop's
-        // card slides in once `celebrating` clears.
         setCelebrating({
           itemId,
           expiresAt: Date.now() + CELEBRATE_DURATION_MS,
@@ -1316,12 +1433,94 @@ export default function PickPage(): React.JSX.Element | null {
         appHaptics.success();
       }
     },
-    [itemTransitionMutation, localItems, order?.items, toast, updateLocalItem, userId, userName],
+    [
+      itemTransitionMutation,
+      localItems,
+      order?.items,
+      toast,
+      tryConsumeShelfStock,
+      updateLocalItem,
+      userId,
+      userName,
+    ],
   );
+
+  const confirmFifoOverride = useCallback(async () => {
+    const sheet = fifoOverrideSheet;
+    if (!sheet || fifoOverrideReason.trim().length < 3) {
+      toast.error('Enter a reason (at least 3 characters).');
+      return;
+    }
+    const orderItem = order?.items.find((i) => i.id === sheet.orderItemId);
+    if (!orderItem) return;
+    const inv = await consumeBinLayerForPick({
+      orderItemId: sheet.orderItemId,
+      qtyEa: sheet.qtyDelta,
+      userId,
+      binId: binIdForPickItem(orderItem),
+      preferredLayerId:
+        preferredPickLayer?.orderItemId === sheet.orderItemId ? preferredPickLayer.layerId : null,
+      overrideReason: fifoOverrideReason.trim(),
+    });
+    if (!inv.success) {
+      toast.error(inv.reason);
+      return;
+    }
+    const b = binIdForPickItem(orderItem);
+    const busy = primaryBusyCodeForOrderItem(orderItem);
+    if (b && busy != null) {
+      void queryClient.invalidateQueries({ queryKey: ['pickerShelf', b, busy] });
+    }
+    const reasonSnap = fifoOverrideReason.trim();
+    setFifoOverrideSheet(null);
+    setFifoOverrideReason('');
+    if (sheet.resume === 'manual') {
+      await applyPickedQty(sheet.orderItemId, sheet.qtyToApply, { skipInventory: true, overrideReason: reasonSnap });
+    } else if (sheet.scanFinalize) {
+      const { progressedResult, nextRemaining, previousScanResult } = sheet.scanFinalize;
+      updateLocalItem(sheet.orderItemId, {
+        scanResult: progressedResult,
+        uiState: nextRemaining === 0 ? 'picked' : 'matched',
+      });
+      itemTransitionMutation.mutate({
+        transition: { kind: 'scan_saved', itemId: sheet.orderItemId, scanResult: progressedResult },
+      });
+      if (nextRemaining === 0) {
+        itemTransitionMutation.mutate({
+          transition: { kind: 'picked', itemId: sheet.orderItemId, scanResult: progressedResult },
+          optimisticState: 'picked',
+        });
+        setUndoSnapshot({
+          itemId: sheet.orderItemId,
+          itemName: orderItem.item_name,
+          itemCode: orderItem.item_alias ?? null,
+          previousScanResult,
+          previousState: 'pending',
+          expiresAt: Date.now() + UNDO_DURATION_MS,
+        });
+        setCelebrating({
+          itemId: sheet.orderItemId,
+          expiresAt: Date.now() + CELEBRATE_DURATION_MS,
+        });
+      }
+      appHaptics.success();
+    }
+  }, [
+    applyPickedQty,
+    fifoOverrideReason,
+    fifoOverrideSheet,
+    itemTransitionMutation,
+    order?.items,
+    preferredPickLayer,
+    queryClient,
+    toast,
+    updateLocalItem,
+    userId,
+  ]);
 
   const handlePick = useCallback(
     (itemId: number) => {
-      applyPickedQty(itemId, 1);
+      void applyPickedQty(itemId, 1);
     },
     [applyPickedQty],
   );
@@ -1706,6 +1905,66 @@ export default function PickPage(): React.JSX.Element | null {
                 <p className="font-mono font-bold text-[64px] leading-none mt-1 text-[var(--content-primary)]">
                   {currentTarget.orderItem.rack_no ?? '—'}
                 </p>
+                {isVerified && shelfBinId && shelfBusy != null && (
+                  <div className="mt-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                      Shelf stock (MRP batches)
+                    </p>
+                    {shelfQuery.isLoading && (
+                      <p className="text-xs text-[var(--content-tertiary)] mt-1">Loading shelf…</p>
+                    )}
+                    {shelfQuery.isError && (
+                      <p className="text-xs text-[var(--content-warning)] mt-1">Could not load shelf.</p>
+                    )}
+                    {shelfQuery.data != null && shelfQuery.data.total_ea === 0 && (
+                      <p className="text-xs text-[var(--content-secondary)] mt-1">
+                        No layered stock for this BIN/SKU — check receiving putaway.
+                      </p>
+                    )}
+                    {shelfQuery.data != null && shelfQuery.data.total_ea > 0 && (
+                      <>
+                        <p className="font-mono text-lg font-bold tabular-nums mt-1 text-[var(--content-primary)]">
+                          {shelfQuery.data.total_ea} ea available
+                        </p>
+                        <ul className="mt-2 space-y-1.5">
+                          {shelfQuery.data.layers.map((layer: BinPickerShelfLayer) => (
+                            <li key={layer.id}>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPreferredPickLayer({
+                                    orderItemId: currentTarget.orderItem.id,
+                                    layerId: layer.id,
+                                  })
+                                }
+                                className={`w-full text-left rounded-lg px-2 py-1.5 text-sm transition-colors ${
+                                  preferredPickLayer?.layerId === layer.id &&
+                                  preferredPickLayer.orderItemId === currentTarget.orderItem.id
+                                    ? 'bg-[var(--bg-accent-subtle)] ring-1 ring-[var(--role-primary)]'
+                                    : 'bg-[var(--bg-primary)]'
+                                }`}
+                              >
+                                <span className="font-mono">₹{Number(layer.mrp_per_ea).toFixed(2)}</span>
+                                <span className="text-[var(--content-secondary)]"> × </span>
+                                <span className="font-mono font-semibold">{layer.qty_ea}</span>
+                                {layer.is_fifo_recommended ? (
+                                  <span className="ml-2 text-[10px] font-bold uppercase text-[var(--content-positive)]">
+                                    Pick first
+                                  </span>
+                                ) : null}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                        {preferredPickLayer?.orderItemId === currentTarget.orderItem.id && (
+                          <p className="text-[10px] text-[var(--content-accent)] mt-2 font-medium">
+                            Non-FIFO batch selected — a short reason is required when you pick.
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
                 {isAwaitingRack && (
                   <p className="text-[11px] text-[var(--content-tertiary)] mt-2">
                     Hold to verify without scanning if the label won’t scan
@@ -1763,7 +2022,7 @@ export default function PickPage(): React.JSX.Element | null {
                           currentBreakdown.outerQty === 0 ? 'opacity-35' : ''
                         }`}
                       >
-                        <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">Master</p>
+                        <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">Outer box</p>
                         <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-accent)] tabular-nums">
                           {currentBreakdown.outerQty}
                         </p>
@@ -1778,7 +2037,7 @@ export default function PickPage(): React.JSX.Element | null {
                           currentBreakdown.innerQty === 0 ? 'opacity-35' : ''
                         }`}
                       >
-                        <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-positive)]">Inner</p>
+                        <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-positive)]">Inner box</p>
                         <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-positive)] tabular-nums">
                           {currentBreakdown.innerQty}
                         </p>
@@ -1792,7 +2051,7 @@ export default function PickPage(): React.JSX.Element | null {
                         currentBreakdown.looseQty === 0 ? 'opacity-35' : ''
                       }`}
                     >
-                      <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">Loose</p>
+                      <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">Pieces</p>
                       <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-secondary)] tabular-nums">
                         {currentBreakdown.looseQty}
                       </p>
@@ -2088,6 +2347,36 @@ export default function PickPage(): React.JSX.Element | null {
       </BottomSheet>
 
       <BottomSheet
+        isOpen={fifoOverrideSheet !== null}
+        onClose={() => {
+          setFifoOverrideSheet(null);
+          setFifoOverrideReason('');
+        }}
+        title="FIFO override"
+     >
+        <div className="space-y-4">
+          <p className="text-sm text-[var(--content-secondary)]">
+            You selected a newer MRP batch or the system needs a written reason. Enter a short warehouse note (who
+            asked, why).
+          </p>
+          <textarea
+            value={fifoOverrideReason}
+            onChange={(e) => setFifoOverrideReason(e.target.value)}
+            placeholder="Reason (required, min 3 characters)"
+            className="w-full min-h-24 px-4 py-3 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-primary)] border border-[var(--border-subtle)]"
+          />
+          <BigButton
+            variant="primary"
+            className="bg-[var(--bg-accent)] text-[var(--content-on-color)]"
+            loading={itemTransitionMutation.isPending}
+            onClick={() => void confirmFifoOverride()}
+          >
+            Confirm and apply pick
+          </BigButton>
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
         isOpen={pendingPackConfirmation !== null}
         onClose={() => setPendingPackConfirmation(null)}
         title="Qty Confirmation"
@@ -2117,7 +2406,7 @@ export default function PickPage(): React.JSX.Element | null {
                   const pending = pendingPackConfirmation;
                   if (!pending) return;
                   setPendingPackConfirmation(null);
-                  applyPickedQty(pending.orderItemId, pending.suggestedQty);
+                  void applyPickedQty(pending.orderItemId, pending.suggestedQty);
                 }}
                 className="flex-1 bg-[var(--bg-warning)] text-[var(--content-primary)]"
               >
@@ -2169,7 +2458,7 @@ export default function PickPage(): React.JSX.Element | null {
                   toast.error('Enter a valid quantity');
                   return;
                 }
-                applyPickedQty(manualQtyTargetItemId, Math.floor(parsed));
+                void applyPickedQty(manualQtyTargetItemId, Math.floor(parsed));
                 setManualQtyTargetItemId(null);
                 setManualQtyInput('1');
               }}

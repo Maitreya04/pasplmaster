@@ -11,6 +11,7 @@ export { Skeleton } from './Skeleton.tsx';
 export { EmptyState } from './EmptyState.tsx';
 export { ToastContainer } from './Toast.tsx';
 export { FilterChip } from './FilterChip.tsx';
+export { AliasChip } from './AliasChip.tsx';
 export { ProgressBar } from './ProgressBar.tsx';
 export { SelectTrigger } from './SelectTrigger.tsx';
 export { LiveQrScanner } from './LiveQrScanner.tsx';

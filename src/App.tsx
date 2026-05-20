@@ -31,6 +31,7 @@ const AdminPage = lazy(() => import('./pages/admin/AdminPage'));
 const AdminPasscodePage = lazy(() => import('./pages/admin/AdminPasscodePage'));
 const UploadPage = lazy(() => import('./pages/admin/UploadPage'));
 const LabelStudioPage = lazy(() => import('./pages/admin/LabelStudioPage'));
+const PackCatalogPage = lazy(() => import('./pages/admin/PackCatalogPage'));
 const CycleCountPage = lazy(() => import('./pages/admin/CycleCountPage'));
 const PickScanLabPage = lazy(() => import('./pages/admin/PickScanLabPage'));
 const OcrOrderLabPage = lazy(() => import('./pages/admin/OcrOrderLabPage'));
@@ -40,6 +41,13 @@ const BarcodeMappingPage = lazy(() => import('./pages/admin/BarcodeMappingPage')
 const UomOnboardingPage = lazy(() => import('./pages/admin/UomOnboardingPage'));
 const BinOnboardingPage = lazy(() => import('./pages/admin/BinOnboardingPage'));
 const ProcessChallanPage = lazy(() => import('./pages/admin/ProcessChallanPage'));
+const ReceivingJobsPage = lazy(() => import('./pages/admin/receiving/ReceivingJobsPage'));
+const ReceivingJobDetailPage = lazy(() => import('./pages/admin/receiving/ReceivingJobDetailPage'));
+const PurchaseHomePage = lazy(() => import('./pages/purchase/PurchaseHomePage'));
+const PurchaseNewPoPage = lazy(() => import('./pages/purchase/PurchaseNewPoPage'));
+const PurchasePoDetailPage = lazy(() => import('./pages/purchase/PurchasePoDetailPage'));
+const PurchaseInvoiceReviewPage = lazy(() => import('./pages/purchase/PurchaseInvoiceReviewPage'));
+const PurchaseInvoiceNewPage = lazy(() => import('./pages/purchase/PurchaseInvoiceNewPage'));
 
 const ROLE_HOME: Record<string, string> = {
   sales: '/sales',
@@ -189,6 +197,16 @@ export default function App(): React.JSX.Element | null {
           }
         />
         <Route
+          path="/admin/pack-catalog"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <PackCatalogPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
           path="/admin/labels"
           element={
             <RequireRole>
@@ -284,6 +302,78 @@ export default function App(): React.JSX.Element | null {
             <RequireRole>
               <RequireAdminUnlock>
                 <SupplyDemandSkuDetailPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/receiving"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <ReceivingJobsPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/receiving/:jobId"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <ReceivingJobDetailPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+
+        {/* Purchase — PO Excel, invoice OCR, receiving handoff */}
+        <Route
+          path="/purchase"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <PurchaseHomePage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/purchase/new"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <PurchaseNewPoPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/purchase/invoice/new"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <PurchaseInvoiceNewPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/purchase/po/:poId"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <PurchasePoDetailPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/purchase/po/:poId/invoice"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <PurchaseInvoiceReviewPage />
               </RequireAdminUnlock>
             </RequireRole>
           }

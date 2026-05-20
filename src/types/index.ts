@@ -314,6 +314,10 @@ export interface ItemPackDefinition {
   item_name_snapshot: string;
   inner_pack_qty: number | null;
   outer_pack_qty: number | null;
+  /** PASPL EACH|PACK|BOTH — controls each-label eligibility on inner break */
+  sell_unit?: 'EACH' | 'PACK' | 'BOTH' | null;
+  bin_forward_pick_qty?: number | null;
+  supplier_type?: 'VARROC' | 'TAFE' | 'OTHER' | null;
   packet_label?: string | null;
   box_label?: string | null;
   confirmed_by_user_id?: number | null;
@@ -352,6 +356,21 @@ export interface LicensePlate {
   opened_at?: string | null;
   depleted_at?: string | null;
   voided_at?: string | null;
+  receiving_job_line_id?: number | null;
+  receiving_lot?: string | null;
+  receiving_pack_seq?: number | null;
+  receiving_lp_state?:
+    | 'printed'
+    | 'received_dock'
+    | 'overflow'
+    | 'broken'
+    | 'sold_whole'
+    | 'voided'
+    | 'voided_unissued'
+    | null;
+  invalidated_at?: string | null;
+  overflow_location_bin_id?: string | null;
+  receiving_putaway_ea_remaining?: number | null;
 }
 
 export type PickScanKind = 'sku' | 'lpn' | 'pack' | 'manual';
@@ -393,6 +412,50 @@ export interface BinInventory {
   last_counted_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** One MRP batch on the shelf (server: bin_inventory_layers). */
+export interface BinInventoryLayerRow {
+  id: number;
+  bin_id: string;
+  sku_busy_code: number;
+  qty_ea: number;
+  mrp_per_ea: number;
+  lot_no: string | null;
+  receiving_job_line_id: number | null;
+  source_license_plate_id: number | null;
+  fifo_received_at: string;
+  item_id_snapshot: number | null;
+  item_name_snapshot: string | null;
+}
+
+export interface BinPickerShelfLayer {
+  id: number;
+  mrp_per_ea: number;
+  qty_ea: number;
+  fifo_received_at: string;
+  is_fifo_recommended: boolean;
+  lot_no: string | null;
+}
+
+export interface BinPickerShelf {
+  bin_id: string;
+  sku_busy_code: number;
+  total_ea: number;
+  layers: BinPickerShelfLayer[];
+}
+
+export interface BinLayerPickEvent {
+  id: number;
+  order_item_id: number;
+  order_item_pick_scan_id: number | null;
+  bin_inventory_layer_id: number;
+  qty_ea: number;
+  mrp_per_ea: number;
+  fifo_skipped: boolean;
+  override_reason: string | null;
+  picker_user_id: number | null;
+  created_at: string;
 }
 
 export interface BinCountLog {
