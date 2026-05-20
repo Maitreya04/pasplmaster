@@ -7,6 +7,7 @@ import {
 import {
   prepareZXingModule,
   readBarcodes,
+  type Position,
   type ReadResult,
   type ReaderOptions,
 } from 'zxing-wasm/reader';
@@ -18,9 +19,17 @@ type ScanRequestMessage = {
   frameId: number;
   imageData: ImageData;
   roiLevel?: 'tight' | 'medium' | 'full';
+  missStreak?: number;
 };
 
 type WorkerRequestMessage = ScanRequestMessage;
+
+export type WorkerBoundingBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 type WorkerResponseMessage =
   | {
@@ -30,11 +39,14 @@ type WorkerResponseMessage =
       type: 'scan-result';
       frameId: number;
       rawValue: string | null;
+      boundingBox?: WorkerBoundingBox;
     }
   | {
       type: 'error';
       message: string;
     };
+
+const HARD_PASS_MISS_STREAK = 4;
 
 function cropImageData(
   source: ImageData,
@@ -114,6 +126,47 @@ function upscaleNearest(source: ImageData, scale: number): ImageData {
   return tctx.getImageData(0, 0, tw, th);
 }
 
+/** Stretch luminance to improve reads on faded or smudged labels. */
+function stretchContrast(source: ImageData): ImageData {
+  const { data, width, height } = source;
+  let min = 255;
+  let max = 0;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
+    if (lum < min) min = lum;
+    if (lum > max) max = lum;
+  }
+
+  if (max - min < 12) return source;
+
+  const scale = 255 / (max - min);
+  const out = new Uint8ClampedArray(data.length);
+  for (let i = 0; i < data.length; i += 4) {
+    for (let c = 0; c < 3; c += 1) {
+      out[i + c] = Math.min(255, Math.max(0, Math.round((data[i + c] - min) * scale)));
+    }
+    out[i + 3] = data[i + 3];
+  }
+
+  return new ImageData(out, width, height);
+}
+
+function positionToBoundingBox(position: Position): WorkerBoundingBox {
+  const xs = [position.topLeft.x, position.topRight.x, position.bottomLeft.x, position.bottomRight.x];
+  const ys = [position.topLeft.y, position.topRight.y, position.bottomLeft.y, position.bottomRight.y];
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+  };
+}
+
 function scoreSymbol(symbol: { type: ZBarSymbolType; decode(): string }): number {
   const decoded = symbol.decode().trim();
   if (!decoded) return -1000;
@@ -191,11 +244,11 @@ async function scanBestZXing(imageData: ImageData, tryHarder: boolean): Promise<
     tryHarder,
     tryRotate: tryHarder,
     tryInvert: tryHarder,
-    tryDownscale: true,
+    tryDownscale: !tryHarder,
     tryDenoise: tryHarder,
     binarizer: tryHarder ? 'LocalAverage' : 'GlobalHistogram',
     maxNumberOfSymbols: 4,
-    minLineCount: 2,
+    minLineCount: tryHarder ? 1 : 2,
     textMode: 'Plain',
   });
   const usableResults = results.filter((result) => result.text.trim().length > 0 && result.isValid);
@@ -229,6 +282,43 @@ async function scanBestSymbol(scanner: ZBarScanner, imageData: ImageData) {
       bestScore = score;
     }
   }
+  return best;
+}
+
+type ScanHit = {
+  text: string;
+  score: number;
+  boundingBox?: WorkerBoundingBox;
+};
+
+async function scanImageParallel(
+  scanner: ZBarScanner,
+  imageData: ImageData,
+  tryHarder: boolean,
+): Promise<ScanHit | null> {
+  const [zxingResult, zbarSymbol] = await Promise.all([
+    scanBestZXing(imageData, tryHarder),
+    tryHarder ? Promise.resolve(null) : scanBestSymbol(scanner, imageData),
+  ]);
+
+  let best: ScanHit | null = null;
+
+  if (zxingResult) {
+    best = {
+      text: zxingResult.text,
+      score: scoreZXingResult(zxingResult),
+      boundingBox: positionToBoundingBox(zxingResult.position),
+    };
+  }
+
+  if (zbarSymbol) {
+    const score = scoreSymbol(zbarSymbol);
+    const text = zbarSymbol.decode().trim();
+    if (!best || score > best.score) {
+      best = { text, score };
+    }
+  }
+
   return best;
 }
 
@@ -278,49 +368,76 @@ async function handleScan(message: ScanRequestMessage) {
     image.height * 0.6,
   );
 
-  const post = (rawValue: string | null) => {
+  const centerCropOffset = {
+    x: image.width * 0.2,
+    y: image.height * 0.2,
+  };
+
+  const normalizeBoundingBox = (
+    bbox: WorkerBoundingBox | undefined,
+    source: 'full' | 'center',
+    upscale = 1,
+  ): WorkerBoundingBox | undefined => {
+    if (!bbox) return undefined;
+    let normalized = bbox;
+    if (upscale !== 1) {
+      normalized = {
+        x: normalized.x / upscale,
+        y: normalized.y / upscale,
+        width: normalized.width / upscale,
+        height: normalized.height / upscale,
+      };
+    }
+    if (source === 'center') {
+      normalized = {
+        x: centerCropOffset.x + normalized.x,
+        y: centerCropOffset.y + normalized.y,
+        width: normalized.width,
+        height: normalized.height,
+      };
+    }
+    return normalized;
+  };
+
+  const post = (rawValue: string | null, boundingBox?: WorkerBoundingBox) => {
     const response: WorkerResponseMessage = {
       type: 'scan-result',
       frameId: message.frameId,
       rawValue,
+      ...(boundingBox ? { boundingBox } : {}),
     };
     self.postMessage(response);
   };
 
-  const fastPassImages: ImageData[] = [centerCrop, image];
-  for (const img of fastPassImages) {
-    const zxingResult = await scanBestZXing(img, false);
-    if (zxingResult) {
-      post(zxingResult.text);
+  const fastPassImages: Array<{ image: ImageData; source: 'full' | 'center' }> = [
+    { image: centerCrop, source: 'center' },
+    { image, source: 'full' },
+  ];
+  for (const pass of fastPassImages) {
+    const hit = await scanImageParallel(scanner, pass.image, false);
+    if (hit) {
+      post(hit.text, normalizeBoundingBox(hit.boundingBox, pass.source));
       return;
     }
   }
 
-  for (const img of fastPassImages) {
-    const symbol = await scanBestSymbol(scanner, img);
-    if (symbol) {
-      post(symbol.decode());
-      return;
-    }
+  const missStreak = message.missStreak ?? 0;
+  if (missStreak < HARD_PASS_MISS_STREAK) {
+    post(null);
+    return;
   }
 
-  const hardVariants: Array<{ image: ImageData; tryHarder: boolean }> = [
-    { image: upscaleNearest(centerCrop, 2), tryHarder: true },
+  const hardVariants: Array<{ image: ImageData; source: 'full' | 'center'; upscale: number }> = [
+    { image: upscaleNearest(stretchContrast(centerCrop), 2), source: 'center', upscale: 2 },
   ];
   if (message.roiLevel !== 'tight') {
-    hardVariants.push({ image: upscaleNearest(image, 1.35), tryHarder: true });
+    hardVariants.push({ image: upscaleNearest(stretchContrast(image), 1.35), source: 'full', upscale: 1.35 });
   }
 
   for (const variant of hardVariants) {
-    const zxingResult = await scanBestZXing(variant.image, variant.tryHarder);
-    if (zxingResult) {
-      post(zxingResult.text);
-      return;
-    }
-
-    const symbol = await scanBestSymbol(scanner, variant.image);
-    if (symbol) {
-      post(symbol.decode());
+    const hit = await scanImageParallel(scanner, variant.image, true);
+    if (hit) {
+      post(hit.text, normalizeBoundingBox(hit.boundingBox, variant.source, variant.upscale));
       return;
     }
   }

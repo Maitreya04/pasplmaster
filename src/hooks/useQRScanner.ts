@@ -4,6 +4,7 @@ import {
   captureRoiBitmap,
   captureRoiImageData,
   getNextRoiLevel,
+  type RoiCrop,
 } from '../lib/scanner/roiProcessor';
 import type { BarcodeDetectorLike, BarcodeDetectorResult } from '../context/CameraContext';
 import { useOptionalPickingCamera } from '../context/CameraContext';
@@ -28,7 +29,7 @@ const BURST_SCAN_INTERVAL_MS = 16;
 const BURST_WINDOW_MS = 700;
 const WORKER_MAX_PENDING_FRAMES = 2;
 const ROI_MAX_LONG_EDGE_NATIVE = 1280;
-const ROI_MAX_LONG_EDGE_WORKER = 800;
+const ROI_MAX_LONG_EDGE_WORKER = 960;
 
 export interface PickedDetectedValue {
   rawValue: string;
@@ -42,7 +43,14 @@ export interface DisplayBox {
   width: number;
   height: number;
   areaRatio: number;
+  confidence: 'detected' | 'locked';
 }
+
+type WorkerCaptureMeta = {
+  sourceCrop: RoiCrop;
+  imageWidth: number;
+  imageHeight: number;
+};
 
 function getBoundingBoxArea(entry: BarcodeDetectorResult): number | null {
   const bbox = entry.boundingBox;
@@ -105,7 +113,11 @@ function pickBestDetectedRawValue(
   return best;
 }
 
-export function mapBoundingBoxToDisplay(entry: PickedDetectedValue, video: HTMLVideoElement): DisplayBox | null {
+export function mapBoundingBoxToDisplay(
+  entry: PickedDetectedValue,
+  video: HTMLVideoElement,
+  confidence: DisplayBox['confidence'] = 'detected',
+): DisplayBox | null {
   const bbox = entry.boundingBox;
   if (!bbox || video.videoWidth <= 0 || video.videoHeight <= 0) return null;
 
@@ -124,7 +136,31 @@ export function mapBoundingBoxToDisplay(entry: PickedDetectedValue, video: HTMLV
     width: bbox.width * coverScale,
     height: bbox.height * coverScale,
     areaRatio: (bbox.width * bbox.height) / (video.videoWidth * video.videoHeight),
+    confidence,
   };
+}
+
+function projectImageBBoxToDisplay(
+  bbox: { x: number; y: number; width: number; height: number },
+  capture: WorkerCaptureMeta,
+  video: HTMLVideoElement,
+  confidence: DisplayBox['confidence'],
+): DisplayBox | null {
+  const scaleX = capture.sourceCrop.sw / capture.imageWidth;
+  const scaleY = capture.sourceCrop.sh / capture.imageHeight;
+  return mapBoundingBoxToDisplay(
+    {
+      rawValue: '',
+      boundingBox: {
+        x: capture.sourceCrop.sx + bbox.x * scaleX,
+        y: capture.sourceCrop.sy + bbox.y * scaleY,
+        width: bbox.width * scaleX,
+        height: bbox.height * scaleY,
+      },
+    },
+    video,
+    confidence,
+  );
 }
 
 function projectRoiPickToVideo(
@@ -155,6 +191,7 @@ type ScannerEnginePath =
       workerCanvas: HTMLCanvasElement;
       workerCtx: CanvasRenderingContext2D;
       pending: Set<number>;
+      pendingCaptures: Map<number, WorkerCaptureMeta>;
     };
 
 type CameraCapabilities = MediaTrackCapabilities & {
@@ -214,7 +251,7 @@ export function useQRScanner({
     updatedAt: 0,
   });
 
-  const STABLE_SCAN_MIN_FRAMES = 1;
+  const STABLE_SCAN_MIN_FRAMES = 2;
   const STABLE_SCAN_TTL_MS = 600;
 
   const [supportMessage, setSupportMessage] = useState<string | null>(null);
@@ -305,7 +342,7 @@ export function useQRScanner({
 
       const currentZoom = currentZoomRef.current ?? 1;
       const shouldZoomForBox = areaRatio != null && areaRatio > 0 && areaRatio < 0.025;
-      const shouldZoomForMisses = noHitFrameCountRef.current >= 18;
+      const shouldZoomForMisses = noHitFrameCountRef.current >= 8;
       if (!shouldZoomForBox && !shouldZoomForMisses) return;
       if (currentZoom >= Math.min(maxZoom, 3)) return;
 
@@ -367,17 +404,21 @@ export function useQRScanner({
             if (selected) {
               noHitFrameCountRef.current = 0;
               burstUntilRef.current = Date.now() + BURST_WINDOW_MS;
-              const box = mapBoundingBoxToDisplay(selected, video);
-              setDetectedBox(box);
-              nudgeZoomForTinyCodesRef.current(box?.areaRatio);
 
               const now = Date.now();
               const state = stableScanRef.current;
               const isFresh = now - state.updatedAt <= STABLE_SCAN_TTL_MS;
               const isSame = isFresh && state.rawValue === selected.rawValue;
+              const nextCount = isSame ? state.count + 1 : 1;
+              const boxConfidence: DisplayBox['confidence'] =
+                nextCount >= STABLE_SCAN_MIN_FRAMES ? 'locked' : 'detected';
+              const box = mapBoundingBoxToDisplay(selected, video, boxConfidence);
+              setDetectedBox(box);
+              nudgeZoomForTinyCodesRef.current(box?.areaRatio);
+
               stableScanRef.current = {
                 rawValue: selected.rawValue,
-                count: isSame ? state.count + 1 : 1,
+                count: nextCount,
                 updatedAt: now,
               };
               if (stableScanRef.current.count >= STABLE_SCAN_MIN_FRAMES) {
@@ -400,12 +441,18 @@ export function useQRScanner({
               if (capture) {
                 const frameId = Date.now();
                 engine.pending.add(frameId);
+                engine.pendingCaptures.set(frameId, {
+                  sourceCrop: capture.sourceCrop,
+                  imageWidth: capture.imageData.width,
+                  imageHeight: capture.imageData.height,
+                });
                 engine.worker.postMessage(
                   {
                     type: 'scan',
                     frameId,
                     imageData: capture.imageData,
                     roiLevel: capture.level,
+                    missStreak: noHitFrameCountRef.current,
                   },
                   [capture.imageData.data.buffer],
                 );
@@ -447,20 +494,34 @@ export function useQRScanner({
         const data = event.data;
         if (data.type === 'scan-result') {
           const engineNow = engineRef.current;
+          let captureMeta: WorkerCaptureMeta | undefined;
           if (engineNow?.type === 'worker') {
             engineNow.pending.delete(data.frameId);
+            captureMeta = engineNow.pendingCaptures.get(data.frameId);
+            engineNow.pendingCaptures.delete(data.frameId);
           }
           if (data.rawValue && !cancelled && !completedRef.current && !lockedRef.current) {
             noHitFrameCountRef.current = 0;
             burstUntilRef.current = Date.now() + BURST_WINDOW_MS;
-            setDetectedBox(null);
             const now = Date.now();
             const state = stableScanRef.current;
             const isFresh = now - state.updatedAt <= STABLE_SCAN_TTL_MS;
             const isSame = isFresh && state.rawValue === data.rawValue;
+            const nextCount = isSame ? state.count + 1 : 1;
+            const boxConfidence: DisplayBox['confidence'] =
+              nextCount >= STABLE_SCAN_MIN_FRAMES ? 'locked' : 'detected';
+
+            const video = videoRef.current;
+            if (data.boundingBox && captureMeta && video) {
+              const box = projectImageBBoxToDisplay(data.boundingBox, captureMeta, video, boxConfidence);
+              if (box) setDetectedBox(box);
+            } else if (nextCount >= STABLE_SCAN_MIN_FRAMES) {
+              setDetectedBox((prev) => (prev ? { ...prev, confidence: 'locked' } : prev));
+            }
+
             stableScanRef.current = {
               rawValue: data.rawValue,
-              count: isSame ? state.count + 1 : 1,
+              count: nextCount,
               updatedAt: now,
             };
             if (stableScanRef.current.count >= STABLE_SCAN_MIN_FRAMES) {
@@ -479,6 +540,7 @@ export function useQRScanner({
           const engineNow = engineRef.current;
           if (engineNow?.type === 'worker') {
             engineNow.pending.clear();
+            engineNow.pendingCaptures.clear();
           }
         }
       };
@@ -530,6 +592,7 @@ export function useQRScanner({
               workerCanvas: canvas,
               workerCtx: ctx,
               pending: new Set(),
+              pendingCaptures: new Map(),
             };
             attachWorkerOnMessage(warm.worker);
           }
@@ -597,7 +660,14 @@ export function useQRScanner({
             setSupportMessage('Canvas 2D context is required for QR scanning.');
             return;
           }
-          engineRef.current = { type: 'worker', worker, workerCanvas: canvas, workerCtx: ctx, pending: new Set() };
+          engineRef.current = {
+            type: 'worker',
+            worker,
+            workerCanvas: canvas,
+            workerCtx: ctx,
+            pending: new Set(),
+            pendingCaptures: new Map(),
+          };
           attachWorkerOnMessage(worker);
         }
 

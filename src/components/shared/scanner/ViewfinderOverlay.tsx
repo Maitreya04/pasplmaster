@@ -8,6 +8,47 @@ export interface ViewfinderOverlayProps {
   flashColor: 'green' | 'red' | null;
 }
 
+function DetectedCodeBox({ box }: { box: DisplayBox }): React.JSX.Element {
+  const isLocked = box.confidence === 'locked';
+  const color = isLocked ? 'rgb(110, 231, 183)' : 'rgb(251, 191, 36)';
+  const glow = isLocked ? 'rgba(52,211,153,0.45)' : 'rgba(251,191,36,0.35)';
+
+  return (
+    <div
+      className={`pointer-events-none absolute ${isLocked ? '' : 'scanner-box-detected'}`}
+      style={{
+        left: box.left,
+        top: box.top,
+        width: box.width,
+        height: box.height,
+        transition: 'left 90ms linear, top 90ms linear, width 90ms linear, height 90ms linear',
+      }}
+    >
+      {(['tl', 'tr', 'bl', 'br'] as const).map((corner) => {
+        const isTop = corner.startsWith('t');
+        const isLeft = corner.endsWith('l');
+        return (
+          <span
+            key={corner}
+            className="absolute h-5 w-5"
+            style={{
+              [isTop ? 'top' : 'bottom']: -1,
+              [isLeft ? 'left' : 'right']: -1,
+              borderColor: color,
+              borderTopWidth: isTop ? 3 : 0,
+              borderBottomWidth: isTop ? 0 : 3,
+              borderLeftWidth: isLeft ? 3 : 0,
+              borderRightWidth: isLeft ? 0 : 3,
+              borderStyle: 'solid',
+              boxShadow: `0 0 12px ${glow}`,
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 export function ViewfinderOverlay({
   videoRef,
   supportMessage,
@@ -40,18 +81,7 @@ export function ViewfinderOverlay({
           />
         </div>
       </div>
-      {detectedBox && (
-        <div
-          className="pointer-events-none absolute rounded-xl border-2 border-emerald-300 shadow-[0_0_24px_rgba(52,211,153,0.45)]"
-          style={{
-            left: detectedBox.left,
-            top: detectedBox.top,
-            width: detectedBox.width,
-            height: detectedBox.height,
-            transition: 'all 90ms linear',
-          }}
-        />
-      )}
+      {detectedBox && <DetectedCodeBox box={detectedBox} />}
       {flashColor && (
         <div
           className="pointer-events-none absolute inset-0"
@@ -68,14 +98,25 @@ export function ViewfinderOverlay({
           50% { opacity: 0.95; }
           100% { top: 88%; opacity: 0.35; }
         }
+        @keyframes scannerBoxPulse {
+          0%, 100% { opacity: 0.65; }
+          50% { opacity: 1; }
+        }
         .scanner-scan-line {
           animation: scannerScanLineMove 2.2s ease-in-out infinite;
+        }
+        .scanner-box-detected {
+          animation: scannerBoxPulse 0.9s ease-in-out infinite;
         }
         @media (prefers-reduced-motion: reduce) {
           .scanner-scan-line {
             animation: none;
             top: 50%;
             opacity: 0.45;
+          }
+          .scanner-box-detected {
+            animation: none;
+            opacity: 0.85;
           }
         }
       `}</style>
