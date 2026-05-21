@@ -4,7 +4,7 @@ import { ArrowLeft, Eye } from '@phosphor-icons/react';
 import { PageHeader, Card, Skeleton } from '../../components/shared';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import type { OrderItem } from '../../types';
-import { pickQuantityTarget } from '../../lib/cartSupply';
+import { pickQuantityTarget, pickableOrderItems } from '../../lib/cartSupply';
 import { isAskLine } from '../../lib/picking/askBrand';
 import { isLucasLine } from '../../lib/picking/lucasBrand';
 import { BrandLineChip } from '../../components/picking/BrandLineChip';
@@ -26,8 +26,25 @@ export default function PickPreviewPage(): React.JSX.Element | null {
 
   const rows = useMemo(() => {
     if (!order?.items?.length) return [];
-    return sortByRack(order.items);
+    return sortByRack(pickableOrderItems(order.items));
   }, [order?.items]);
+
+  const pickLineCount = order?.pick_line_count ?? rows.length;
+
+  const previewBrandCounts = useMemo(() => {
+    let ask = 0;
+    let lucas = 0;
+    for (const line of rows) {
+      const brandLine = {
+        item_name: line.item_name,
+        main_group: line.catalog_main_group,
+        parent_group: line.catalog_parent_group,
+      };
+      if (isAskLine(brandLine)) ask += 1;
+      if (isLucasLine(brandLine)) lucas += 1;
+    }
+    return { ask, lucas };
+  }, [rows]);
 
   if (orderId === null || !Number.isFinite(orderId) || orderId <= 0) {
     return (
@@ -78,15 +95,15 @@ export default function PickPreviewPage(): React.JSX.Element | null {
                   {order.customer_name}
                 </p>
                 <p className="text-xs text-[var(--content-tertiary)] mt-1 tabular-nums">
-                  {order.item_count} line{order.item_count === 1 ? '' : 's'}
-                  {(order.ask_line_count ?? 0) > 0 && (
+                  {pickLineCount} line{pickLineCount === 1 ? '' : 's'}
+                  {(previewBrandCounts.ask > 0) && (
                     <span className="ml-2 inline-flex items-center gap-1">
-                      <BrandLineChip brand="ask" count={order.ask_line_count} />
+                      <BrandLineChip brand="ask" count={previewBrandCounts.ask} />
                     </span>
                   )}
-                  {(order.lucas_line_count ?? 0) > 0 && (
+                  {(previewBrandCounts.lucas > 0) && (
                     <span className="ml-1.5 inline-flex items-center gap-1">
-                      <BrandLineChip brand="lucas" count={order.lucas_line_count} />
+                      <BrandLineChip brand="lucas" count={previewBrandCounts.lucas} />
                     </span>
                   )}
                 </p>

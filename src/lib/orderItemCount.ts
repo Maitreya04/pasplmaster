@@ -1,4 +1,5 @@
 import type { Order, Item } from '../types';
+import { countPickableOrderLines } from './cartSupply';
 import { isAskLine } from './picking/askBrand';
 import { isLucasLine } from './picking/lucasBrand';
 import { summarizeSpecialPricing } from './specialPricing';
@@ -18,7 +19,7 @@ import { ITEMS_QUERY_KEY } from '../hooks/useItems';
  * one-time snapshot — payloads shrink by ~40–60% with zero UI regression.
  */
 export const ORDERS_SELECT_WITH_ITEM_LINE_COUNT =
-  '*, order_items(item_id,price_quoted,price_system,qty_requested,item_name)' as const;
+  '*, order_items(item_id,price_quoted,price_system,qty_requested,qty_shippable,qty_approved,item_name)' as const;
 
 export type OrderRowWithEmbed = Order & {
   order_items?: {
@@ -26,6 +27,8 @@ export type OrderRowWithEmbed = Order & {
     price_quoted?: number | null;
     price_system?: number | null;
     qty_requested?: number;
+    qty_shippable?: number;
+    qty_approved?: number | null;
     item_name?: string | null;
   }[] | null;
 };
@@ -77,9 +80,18 @@ export function normalizeOrderBusyItemCount(row: OrderRowWithEmbed): Order & {
     if (isAskLine(line)) askLineCount += 1;
     if (isLucasLine(line)) lucasLineCount += 1;
   }
+  const pickLineCount = countPickableOrderLines(
+    (embed ?? []).map((item) => ({
+      qty_requested: item.qty_requested ?? 0,
+      qty_shippable: item.qty_shippable,
+      qty_approved: item.qty_approved,
+    })),
+  );
+
   return {
     ...rest,
     item_count: liveLineCount,
+    pick_line_count: pickLineCount,
     ask_line_count: askLineCount,
     lucas_line_count: lucasLineCount,
     special_rate_line_count: specialLineCount,
@@ -130,9 +142,18 @@ export function normalizeOrderListBusyItemCount(
       if (isAskLine(line)) askLineCount += 1;
       if (isLucasLine(line)) lucasLineCount += 1;
     }
+    const pickLineCount = countPickableOrderLines(
+      (embed ?? []).map((item) => ({
+        qty_requested: item.qty_requested ?? 0,
+        qty_shippable: item.qty_shippable,
+        qty_approved: item.qty_approved,
+      })),
+    );
+
     return {
       ...rest,
       item_count: liveLineCount,
+      pick_line_count: pickLineCount,
       ask_line_count: askLineCount,
       lucas_line_count: lucasLineCount,
       special_rate_line_count: specialLineCount,

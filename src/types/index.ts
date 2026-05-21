@@ -73,6 +73,8 @@ export interface Order {
   notes: string | null;
   /** Busy “items”: number of invoice rows (distinct order_lines), not sum of qty. Prefer live count from order_items when available. */
   item_count: number;
+  /** Lines with qty to pick from stock (excludes full PO / billing-dropped rows). */
+  pick_line_count?: number;
   /** Lines whose catalog or line text resolves to ASK (see `isAskLine`). Set when loading queue embeds. */
   ask_line_count?: number;
   /** Lines whose catalog or line text resolves to Lucas (see `isLucasLine`). Set when loading queue embeds. */

@@ -31,7 +31,7 @@ import type { OrderItem, OrderItemState, ScanResult } from '../../types';
 import { FLAG_REASONS, type FlagReason } from '../../utils/constants';
 import { PickCompleteScreen } from './PickCompleteScreen';
 import { QueueSheet, type QueueSheetRow } from './QueueSheet';
-import { pickQuantityTarget } from '../../lib/cartSupply';
+import { pickQuantityTarget, pickableOrderItems } from '../../lib/cartSupply';
 import { appHaptics } from '../../lib/haptics';
 import { sendInternalNotification } from '../../lib/pickerPush';
 import type { LiveQrScannerResolved } from '../../components/shared/LiveQrScanner';
@@ -390,7 +390,10 @@ export default function PickPage(): React.JSX.Element | null {
   } | null>(null);
   const [fifoOverrideReason, setFifoOverrideReason] = useState('');
 
-  const orderItems = order?.items;
+  const orderItems = useMemo(
+    () => (order?.items ? pickableOrderItems(order.items) : undefined),
+    [order?.items],
+  );
 
   // Hydrate per-order state from sessionStorage so a refresh doesn't force the
   // picker to re-scan racks or re-acknowledge the brief mid-flow.
@@ -542,8 +545,8 @@ export default function PickPage(): React.JSX.Element | null {
   // Group the trip-summary view's racks by rack_no so the brief reads as a route,
   // not a list of items. Items without a rack go into a "—" group at the end.
   const briefRacks = useMemo(() => {
-    if (!order?.items) return [] as { rack: string | null; lines: number; pieces: number }[];
-    const sorted = sortByRack(order.items);
+    if (!orderItems?.length) return [] as { rack: string | null; lines: number; pieces: number }[];
+    const sorted = sortByRack(orderItems);
     const map = new Map<string, { rack: string | null; lines: number; pieces: number }>();
     for (const item of sorted) {
       const key = item.rack_no ?? '—';
@@ -554,13 +557,13 @@ export default function PickPage(): React.JSX.Element | null {
       map.set(key, entry);
     }
     return [...map.values()];
-  }, [order?.items]);
+  }, [orderItems]);
 
   const briefTotals = useMemo(() => {
-    const lines = order?.items?.length ?? 0;
-    const pieces = order?.items?.reduce((sum, oi) => sum + pickQuantityTarget(oi), 0) ?? 0;
+    const lines = orderItems?.length ?? 0;
+    const pieces = orderItems?.reduce((sum, oi) => sum + pickQuantityTarget(oi), 0) ?? 0;
     return { lines, pieces };
-  }, [order?.items]);
+  }, [orderItems]);
 
   // Build the QueueSheet view-model in one place.
   const queueSheetRows: QueueSheetRow[] = useMemo(() => {
@@ -1759,6 +1762,23 @@ export default function PickPage(): React.JSX.Element | null {
               Go back to queue
             </button>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (orderItems && orderItems.length === 0) {
+    return (
+      <div className="min-h-screen pb-32 p-4">
+        <div className="mb-6 p-4 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]">
+          <p className="font-semibold text-[var(--content-primary)]">Nothing to pick</p>
+          <p className="text-sm text-[var(--content-secondary)] mt-2">
+            Billing approved this order with no shippable stock — all lines are on purchase order.
+            Return to the queue and pick another order.
+          </p>
+          <BigButton variant="secondary" onClick={() => navigate('/picking')} className="mt-4">
+            Back to Queue
+          </BigButton>
         </div>
       </div>
     );

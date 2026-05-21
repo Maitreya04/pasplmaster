@@ -5,6 +5,7 @@ import { subscribeToTable } from '../lib/realtime';
 import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
 import { isAskLine } from '../lib/picking/askBrand';
 import { isLucasLine } from '../lib/picking/lucasBrand';
+import { countPickableOrderLines } from '../lib/cartSupply';
 import type { OrderItem, OrderWithItems } from '../types';
 
 type ItemCatalogJoin = {
@@ -86,6 +87,7 @@ export function useOrderDetail(orderId: number | null) {
       if (itemsError) throw itemsError;
 
       const items = mapOrderItemsWithCatalog(rawItems as OrderItemRow[] | null);
+      const pickLineCount = countPickableOrderLines(items);
       const askLineCount = items.filter((oi) =>
         isAskLine({
           item_name: oi.item_name,
@@ -121,8 +123,9 @@ export function useOrderDetail(orderId: number | null) {
         customer_mobile: customerMobile,
         customer_address: customerAddress,
         items,
-        /** Busy “items” = invoice lines; prefer live row count over denormalized column. */
+        /** Busy “items” = invoice rows; pick_line_count excludes PO-only lines. */
         item_count: items.length,
+        pick_line_count: pickLineCount,
         ask_line_count: askLineCount,
         lucas_line_count: lucasLineCount,
       } as OrderWithItems;

@@ -30,6 +30,10 @@ import {
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 import { BrandLineChip } from '../../components/picking/BrandLineChip';
 
+function pickerLineCount(order: { pick_line_count?: number; item_count: number }): number {
+  return order.pick_line_count ?? order.item_count;
+}
+
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return '';
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -92,7 +96,7 @@ export default function QueuePage(): React.JSX.Element | null {
 
   const queueHeadline = useMemo(() => {
     const orders = availableOrders.length;
-    const items = availableOrders.reduce((sum, o) => sum + (o.item_count ?? 0), 0);
+    const items = availableOrders.reduce((sum, o) => sum + pickerLineCount(o), 0);
     const urgent = availableOrders.filter((o) => o.priority === 'urgent').length;
     return { orders, items, urgent };
   }, [availableOrders]);
@@ -351,7 +355,7 @@ export default function QueuePage(): React.JSX.Element | null {
                     <p className="text-sm text-[var(--content-secondary)] truncate">
                       {pick.customer_name}
                       <span className="text-[var(--content-tertiary)]">
-                        {' '}· {pick.item_count} items
+                        {' '}· {pickerLineCount(pick)} items
                       </span>
                       {(pick.ask_line_count ?? 0) > 0 && (
                         <BrandLineChip brand="ask" count={pick.ask_line_count} className="ml-1.5" />
@@ -493,7 +497,7 @@ export default function QueuePage(): React.JSX.Element | null {
                         )}
                       </p>
                       <p className="text-xs text-[var(--content-quaternary)] tabular-nums">
-                        {order.item_count} items
+                        {pickerLineCount(order)} items
                       </p>
                     </div>
                   </Card>
@@ -564,7 +568,7 @@ function OrderCard({
         <div className="flex items-center gap-3 text-xs text-[var(--content-tertiary)]">
           <span className="flex items-center gap-1">
             <Package size={14} />
-            {order.item_count} items
+            {pickerLineCount(order)} items
           </span>
           {order.transport_name && (
             <span className="truncate max-w-[140px]">

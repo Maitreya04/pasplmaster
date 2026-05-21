@@ -100,3 +100,32 @@ export function pickQuantityTarget(oi: {
   }
   return shipCap;
 }
+
+/** True when billing approved at least one unit to pick from stock. */
+export function isPickableOrderLine(oi: {
+  qty_requested: number;
+  qty_shippable?: number;
+  qty_approved?: number | null;
+}): boolean {
+  return pickQuantityTarget(oi) > 0;
+}
+
+export function pickableOrderItems<
+  T extends {
+    qty_requested: number;
+    qty_shippable?: number;
+    qty_approved?: number | null;
+  },
+>(items: T[]): T[] {
+  return items.filter(isPickableOrderLine);
+}
+
+export function countPickableOrderLines(
+  items: {
+    qty_requested: number;
+    qty_shippable?: number;
+    qty_approved?: number | null;
+  }[],
+): number {
+  return pickableOrderItems(items).length;
+}
