@@ -166,10 +166,10 @@ export function LiveQrScanner({
   const resolvedHelpText = useMemo(() => {
     if (helpText) return helpText;
     if (isTafePick && pickScanContext) {
-      return 'TAFE label: aim at the 2D QR or top barcode with the part number — ignore the bottom serial stamp.';
+      return 'TAFE: fill the upper label in frame. Use torch on plastic glare. Scan the QR or top part barcode — ignore the bottom serial stamp.';
     }
     if (pickScanContext) {
-      return 'Aim at the QR or barcode that shows the part number, not a serial stamp below it.';
+      return 'Damaged or wrinkled label? Hold steady, use torch, and aim at the part-number QR or top barcode.';
     }
     return 'Steady, fill the frame, use torch in dim aisles.';
   }, [helpText, isTafePick, pickScanContext]);

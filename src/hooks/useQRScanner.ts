@@ -17,9 +17,11 @@ import {
 import { createVideoScanLoop } from '../lib/scanner/videoLoop';
 import {
   pickBestBarcodeCandidate,
+  barcodeMatchesExpected,
   type BarcodeHit,
   type PickBarcodeContext,
 } from '../lib/scanner/pickBarcodeSelection';
+import { oemCaptureBoost } from '../lib/scanner/labelPreprocess';
 import { isScannerDebugEnabled, scannerDebugLog } from '../lib/scanner/scannerDebug';
 
 type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => BarcodeDetectorLike;
@@ -32,8 +34,24 @@ const WORKER_SCAN_INTERVAL_MS = 33;
 const BURST_SCAN_INTERVAL_MS = 16;
 const BURST_WINDOW_MS = 700;
 const WORKER_MAX_PENDING_FRAMES = 2;
-const ROI_MAX_LONG_EDGE_NATIVE = 1280;
-const ROI_MAX_LONG_EDGE_WORKER = 960;
+
+function oemHardeningActive(pickContext?: PickBarcodeContext): boolean {
+  return Boolean(pickContext?.oemMultiBarcodeMode && pickContext.expectedCodes.length > 0);
+}
+
+function captureOptionsForPick(pickContext?: PickBarcodeContext): {
+  maxLongEdge: number;
+  upscale: number;
+} {
+  return oemCaptureBoost(oemHardeningActive(pickContext));
+}
+
+function stableFramesRequired(rawValue: string, pickContext?: PickBarcodeContext): number {
+  if (oemHardeningActive(pickContext) && barcodeMatchesExpected(rawValue, pickContext!.expectedCodes)) {
+    return 1;
+  }
+  return 2;
+}
 
 export interface PickedDetectedValue {
   rawValue: string;
@@ -226,7 +244,6 @@ export function useQRScanner({
     updatedAt: 0,
   });
 
-  const STABLE_SCAN_MIN_FRAMES = 2;
   const STABLE_SCAN_TTL_MS = 600;
 
   const [supportMessage, setSupportMessage] = useState<string | null>(null);
@@ -319,7 +336,7 @@ export function useQRScanner({
 
       const currentZoom = currentZoomRef.current ?? 1;
       const shouldZoomForBox = areaRatio != null && areaRatio > 0 && areaRatio < 0.025;
-      const shouldZoomForMisses = noHitFrameCountRef.current >= 8;
+      const shouldZoomForMisses = noHitFrameCountRef.current >= (oemHardeningActive(pickContextRef.current) ? 5 : 8);
       if (!shouldZoomForBox && !shouldZoomForMisses) return;
       if (currentZoom >= Math.min(maxZoom, 3)) return;
 
@@ -357,9 +374,10 @@ export function useQRScanner({
         try {
           if (engine.type === 'native') {
             let selected: PickedDetectedValue | null = null;
+            const captureOpts = captureOptionsForPick(pickContextRef.current);
             const roiCapture = await captureViewfinderBitmap(video, {
-              maxLongEdge: ROI_MAX_LONG_EDGE_NATIVE,
-              upscale: 1.85,
+              maxLongEdge: captureOpts.maxLongEdge,
+              upscale: captureOpts.upscale,
               viewfinderEl: viewfinderRef.current,
             });
 
@@ -391,8 +409,9 @@ export function useQRScanner({
               const isFresh = now - state.updatedAt <= STABLE_SCAN_TTL_MS;
               const isSame = isFresh && state.rawValue === selected.rawValue;
               const nextCount = isSame ? state.count + 1 : 1;
+              const minStable = stableFramesRequired(selected.rawValue, pickContextRef.current);
               const boxConfidence: DisplayBox['confidence'] =
-                nextCount >= STABLE_SCAN_MIN_FRAMES ? 'locked' : 'detected';
+                nextCount >= minStable ? 'locked' : 'detected';
               const box = mapBoundingBoxToDisplay(selected, video, boxConfidence);
               setDetectedBox(box);
               nudgeZoomForTinyCodesRef.current(box?.areaRatio);
@@ -402,7 +421,7 @@ export function useQRScanner({
                 count: nextCount,
                 updatedAt: now,
               };
-              if (stableScanRef.current.count >= STABLE_SCAN_MIN_FRAMES) {
+              if (stableScanRef.current.count >= minStable) {
                 stableScanRef.current = { rawValue: null, count: 0, updatedAt: 0 };
                 emitStableDecode(selected.rawValue);
               }
@@ -414,9 +433,10 @@ export function useQRScanner({
             }
           } else if (engine.type === 'worker') {
             if (engine.pending.size < WORKER_MAX_PENDING_FRAMES) {
+              const captureOpts = captureOptionsForPick(pickContextRef.current);
               const capture = captureViewfinderImageData(video, engine.workerCanvas, engine.workerCtx, {
-                maxLongEdge: ROI_MAX_LONG_EDGE_WORKER,
-                upscale: 1.85,
+                maxLongEdge: captureOpts.maxLongEdge,
+                upscale: captureOpts.upscale,
                 viewfinderEl: viewfinderRef.current,
               });
               if (capture) {
@@ -506,13 +526,14 @@ export function useQRScanner({
             const isFresh = now - state.updatedAt <= STABLE_SCAN_TTL_MS;
             const isSame = isFresh && state.rawValue === data.rawValue;
             const nextCount = isSame ? state.count + 1 : 1;
+            const minStable = stableFramesRequired(data.rawValue, pickContextRef.current);
             const boxConfidence: DisplayBox['confidence'] =
-              nextCount >= STABLE_SCAN_MIN_FRAMES ? 'locked' : 'detected';
+              nextCount >= minStable ? 'locked' : 'detected';
 
             if (data.boundingBox && captureMeta && video) {
               const box = projectImageBBoxToDisplay(data.boundingBox, captureMeta, video, boxConfidence);
               if (box) setDetectedBox(box);
-            } else if (nextCount >= STABLE_SCAN_MIN_FRAMES) {
+            } else if (nextCount >= minStable) {
               setDetectedBox((prev) => (prev ? { ...prev, confidence: 'locked' } : prev));
             }
 
@@ -521,7 +542,7 @@ export function useQRScanner({
               count: nextCount,
               updatedAt: now,
             };
-            if (stableScanRef.current.count >= STABLE_SCAN_MIN_FRAMES) {
+            if (stableScanRef.current.count >= minStable) {
               stableScanRef.current = { rawValue: null, count: 0, updatedAt: 0 };
               emitStableDecode(data.rawValue);
             }
