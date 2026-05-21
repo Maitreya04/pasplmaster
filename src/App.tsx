@@ -32,6 +32,7 @@ const AdminPasscodePage = lazy(() => import('./pages/admin/AdminPasscodePage'));
 const UploadPage = lazy(() => import('./pages/admin/UploadPage'));
 const LabelStudioPage = lazy(() => import('./pages/admin/LabelStudioPage'));
 const PackCatalogPage = lazy(() => import('./pages/admin/PackCatalogPage'));
+const ParetoLabelPrintPage = lazy(() => import('./pages/admin/ParetoLabelPrintPage'));
 const CycleCountPage = lazy(() => import('./pages/admin/CycleCountPage'));
 const PickScanLabPage = lazy(() => import('./pages/admin/PickScanLabPage'));
 const OcrOrderLabPage = lazy(() => import('./pages/admin/OcrOrderLabPage'));
@@ -202,6 +203,16 @@ export default function App(): React.JSX.Element | null {
             <RequireRole>
               <RequireAdminUnlock>
                 <PackCatalogPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/pareto-labels"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <ParetoLabelPrintPage />
               </RequireAdminUnlock>
             </RequireRole>
           }

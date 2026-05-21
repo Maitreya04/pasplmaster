@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Lucas 80/20 Pareto — Label Print Plan</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; color: #1a1a2e; padding: 24px; font-size: 13px; }
+
+h1 { font-size: 20px; font-weight: 800; color: #1a1a2e; margin-bottom: 3px; }
+.subtitle { font-size: 12px; color: #777; margin-bottom: 20px; }
+
+/* Stats */
+.stats { display: flex; gap: 12px; margin-bottom: 22px; flex-wrap: wrap; }
+.card { background: white; border-radius: 10px; padding: 14px 18px; flex: 1; min-width: 130px;
+  box-shadow: 0 1px 5px rgba(0,0,0,0.07); border-top: 4px solid #2563eb; }
+.card.r { border-top-color: #dc2626; }
+.card.g { border-top-color: #16a34a; }
+.card.o { border-top-color: #f97316; }
+.card.p { border-top-color: #7c3aed; }
+.clabel { font-size: 10px; color: #999; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
+.cval { font-size: 26px; font-weight: 800; color: #1a1a2e; }
+.csub { font-size: 10.5px; color: #888; margin-top: 2px; }
+
+/* Pareto bar chart */
+.chart-wrap { background: white; border-radius: 10px; padding: 20px 20px 14px; margin-bottom: 22px;
+  box-shadow: 0 1px 5px rgba(0,0,0,0.07); }
+.chart-title { font-size: 12px; font-weight: 700; color: #444; margin-bottom: 14px; }
+.bar-chart { display: flex; align-items: flex-end; gap: 3px; height: 120px; }
+.bar-col { display: flex; flex-direction: column; align-items: center; flex: 1; height: 100%; justify-content: flex-end; }
+.bar { width: 100%; border-radius: 3px 3px 0 0; min-height: 2px; transition: opacity 0.2s; }
+.bar.top5  { background: #dc2626; }
+.bar.top20 { background: #f97316; }
+.bar.rest  { background: #2563eb; }
+.bar-lbl { font-size: 8px; color: #aaa; margin-top: 3px; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; max-height: 36px; overflow: hidden; }
+
+.legend { display: flex; gap: 16px; margin-top: 10px; flex-wrap: wrap; }
+.leg-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #555; }
+.leg-dot { width: 10px; height: 10px; border-radius: 2px; }
+
+/* Zone callouts */
+.zones { display: flex; gap: 12px; margin-bottom: 22px; flex-wrap: wrap; }
+.zone { background: white; border-radius: 10px; padding: 14px 16px; flex: 1; min-width: 180px;
+  box-shadow: 0 1px 5px rgba(0,0,0,0.07); }
+.zone-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.zone.red .zone-head { color: #dc2626; }
+.zone.orange .zone-head { color: #f97316; }
+.zone.blue .zone-head { color: #2563eb; }
+.zone-stat { font-size: 22px; font-weight: 800; }
+.zone.red .zone-stat { color: #dc2626; }
+.zone.orange .zone-stat { color: #f97316; }
+.zone.blue .zone-stat { color: #2563eb; }
+.zone-desc { font-size: 11px; color: #777; margin-top: 4px; line-height: 1.5; }
+
+/* Table */
+.section-label { font-size: 12px; font-weight: 700; color: #333; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 10px; font-weight: 700; }
+.badge.red { background: #fef2f2; color: #dc2626; }
+.badge.orange { background: #fff7ed; color: #c2410c; }
+.badge.blue { background: #eff6ff; color: #1d4ed8; }
+
+table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden;
+  box-shadow: 0 1px 5px rgba(0,0,0,0.07); margin-bottom: 14px; font-size: 12px; }
+thead { background: #1a1a2e; color: white; }
+thead th { padding: 9px 10px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
+thead th.r { text-align: right; }
+tbody tr { border-bottom: 1px solid #f0f0f0; }
+tbody tr:hover { background: #f8faff; }
+tbody td { padding: 8px 10px; vertical-align: middle; }
+tbody td.r { text-align: right; font-variant-numeric: tabular-nums; }
+.rank { font-weight: 800; color: #999; font-size: 11px; }
+.rank.hot { color: #dc2626; }
+.rank.warm { color: #f97316; }
+.rank.cool { color: #2563eb; }
+.sku { font-weight: 600; max-width: 260px; line-height: 1.3; }
+.grp { color: #999; font-size: 10px; }
+.labels-big { font-weight: 800; font-size: 15px; }
+.labels-big.hot { color: #dc2626; }
+.labels-big.warm { color: #f97316; }
+.labels-big.cool { color: #2563eb; }
+.mini-bar { display: inline-block; background: #e5e7eb; border-radius: 99px; height: 5px; width: 60px; vertical-align: middle; margin-right: 4px; }
+.mini-fill { height: 5px; border-radius: 99px; }
+.mini-fill.hot { background: #dc2626; }
+.mini-fill.warm { background: #f97316; }
+.mini-fill.cool { background: #2563eb; }
+.cpct { font-size: 10px; color: #aaa; }
+.flag { font-size: 10px; background: #fef9c3; color: #92400e; border-radius: 4px; padding: 1px 5px; margin-left: 4px; }
+
+.note { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px 16px; font-size: 11.5px; color: #78350f; line-height: 1.7; margin-top: 6px; }
+.note strong { color: #92400e; }
+
+.total-row td { background: #f8faff; font-weight: 800; font-size: 13px; border-top: 2px solid #2563eb; }
+</style>
+</head>
+<body>
+
+<h1>📦 Lucas Brand — 80/20 Pareto Label Print Plan</h1>
+<p class="subtitle">FY 2025-26 · 31,823 units sold across 395 SKUs · Labels = Weekly Avg × 1.2 buffer</p>
+
+<!-- Summary cards -->
+<div class="stats">
+  <div class="card r">
+    <div class="clabel">SKUs Covering 80%</div>
+    <div class="cval">87</div>
+    <div class="csub">Out of 395 total Lucas SKUs</div>
+  </div>
+  <div class="card g">
+    <div class="clabel">Total Labels to Print</div>
+    <div class="cval">589</div>
+    <div class="csub">Covers 80% of annual volume</div>
+  </div>
+  <div class="card o">
+    <div class="clabel">Annual Volume Covered</div>
+    <div class="cval">25,460</div>
+    <div class="csub">Units out of 31,823 total</div>
+  </div>
+  <div class="card p">
+    <div class="clabel">SKUs Left in Long Tail</div>
+    <div class="cval">308</div>
+    <div class="csub">Only 20% of volume — add later</div>
+  </div>
+</div>
+
+<!-- Zone breakdown -->
+<div class="zones">
+  <div class="zone red">
+    <div class="zone-head">🔴 Zone A — Critical (Ranks 1–10)</div>
+    <div class="zone-stat">183 labels</div>
+    <div class="zone-desc">Top 10 SKUs · 28.5% of all Lucas volume<br>Print first. Check accuracy every pick.</div>
+  </div>
+  <div class="zone orange">
+    <div class="zone-head">🟠 Zone B — Important (Ranks 11–40)</div>
+    <div class="zone-stat">222 labels</div>
+    <div class="zone-desc">Next 30 SKUs · takes you to ~60%<br>Print after Zone A is verified.</div>
+  </div>
+  <div class="zone blue">
+    <div class="zone-head">🔵 Zone C — Supporting (Ranks 41–87)</div>
+    <div class="zone-stat">184 labels</div>
+    <div class="zone-desc">Remaining 47 SKUs · fills out to 80%<br>Lower velocity, 2–5 labels each.</div>
+  </div>
+</div>
+
+<!-- Zone A table -->
+<div class="section-label">🔴 Zone A — Critical SKUs (Ranks 1–10) <span class="badge red">Print Today</span></div>
+<table>
+  <thead>
+    <tr><th>#</th><th>SKU Name</th><th>Product Group</th><th class="r">Annual Qty</th><th class="r">Orders</th><th class="r">Wk Avg</th><th class="r">Labels</th><th class="r">Cum %</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="rank hot">1</td><td class="sku">LC STARTER MOTOR PAS. PRO/I3S/SPL.P/DLX</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">1,956</td><td class="r">523</td><td class="r">37.6</td><td class="r"><span class="labels-big hot">45</span></td><td class="r"><div class="mini-bar"><div class="mini-fill hot" style="width:100%"></div></div><span class="cpct">6.2%</span></td></tr>
+    <tr><td class="rank hot">2</td><td class="sku">LC RR SUP.SPL/PASSION PRO/ACTIVA 3G.12CC</td><td class="grp">INEL RR</td><td class="r">1,926</td><td class="r">277</td><td class="r">37.0</td><td class="r"><span class="labels-big hot">44</span></td><td class="r"><div class="mini-bar"><div class="mini-fill hot" style="width:98%"></div></div><span class="cpct">12.2%</span></td></tr>
+    <tr><td class="rank hot">3</td><td class="sku">INEL MAGNET ASSY.HERO SPLENDOR</td><td class="grp">INEL ROTORS</td><td class="r">1,284</td><td class="r">346</td><td class="r">24.7</td><td class="r"><span class="labels-big hot">30</span></td><td class="r"><div class="mini-bar"><div class="mini-fill hot" style="width:66%"></div></div><span class="cpct">16.2%</span></td></tr>
+    <tr><td class="rank hot">4</td><td class="sku">LC CLUTCH PL.HH CD-100/PSSN/SPL/DAWN <span class="flag">⚠ Bulk orders</span></td><td class="grp">LISPART CABLE/CP</td><td class="r">1,111</td><td class="r">17</td><td class="r">21.4</td><td class="r"><span class="labels-big hot">26</span></td><td class="r"><div class="mini-bar"><div class="mini-fill hot" style="width:57%"></div></div><span class="cpct">19.7%</span></td></tr>
+    <tr><td class="rank hot">5</td><td class="sku">INEL IGNITION COIL HERO CD DELUX</td><td class="grp">INEL IU/IG</td><td class="r">703</td><td class="r">105</td><td class="r">13.5</td><td class="r"><span class="labels-big hot">16</span></td><td class="r"><div class="mini-bar"><div class="mini-fill hot" style="width:36%"></div></div><span class="cpct">21.9%</span></td></tr>
+    <tr><td class="rank hot">6</td><td class="sku">INEL COIL PLATE STATOR TVS STAR CDI TYPE</td><td class="grp">INEL STATORS</td><td class="r">568</td><td class="r">162</td><td class="r">10.9</td><td class="r"><span class="labels-big hot">13</span></td><td class="r"><div class="mini-bar"><div class="mini-fill hot" style="width:29%"></div></div><span class="cpct">23.7%</span></td></tr>
+    <tr><td class="rank hot">7</td><td class="sku">LC STARTER MOTOR SHINE / UNICORN</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">539</td><td class="r">228</td><td class="r">10.4</td><td class="r"><span class="labels-big hot">12</span></td><td class="r"><div class="mini-bar"><div class="mini-fill hot" style="width:28%"></div></div><span class="cpct">25.4%</span></td></tr>
+    <tr><td class="rank hot">8</td><td class="sku">LC STARTER MOTOR SM5-12V-0.3KW DLX BS6</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">503</td><td class="r">199</td><td class="r">9.7</td><td class="r"><span class="labels-big hot">12</span></td><td class="r"><div class="mini-bar"><div class="mini-fill hot" style="width:26%"></div></div><span class="cpct">27.0%</span></td></tr>
+    <tr><td class="rank hot">9</td><td class="sku">LC STARTER MOTOR ASSLY.ACTIVA NEW/3G</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">476</td><td class="r">194</td><td class="r">9.2</td><td class="r"><span class="labels-big hot">11</span></td><td class="r"><div class="mini-bar"><div class="mini-fill hot" style="width:24%"></div></div><span class="cpct">28.5%</span></td></tr>
+    <tr><td class="rank hot">10</td><td class="sku">LC STATOR DELUXE/SPLENDOR+ SELF START</td><td class="grp">INEL STATORS</td><td class="r">464</td><td class="r">161</td><td class="r">8.9</td><td class="r"><span class="labels-big hot">11</span></td><td class="r"><div class="mini-bar"><div class="mini-fill hot" style="width:24%"></div></div><span class="cpct">29.9%</span></td></tr>
+    <tr class="total-row"><td colspan="6">Zone A Total</td><td class="r">183 labels</td><td class="r">29.9%</td></tr>
+  </tbody>
+</table>
+
+<!-- Zone B table -->
+<div class="section-label">🟠 Zone B — Important SKUs (Ranks 11–40) <span class="badge orange">Print Next</span></div>
+<table>
+  <thead>
+    <tr><th>#</th><th>SKU Name</th><th>Product Group</th><th class="r">Annual Qty</th><th class="r">Orders</th><th class="r">Wk Avg</th><th class="r">Labels</th><th class="r">Cum %</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="rank warm">11</td><td class="sku">LC STATOR SPLENDOR 2 HOLE</td><td class="grp">INEL STATORS</td><td class="r">438</td><td class="r">135</td><td class="r">8.4</td><td class="r"><span class="labels-big warm">10</span></td><td class="r"><span class="cpct">31.3%</span></td></tr>
+    <tr><td class="rank warm">12</td><td class="sku">LC BENDIX STARTER ACTIVA 100</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">417</td><td class="r">83</td><td class="r">8.0</td><td class="r"><span class="labels-big warm">10</span></td><td class="r"><span class="cpct">32.6%</span></td></tr>
+    <tr><td class="rank warm">13</td><td class="sku">LC STARTER MOTOR TVS WIGO 4 STROKE 100CC</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">403</td><td class="r">197</td><td class="r">7.8</td><td class="r"><span class="labels-big warm">9</span></td><td class="r"><span class="cpct">33.9%</span></td></tr>
+    <tr><td class="rank warm">14</td><td class="sku">INEL COIL PL.VICTOR N/S.CITY+/HLX150/125</td><td class="grp">INEL STATORS</td><td class="r">378</td><td class="r">152</td><td class="r">7.3</td><td class="r"><span class="labels-big warm">9</span></td><td class="r"><span class="cpct">35.1%</span></td></tr>
+    <tr><td class="rank warm">15</td><td class="sku">INEL MAGNET ASSY.HERO PASSION PRO</td><td class="grp">INEL ROTORS</td><td class="r">376</td><td class="r">136</td><td class="r">7.2</td><td class="r"><span class="labels-big warm">9</span></td><td class="r"><span class="cpct">36.3%</span></td></tr>
+    <tr><td class="rank warm">16</td><td class="sku">INEL PICK UP COIL STAR CITY</td><td class="grp">INEL STARTING/PICK UP COIL</td><td class="r">374</td><td class="r">63</td><td class="r">7.2</td><td class="r"><span class="labels-big warm">9</span></td><td class="r"><span class="cpct">37.4%</span></td></tr>
+    <tr><td class="rank warm">17</td><td class="sku">LC STATOR SPLENDOR NEW 4HOLE</td><td class="grp">INEL STATORS</td><td class="r">373</td><td class="r">131</td><td class="r">7.2</td><td class="r"><span class="labels-big warm">9</span></td><td class="r"><span class="cpct">38.6%</span></td></tr>
+    <tr><td class="rank warm">18</td><td class="sku">LC CLUTCH PL.BAJ.HODIBABA/CT100/PLTN/DIS <span class="flag">⚠ Bulk</span></td><td class="grp">LISPART CABLE/CP</td><td class="r">372</td><td class="r">10</td><td class="r">7.2</td><td class="r"><span class="labels-big warm">9</span></td><td class="r"><span class="cpct">39.8%</span></td></tr>
+    <tr><td class="rank warm">19</td><td class="sku">LC STARTER MOTOR HONDA ACTIVA</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">368</td><td class="r">137</td><td class="r">7.1</td><td class="r"><span class="labels-big warm">9</span></td><td class="r"><span class="cpct">40.9%</span></td></tr>
+    <tr><td class="rank warm">20</td><td class="sku">INEL TCI ACTIVA 3G</td><td class="grp">INEL CDI/TCI</td><td class="r">368</td><td class="r">142</td><td class="r">7.1</td><td class="r"><span class="labels-big warm">9</span></td><td class="r"><span class="cpct">42.1%</span></td></tr>
+    <tr><td class="rank warm">21</td><td class="sku">INEL INTEGRAL UNIT TVS S.SPORTS KS/ESBS4</td><td class="grp">INEL IU/IG</td><td class="r">361</td><td class="r">127</td><td class="r">6.9</td><td class="r"><span class="labels-big warm">8</span></td><td class="r"><span class="cpct">43.2%</span></td></tr>
+    <tr><td class="rank warm">22</td><td class="sku">INEL IGNITOR UNIT TVS STAR KS</td><td class="grp">INEL IU/IG</td><td class="r">350</td><td class="r">110</td><td class="r">6.7</td><td class="r"><span class="labels-big warm">8</span></td><td class="r"><span class="cpct">44.3%</span></td></tr>
+    <tr><td class="rank warm">23</td><td class="sku">LC STARTER MOTOR HONDA D. YUGA/TWISTER</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">342</td><td class="r">142</td><td class="r">6.6</td><td class="r"><span class="labels-big warm">8</span></td><td class="r"><span class="cpct">45.4%</span></td></tr>
+    <tr><td class="rank warm">24</td><td class="sku">INEL STATOR GLAMOUR / PASSION PRO</td><td class="grp">INEL STATORS</td><td class="r">312</td><td class="r">136</td><td class="r">6.0</td><td class="r"><span class="labels-big warm">7</span></td><td class="r"><span class="cpct">46.4%</span></td></tr>
+    <tr><td class="rank warm">25</td><td class="sku">INEL STARTING COIL HERO SPLENDOR</td><td class="grp">INEL STARTING/PICK UP COIL</td><td class="r">296</td><td class="r">44</td><td class="r">5.7</td><td class="r"><span class="labels-big warm">7</span></td><td class="r"><span class="cpct">47.3%</span></td></tr>
+    <tr><td class="rank warm">26</td><td class="sku">INEL CDI HONDA ACTIVA</td><td class="grp">INEL CDI/TCI</td><td class="r">296</td><td class="r">122</td><td class="r">5.7</td><td class="r"><span class="labels-big warm">7</span></td><td class="r"><span class="cpct">48.2%</span></td></tr>
+    <tr><td class="rank warm">27</td><td class="sku">INEL STARTING COIL HH SPLENDOR OLD</td><td class="grp">INEL STARTING/PICK UP COIL</td><td class="r">295</td><td class="r">45</td><td class="r">5.7</td><td class="r"><span class="labels-big warm">7</span></td><td class="r"><span class="cpct">49.2%</span></td></tr>
+    <tr><td class="rank warm">28</td><td class="sku">INEL CDI PASSION PRO</td><td class="grp">INEL CDI/TCI</td><td class="r">293</td><td class="r">94</td><td class="r">5.6</td><td class="r"><span class="labels-big warm">7</span></td><td class="r"><span class="cpct">50.1%</span></td></tr>
+    <tr><td class="rank warm">29</td><td class="sku">LC STARTER MOTOR BAJAJ DISCOVER 100/125C</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">291</td><td class="r">129</td><td class="r">5.6</td><td class="r"><span class="labels-big warm">7</span></td><td class="r"><span class="cpct">51.0%</span></td></tr>
+    <tr><td class="rank warm">30</td><td class="sku">LC STATOR SHINE 12P</td><td class="grp">INEL STATORS</td><td class="r">282</td><td class="r">107</td><td class="r">5.4</td><td class="r"><span class="labels-big warm">6</span></td><td class="r"><span class="cpct">51.9%</span></td></tr>
+    <tr><td class="rank warm">31</td><td class="sku">LC STARTER MOTOR BAJAJ PULSAR 150&180CC</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">275</td><td class="r">124</td><td class="r">5.3</td><td class="r"><span class="labels-big warm">6</span></td><td class="r"><span class="cpct">52.8%</span></td></tr>
+    <tr><td class="rank warm">32</td><td class="sku">LC CARBON BRUSH KIT HERO PASSION PRO</td><td class="grp">LUCAS CARBON BRUSH</td><td class="r">272</td><td class="r">16</td><td class="r">5.2</td><td class="r"><span class="labels-big warm">6</span></td><td class="r"><span class="cpct">53.6%</span></td></tr>
+    <tr><td class="rank warm">33</td><td class="sku">LC STATOR SPLENDOR PRO</td><td class="grp">INEL STATORS</td><td class="r">258</td><td class="r">82</td><td class="r">5.0</td><td class="r"><span class="labels-big warm">6</span></td><td class="r"><span class="cpct">54.4%</span></td></tr>
+    <tr><td class="rank warm">34</td><td class="sku">INEL DIGITAL TCI DREAM NEO/YUGA HET</td><td class="grp">INEL CDI/TCI</td><td class="r">255</td><td class="r">98</td><td class="r">4.9</td><td class="r"><span class="labels-big warm">6</span></td><td class="r"><span class="cpct">55.2%</span></td></tr>
+    <tr><td class="rank warm">35</td><td class="sku">INEL IGNITION COIL DIX/ACTIVA/AVAT/SHINE</td><td class="grp">INEL IU/IG</td><td class="r">251</td><td class="r">55</td><td class="r">4.8</td><td class="r"><span class="labels-big warm">6</span></td><td class="r"><span class="cpct">56.0%</span></td></tr>
+    <tr><td class="rank warm">36</td><td class="sku">INEL COIL PLATE SS TVS S-CITY CDI TYPE</td><td class="grp">INEL STATORS</td><td class="r">247</td><td class="r">98</td><td class="r">4.8</td><td class="r"><span class="labels-big warm">6</span></td><td class="r"><span class="cpct">56.8%</span></td></tr>
+    <tr><td class="rank warm">37</td><td class="sku">INEL IGNITOR COIL PUL.135/150/180/200/220</td><td class="grp">INEL IU/IG</td><td class="r">235</td><td class="r">33</td><td class="r">4.5</td><td class="r"><span class="labels-big warm">5</span></td><td class="r"><span class="cpct">57.5%</span></td></tr>
+    <tr><td class="rank warm">38</td><td class="sku">LC STARTER MOTOR TVS STAR CITY</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">231</td><td class="r">119</td><td class="r">4.4</td><td class="r"><span class="labels-big warm">5</span></td><td class="r"><span class="cpct">58.3%</span></td></tr>
+    <tr><td class="rank warm">39</td><td class="sku">INEL IGNITOR UNIT TVL XL 100 CC</td><td class="grp">INEL IU/IG</td><td class="r">223</td><td class="r">77</td><td class="r">4.3</td><td class="r"><span class="labels-big warm">5</span></td><td class="r"><span class="cpct">59.0%</span></td></tr>
+    <tr><td class="rank warm">40</td><td class="sku">INEL RR TVS STAR CITY PLUS</td><td class="grp">INEL RR</td><td class="r">210</td><td class="r">88</td><td class="r">4.0</td><td class="r"><span class="labels-big warm">5</span></td><td class="r"><span class="cpct">59.6%</span></td></tr>
+    <tr class="total-row"><td colspan="6">Zone B Total</td><td class="r">222 labels</td><td class="r">59.6%</td></tr>
+  </tbody>
+</table>
+
+<!-- Zone C table -->
+<div class="section-label">🔵 Zone C — Supporting SKUs (Ranks 41–87) <span class="badge blue">Print Last</span></div>
+<table>
+  <thead>
+    <tr><th>#</th><th>SKU Name</th><th>Product Group</th><th class="r">Annual Qty</th><th class="r">Orders</th><th class="r">Wk Avg</th><th class="r">Labels</th><th class="r">Cum %</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="rank cool">41</td><td class="sku">INEL TCI ACTIVA 110 HET</td><td class="grp">INEL CDI/TCI</td><td class="r">199</td><td class="r">80</td><td class="r">3.8</td><td class="r"><span class="labels-big cool">5</span></td><td class="r"><span class="cpct">60.2%</span></td></tr>
+    <tr><td class="rank cool">42</td><td class="sku">INEL COIL PLATE DREAM YUGA / NEO</td><td class="grp">INEL STATORS</td><td class="r">196</td><td class="r">83</td><td class="r">3.8</td><td class="r"><span class="labels-big cool">5</span></td><td class="r"><span class="cpct">60.9%</span></td></tr>
+    <tr><td class="rank cool">43</td><td class="sku">LC CLUTCH PL.HH CD-100/PSSN/SPL <span class="flag">⚠ Bulk</span></td><td class="grp">LISPART CABLE/CP</td><td class="r">195</td><td class="r">4</td><td class="r">3.8</td><td class="r"><span class="labels-big cool">5</span></td><td class="r"><span class="cpct">61.5%</span></td></tr>
+    <tr><td class="rank cool">44</td><td class="sku">INEL RR HERO SPLENDOR PIN TYPE HH24</td><td class="grp">INEL RR</td><td class="r">192</td><td class="r">40</td><td class="r">3.7</td><td class="r"><span class="labels-big cool">4</span></td><td class="r"><span class="cpct">62.1%</span></td></tr>
+    <tr><td class="rank cool">45</td><td class="sku">INEL MAGNET ASY.VICTOR N+/S.CITY+/HLX150</td><td class="grp">INEL ROTORS</td><td class="r">189</td><td class="r">86</td><td class="r">3.6</td><td class="r"><span class="labels-big cool">4</span></td><td class="r"><span class="cpct">62.7%</span></td></tr>
+    <tr><td class="rank cool">46</td><td class="sku">INEL RR SUPER SPL/PASSION PRO</td><td class="grp">INEL RR</td><td class="r">188</td><td class="r">47</td><td class="r">3.6</td><td class="r"><span class="labels-big cool">4</span></td><td class="r"><span class="cpct">63.3%</span></td></tr>
+    <tr><td class="rank cool">47</td><td class="sku">INEL IGNITOR TVS JUPITER/WEGO BS3</td><td class="grp">INEL IU/IG</td><td class="r">187</td><td class="r">94</td><td class="r">3.6</td><td class="r"><span class="labels-big cool">4</span></td><td class="r"><span class="cpct">63.9%</span></td></tr>
+    <tr><td class="rank cool">48</td><td class="sku">LC STARTER MOTOR I-SMART BG6 4 POLE</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">187</td><td class="r">96</td><td class="r">3.6</td><td class="r"><span class="labels-big cool">4</span></td><td class="r"><span class="cpct">64.4%</span></td></tr>
+    <tr><td class="rank cool">49</td><td class="sku">INEL COIL PLATE HERO PASSION PRO</td><td class="grp">INEL STATORS</td><td class="r">175</td><td class="r">60</td><td class="r">3.4</td><td class="r"><span class="labels-big cool">4</span></td><td class="r"><span class="cpct">65.0%</span></td></tr>
+    <tr><td class="rank cool">50</td><td class="sku">INEL CDI SPLENDOR / PASSION</td><td class="grp">INEL CDI/TCI</td><td class="r">174</td><td class="r">39</td><td class="r">3.3</td><td class="r"><span class="labels-big cool">4</span></td><td class="r"><span class="cpct">65.5%</span></td></tr>
+    <tr><td class="rank cool">51</td><td class="sku">INEL RR HONDA ACTIVA OLD HM25</td><td class="grp">INEL RR</td><td class="r">171</td><td class="r">40</td><td class="r">3.3</td><td class="r"><span class="labels-big cool">4</span></td><td class="r"><span class="cpct">66.1%</span></td></tr>
+    <tr><td class="rank cool">52</td><td class="sku">INEL COIL PLATE STATOR ACTIVA HET</td><td class="grp">INEL STATORS</td><td class="r">164</td><td class="r">70</td><td class="r">3.2</td><td class="r"><span class="labels-big cool">4</span></td><td class="r"><span class="cpct">66.6%</span></td></tr>
+    <tr><td class="rank cool">53</td><td class="sku">INEL ROTOR DLX/SPLENDOR.PLUS SELF START</td><td class="grp">INEL ROTORS</td><td class="r">150</td><td class="r">82</td><td class="r">2.9</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">67.1%</span></td></tr>
+    <tr><td class="rank cool">54</td><td class="sku">INEL COIL PLATE ACTIVA 110</td><td class="grp">INEL STATORS</td><td class="r">148</td><td class="r">58</td><td class="r">2.8</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">67.5%</span></td></tr>
+    <tr><td class="rank cool">55</td><td class="sku">INEL MAGNET ASSY.SPORT/S.CITY HLX100 SRT</td><td class="grp">INEL ROTORS</td><td class="r">148</td><td class="r">87</td><td class="r">2.8</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">68.0%</span></td></tr>
+    <tr><td class="rank cool">56</td><td class="sku">INEL IGNITOR UNIT TVS STAR SPLIT</td><td class="grp">INEL IU/IG</td><td class="r">146</td><td class="r">76</td><td class="r">2.8</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">68.4%</span></td></tr>
+    <tr><td class="rank cool">57</td><td class="sku">LC STARTER MOTOR ACTIVA W/O WIRING HARNES</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">146</td><td class="r">53</td><td class="r">2.8</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">68.9%</span></td></tr>
+    <tr><td class="rank cool">58</td><td class="sku">INEL TCI TVS STAR PLUS 110CC</td><td class="grp">INEL CDI/TCI</td><td class="r">140</td><td class="r">79</td><td class="r">2.7</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">69.3%</span></td></tr>
+    <tr><td class="rank cool">59</td><td class="sku">LC STARTER MOTOR NON OE SUP.SPLENDOR</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">140</td><td class="r">81</td><td class="r">2.7</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">69.8%</span></td></tr>
+    <tr><td class="rank cool">60</td><td class="sku">INEL DIGITAL CDI BAJAJ DISCOVER 100 CC</td><td class="grp">INEL CDI/TCI</td><td class="r">139</td><td class="r">36</td><td class="r">2.7</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">70.2%</span></td></tr>
+    <tr><td class="rank cool">61</td><td class="sku">LC STARTER MOTOR TVS SCOOTY PEP</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">138</td><td class="r">77</td><td class="r">2.7</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">70.7%</span></td></tr>
+    <tr><td class="rank cool">62</td><td class="sku">INEL RR HERO SPL/PASSN/GLAMR/BS6</td><td class="grp">INEL RR</td><td class="r">135</td><td class="r">39</td><td class="r">2.6</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">71.1%</span></td></tr>
+    <tr><td class="rank cool">63</td><td class="sku">INEL COIL PLATE TVS XL SUPER 70CC</td><td class="grp">INEL STATORS</td><td class="r">135</td><td class="r">55</td><td class="r">2.6</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">71.5%</span></td></tr>
+    <tr><td class="rank cool">64</td><td class="sku">LC STATOR TVS RADEON/S.CITY+/SPORT/KS/S</td><td class="grp">INEL STATORS</td><td class="r">132</td><td class="r">65</td><td class="r">2.5</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">71.9%</span></td></tr>
+    <tr><td class="rank cool">65</td><td class="sku">INEL LAMP COIL HH SPLENDOR OLD MODEL</td><td class="grp">INEL BUZZER/LIGHTING COILS</td><td class="r">128</td><td class="r">35</td><td class="r">2.5</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">72.3%</span></td></tr>
+    <tr><td class="rank cool">66</td><td class="sku">LC BULB HSI 12V-45/40 (BLISTER PACK)</td><td class="grp">LISPART HORNS</td><td class="r">126</td><td class="r">7</td><td class="r">2.4</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">72.7%</span></td></tr>
+    <tr><td class="rank cool">67</td><td class="sku">INEL COIL PLATE HONDA NEW DREAM YUGA/NEO</td><td class="grp">INEL STATORS</td><td class="r">126</td><td class="r">63</td><td class="r">2.4</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">73.1%</span></td></tr>
+    <tr><td class="rank cool">68</td><td class="sku">INEL CDI HH SUP.SPLENDORE / GLAMOUR</td><td class="grp">INEL CDI/TCI</td><td class="r">125</td><td class="r">46</td><td class="r">2.4</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">73.5%</span></td></tr>
+    <tr><td class="rank cool">69</td><td class="sku">INEL CDI CT-100/PLATINA 100/DISCOVER 112</td><td class="grp">INEL CDI/TCI</td><td class="r">125</td><td class="r">29</td><td class="r">2.4</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">73.9%</span></td></tr>
+    <tr><td class="rank cool">70</td><td class="sku">INEL CDI HH CD-DLX NEW DC NXG ECO DELUX</td><td class="grp">INEL CDI/TCI</td><td class="r">124</td><td class="r">44</td><td class="r">2.4</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">74.3%</span></td></tr>
+    <tr><td class="rank cool">71</td><td class="sku">LC STARTER MOTOR I-SMART SSPLBS6 4POLE</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">124</td><td class="r">70</td><td class="r">2.4</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">74.7%</span></td></tr>
+    <tr><td class="rank cool">72</td><td class="sku">INEL PICKUP COIL HERO PASSION PRO</td><td class="grp">INEL STARTING/PICK UP COIL</td><td class="r">118</td><td class="r">23</td><td class="r">2.3</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">75.1%</span></td></tr>
+    <tr><td class="rank cool">73</td><td class="sku">LC STARTER MOTOR HERO SPLENDOR I-SMART</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">118</td><td class="r">73</td><td class="r">2.3</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">75.4%</span></td></tr>
+    <tr><td class="rank cool">74</td><td class="sku">INEL COIL PLATE HONDA ACTIVA 110</td><td class="grp">INEL STATORS</td><td class="r">117</td><td class="r">48</td><td class="r">2.2</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">75.8%</span></td></tr>
+    <tr><td class="rank cool">75</td><td class="sku">INEL IGNITION COIL HERO SPLENDOR</td><td class="grp">INEL IU/IG</td><td class="r">116</td><td class="r">33</td><td class="r">2.2</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">76.2%</span></td></tr>
+    <tr><td class="rank cool">76</td><td class="sku">INEL IGNITOR UNIT TVS XL SUPER</td><td class="grp">INEL IU/IG</td><td class="r">115</td><td class="r">35</td><td class="r">2.2</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">76.5%</span></td></tr>
+    <tr><td class="rank cool">77</td><td class="sku">INEL RR TVS JUPITER</td><td class="grp">INEL RR</td><td class="r">114</td><td class="r">38</td><td class="r">2.2</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">76.9%</span></td></tr>
+    <tr><td class="rank cool">78</td><td class="sku">LC BRUSH KIT HONDA ACTIVA/AVIATOR NEW</td><td class="grp">LUCAS CARBON BRUSH</td><td class="r">111</td><td class="r">9</td><td class="r">2.1</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">77.2%</span></td></tr>
+    <tr><td class="rank cool">79</td><td class="sku">LC CARBON BRUSH SET HERO PASS PRO</td><td class="grp">LUCAS CARBON BRUSH</td><td class="r">109</td><td class="r">5</td><td class="r">2.1</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">77.6%</span></td></tr>
+    <tr><td class="rank cool">80</td><td class="sku">LC STARTER MOTOR TVS APACHE 160 CC</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">108</td><td class="r">61</td><td class="r">2.1</td><td class="r"><span class="labels-big cool">3</span></td><td class="r"><span class="cpct">77.9%</span></td></tr>
+    <tr><td class="rank cool">81</td><td class="sku">INEL IGNITOR UNIT TVS STAR OLD</td><td class="grp">INEL IU/IG</td><td class="r">105</td><td class="r">55</td><td class="r">2.0</td><td class="r"><span class="labels-big cool">2</span></td><td class="r"><span class="cpct">78.2%</span></td></tr>
+    <tr><td class="rank cool">82</td><td class="sku">INEL COIL PLATE HONDA SHINE</td><td class="grp">INEL STATORS</td><td class="r">98</td><td class="r">49</td><td class="r">1.9</td><td class="r"><span class="labels-big cool">2</span></td><td class="r"><span class="cpct">78.5%</span></td></tr>
+    <tr><td class="rank cool">83</td><td class="sku">LC STARTER MOTOR RADEON CITY SPORTS BSVI</td><td class="grp">LUCAS STARTER MOTOR</td><td class="r">97</td><td class="r">60</td><td class="r">1.9</td><td class="r"><span class="labels-big cool">2</span></td><td class="r"><span class="cpct">78.8%</span></td></tr>
+    <tr><td class="rank cool">84</td><td class="sku">INEL STATOR HF DELUXE</td><td class="grp">INEL STATORS</td><td class="r">96</td><td class="r">43</td><td class="r">1.8</td><td class="r"><span class="labels-big cool">2</span></td><td class="r"><span class="cpct">79.1%</span></td></tr>
+    <tr><td class="rank cool">85</td><td class="sku">INEL CDI HONDA SHINE</td><td class="grp">INEL CDI/TCI</td><td class="r">94</td><td class="r">46</td><td class="r">1.8</td><td class="r"><span class="labels-big cool">2</span></td><td class="r"><span class="cpct">79.4%</span></td></tr>
+    <tr><td class="rank cool">86</td><td class="sku">INEL IMMOBLISER WO HERO DUET/MASTRO EDGE</td><td class="grp">INEL IU/IG</td><td class="r">93</td><td class="r">50</td><td class="r">1.8</td><td class="r"><span class="labels-big cool">2</span></td><td class="r"><span class="cpct">79.7%</span></td></tr>
+    <tr><td class="rank cool">87</td><td class="sku">INEL DIGITAL TCI UNIT DREAM YUGA</td><td class="grp">INEL CDI/TCI</td><td class="r">92</td><td class="r">38</td><td class="r">1.8</td><td class="r"><span class="labels-big cool">2</span></td><td class="r"><span class="cpct">80.0%</span></td></tr>
+    <tr class="total-row"><td colspan="6">Zone C Total</td><td class="r">184 labels</td><td class="r">80.0%</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <strong>Label formula:</strong> Annual Qty ÷ 52 weeks × 1.2 buffer = Labels to print (minimum 2).<br>
+  <strong>⚠️ Bulk order flags (SKUs #4, #18, #43):</strong> High annual qty but very few orders — these ship in large batches occasionally, not daily. Labels will sit unused most weeks — that's expected.<br>
+  <strong>The remaining 308 SKUs</strong> cover only the last 20% of Lucas volume. Add them gradually as this system stabilises — don't print them all at once.
+</div>
+
+</body>
+</html>

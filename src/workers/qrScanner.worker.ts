@@ -18,7 +18,6 @@ type ScanRequestMessage = {
   type: 'scan';
   frameId: number;
   imageData: ImageData;
-  roiLevel?: 'tight' | 'medium' | 'full';
   missStreak?: number;
 };
 
@@ -47,31 +46,6 @@ type WorkerResponseMessage =
     };
 
 const HARD_PASS_MISS_STREAK = 4;
-
-function cropImageData(
-  source: ImageData,
-  sx: number,
-  sy: number,
-  width: number,
-  height: number,
-): ImageData {
-  const srcWidth = source.width;
-  const srcHeight = source.height;
-  const x = Math.max(0, Math.min(srcWidth - 1, Math.floor(sx)));
-  const y = Math.max(0, Math.min(srcHeight - 1, Math.floor(sy)));
-  const w = Math.max(1, Math.min(srcWidth - x, Math.floor(width)));
-  const h = Math.max(1, Math.min(srcHeight - y, Math.floor(height)));
-  const out = new Uint8ClampedArray(w * h * 4);
-  const src = source.data;
-
-  for (let row = 0; row < h; row += 1) {
-    const srcOffset = ((y + row) * srcWidth + x) * 4;
-    const dstOffset = row * w * 4;
-    out.set(src.subarray(srcOffset, srcOffset + w * 4), dstOffset);
-  }
-
-  return new ImageData(out, w, h);
-}
 
 function upscaleNearestJs(source: ImageData, scale: number): ImageData {
   const targetWidth = Math.max(1, Math.floor(source.width * scale));
@@ -360,65 +334,30 @@ const engineWarmPromise = Promise.all([prepareZXing(), getBarcodeScanner()]).cat
 async function handleScan(message: ScanRequestMessage) {
   const scanner = await getBarcodeScanner();
   const image = message.imageData;
-  const centerCrop = cropImageData(
-    image,
-    image.width * 0.2,
-    image.height * 0.2,
-    image.width * 0.6,
-    image.height * 0.6,
-  );
 
-  const centerCropOffset = {
-    x: image.width * 0.2,
-    y: image.height * 0.2,
-  };
-
-  const normalizeBoundingBox = (
-    bbox: WorkerBoundingBox | undefined,
-    source: 'full' | 'center',
-    upscale = 1,
-  ): WorkerBoundingBox | undefined => {
-    if (!bbox) return undefined;
-    let normalized = bbox;
-    if (upscale !== 1) {
-      normalized = {
-        x: normalized.x / upscale,
-        y: normalized.y / upscale,
-        width: normalized.width / upscale,
-        height: normalized.height / upscale,
+  const post = (rawValue: string | null, boundingBox?: WorkerBoundingBox, upscale = 1) => {
+    let box = boundingBox;
+    if (box && upscale !== 1) {
+      box = {
+        x: box.x / upscale,
+        y: box.y / upscale,
+        width: box.width / upscale,
+        height: box.height / upscale,
       };
     }
-    if (source === 'center') {
-      normalized = {
-        x: centerCropOffset.x + normalized.x,
-        y: centerCropOffset.y + normalized.y,
-        width: normalized.width,
-        height: normalized.height,
-      };
-    }
-    return normalized;
-  };
-
-  const post = (rawValue: string | null, boundingBox?: WorkerBoundingBox) => {
     const response: WorkerResponseMessage = {
       type: 'scan-result',
       frameId: message.frameId,
       rawValue,
-      ...(boundingBox ? { boundingBox } : {}),
+      ...(box ? { boundingBox: box } : {}),
     };
     self.postMessage(response);
   };
 
-  const fastPassImages: Array<{ image: ImageData; source: 'full' | 'center' }> = [
-    { image: centerCrop, source: 'center' },
-    { image, source: 'full' },
-  ];
-  for (const pass of fastPassImages) {
-    const hit = await scanImageParallel(scanner, pass.image, false);
-    if (hit) {
-      post(hit.text, normalizeBoundingBox(hit.boundingBox, pass.source));
-      return;
-    }
+  const hit = await scanImageParallel(scanner, image, false);
+  if (hit) {
+    post(hit.text, hit.boundingBox);
+    return;
   }
 
   const missStreak = message.missStreak ?? 0;
@@ -427,19 +366,11 @@ async function handleScan(message: ScanRequestMessage) {
     return;
   }
 
-  const hardVariants: Array<{ image: ImageData; source: 'full' | 'center'; upscale: number }> = [
-    { image: upscaleNearest(stretchContrast(centerCrop), 2), source: 'center', upscale: 2 },
-  ];
-  if (message.roiLevel !== 'tight') {
-    hardVariants.push({ image: upscaleNearest(stretchContrast(image), 1.35), source: 'full', upscale: 1.35 });
-  }
-
-  for (const variant of hardVariants) {
-    const hit = await scanImageParallel(scanner, variant.image, true);
-    if (hit) {
-      post(hit.text, normalizeBoundingBox(hit.boundingBox, variant.source, variant.upscale));
-      return;
-    }
+  const hardImage = upscaleNearest(stretchContrast(image), 2);
+  const hardHit = await scanImageParallel(scanner, hardImage, true);
+  if (hardHit) {
+    post(hardHit.text, hardHit.boundingBox, 2);
+    return;
   }
 
   post(null);

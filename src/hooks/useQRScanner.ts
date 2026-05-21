@@ -1,11 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- BarcodeDetector is platform-specific */
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react';
 import {
-  captureRoiBitmap,
-  captureRoiImageData,
-  getNextRoiLevel,
+  captureViewfinderBitmap,
+  captureViewfinderImageData,
   type RoiCrop,
 } from '../lib/scanner/roiProcessor';
+import { getViewfinderVideoCrop, isBoundingBoxInsideCrop } from '../lib/scanner/viewfinderCrop';
 import type { BarcodeDetectorLike, BarcodeDetectorResult } from '../context/CameraContext';
 import { useOptionalPickingCamera } from '../context/CameraContext';
 import { REQUESTED_BARCODE_FORMATS } from '../lib/scanner/barcodeFormats';
@@ -218,6 +218,7 @@ export function useQRScanner({
   onScannerReady,
 }: UseQRScannerArgs): {
   videoRef: RefObject<HTMLVideoElement | null>;
+  viewfinderRef: RefObject<HTMLDivElement | null>;
   streamRef: RefObject<MediaStream | null>;
   supportMessage: string | null;
   torchAvailable: boolean;
@@ -234,6 +235,7 @@ export function useQRScanner({
   burstUntilRefOut: MutableRefObject<number>;
 } {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const viewfinderRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const engineRef = useRef<ScannerEnginePath | null>(null);
   const videoLoopStopRef = useRef<(() => void) | null>(null);
@@ -379,26 +381,25 @@ export function useQRScanner({
       void (async () => {
         try {
           if (engine.type === 'native') {
-            const roiLevel = getNextRoiLevel(frameNumber);
             let selected: PickedDetectedValue | null = null;
-            let roiCapture: Awaited<ReturnType<typeof captureRoiBitmap>> = null;
+            const roiCapture = await captureViewfinderBitmap(video, {
+              maxLongEdge: ROI_MAX_LONG_EDGE_NATIVE,
+              upscale: 1.85,
+              viewfinderEl: viewfinderRef.current,
+            });
 
-            if (roiLevel !== 'full') {
-              roiCapture = await captureRoiBitmap(video, roiLevel, {
-                maxLongEdge: ROI_MAX_LONG_EDGE_NATIVE,
-                upscale: roiLevel === 'tight' ? 1.8 : 1.25,
-              });
-              if (roiCapture) {
-                const roiCodes = await engine.detector.detect(roiCapture.bitmap);
-                const roiPick = pickBestDetectedRawValue(roiCodes, collectMode, video);
-                selected = roiPick ? projectRoiPickToVideo(roiPick, roiCapture) : null;
-                roiCapture.bitmap.close();
+            if (roiCapture) {
+              const viewfinderCrop = getViewfinderVideoCrop(video, viewfinderRef.current);
+              const roiCodes = await engine.detector.detect(roiCapture.bitmap);
+              const roiPick = pickBestDetectedRawValue(roiCodes, collectMode, video);
+              if (roiPick) {
+                const projected = projectRoiPickToVideo(roiPick, roiCapture);
+                const bbox = projected.boundingBox;
+                if (!viewfinderCrop || !bbox || isBoundingBoxInsideCrop(bbox, viewfinderCrop)) {
+                  selected = projected;
+                }
               }
-            }
-
-            if (!selected && roiLevel === 'full') {
-              const barcodes = await engine.detector.detect(video);
-              selected = pickBestDetectedRawValue(barcodes, collectMode, video);
+              roiCapture.bitmap.close();
             }
 
             if (selected) {
@@ -433,10 +434,10 @@ export function useQRScanner({
             }
           } else if (engine.type === 'worker') {
             if (engine.pending.size < WORKER_MAX_PENDING_FRAMES) {
-              const roiLevel = getNextRoiLevel(frameNumber);
-              const capture = captureRoiImageData(video, engine.workerCanvas, engine.workerCtx, roiLevel, {
+              const capture = captureViewfinderImageData(video, engine.workerCanvas, engine.workerCtx, {
                 maxLongEdge: ROI_MAX_LONG_EDGE_WORKER,
-                upscale: roiLevel === 'tight' ? 1.65 : 1.1,
+                upscale: 1.85,
+                viewfinderEl: viewfinderRef.current,
               });
               if (capture) {
                 const frameId = Date.now();
@@ -451,7 +452,6 @@ export function useQRScanner({
                     type: 'scan',
                     frameId,
                     imageData: capture.imageData,
-                    roiLevel: capture.level,
                     missStreak: noHitFrameCountRef.current,
                   },
                   [capture.imageData.data.buffer],
@@ -501,6 +501,23 @@ export function useQRScanner({
             engineNow.pendingCaptures.delete(data.frameId);
           }
           if (data.rawValue && !cancelled && !completedRef.current && !lockedRef.current) {
+            const video = videoRef.current;
+            const viewfinderCrop = video ? getViewfinderVideoCrop(video, viewfinderRef.current) : null;
+            if (viewfinderCrop && data.boundingBox && captureMeta) {
+              const scaleX = captureMeta.sourceCrop.sw / captureMeta.imageWidth;
+              const scaleY = captureMeta.sourceCrop.sh / captureMeta.imageHeight;
+              const videoBBox = {
+                x: captureMeta.sourceCrop.sx + data.boundingBox.x * scaleX,
+                y: captureMeta.sourceCrop.sy + data.boundingBox.y * scaleY,
+                width: data.boundingBox.width * scaleX,
+                height: data.boundingBox.height * scaleY,
+              };
+              if (!isBoundingBoxInsideCrop(videoBBox, viewfinderCrop)) {
+                noHitFrameCountRef.current += 1;
+                return;
+              }
+            }
+
             noHitFrameCountRef.current = 0;
             burstUntilRef.current = Date.now() + BURST_WINDOW_MS;
             const now = Date.now();
@@ -511,7 +528,6 @@ export function useQRScanner({
             const boxConfidence: DisplayBox['confidence'] =
               nextCount >= STABLE_SCAN_MIN_FRAMES ? 'locked' : 'detected';
 
-            const video = videoRef.current;
             if (data.boundingBox && captureMeta && video) {
               const box = projectImageBBoxToDisplay(data.boundingBox, captureMeta, video, boxConfidence);
               if (box) setDetectedBox(box);
@@ -736,6 +752,7 @@ export function useQRScanner({
 
   return {
     videoRef,
+    viewfinderRef,
     streamRef,
     supportMessage,
     torchAvailable,

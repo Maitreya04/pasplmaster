@@ -3,6 +3,7 @@ import type { DisplayBox } from '../../../hooks/useQRScanner';
 
 export interface ViewfinderOverlayProps {
   videoRef: RefObject<HTMLVideoElement | null>;
+  viewfinderRef?: RefObject<HTMLDivElement | null>;
   supportMessage: string | null;
   detectedBox: DisplayBox | null;
   flashColor: 'green' | 'red' | null;
@@ -51,6 +52,7 @@ function DetectedCodeBox({ box }: { box: DisplayBox }): React.JSX.Element {
 
 export function ViewfinderOverlay({
   videoRef,
+  viewfinderRef,
   supportMessage,
   detectedBox,
   flashColor,
@@ -74,7 +76,10 @@ export function ViewfinderOverlay({
       <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
       {/* Aim guide + animated scan line */}
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <div className="relative h-48 w-64 overflow-hidden rounded-[20px] border-2 border-emerald-400/70 shadow-[0_0_0_9999px_rgba(2,6,23,0.35)]">
+        <div
+          ref={viewfinderRef}
+          className="relative h-48 w-64 overflow-hidden rounded-[20px] border-2 border-emerald-400/70 shadow-[0_0_0_9999px_rgba(2,6,23,0.35)]"
+        >
           <div
             className="scanner-scan-line pointer-events-none absolute inset-x-[12%] h-[2px] rounded-full bg-emerald-400/80 shadow-[0_0_14px_rgba(52,211,153,0.55)]"
             aria-hidden

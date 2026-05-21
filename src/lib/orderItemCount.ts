@@ -1,5 +1,6 @@
 import type { Order, Item } from '../types';
 import { isAskLine } from './picking/askBrand';
+import { isLucasLine } from './picking/lucasBrand';
 import { summarizeSpecialPricing } from './specialPricing';
 import { queryClient } from './queryClient';
 import { ITEMS_QUERY_KEY } from '../hooks/useItems';
@@ -8,7 +9,7 @@ import { ITEMS_QUERY_KEY } from '../hooks/useItems';
  * Lightweight order_items embed for list views.
  *
  * Previously this joined `items(main_group, parent_group)` purely to power
- * the ASK-line badge in queue cards. That join roughly doubled the payload
+ * ASK / Lucas line badges in queue cards. That join roughly doubled the payload
  * size of every queue/orders list refetch.
  *
  * We instead embed `item_id` and look the catalog row up in the in-memory
@@ -69,16 +70,18 @@ export function normalizeOrderBusyItemCount(row: OrderRowWithEmbed): Order & {
     })),
   );
   let askLineCount = 0;
+  let lucasLineCount = 0;
   for (const oi of embed ?? []) {
     const { main_group, parent_group } = lookupCatalogGroups(oi.item_id);
-    if (isAskLine({ item_name: oi.item_name, main_group, parent_group })) {
-      askLineCount += 1;
-    }
+    const line = { item_name: oi.item_name, main_group, parent_group };
+    if (isAskLine(line)) askLineCount += 1;
+    if (isLucasLine(line)) lucasLineCount += 1;
   }
   return {
     ...rest,
     item_count: liveLineCount,
     ask_line_count: askLineCount,
+    lucas_line_count: lucasLineCount,
     special_rate_line_count: specialLineCount,
     special_rate_qty: specialQty,
   };
@@ -116,22 +119,22 @@ export function normalizeOrderListBusyItemCount(
       })),
     );
     let askLineCount = 0;
+    let lucasLineCount = 0;
     for (const oi of embed ?? []) {
       const cat = oi.item_id != null ? byId.get(oi.item_id) : undefined;
-      if (
-        isAskLine({
-          item_name: oi.item_name,
-          main_group: cat?.main_group ?? null,
-          parent_group: cat?.parent_group ?? null,
-        })
-      ) {
-        askLineCount += 1;
-      }
+      const line = {
+        item_name: oi.item_name,
+        main_group: cat?.main_group ?? null,
+        parent_group: cat?.parent_group ?? null,
+      };
+      if (isAskLine(line)) askLineCount += 1;
+      if (isLucasLine(line)) lucasLineCount += 1;
     }
     return {
       ...rest,
       item_count: liveLineCount,
       ask_line_count: askLineCount,
+      lucas_line_count: lucasLineCount,
       special_rate_line_count: specialLineCount,
       special_rate_qty: specialQty,
     };

@@ -179,6 +179,7 @@ export function LiveQrScanner({
 
   const {
     videoRef,
+    viewfinderRef,
     streamRef,
     supportMessage,
     torchAvailable,
@@ -496,6 +497,7 @@ export function LiveQrScanner({
           <div className="relative min-h-[200px] flex-1 overflow-hidden rounded-[24px] border border-white/10 bg-black">
             <ViewfinderOverlay
               videoRef={videoRef}
+              viewfinderRef={viewfinderRef}
               supportMessage={supportMessage}
               detectedBox={detectedBox}
               flashColor={flashColor}

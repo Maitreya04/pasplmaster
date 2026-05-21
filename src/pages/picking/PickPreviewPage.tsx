@@ -6,6 +6,8 @@ import { useOrderDetail } from '../../hooks/useOrderDetail';
 import type { OrderItem } from '../../types';
 import { pickQuantityTarget } from '../../lib/cartSupply';
 import { isAskLine } from '../../lib/picking/askBrand';
+import { isLucasLine } from '../../lib/picking/lucasBrand';
+import { BrandLineChip } from '../../components/picking/BrandLineChip';
 
 function sortByRack(items: OrderItem[]): OrderItem[] {
   return [...items].sort((a, b) => {
@@ -77,9 +79,14 @@ export default function PickPreviewPage(): React.JSX.Element | null {
                 </p>
                 <p className="text-xs text-[var(--content-tertiary)] mt-1 tabular-nums">
                   {order.item_count} line{order.item_count === 1 ? '' : 's'}
-                  {typeof order.ask_line_count === 'number' && order.ask_line_count > 0 && (
-                    <span className="ml-2 font-medium text-[var(--content-primary)]">
-                      · {order.ask_line_count} ASK
+                  {(order.ask_line_count ?? 0) > 0 && (
+                    <span className="ml-2 inline-flex items-center gap-1">
+                      <BrandLineChip brand="ask" count={order.ask_line_count} />
+                    </span>
+                  )}
+                  {(order.lucas_line_count ?? 0) > 0 && (
+                    <span className="ml-1.5 inline-flex items-center gap-1">
+                      <BrandLineChip brand="lucas" count={order.lucas_line_count} />
                     </span>
                   )}
                 </p>
@@ -97,11 +104,13 @@ export default function PickPreviewPage(): React.JSX.Element | null {
             <ul className="space-y-2">
               {rows.map((line) => {
                 const qty = pickQuantityTarget(line);
-                const ask = isAskLine({
+                const brandLine = {
                   item_name: line.item_name,
                   main_group: line.catalog_main_group,
                   parent_group: line.catalog_parent_group,
-                });
+                };
+                const ask = isAskLine(brandLine);
+                const lucas = isLucasLine(brandLine);
                 return (
                   <li key={line.id}>
                     <Card className="py-3 px-4 space-y-1.5">
@@ -110,11 +119,8 @@ export default function PickPreviewPage(): React.JSX.Element | null {
                           {line.rack_no || '—'}
                         </p>
                         <div className="flex items-center gap-2 shrink-0">
-                          {ask && (
-                            <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--content-primary)] border border-[var(--border-subtle)]">
-                              ASK
-                            </span>
-                          )}
+                          {ask && <BrandLineChip brand="ask" />}
+                          {lucas && <BrandLineChip brand="lucas" />}
                           <span className="text-sm font-semibold tabular-nums text-[var(--content-secondary)]">
                             ×{qty}
                           </span>

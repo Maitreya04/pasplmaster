@@ -75,6 +75,8 @@ export interface Order {
   item_count: number;
   /** Lines whose catalog or line text resolves to ASK (see `isAskLine`). Set when loading queue embeds. */
   ask_line_count?: number;
+  /** Lines whose catalog or line text resolves to Lucas (see `isLucasLine`). Set when loading queue embeds. */
+  lucas_line_count?: number;
   total_value: number;
   created_at: string;
   approved_at: string | null;

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase/client';
 import { subscribeToTable } from '../lib/realtime';
 import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
 import { isAskLine } from '../lib/picking/askBrand';
+import { isLucasLine } from '../lib/picking/lucasBrand';
 import type { OrderItem, OrderWithItems } from '../types';
 
 type ItemCatalogJoin = {
@@ -92,6 +93,13 @@ export function useOrderDetail(orderId: number | null) {
           parent_group: oi.catalog_parent_group,
         }),
       ).length;
+      const lucasLineCount = items.filter((oi) =>
+        isLucasLine({
+          item_name: oi.item_name,
+          main_group: oi.catalog_main_group,
+          parent_group: oi.catalog_parent_group,
+        }),
+      ).length;
       let customerMobile: string | null = null;
       let customerAddress: string | null = null;
 
@@ -116,6 +124,7 @@ export function useOrderDetail(orderId: number | null) {
         /** Busy “items” = invoice lines; prefer live row count over denormalized column. */
         item_count: items.length,
         ask_line_count: askLineCount,
+        lucas_line_count: lucasLineCount,
       } as OrderWithItems;
     },
     enabled: orderId !== null,

@@ -1,3 +1,5 @@
+import { getViewfinderVideoCrop } from './viewfinderCrop';
+
 export type RoiLevel = 'tight' | 'medium' | 'full';
 
 export interface RoiCrop {
@@ -52,10 +54,71 @@ export function getRoiCrop(sourceWidth: number, sourceHeight: number, level: Roi
   return { level, sx, sy, sw, sh };
 }
 
-export function getNextRoiLevel(frameNumber: number): RoiLevel {
-  if (frameNumber % 9 === 0) return 'full';
-  if (frameNumber % 3 === 0) return 'medium';
+/** @deprecated Scanning uses the viewfinder crop only; kept for compatibility. */
+export function getNextRoiLevel(_frameNumber: number): RoiLevel {
   return 'tight';
+}
+
+export async function captureViewfinderBitmap(
+  video: HTMLVideoElement,
+  options: { maxLongEdge?: number; upscale?: number; viewfinderEl?: HTMLElement | null } = {},
+): Promise<RoiBitmapCapture | null> {
+  if (typeof createImageBitmap !== 'function') return null;
+
+  const sourceCrop = getViewfinderVideoCrop(video, options.viewfinderEl);
+  if (!sourceCrop) return null;
+
+  const { width, height } = getTargetSize(sourceCrop, options.maxLongEdge ?? 1280, options.upscale ?? 1.85);
+
+  const bitmap = await createImageBitmap(
+    video,
+    sourceCrop.sx,
+    sourceCrop.sy,
+    sourceCrop.sw,
+    sourceCrop.sh,
+    {
+      resizeWidth: width,
+      resizeHeight: height,
+      resizeQuality: 'high',
+    },
+  );
+
+  return { level: 'tight', bitmap, sourceCrop };
+}
+
+export function captureViewfinderImageData(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  ctx: CanvasRenderingContext2D,
+  options: { maxLongEdge?: number; upscale?: number; viewfinderEl?: HTMLElement | null } = {},
+): RoiImageDataCapture | null {
+  const sourceCrop = getViewfinderVideoCrop(video, options.viewfinderEl);
+  if (!sourceCrop) return null;
+
+  const { width, height } = getTargetSize(sourceCrop, options.maxLongEdge ?? 1280, options.upscale ?? 1.85);
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  ctx.drawImage(
+    video,
+    sourceCrop.sx,
+    sourceCrop.sy,
+    sourceCrop.sw,
+    sourceCrop.sh,
+    0,
+    0,
+    width,
+    height,
+  );
+
+  return {
+    level: 'tight',
+    imageData: ctx.getImageData(0, 0, width, height),
+    sourceCrop,
+  };
 }
 
 export async function captureRoiBitmap(
@@ -63,6 +126,10 @@ export async function captureRoiBitmap(
   level: RoiLevel,
   options: { maxLongEdge?: number; upscale?: number } = {},
 ): Promise<RoiBitmapCapture | null> {
+  if (level === 'tight') {
+    return captureViewfinderBitmap(video, options);
+  }
+
   if (typeof createImageBitmap !== 'function') return null;
   if (video.videoWidth <= 0 || video.videoHeight <= 0) return null;
 
@@ -70,7 +137,7 @@ export async function captureRoiBitmap(
   const { width, height } = getTargetSize(
     sourceCrop,
     options.maxLongEdge ?? 1280,
-    options.upscale ?? (level === 'tight' ? 1.5 : 1),
+    options.upscale ?? 1,
   );
 
   const bitmap = await createImageBitmap(
@@ -96,13 +163,17 @@ export function captureRoiImageData(
   level: RoiLevel,
   options: { maxLongEdge?: number; upscale?: number } = {},
 ): RoiImageDataCapture | null {
+  if (level === 'tight') {
+    return captureViewfinderImageData(video, canvas, ctx, options);
+  }
+
   if (video.videoWidth <= 0 || video.videoHeight <= 0) return null;
 
   const sourceCrop = getRoiCrop(video.videoWidth, video.videoHeight, level);
   const { width, height } = getTargetSize(
     sourceCrop,
     options.maxLongEdge ?? 1280,
-    options.upscale ?? (level === 'tight' ? 1.5 : 1),
+    options.upscale ?? 1,
   );
 
   if (canvas.width !== width || canvas.height !== height) {

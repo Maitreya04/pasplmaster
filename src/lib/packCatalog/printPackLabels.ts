@@ -228,3 +228,76 @@ export async function openPackCatalogLabelsPrint(opts: {
 
   return { cardCount, blocked: false };
 }
+
+export interface BulkPieceLabelRequest {
+  item: Item;
+  busyCode: number;
+  count: number;
+}
+
+/** Print many piece (individual) QR stickers from a Pareto plan or similar bulk list. */
+export async function openBulkPieceLabelsPrint(opts: {
+  requests: BulkPieceLabelRequest[];
+  offsets?: PrecutPrintOffsets;
+  autoPrint?: boolean;
+  title?: string;
+}): Promise<{ cardCount: number; blocked: boolean }> {
+  const spec = getPrecutSheet();
+  const w = window.open('', '_blank');
+  if (!w) return { cardCount: 0, blocked: true };
+
+  const qrByBusy = new Map<number, string>();
+  const cells: PrecutLabelCell[] = [];
+
+  for (const req of opts.requests) {
+    if (req.count < 1) continue;
+    let qrSvg = qrByBusy.get(req.busyCode);
+    if (!qrSvg) {
+      qrSvg = await buildItemQr(req.item, req.busyCode);
+      qrByBusy.set(req.busyCode, qrSvg);
+    }
+    const alias = aliasDisplayForItem(req.item);
+    const itemName =
+      req.item.name.length > 72 ? `${req.item.name.slice(0, 69)}…` : req.item.name;
+    for (let i = 0; i < req.count; i += 1) {
+      cells.push({
+        tier: 'piece',
+        tierLabel: 'Individual',
+        packQty: 1,
+        scanHint: 'Scan +1 pc',
+        aliasHeading: alias.heading,
+        itemName,
+        qrSvg,
+      });
+    }
+  }
+
+  const cardCount = cells.length;
+  if (cardCount === 0) {
+    w.close();
+    return { cardCount: 0, blocked: false };
+  }
+
+  const pages = chunkLabels(cells, spec.labelsPerPage);
+  const sheetsHtml = pages
+    .map((pageCells, idx) => renderSheet(pageCells, idx, pages.length, spec, opts.offsets))
+    .join('');
+
+  const autoPrint = opts.autoPrint !== false;
+  const printCss = buildPrecutPrintCss(spec, opts.offsets);
+  const printScript = autoPrint
+    ? '<script>window.onload=function(){window.print();}</script>'
+    : `<p class="screen-only" style="margin:12px auto;max-width:210mm;font-size:12px;color:#64748b;text-align:center">
+        Preview only — use the browser Print button when ready (100% scale, no fit-to-page).
+      </p>`;
+  const title = escapeHtml(opts.title ?? 'Bulk piece labels');
+
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>
+    <style>${printCss}</style></head><body>
+    ${sheetsHtml}
+    ${printScript}
+  </body></html>`);
+  w.document.close();
+
+  return { cardCount, blocked: false };
+}

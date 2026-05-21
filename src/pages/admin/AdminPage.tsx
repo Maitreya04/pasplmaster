@@ -5,6 +5,7 @@ import {
   ChartBar,
   Tag,
   Package,
+  Printer,
   Camera,
   MagicWand,
   Database,
@@ -183,6 +184,22 @@ export default function AdminPage(): React.JSX.Element | null {
               <p className="font-semibold text-[var(--content-primary)]">Pack catalog</p>
               <p className="text-sm text-[var(--content-tertiary)]">
                 Search SKUs · outer / inner / piece sizes · print three QR stickers · CSV sync
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/admin/pareto-labels')}
+            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
+          >
+            <div className="w-12 h-12 rounded-xl bg-[var(--bg-positive-subtle)] flex items-center justify-center">
+              <Printer size={22} weight="regular" className="text-[var(--content-positive)]" />
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-[var(--content-primary)]">Lucas Pareto bulk print</p>
+              <p className="text-sm text-[var(--content-tertiary)]">
+                Upload 80/20 plan HTML · auto-layout 589 piece labels on Oddy sheets
               </p>
             </div>
           </button>

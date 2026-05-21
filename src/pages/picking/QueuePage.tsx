@@ -28,6 +28,7 @@ import {
   Skeleton,
 } from '../../components/shared';
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
+import { BrandLineChip } from '../../components/picking/BrandLineChip';
 
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return '';
@@ -353,9 +354,10 @@ export default function QueuePage(): React.JSX.Element | null {
                         {' '}· {pick.item_count} items
                       </span>
                       {(pick.ask_line_count ?? 0) > 0 && (
-                        <span className="ml-1.5 inline-flex items-center rounded-md border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--content-warning-on-light)]">
-                          ASK {pick.ask_line_count}
-                        </span>
+                        <BrandLineChip brand="ask" count={pick.ask_line_count} className="ml-1.5" />
+                      )}
+                      {(pick.lucas_line_count ?? 0) > 0 && (
+                        <BrandLineChip brand="lucas" count={pick.lucas_line_count} className="ml-1.5" />
                       )}
                     </p>
                   </div>
@@ -463,9 +465,10 @@ export default function QueuePage(): React.JSX.Element | null {
                         {order.priority === 'urgent' && <StatusBadge status="urgent" />}
                         <StatusBadge status="picking" />
                         {(order.ask_line_count ?? 0) > 0 && (
-                          <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]">
-                            ASK {order.ask_line_count}
-                          </span>
+                          <BrandLineChip brand="ask" count={order.ask_line_count} />
+                        )}
+                        {(order.lucas_line_count ?? 0) > 0 && (
+                          <BrandLineChip brand="lucas" count={order.lucas_line_count} />
                         )}
                       </div>
                       <p className="text-sm text-[var(--content-secondary)] truncate">
@@ -516,6 +519,7 @@ function OrderCard({
   const navigate = useNavigate();
   const isUrgent = order.priority === 'urgent';
   const askCount = order.ask_line_count ?? 0;
+  const lucasCount = order.lucas_line_count ?? 0;
 
   return (
     <Card
@@ -532,11 +536,8 @@ function OrderCard({
               {order.order_number}
             </span>
             {isUrgent && <StatusBadge status="urgent" />}
-            {askCount > 0 && (
-              <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]">
-                ASK {askCount}
-              </span>
-            )}
+            {askCount > 0 && <BrandLineChip brand="ask" count={askCount} />}
+            {lucasCount > 0 && <BrandLineChip brand="lucas" count={lucasCount} />}
             {order.claim_info?.is_stale && (
               <span className="font-ds-micro uppercase font-bold text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] px-2 py-0.5 rounded border border-[var(--border-warning)]">
                 Stale (Takeover)
