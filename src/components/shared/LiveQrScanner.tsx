@@ -10,7 +10,11 @@ import {
 import { normalizeScanCode } from '../../lib/scanner/qrPayload';
 import { useItemScanIndexStore } from '../../stores/itemScanIndex';
 import { useQRScanner } from '../../hooks/useQRScanner';
-import { buildResolvedScanPayload, uniqueCodes } from '../../lib/scanner/resolvePickedScan';
+import {
+  buildResolvedScanPayload,
+  buildResolvedScanPayloadSync,
+  uniqueCodes,
+} from '../../lib/scanner/resolvePickedScan';
 import {
   playErrorBuzz,
   playSuccessBeep,
@@ -39,9 +43,11 @@ import type {
   LiveQrScannerResolved,
 } from '../../lib/scanner/liveQrScannerTypes';
 
-const LAST_PAYLOAD_DEBOUNCE_MS = 1200;
-const AUTO_RETRY_DELAY_MS = 1000;
-const RESET_COOLDOWN_MS = 350;
+/** Same label re-fired within this window is ignored (prevents double-log). */
+const LAST_PAYLOAD_DEBOUNCE_MS = 450;
+const AUTO_RETRY_DELAY_MS = 450;
+/** Brief lock after accept so decode does not fire twice; keep short for rapid multi-scan. */
+const RESET_COOLDOWN_MS = 90;
 
 export interface LiveQrScannerPickLabContext {
   targetQty: number;
@@ -64,6 +70,8 @@ interface LiveQrScannerProps {
   onClose: () => void;
   onResolved: (result: LiveQrScannerResolved) => void;
   onError: (message: string) => void;
+  /** When true, awaits UOM RPC before onResolved (slower; for UoM onboarding). Default false. */
+  resolveUomOnScan?: boolean;
 }
 
 export function LiveQrScanner({
@@ -78,6 +86,7 @@ export function LiveQrScanner({
   onClose,
   onResolved,
   onError,
+  resolveUomOnScan = false,
 }: LiveQrScannerProps): React.JSX.Element {
   const idleLine = idleStatus ?? 'Point the QR inside the frame';
   const [lockedUi, setLockedUi] = useState(false);
@@ -260,9 +269,37 @@ export function LiveQrScanner({
       lastFiredPayloadRef.current = { key: debounceKey, at: debounceNow };
 
       try {
-        const result = await buildResolvedScanPayload(rawValue, scannerPickItem);
+        const result = resolveUomOnScan
+          ? await buildResolvedScanPayload(rawValue, scannerPickItem, { resolveUom: true })
+          : buildResolvedScanPayloadSync(rawValue, scannerPickItem);
 
         setLastScan(result);
+
+        if (!resolveUomOnScan) {
+          if (pickLabMode) {
+            if (result.matchesPickItem) {
+              vibrateIfEnabled('success');
+              playSuccessBeep();
+              flashViewport('green');
+            } else {
+              vibrateIfEnabled('error');
+              playErrorBuzz();
+              flashViewport('red');
+            }
+          } else if (collectMode) {
+            vibrateIfEnabled('success');
+            playSuccessBeep();
+            flashViewport('green');
+          } else if (result.matchesPickItem) {
+            vibrateIfEnabled('success');
+            playSuccessBeep();
+            flashViewport('green');
+          } else {
+            vibrateIfEnabled('error');
+            playErrorBuzz();
+            flashViewport('red');
+          }
+        }
 
         let labQuantity: PickScanQuantityResult | null = null;
         if (pickLabMode && pickLabContext) {
@@ -299,22 +336,14 @@ export function LiveQrScanner({
         onResolved(result);
 
         if (pickLabMode) {
-          vibrateIfEnabled(result.matchesPickItem ? 100 : [100, 50, 100]);
-          if (result.matchesPickItem) {
-            playSuccessBeep();
-            flashViewport('green');
-            setErrorMessage(null);
-            setStatus(
-              labQuantity && labQuantity.qtyAdded > 0
+          setErrorMessage(result.matchesPickItem ? null : result.reason);
+          setStatus(
+            result.matchesPickItem
+              ? labQuantity && labQuantity.qtyAdded > 0
                 ? `+${labQuantity.qtyAdded} pcs · scan next label…`
-                : 'Verified — scan next label…',
-            );
-          } else {
-            playErrorBuzz();
-            flashViewport('red');
-            setErrorMessage(result.reason);
-            setStatus('Wrong label for this line — try again…');
-          }
+                : 'Verified — scan next label…'
+              : 'Wrong label for this line — try again…',
+          );
           window.setTimeout(() => {
             lockedRef.current = false;
             setLockedUi(false);
@@ -327,9 +356,11 @@ export function LiveQrScanner({
         }
 
         if (collectMode) {
-          vibrateIfEnabled(60);
-          playSuccessBeep();
-          flashViewport('green');
+          if (resolveUomOnScan) {
+            vibrateIfEnabled('success');
+            playSuccessBeep();
+            flashViewport('green');
+          }
           setErrorMessage(null);
           setStatus('Scan logged. Point at the next label…');
           window.setTimeout(() => {
@@ -349,19 +380,23 @@ export function LiveQrScanner({
         if (result.matchesPickItem) {
           completedRef.current = true;
           stopScanner();
-          vibrateIfEnabled(100);
-          playSuccessBeep();
-          flashViewport('green');
+          if (resolveUomOnScan) {
+            vibrateIfEnabled('success');
+            playSuccessBeep();
+            flashViewport('green');
+          }
           setErrorMessage(null);
           setStatus('Shelf verified');
           return;
         }
 
-        vibrateIfEnabled([100, 50, 100]);
-        playErrorBuzz();
-        flashViewport('red');
+        if (resolveUomOnScan) {
+          vibrateIfEnabled('error');
+          playErrorBuzz();
+          flashViewport('red');
+        }
         setErrorMessage(result.reason);
-        setStatus(`Verification failed. Retrying in ${AUTO_RETRY_DELAY_MS / 1000}s…`);
+        setStatus('Wrong label — aim at this line and scan again…');
 
         if (retryTimerRef.current !== null) {
           window.clearTimeout(retryTimerRef.current);
@@ -387,6 +422,7 @@ export function LiveQrScanner({
       flashViewport,
       idleLine,
       onResolved,
+      resolveUomOnScan,
       resumeVideoLoop,
       scannerPickItem,
       sheetMode,

@@ -79,7 +79,7 @@ export async function captureViewfinderBitmap(
     {
       resizeWidth: width,
       resizeHeight: height,
-      resizeQuality: 'high',
+      resizeQuality: 'medium',
     },
   );
 
@@ -149,7 +149,7 @@ export async function captureRoiBitmap(
     {
       resizeWidth: width,
       resizeHeight: height,
-      resizeQuality: 'high',
+      resizeQuality: 'medium',
     },
   );
 

@@ -29,9 +29,10 @@ type BarcodeDetectorStatic = BarcodeDetectorCtor & {
   getSupportedFormats?: () => Promise<string[]>;
 };
 
-const NATIVE_SCAN_INTERVAL_MS = 33;
-const WORKER_SCAN_INTERVAL_MS = 33;
-const BURST_SCAN_INTERVAL_MS = 16;
+/** Native ML Kit path: run every camera frame when idle (0 = no extra throttle). */
+const NATIVE_SCAN_INTERVAL_MS = 0;
+const WORKER_SCAN_INTERVAL_MS = 28;
+const BURST_SCAN_INTERVAL_MS = 0;
 const BURST_WINDOW_MS = 700;
 const WORKER_MAX_PENDING_FRAMES = 2;
 
@@ -46,7 +47,12 @@ function captureOptionsForPick(pickContext?: PickBarcodeContext): {
   return oemCaptureBoost(oemHardeningActive(pickContext));
 }
 
-function stableFramesRequired(rawValue: string, pickContext?: PickBarcodeContext): number {
+function stableFramesRequired(
+  rawValue: string,
+  pickContext: PickBarcodeContext | undefined,
+  engineType: 'native' | 'worker',
+): number {
+  if (engineType === 'native') return 1;
   if (oemHardeningActive(pickContext) && barcodeMatchesExpected(rawValue, pickContext!.expectedCodes)) {
     return 1;
   }
@@ -374,30 +380,51 @@ export function useQRScanner({
         try {
           if (engine.type === 'native') {
             let selected: PickedDetectedValue | null = null;
-            const captureOpts = captureOptionsForPick(pickContextRef.current);
-            const roiCapture = await captureViewfinderBitmap(video, {
-              maxLongEdge: captureOpts.maxLongEdge,
-              upscale: captureOpts.upscale,
-              viewfinderEl: viewfinderRef.current,
-            });
+            const viewfinderCrop = getViewfinderVideoCrop(video, viewfinderRef.current);
 
-            if (roiCapture) {
-              const viewfinderCrop = getViewfinderVideoCrop(video, viewfinderRef.current);
-              const roiCodes = await engine.detector.detect(roiCapture.bitmap);
-              const roiPick = pickBestDetectedRawValue(
-                roiCodes,
+            try {
+              const fullCodes = await engine.detector.detect(video);
+              const fullPick = pickBestDetectedRawValue(
+                fullCodes,
                 collectMode,
                 video,
                 pickContextRef.current,
               );
-              if (roiPick) {
-                const projected = projectRoiPickToVideo(roiPick, roiCapture);
-                const bbox = projected.boundingBox;
+              if (fullPick) {
+                const bbox = fullPick.boundingBox;
                 if (!viewfinderCrop || !bbox || isBoundingBoxInsideCrop(bbox, viewfinderCrop)) {
-                  selected = projected;
+                  selected = fullPick;
                 }
               }
-              roiCapture.bitmap.close();
+            } catch {
+              /* fall through to ROI bitmap */
+            }
+
+            if (!selected) {
+              const captureOpts = captureOptionsForPick(pickContextRef.current);
+              const roiCapture = await captureViewfinderBitmap(video, {
+                maxLongEdge: captureOpts.maxLongEdge,
+                upscale: captureOpts.upscale,
+                viewfinderEl: viewfinderRef.current,
+              });
+
+              if (roiCapture) {
+                const roiCodes = await engine.detector.detect(roiCapture.bitmap);
+                const roiPick = pickBestDetectedRawValue(
+                  roiCodes,
+                  collectMode,
+                  video,
+                  pickContextRef.current,
+                );
+                if (roiPick) {
+                  const projected = projectRoiPickToVideo(roiPick, roiCapture);
+                  const bbox = projected.boundingBox;
+                  if (!viewfinderCrop || !bbox || isBoundingBoxInsideCrop(bbox, viewfinderCrop)) {
+                    selected = projected;
+                  }
+                }
+                roiCapture.bitmap.close();
+              }
             }
 
             if (selected) {
@@ -409,7 +436,7 @@ export function useQRScanner({
               const isFresh = now - state.updatedAt <= STABLE_SCAN_TTL_MS;
               const isSame = isFresh && state.rawValue === selected.rawValue;
               const nextCount = isSame ? state.count + 1 : 1;
-              const minStable = stableFramesRequired(selected.rawValue, pickContextRef.current);
+              const minStable = stableFramesRequired(selected.rawValue, pickContextRef.current, 'native');
               const boxConfidence: DisplayBox['confidence'] =
                 nextCount >= minStable ? 'locked' : 'detected';
               const box = mapBoundingBoxToDisplay(selected, video, boxConfidence);
@@ -526,7 +553,7 @@ export function useQRScanner({
             const isFresh = now - state.updatedAt <= STABLE_SCAN_TTL_MS;
             const isSame = isFresh && state.rawValue === data.rawValue;
             const nextCount = isSame ? state.count + 1 : 1;
-            const minStable = stableFramesRequired(data.rawValue, pickContextRef.current);
+            const minStable = stableFramesRequired(data.rawValue, pickContextRef.current, 'worker');
             const boxConfidence: DisplayBox['confidence'] =
               nextCount >= minStable ? 'locked' : 'detected';
 

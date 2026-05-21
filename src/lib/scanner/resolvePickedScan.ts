@@ -4,7 +4,7 @@ import {
   getScanCatalogItemByBusyCode,
 } from '../../stores/itemScanIndex';
 import { classifyScanPayload, normalizeScanCode } from './qrPayload';
-import { resolveScanToUom } from './uomMapper';
+import { resolveScanToUom, type ResolvedUom } from './uomMapper';
 import type { LiveQrScannerPickItem, LiveQrScannerResolved } from './liveQrScannerTypes';
 
 function uniqueCodes(values: Array<string | null | undefined>): string[] {
@@ -31,16 +31,57 @@ function extractNumericCandidates(values: Array<string | null | undefined>): num
   return [...out];
 }
 
-export async function buildResolvedScanPayload(
+export type BuildResolvedScanOptions = {
+  /** When false, skip network UOM RPC (pick verify uses local catalog + PickPage qty logic). */
+  resolveUom?: boolean;
+};
+
+function applyUomFields(
+  base: Omit<
+    LiveQrScannerResolved,
+    'uomTier' | 'baseQtyEa' | 'packetQtyEa' | 'packetsPerBox' | 'uomSource' | 'suggestedQty'
+  >,
+  classified: ReturnType<typeof classifyScanPayload>,
+  uomResolved: ResolvedUom,
+): LiveQrScannerResolved {
+  const uomTier = uomResolved.tier;
+  const baseQtyEa = uomResolved.baseQtyEa;
+  const packetQtyEa = uomResolved.packetQtyEa;
+  const packetsPerBox = uomResolved.packetsPerBox;
+  const uomSource = uomResolved.source;
+
+  const suggestedQty =
+    uomResolved.matched &&
+    baseQtyEa != null &&
+    Number.isFinite(baseQtyEa) &&
+    baseQtyEa >= 1
+      ? Math.floor(baseQtyEa)
+      : classified.kind === 'pack'
+        ? 1
+        : classified.kind === 'lpn'
+          ? Math.max(1, classified.lpnPayload?.remainingQty ?? 1)
+          : 1;
+
+  return {
+    ...base,
+    suggestedQty,
+    uomTier,
+    baseQtyEa,
+    packetQtyEa,
+    packetsPerBox,
+    uomSource,
+  };
+}
+
+/** In-memory resolve only — no network; safe to call on every stable decode. */
+export function buildResolvedScanPayloadSync(
   rawValue: string,
   scannerPickItem: LiveQrScannerPickItem,
-): Promise<LiveQrScannerResolved> {
+): LiveQrScannerResolved {
   const classified = classifyScanPayload(rawValue);
   const candidates = classified.normalizedCandidates;
   const packPayload = classified.packPayload;
   const lpnPayload = classified.lpnPayload;
-
-  const uomResolved = await resolveScanToUom(rawValue);
 
   let matchesPickItem = false;
   let matchedBy: LiveQrScannerResolved['matchedBy'] = null;
@@ -99,25 +140,7 @@ export async function buildResolvedScanPayload(
     lookupCode = lookup.code;
   }
 
-  const uomTier = uomResolved.tier;
-  const baseQtyEa = uomResolved.baseQtyEa;
-  const packetQtyEa = uomResolved.packetQtyEa;
-  const packetsPerBox = uomResolved.packetsPerBox;
-  const uomSource = uomResolved.source;
-
-  const suggestedQty =
-    uomResolved.matched &&
-    baseQtyEa != null &&
-    Number.isFinite(baseQtyEa) &&
-    baseQtyEa >= 1
-      ? Math.floor(baseQtyEa)
-      : classified.kind === 'pack'
-        ? 1
-        : classified.kind === 'lpn'
-          ? Math.max(1, lpnPayload?.remainingQty ?? 1)
-          : 1;
-
-  const result: LiveQrScannerResolved = {
+  const base = {
     rawValue,
     matchedItem: matchesPickItem
       ? (getScanCatalogItemById(scannerPickItem.itemId) ?? lookup?.item ?? packCatalogItem ?? null)
@@ -132,14 +155,8 @@ export async function buildResolvedScanPayload(
           ? String(lpnPayload.busyCode)
           : (lookup?.code ?? candidates[0] ?? null)),
     codeType: classified.kind,
-    suggestedQty,
     requiresBreakConfirmation: false,
     lpnCode: lpnPayload?.lpnCode ?? null,
-    uomTier,
-    baseQtyEa,
-    packetQtyEa,
-    packetsPerBox,
-    uomSource,
     reason: matchesPickItem
       ? matchedBy === 'pack'
         ? `Verified reusable ${packPayload?.packType} pack QR.`
@@ -155,7 +172,34 @@ export async function buildResolvedScanPayload(
               : 'QR decoded, but no catalog item matched.',
   };
 
-  return result;
+  return applyUomFields(base, classified, {
+    matched: false,
+    busyCode: null,
+    itemId: null,
+    itemName: null,
+    sellingUnit: 'piece',
+    tier: null,
+    baseQtyEa: null,
+    packetQtyEa: null,
+    packetsPerBox: null,
+    source: null,
+    reason: null,
+  });
+}
+
+export async function buildResolvedScanPayload(
+  rawValue: string,
+  scannerPickItem: LiveQrScannerPickItem,
+  options: BuildResolvedScanOptions = {},
+): Promise<LiveQrScannerResolved> {
+  const sync = buildResolvedScanPayloadSync(rawValue, scannerPickItem);
+  if (options.resolveUom === false) return sync;
+
+  const classified = classifyScanPayload(rawValue);
+  const uomResolved = await resolveScanToUom(rawValue);
+  const { suggestedQty: _s, uomTier: _t, baseQtyEa: _b, packetQtyEa: _p, packetsPerBox: _pb, uomSource: _us, ...base } =
+    sync;
+  return applyUomFields(base, classified, uomResolved);
 }
 
 export { uniqueCodes };

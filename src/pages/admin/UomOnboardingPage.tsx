@@ -480,6 +480,7 @@ export default function UomOnboardingPage(): ReactElement {
       {scannerOpen && (
         <LiveQrScanner
           mode="collect"
+          resolveUomOnScan
           title="Scan SKU label"
           eyebrow="UoM onboarding"
           helpText="Point at OEM QR, pack label, or alias barcode."

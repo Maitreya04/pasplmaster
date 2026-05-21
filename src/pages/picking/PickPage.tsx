@@ -94,7 +94,7 @@ interface PendingPackConfirmation {
   targetQty: number;
 }
 
-const DUPLICATE_SCAN_WINDOW_MS = 1200;
+const DUPLICATE_SCAN_WINDOW_MS = 500;
 const MAX_AUTO_SCAN_QTY = 12;
 
 // ─── Pick flow constants ───
