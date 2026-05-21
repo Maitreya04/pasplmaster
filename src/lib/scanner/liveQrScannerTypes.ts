@@ -8,6 +8,9 @@ export interface LiveQrScannerPickItem {
   alias?: string | null;
   itemCode?: string | null;
   busyCode?: number | null;
+  /** Busy catalog groups — used for OEM label hints (e.g. TAFE). */
+  mainGroup?: string | null;
+  parentGroup?: string | null;
 }
 
 export interface LiveQrScannerResolved {

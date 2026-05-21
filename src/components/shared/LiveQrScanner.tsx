@@ -29,6 +29,8 @@ import {
   type PickScanQuantityResult,
 } from '../../lib/scanner/pickScanQuantity';
 import type { ItemPackDefinition } from '../../types';
+import type { PickBarcodeContext } from '../../lib/scanner/pickBarcodeSelection';
+import { isTafeLine } from '../../lib/picking/tafeBrand';
 
 export type { LiveQrScannerPickItem, LiveQrScannerResolved } from '../../lib/scanner/liveQrScannerTypes';
 
@@ -57,6 +59,8 @@ interface LiveQrScannerProps {
   mode?: 'verify' | 'collect' | 'pickLab';
   pickItem?: LiveQrScannerPickItem;
   pickLabContext?: LiveQrScannerPickLabContext;
+  /** Pick flow: barcode unreadable — verify printed product code + manual qty. */
+  onManualVerify?: () => void;
   onClose: () => void;
   onResolved: (result: LiveQrScannerResolved) => void;
   onError: (message: string) => void;
@@ -70,6 +74,7 @@ export function LiveQrScanner({
   mode = 'verify',
   pickItem,
   pickLabContext,
+  onManualVerify,
   onClose,
   onResolved,
   onError,
@@ -138,6 +143,37 @@ export function LiveQrScanner({
     [collectMode, scannerPickItem.alias1, scannerPickItem.alias, scannerPickItem.itemCode],
   );
 
+  const pickScanContext = useMemo<PickBarcodeContext | undefined>(() => {
+    if (collectMode || scannerPickItem.itemId <= 0) return undefined;
+    const codes = expectedCodes.map((c) => normalizeScanCode(c)).filter((c) => c.length > 0);
+    if (codes.length === 0) return undefined;
+    return {
+      expectedCodes: codes,
+      oemMultiBarcodeMode: true,
+    };
+  }, [collectMode, expectedCodes, scannerPickItem.itemId]);
+
+  const isTafePick = useMemo(
+    () =>
+      isTafeLine({
+        item_name: scannerPickItem.name,
+        main_group: scannerPickItem.mainGroup,
+        parent_group: scannerPickItem.parentGroup,
+      }),
+    [scannerPickItem.mainGroup, scannerPickItem.name, scannerPickItem.parentGroup],
+  );
+
+  const resolvedHelpText = useMemo(() => {
+    if (helpText) return helpText;
+    if (isTafePick && pickScanContext) {
+      return 'TAFE label: aim at the 2D QR or top barcode with the part number — ignore the bottom serial stamp.';
+    }
+    if (pickScanContext) {
+      return 'Aim at the QR or barcode that shows the part number, not a serial stamp below it.';
+    }
+    return 'Steady, fill the frame, use torch in dim aisles.';
+  }, [helpText, isTafePick, pickScanContext]);
+
   const toggleFeedbackSound = useCallback(() => {
     const next = !getScannerFeedbackPrefs().sound;
     setScannerFeedbackPrefs({ sound: next });
@@ -192,6 +228,7 @@ export function LiveQrScanner({
     applyCameraZoom,
   } = useQRScanner({
     collectMode: collectMode || pickLabMode,
+    pickContext: pickScanContext,
     completedRef,
     lockedRef,
     onStableRawDecode: (raw) => onStableDecodeRef.current(raw),
@@ -546,9 +583,20 @@ export function LiveQrScanner({
             onClose={handleClose}
           />
 
-          {!sheetMode && (
+          {(pickLabMode || !sheetMode) && onManualVerify && (
+            <button
+              type="button"
+              onClick={onManualVerify}
+              className="w-full rounded-2xl border border-white/15 bg-white/8 px-4 py-3 text-sm font-medium text-white/90 active:scale-[0.98]"
+              style={{ transition: 'transform 120ms ease-out' }}
+            >
+              Barcode not scanning? Enter product code
+            </button>
+          )}
+
+          {(pickLabMode || !sheetMode) && (
             <p className="px-1 text-center text-xs leading-relaxed text-slate-500">
-              {helpText ?? 'Steady, fill the frame, use torch in dim aisles.'}
+              {resolvedHelpText}
             </p>
           )}
         </div>

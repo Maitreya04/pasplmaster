@@ -13,7 +13,7 @@ import {
 } from '@phosphor-icons/react';
 import { useItems } from '../../hooks/useItems';
 import { useToast } from '../../context/ToastContext';
-import { BigButton, LiveQrScanner, SearchInput, Skeleton } from '../../components/shared';
+import { BigButton, BottomSheet, LiveQrScanner, SearchInput, Skeleton } from '../../components/shared';
 import type { Item, ItemPackDefinition, LicensePlatePackType, ScanResult } from '../../types';
 import { appHaptics } from '../../lib/haptics';
 import type { LiveQrScannerResolved } from '../../components/shared/LiveQrScanner';
@@ -22,6 +22,8 @@ import {
   partNoFromPickItem,
   type PickScanQuantityResult,
 } from '../../lib/scanner/pickScanQuantity';
+import { barcodeMatchesExpected } from '../../lib/scanner/pickBarcodeSelection';
+import { isTafeLine } from '../../lib/picking/tafeBrand';
 import { itemPickCode } from '../../utils/itemCodes';
 import {
   fetchItemPackDefinitions,
@@ -80,6 +82,37 @@ function packPayload(busyCode: number, packType: LicensePlatePackType): string {
   return `PASPL-PACK:${busyCode}:${packType}`;
 }
 
+function expectedCodesForItem(item: ScanLabRecord): string[] {
+  return [item.alias1, item.alias, item.pickCode].filter(
+    (code, index, values): code is string => Boolean(code) && values.indexOf(code) === index,
+  );
+}
+
+function buildManualLabQuantity(
+  targetQty: number,
+  totalBefore: number,
+  qtyToApply: number,
+): PickScanQuantityResult {
+  const remainingBefore = Math.max(0, targetQty - totalBefore);
+  const floored = Math.max(0, Math.floor(qtyToApply));
+  const requiresBreakConfirmation = floored > remainingBefore && remainingBefore > 0;
+  const qtyAdded = floored <= 0 ? 0 : Math.min(remainingBefore, floored);
+  const totalAfter = totalBefore + qtyAdded;
+  return {
+    scanKind: 'unknown',
+    packType: null,
+    packQty: null,
+    tierLabel: 'Manual code verify',
+    qtyAdded,
+    targetQty,
+    totalBefore,
+    totalAfter,
+    remainingBefore,
+    remainingAfter: Math.max(0, targetQty - totalAfter),
+    requiresBreakConfirmation,
+  };
+}
+
 export default function PickScanLabPage(): React.JSX.Element {
   const navigate = useNavigate();
   const toast = useToast();
@@ -105,6 +138,9 @@ export default function PickScanLabPage(): React.JSX.Element {
     quantity: PickScanQuantityResult;
   } | null>(null);
   const [scanOnlyHistory, setScanOnlyHistory] = useState<ScanOnlyResult[]>([]);
+  const [manualCodeVerifyItem, setManualCodeVerifyItem] = useState<ScanLabRecord | null>(null);
+  const [manualCodeInput, setManualCodeInput] = useState('');
+  const [manualCodeQtyInput, setManualCodeQtyInput] = useState('1');
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const [focusedFromStudioItemId, setFocusedFromStudioItemId] = useState<number | null>(null);
   const [studioHintVisible, setStudioHintVisible] = useState(false);
@@ -166,6 +202,70 @@ export default function PickScanLabPage(): React.JSX.Element {
   const closeScan = useCallback(() => {
     setLiveTarget(null);
   }, []);
+
+  const openManualCodeVerify = useCallback((item: ScanLabRecord) => {
+    appHaptics.selection();
+    setLiveTarget(null);
+    const remaining = Math.max(1, targetQty - simulatedPickedQty);
+    setManualCodeVerifyItem(item);
+    setManualCodeInput('');
+    setManualCodeQtyInput(String(remaining));
+  }, [simulatedPickedQty, targetQty]);
+
+  const confirmManualCodeVerify = useCallback(() => {
+    const item = manualCodeVerifyItem;
+    if (!item) return;
+
+    const entered = manualCodeInput.trim();
+    if (!entered) {
+      toast.error('Enter the product code printed on the box');
+      return;
+    }
+
+    if (!barcodeMatchesExpected(entered, expectedCodesForItem(item))) {
+      appHaptics.warning();
+      toast.error('Product code does not match this SKU. Check the label and try again.');
+      return;
+    }
+
+    const parsedQty = Number(manualCodeQtyInput);
+    if (!Number.isFinite(parsedQty) || parsedQty <= 0) {
+      toast.error('Enter a valid quantity');
+      return;
+    }
+
+    setSimulatedPickedQty((pickedBefore) => {
+      const quantity = buildManualLabQuantity(targetQty, pickedBefore, parsedQty);
+      const result: ScanResult = {
+        scannedText: entered,
+        confidence: 100,
+        isMatch: true,
+        matchedAgainst: item.pickCode,
+        matchStrategy: 'manual_code_verify',
+        ocrExtracted: { partNumber: entered, mrp: item.mrp ?? null },
+        method: 'manual',
+        timestamp: new Date().toISOString(),
+        extractedCode: entered,
+        extractedDescription: item.name,
+        reason: 'Product code verified manually (barcode unreadable)',
+        suggestedQty: Math.floor(parsedQty),
+        requiresBreakConfirmation: quantity.requiresBreakConfirmation,
+        operatorContext: {
+          pickerName: null,
+          pickerUserId: null,
+          source: 'manual',
+        },
+      };
+      setLastResult({ item, result, quantity });
+      if (quantity.qtyAdded > 0) appHaptics.success();
+      else appHaptics.warning();
+      return quantity.qtyAdded > 0 ? quantity.totalAfter : pickedBefore;
+    });
+
+    setManualCodeVerifyItem(null);
+    setManualCodeInput('');
+    setManualCodeQtyInput('1');
+  }, [manualCodeInput, manualCodeQtyInput, manualCodeVerifyItem, targetQty, toast]);
 
   const closeScanOnly = useCallback(() => {
     setScanOnlyOpen(false);
@@ -288,7 +388,8 @@ export default function PickScanLabPage(): React.JSX.Element {
           <div className="min-w-0">
             <h1 className="text-2xl font-bold text-[var(--content-primary)]">Pick Scan Lab</h1>
             <p className="text-sm text-[var(--content-tertiary)]">
-              Test verification mode or scan-only recognition using current barcode mapping and alias rules.
+              Test the same scan rules as live picking: OEM multi-barcode selection, TAFE label hints,
+              PASPL pack QRs, and manual product-code fallback.
             </p>
           </div>
         </div>
@@ -333,6 +434,12 @@ export default function PickScanLabPage(): React.JSX.Element {
             Scan Mode
           </button>
         </div>
+
+        <p className="mt-3 text-xs leading-relaxed text-[var(--content-tertiary)]">
+          {labScannerMode === 'verify'
+            ? 'Verify Mode mirrors the pick screen: expected SKU is known, OEM labels prefer the part-number QR/top 1D, and you can fall back to typed product code + qty.'
+            : 'Scan Mode is open recognition only (no expected SKU) — useful to see what a raw barcode resolves to before mapping.'}
+        </p>
 
         {labScannerMode === 'scan' && (
           <section className="mt-5 space-y-4">
@@ -443,13 +550,21 @@ export default function PickScanLabPage(): React.JSX.Element {
               How To Test
             </p>
             <div className="mt-3 space-y-3 text-sm text-[var(--content-secondary)]">
-              <p>1. Print the 35mm pack strip from Label Studio.</p>
-              <p>2. Set a target quantity here, then search the SKU and tap `Test Scan`.</p>
-              <p>3. Scan ITEM, INNER, and MASTER. The lab will show the decoded payload and simulated quantity added.</p>
-              <p>4. If a pack is larger than remaining qty, the lab flags the same break-confirmation case as picking.</p>
+              <p>1. Search a SKU and tap <span className="font-semibold">Test Scan</span> — same engine as live picking.</p>
               <p>
-                5. From Label Studio, use <span className="font-semibold">Pick Scan Lab</span> on a SKU row (or open{' '}
-                <span className="font-mono text-xs">/admin/pick-scan-lab?itemId=…</span>) to focus that line here.
+                2. <span className="font-semibold">OEM box labels</span> (e.g. TAFE): scanner reads all barcodes in frame
+                and picks the one matching this SKU&apos;s part code — not the bottom serial stamp.
+              </p>
+              <p>3. Scan PASPL ITEM, INNER, or MASTER pack strips; qty added follows UoM / pack definitions.</p>
+              <p>
+                4. If the camera won&apos;t read the label, use{' '}
+                <span className="font-semibold">Enter product code</span> in the scanner or on the SKU row — type the
+                printed alias and qty (same as pick screen).
+              </p>
+              <p>5. Break-pack cases (scan qty &gt; remaining) show the same confirmation flag as picking.</p>
+              <p>
+                6. From Label Studio:{' '}
+                <span className="font-mono text-xs">/admin/pick-scan-lab?itemId=…</span> deep-links a printed SKU here.
               </p>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -634,6 +749,11 @@ export default function PickScanLabPage(): React.JSX.Element {
                     : null;
                 const oemMapCount = oemBarcodeCountByItemId.get(item.id) ?? 0;
                 const varrocLikely = isLikelyVarrocLine(item);
+                const tafeLikely = isTafeLine({
+                  item_name: item.name,
+                  main_group: item.main_group,
+                  parent_group: item.parent_group,
+                });
 
                 return (
                   <article
@@ -665,6 +785,11 @@ export default function PickScanLabPage(): React.JSX.Element {
                           {oemMapCount > 0 && (
                             <span className="rounded-full border border-[var(--border-subtle)] px-3 py-1 text-xs font-medium text-[var(--content-tertiary)]">
                               OEM barcode keys ×{oemMapCount}
+                            </span>
+                          )}
+                          {tafeLikely && (
+                            <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-900">
+                              TAFE — use QR or top part barcode
                             </span>
                           )}
                           {varrocLikely && oemMapCount === 0 ? (
@@ -735,6 +860,13 @@ export default function PickScanLabPage(): React.JSX.Element {
                           <Camera size={18} weight="bold" />
                           Test Scan
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => openManualCodeVerify(item)}
+                          className="flex h-11 items-center justify-center rounded-2xl bg-[var(--bg-accent-subtle)] px-4 text-sm font-semibold text-[var(--content-accent)]"
+                        >
+                          Manual code
+                        </button>
                       </div>
                     </div>
                   </article>
@@ -753,7 +885,7 @@ export default function PickScanLabPage(): React.JSX.Element {
           mode="pickLab"
           title={liveTarget.name}
           eyebrow="Pick Scan Lab"
-          idleStatus="Scan outer, inner, or piece QR"
+          idleStatus="Scan OEM box, PASPL pack strip, or piece QR"
           pickItem={{
             itemId: liveTarget.id,
             name: liveTarget.name,
@@ -761,8 +893,11 @@ export default function PickScanLabPage(): React.JSX.Element {
             alias: liveTarget.alias,
             itemCode: liveTarget.pickCode,
             busyCode: liveTarget.busy_code ?? null,
+            mainGroup: liveTarget.main_group,
+            parentGroup: liveTarget.parent_group,
           }}
           pickLabContext={pickLabContext}
+          onManualVerify={() => openManualCodeVerify(liveTarget)}
           onClose={closeScan}
           onResolved={handleScanResolved}
           onError={(message) => {
@@ -771,6 +906,74 @@ export default function PickScanLabPage(): React.JSX.Element {
           }}
         />
       )}
+      <BottomSheet
+        isOpen={manualCodeVerifyItem !== null}
+        onClose={() => {
+          setManualCodeVerifyItem(null);
+          setManualCodeInput('');
+          setManualCodeQtyInput('1');
+        }}
+        title="Verify product code (lab)"
+      >
+        {manualCodeVerifyItem && (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--content-secondary)]">
+              Same fallback as live picking for{' '}
+              <span className="font-semibold text-[var(--content-primary)]">{manualCodeVerifyItem.name}</span>.
+              Type the printed code and qty to simulate a manual verify pick.
+            </p>
+            <div className="rounded-xl border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">
+                Expected code
+              </p>
+              <p className="font-mono text-base font-bold text-[var(--content-primary)] break-all">
+                {manualCodeVerifyItem.pickCode}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-[var(--content-secondary)]">
+                Product code on box
+              </label>
+              <input
+                type="text"
+                inputMode="text"
+                autoCapitalize="characters"
+                autoComplete="off"
+                value={manualCodeInput}
+                onChange={(e) => setManualCodeInput(e.target.value)}
+                placeholder="Enter printed code"
+                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3 font-mono text-[var(--content-primary)]"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-[var(--content-secondary)]">
+                Quantity
+                <span className="text-[var(--content-tertiary)] font-normal">
+                  {' '}
+                  ({Math.max(0, targetQty - simulatedPickedQty)} remaining)
+                </span>
+              </label>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={1}
+                value={manualCodeQtyInput}
+                onChange={(e) => setManualCodeQtyInput(e.target.value)}
+                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3 text-[var(--content-primary)]"
+              />
+            </div>
+            <BigButton
+              variant="primary"
+              onClick={confirmManualCodeVerify}
+              disabled={!manualCodeInput.trim()}
+              className="bg-[var(--bg-accent)] text-[var(--content-on-color)]"
+            >
+              Verify &amp; apply qty
+            </BigButton>
+          </div>
+        )}
+      </BottomSheet>
       {scanOnlyOpen && (
         <LiveQrScanner
           mode="collect"

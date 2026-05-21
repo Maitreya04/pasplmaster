@@ -305,6 +305,20 @@ export function classifyScanPayload(rawValue: string): ClassifiedScanPayload {
  * Both are normalised to uppercase alphanumerics + dashes, so "a 12" matches "A-12"
  * the same way "A12" does.
  */
+/** True when typed product code matches any expected alias (normalized). */
+export function productCodeMatchesExpected(
+  entered: string,
+  expectedCodes: Array<string | null | undefined>,
+): boolean {
+  const normalizedEntered = normalizeScanCode(entered);
+  if (!normalizedEntered) return false;
+  for (const code of expectedCodes) {
+    const normalized = normalizeScanCode(code);
+    if (normalized && normalized === normalizedEntered) return true;
+  }
+  return false;
+}
+
 export function rackCodesMatch(
   scanned: string | null | undefined,
   expected: string | null | undefined,

@@ -15,7 +15,11 @@ import {
   applyContinuousCameraEnhancements,
 } from '../lib/scanner/acquireCamera';
 import { createVideoScanLoop } from '../lib/scanner/videoLoop';
-import { scoreDetectedValue } from '../lib/scanner/scoring';
+import {
+  pickBestBarcodeCandidate,
+  type BarcodeHit,
+  type PickBarcodeContext,
+} from '../lib/scanner/pickBarcodeSelection';
 import { isScannerDebugEnabled, scannerDebugLog } from '../lib/scanner/scannerDebug';
 
 type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => BarcodeDetectorLike;
@@ -52,65 +56,32 @@ type WorkerCaptureMeta = {
   imageHeight: number;
 };
 
-function getBoundingBoxArea(entry: BarcodeDetectorResult): number | null {
-  const bbox = entry.boundingBox;
-  if (bbox && Number.isFinite(bbox.width) && Number.isFinite(bbox.height) && bbox.width > 0 && bbox.height > 0) {
-    return bbox.width * bbox.height;
-  }
-  return null;
-}
-
-function scoreSpatialPriority(entry: BarcodeDetectorResult, video: HTMLVideoElement): number {
-  const area = getBoundingBoxArea(entry);
-  if (!area || video.videoWidth <= 0 || video.videoHeight <= 0) return 0;
-
-  const frameArea = video.videoWidth * video.videoHeight;
-  const areaRatio = Math.min(1, Math.max(0, area / frameArea));
-  const sizeScore = (1 - areaRatio) * 30;
-
-  const bbox = entry.boundingBox;
-  if (!bbox) return sizeScore;
-  const centerX = bbox.x + bbox.width / 2;
-  const centerY = bbox.y + bbox.height / 2;
-  const dx = (centerX - video.videoWidth / 2) / (video.videoWidth / 2);
-  const dy = (centerY - video.videoHeight / 2) / (video.videoHeight / 2);
-  const distance = Math.min(1, Math.sqrt(dx * dx + dy * dy));
-  const centerScore = (1 - distance) * 12;
-
-  return sizeScore + centerScore;
-}
-
 function pickBestDetectedRawValue(
   codes: BarcodeDetectorResult[],
   collectMode: boolean,
   video: HTMLVideoElement,
+  pickContext?: PickBarcodeContext,
 ): PickedDetectedValue | null {
-  const candidates = codes
+  const hits: BarcodeHit[] = codes
     .map((code) => ({
       rawValue: typeof code.rawValue === 'string' ? code.rawValue.trim() : '',
       format: code.format,
       boundingBox: code.boundingBox,
-      scoreBoost: scoreSpatialPriority(code, video),
     }))
     .filter((entry) => entry.rawValue.length > 0);
 
-  if (candidates.length === 0) return null;
+  const best = pickBestBarcodeCandidate(hits, {
+    collectMode,
+    pickContext,
+    frameHeight: video.videoHeight,
+  });
+  if (!best) return null;
 
-  let best = candidates[0];
-  let bestScore =
-    scoreDetectedValue(best.rawValue, best.format, collectMode) + best.scoreBoost;
-
-  for (let i = 1; i < candidates.length; i += 1) {
-    const candidate = candidates[i];
-    const score =
-      scoreDetectedValue(candidate.rawValue, candidate.format, collectMode) + candidate.scoreBoost;
-    if (score > bestScore) {
-      best = candidate;
-      bestScore = score;
-    }
-  }
-
-  return best;
+  return {
+    rawValue: best.rawValue,
+    format: best.format,
+    boundingBox: best.boundingBox,
+  };
 }
 
 export function mapBoundingBoxToDisplay(
@@ -201,6 +172,7 @@ type CameraCapabilities = MediaTrackCapabilities & {
 
 export interface UseQRScannerArgs {
   collectMode: boolean;
+  pickContext?: PickBarcodeContext;
   completedRef: RefObject<boolean>;
   lockedRef: RefObject<boolean>;
   onStableRawDecode: (raw: string) => void;
@@ -211,6 +183,7 @@ export interface UseQRScannerArgs {
 
 export function useQRScanner({
   collectMode,
+  pickContext,
   completedRef,
   lockedRef,
   onStableRawDecode,
@@ -271,9 +244,11 @@ export function useQRScanner({
   const onStableRawDecodeRef = useRef(onStableRawDecode);
   const onErrorRef = useRef(onError);
   const onScannerReadyRef = useRef(onScannerReady);
+  const pickContextRef = useRef(pickContext);
   onStableRawDecodeRef.current = onStableRawDecode;
   onErrorRef.current = onError;
   onScannerReadyRef.current = onScannerReady;
+  pickContextRef.current = pickContext;
 
   const firstFrameAtRef = useRef<number | null>(null);
   const firstDecodeAtRef = useRef<number | null>(null);
@@ -391,7 +366,12 @@ export function useQRScanner({
             if (roiCapture) {
               const viewfinderCrop = getViewfinderVideoCrop(video, viewfinderRef.current);
               const roiCodes = await engine.detector.detect(roiCapture.bitmap);
-              const roiPick = pickBestDetectedRawValue(roiCodes, collectMode, video);
+              const roiPick = pickBestDetectedRawValue(
+                roiCodes,
+                collectMode,
+                video,
+                pickContextRef.current,
+              );
               if (roiPick) {
                 const projected = projectRoiPickToVideo(roiPick, roiCapture);
                 const bbox = projected.boundingBox;
@@ -453,6 +433,7 @@ export function useQRScanner({
                     frameId,
                     imageData: capture.imageData,
                     missStreak: noHitFrameCountRef.current,
+                    pickContext: pickContextRef.current,
                   },
                   [capture.imageData.data.buffer],
                 );

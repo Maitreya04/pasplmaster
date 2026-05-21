@@ -8,17 +8,21 @@ import {
   prepareZXingModule,
   readBarcodes,
   type Position,
-  type ReadResult,
   type ReaderOptions,
 } from 'zxing-wasm/reader';
 import zxingReaderWasmUrl from 'zxing-wasm/reader/zxing_reader.wasm?url';
-import { isLikelyPartNumber } from '../lib/scanner/scoring';
+import {
+  pickBestBarcodeCandidate,
+  type BarcodeHit,
+  type PickBarcodeContext,
+} from '../lib/scanner/pickBarcodeSelection';
 
 type ScanRequestMessage = {
   type: 'scan';
   frameId: number;
   imageData: ImageData;
   missStreak?: number;
+  pickContext?: PickBarcodeContext;
 };
 
 type WorkerRequestMessage = ScanRequestMessage;
@@ -141,25 +145,12 @@ function positionToBoundingBox(position: Position): WorkerBoundingBox {
   };
 }
 
-function scoreSymbol(symbol: { type: ZBarSymbolType; decode(): string }): number {
-  const decoded = symbol.decode().trim();
-  if (!decoded) return -1000;
-
-  let score = 0;
-  if (symbol.type === ZBarSymbolType.ZBAR_CODE128) score += 12;
-  if (symbol.type === ZBarSymbolType.ZBAR_CODE39 || symbol.type === ZBarSymbolType.ZBAR_CODE93) score += 8;
-  if (
-    symbol.type === ZBarSymbolType.ZBAR_EAN13 ||
-    symbol.type === ZBarSymbolType.ZBAR_EAN8 ||
-    symbol.type === ZBarSymbolType.ZBAR_UPCA ||
-    symbol.type === ZBarSymbolType.ZBAR_UPCE
-  ) {
-    score += 6;
-  }
-  if (symbol.type === ZBarSymbolType.ZBAR_QRCODE) score -= 8;
-  if (isLikelyPartNumber(decoded)) score += 20;
-  if (decoded.length > 26) score -= 4;
-  return score;
+function zbarFormatName(type: ZBarSymbolType): string | undefined {
+  if (type === ZBarSymbolType.ZBAR_QRCODE) return 'QRCode';
+  if (type === ZBarSymbolType.ZBAR_CODE128) return 'Code128';
+  if (type === ZBarSymbolType.ZBAR_CODE39) return 'Code39';
+  if (type === ZBarSymbolType.ZBAR_CODE93) return 'Code93';
+  return undefined;
 }
 
 const ZXING_FORMATS: NonNullable<ReaderOptions['formats']> = [
@@ -179,22 +170,6 @@ const ZXING_FORMATS: NonNullable<ReaderOptions['formats']> = [
   'UPCE',
 ];
 
-function scoreZXingResult(result: ReadResult): number {
-  const decoded = result.text.trim();
-  if (!decoded || !result.isValid) return -1000;
-
-  let score = 0;
-  if (result.format === 'Code128') score += 12;
-  if (result.format === 'Code39' || result.format === 'Code93') score += 8;
-  if (result.format === 'EAN13' || result.format === 'EAN8' || result.format === 'UPCA' || result.format === 'UPCE') {
-    score += 6;
-  }
-  if (result.format === 'QRCode' || result.format === 'MicroQRCode') score -= 8;
-  if (isLikelyPartNumber(decoded)) score += 20;
-  if (decoded.length > 26) score -= 4;
-  return score;
-}
-
 let zxingReadyPromise: Promise<unknown> | null = null;
 
 async function prepareZXing(): Promise<void> {
@@ -211,7 +186,7 @@ async function prepareZXing(): Promise<void> {
   await zxingReadyPromise;
 }
 
-async function scanBestZXing(imageData: ImageData, tryHarder: boolean): Promise<ReadResult | null> {
+async function scanAllZXing(imageData: ImageData, tryHarder: boolean): Promise<BarcodeHit[]> {
   await prepareZXing();
   const results = await readBarcodes(imageData, {
     formats: ZXING_FORMATS,
@@ -221,79 +196,58 @@ async function scanBestZXing(imageData: ImageData, tryHarder: boolean): Promise<
     tryDownscale: !tryHarder,
     tryDenoise: tryHarder,
     binarizer: tryHarder ? 'LocalAverage' : 'GlobalHistogram',
-    maxNumberOfSymbols: 4,
+    maxNumberOfSymbols: 6,
     minLineCount: tryHarder ? 1 : 2,
     textMode: 'Plain',
   });
-  const usableResults = results.filter((result) => result.text.trim().length > 0 && result.isValid);
-  if (usableResults.length === 0) return null;
-
-  let best = usableResults[0];
-  let bestScore = scoreZXingResult(best);
-  for (let i = 1; i < usableResults.length; i += 1) {
-    const candidate = usableResults[i];
-    const score = scoreZXingResult(candidate);
-    if (score > bestScore) {
-      best = candidate;
-      bestScore = score;
-    }
-  }
-  return best;
+  return results
+    .filter((result) => result.text.trim().length > 0 && result.isValid)
+    .map((result) => ({
+      rawValue: result.text.trim(),
+      format: result.format,
+      boundingBox: positionToBoundingBox(result.position),
+    }));
 }
 
-async function scanBestSymbol(scanner: ZBarScanner, imageData: ImageData) {
+async function scanAllZBar(scanner: ZBarScanner, imageData: ImageData): Promise<BarcodeHit[]> {
   const symbols = await scanImageData(imageData, scanner);
-  const usableSymbols = symbols.filter((symbol) => symbol.decode().trim().length > 0);
-  if (usableSymbols.length === 0) return null;
-
-  let best = usableSymbols[0];
-  let bestScore = scoreSymbol(best);
-  for (let i = 1; i < usableSymbols.length; i += 1) {
-    const candidate = usableSymbols[i];
-    const score = scoreSymbol(candidate);
-    if (score > bestScore) {
-      best = candidate;
-      bestScore = score;
-    }
+  const hits: BarcodeHit[] = [];
+  for (const symbol of symbols) {
+    const rawValue = symbol.decode().trim();
+    if (!rawValue) continue;
+    hits.push({
+      rawValue,
+      format: zbarFormatName(symbol.type),
+    });
   }
-  return best;
+  return hits;
 }
 
-type ScanHit = {
-  text: string;
-  score: number;
-  boundingBox?: WorkerBoundingBox;
-};
-
-async function scanImageParallel(
+async function scanAllBarcodes(
   scanner: ZBarScanner,
   imageData: ImageData,
   tryHarder: boolean,
-): Promise<ScanHit | null> {
-  const [zxingResult, zbarSymbol] = await Promise.all([
-    scanBestZXing(imageData, tryHarder),
-    tryHarder ? Promise.resolve(null) : scanBestSymbol(scanner, imageData),
+  pickContext?: PickBarcodeContext,
+): Promise<BarcodeHit | null> {
+  const [zxingHits, zbarHits] = await Promise.all([
+    scanAllZXing(imageData, tryHarder),
+    tryHarder ? Promise.resolve([] as BarcodeHit[]) : scanAllZBar(scanner, imageData),
   ]);
 
-  let best: ScanHit | null = null;
-
-  if (zxingResult) {
-    best = {
-      text: zxingResult.text,
-      score: scoreZXingResult(zxingResult),
-      boundingBox: positionToBoundingBox(zxingResult.position),
-    };
+  const merged: BarcodeHit[] = [];
+  const seen = new Set<string>();
+  for (const hit of [...zxingHits, ...zbarHits]) {
+    const key = hit.rawValue.trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(hit);
   }
 
-  if (zbarSymbol) {
-    const score = scoreSymbol(zbarSymbol);
-    const text = zbarSymbol.decode().trim();
-    if (!best || score > best.score) {
-      best = { text, score };
-    }
-  }
-
-  return best;
+  return pickBestBarcodeCandidate(merged, {
+    collectMode: false,
+    pickContext,
+    frameHeight: imageData.height,
+  });
 }
 
 let scannerPromise: Promise<ZBarScanner> | null = null;
@@ -334,6 +288,7 @@ const engineWarmPromise = Promise.all([prepareZXing(), getBarcodeScanner()]).cat
 async function handleScan(message: ScanRequestMessage) {
   const scanner = await getBarcodeScanner();
   const image = message.imageData;
+  const pickContext = message.pickContext;
 
   const post = (rawValue: string | null, boundingBox?: WorkerBoundingBox, upscale = 1) => {
     let box = boundingBox;
@@ -354,9 +309,9 @@ async function handleScan(message: ScanRequestMessage) {
     self.postMessage(response);
   };
 
-  const hit = await scanImageParallel(scanner, image, false);
+  const hit = await scanAllBarcodes(scanner, image, false, pickContext);
   if (hit) {
-    post(hit.text, hit.boundingBox);
+    post(hit.rawValue, hit.boundingBox);
     return;
   }
 
@@ -367,9 +322,9 @@ async function handleScan(message: ScanRequestMessage) {
   }
 
   const hardImage = upscaleNearest(stretchContrast(image), 2);
-  const hardHit = await scanImageParallel(scanner, hardImage, true);
+  const hardHit = await scanAllBarcodes(scanner, hardImage, true, pickContext);
   if (hardHit) {
-    post(hardHit.text, hardHit.boundingBox, 2);
+    post(hardHit.rawValue, hardHit.boundingBox, 2);
     return;
   }
 
