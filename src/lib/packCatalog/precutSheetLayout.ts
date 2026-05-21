@@ -1,54 +1,122 @@
 /**
- * Oddy ST-24 A4 precut (ST-24A4100 / Word template L-7159).
- * 3 across × 8 down = 24 labels per sheet.
- * Label face: 63.5 × 33.86 mm (Oddy / Avery L7159 family).
- *
- * Margins derived to fit 210×297 mm with even gutters (calibrated; use
- * printer scale 100% and adjust 1–2 mm in dialog if your printer feeds slightly off).
+ * Oddy A4 precut sheets — layout matches manufacturer / Word label dialogs:
+ * top margin, side margin, horizontal pitch, vertical pitch, label width & height.
+ * Each label is placed at side + col×H-pitch, top + row×V-pitch (not CSS grid gaps).
  */
 export interface PrecutSheetSpec {
   id: string;
+  name: string;
   pageWidthMm: number;
   pageHeightMm: number;
-  marginTopMm: number;
-  marginLeftMm: number;
+  topMarginMm: number;
+  sideMarginMm: number;
+  horizontalPitchMm: number;
+  verticalPitchMm: number;
   labelWidthMm: number;
   labelHeightMm: number;
   columns: number;
   rows: number;
-  columnGapMm: number;
-  rowGapMm: number;
   labelsPerPage: number;
-  /** QR column width inside sticker */
   qrColumnMm: number;
   qrSvgMm: number;
+  aliasFontPt: number;
+  packFontPt: number;
+  nameFontPt: number;
 }
 
+/**
+ * Oddy ST-24 A4100 (24-up A4) — official dimensions table / Word L-7159.
+ * Source: Oddy multipurpose labels dimension identification table.
+ */
 export const ODDY_ST24_A4: PrecutSheetSpec = {
-  id: 'ST-24',
+  id: 'ST-24A4100',
+  name: 'Oddy ST-24 A4100 (L-7159)',
   pageWidthMm: 210,
   pageHeightMm: 297,
-  marginTopMm: 4.5,
-  marginLeftMm: 5,
-  labelWidthMm: 63.5,
-  labelHeightMm: 33.86,
+  topMarginMm: 12.979,
+  sideMarginMm: 4.597,
+  horizontalPitchMm: 66.472,
+  verticalPitchMm: 33.858,
+  labelWidthMm: 64,
+  labelHeightMm: 34,
   columns: 3,
   rows: 8,
-  columnGapMm: 4.75,
-  rowGapMm: 2.45,
   labelsPerPage: 24,
   qrColumnMm: 24,
   qrSvgMm: 22,
+  aliasFontPt: 9.5,
+  packFontPt: 6.5,
+  nameFontPt: 5,
 };
 
-/** Active sheet for Pack Catalog print */
+/** Active Oddy precut sheet for Pack Catalog print. */
 export const PRECUT_SHEET = ODDY_ST24_A4;
 
-function gridTemplateColumns(spec: PrecutSheetSpec): string {
-  return Array.from({ length: spec.columns }, () => `${spec.labelWidthMm}mm`).join(' ');
+export function getPrecutSheet(): PrecutSheetSpec {
+  return PRECUT_SHEET;
 }
 
-export function buildPrecutPrintCss(spec: PrecutSheetSpec = PRECUT_SHEET): string {
+/** Fine-tune when a printer feeds slightly off (mm), applied on top of margins. */
+export interface PrecutPrintOffsets {
+  topMm: number;
+  leftMm: number;
+}
+
+export const PRECUT_PRINT_OFFSET_STORAGE_KEY = 'paspl.pack-catalog.precut-offset';
+
+export function loadPrecutPrintOffsets(): PrecutPrintOffsets {
+  try {
+    const raw = localStorage.getItem(PRECUT_PRINT_OFFSET_STORAGE_KEY);
+    if (!raw) return { topMm: 0, leftMm: 0 };
+    const parsed = JSON.parse(raw) as Partial<PrecutPrintOffsets>;
+    return {
+      topMm: typeof parsed.topMm === 'number' ? parsed.topMm : 0,
+      leftMm: typeof parsed.leftMm === 'number' ? parsed.leftMm : 0,
+    };
+  } catch {
+    return { topMm: 0, leftMm: 0 };
+  }
+}
+
+export function savePrecutPrintOffsets(offsets: PrecutPrintOffsets): void {
+  localStorage.setItem(PRECUT_PRINT_OFFSET_STORAGE_KEY, JSON.stringify(offsets));
+}
+
+export function precutLabelPosition(
+  spec: PrecutSheetSpec,
+  index: number,
+  offsets: PrecutPrintOffsets = { topMm: 0, leftMm: 0 },
+): { leftMm: number; topMm: number; col: number; row: number } {
+  const col = index % spec.columns;
+  const row = Math.floor(index / spec.columns);
+  return {
+    col,
+    row,
+    leftMm: spec.sideMarginMm + col * spec.horizontalPitchMm + offsets.leftMm,
+    topMm: spec.topMarginMm + row * spec.verticalPitchMm + offsets.topMm,
+  };
+}
+
+/** Human-readable line matching Oddy / Word label dialog fields. */
+export function precutOddyDialogSummary(spec: PrecutSheetSpec): string {
+  return [
+    `top ${spec.topMarginMm}`,
+    `side ${spec.sideMarginMm}`,
+    `H pitch ${spec.horizontalPitchMm}`,
+    `V pitch ${spec.verticalPitchMm}`,
+    `${spec.labelWidthMm}×${spec.labelHeightMm} mm`,
+    `${spec.columns}×${spec.rows}`,
+  ].join(' · ');
+}
+
+export function precutSheetSummary(spec: PrecutSheetSpec): string {
+  return `${spec.name} · ${spec.labelsPerPage}/sheet · ${precutOddyDialogSummary(spec)}`;
+}
+
+export function buildPrecutPrintCss(
+  spec: PrecutSheetSpec = getPrecutSheet(),
+  _offsets: PrecutPrintOffsets = { topMm: 0, leftMm: 0 },
+): string {
   return `
   @page {
     size: A4 portrait;
@@ -85,24 +153,22 @@ export function buildPrecutPrintCss(spec: PrecutSheetSpec = PRECUT_SHEET): strin
 
   .precut-grid {
     position: absolute;
-    top: ${spec.marginTopMm}mm;
-    left: ${spec.marginLeftMm}mm;
-    display: grid;
-    grid-template-columns: ${gridTemplateColumns(spec)};
-    grid-template-rows: repeat(${spec.rows}, ${spec.labelHeightMm}mm);
-    column-gap: ${spec.columnGapMm}mm;
-    row-gap: ${spec.rowGapMm}mm;
+    inset: 0;
+    width: ${spec.pageWidthMm}mm;
+    height: ${spec.pageHeightMm}mm;
   }
 
   .sticker {
+    position: absolute;
+    margin: 0;
     width: ${spec.labelWidthMm}mm;
     height: ${spec.labelHeightMm}mm;
     overflow: hidden;
     display: grid;
     grid-template-columns: minmax(0, 1fr) ${spec.qrColumnMm}mm;
     align-items: center;
-    gap: 1.2mm;
-    padding: 1.5mm 1.8mm;
+    gap: 1.5mm;
+    padding: 2mm 2.2mm;
   }
 
   @media screen {
@@ -130,11 +196,11 @@ export function buildPrecutPrintCss(spec: PrecutSheetSpec = PRECUT_SHEET): strin
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 0.6mm;
+    gap: 0.8mm;
   }
 
   .sticker-alias {
-    font-size: 9.5pt;
+    font-size: ${spec.aliasFontPt}pt;
     font-weight: 900;
     line-height: 1.02;
     letter-spacing: -0.02em;
@@ -147,14 +213,14 @@ export function buildPrecutPrintCss(spec: PrecutSheetSpec = PRECUT_SHEET): strin
     flex-wrap: wrap;
     align-items: baseline;
     gap: 1mm;
-    font-size: 6.5pt;
+    font-size: ${spec.packFontPt}pt;
     font-weight: 700;
     line-height: 1.15;
     color: #334155;
   }
 
   .sticker-pack-tier {
-    font-size: 5.5pt;
+    font-size: ${Math.max(spec.packFontPt - 1, 5)}pt;
     font-weight: 800;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -176,7 +242,7 @@ export function buildPrecutPrintCss(spec: PrecutSheetSpec = PRECUT_SHEET): strin
   }
 
   .sticker-name {
-    font-size: 5pt;
+    font-size: ${spec.nameFontPt}pt;
     font-weight: 500;
     color: #64748b;
     line-height: 1.15;
@@ -201,8 +267,6 @@ export function buildPrecutPrintCss(spec: PrecutSheetSpec = PRECUT_SHEET): strin
   }
 `;
 }
-
-export const PRECUT_PRINT_CSS = buildPrecutPrintCss(PRECUT_SHEET);
 
 export function chunkLabels<T>(items: T[], perPage: number): T[][] {
   const pages: T[][] = [];

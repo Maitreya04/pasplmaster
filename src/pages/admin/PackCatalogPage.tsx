@@ -57,6 +57,14 @@ import {
   packCatalogTemplateCsv,
 } from '../../lib/packCatalog/exportPackCatalogCsv';
 import { openPackCatalogLabelsPrint } from '../../lib/packCatalog/printPackLabels';
+import {
+  loadPrecutPrintOffsets,
+  PRECUT_SHEET,
+  precutSheetSummary,
+  savePrecutPrintOffsets,
+  type PrecutPrintOffsets,
+} from '../../lib/packCatalog/precutSheetLayout';
+import { PrecutSheetPreview } from '../../components/packCatalog/PrecutSheetPreview';
 import { BottomSheet, BigButton } from '../../components/shared';
 
 function PackQtyInlineCell({
@@ -111,6 +119,16 @@ function PackQtyInlineCell({
   );
 }
 
+/** Keeps status + edit/print visible when the table scrolls horizontally. */
+const STICKY_STATUS_CELL =
+  'sticky right-[5.5rem] z-10 min-w-[6.5rem] border-l border-[var(--border-subtle)] bg-[var(--bg-primary)] group-hover:bg-[var(--bg-secondary)]';
+const STICKY_ACTIONS_CELL =
+  'sticky right-0 z-20 min-w-[5.5rem] border-l border-[var(--border-subtle)] bg-[var(--bg-primary)] shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.12)] group-hover:bg-[var(--bg-secondary)]';
+const STICKY_STATUS_HEAD =
+  'sticky right-[5.5rem] z-10 min-w-[6.5rem] border-l border-[var(--border-subtle)] bg-[var(--bg-secondary)]';
+const STICKY_ACTIONS_HEAD =
+  'sticky right-0 z-20 min-w-[5.5rem] border-l border-[var(--border-subtle)] bg-[var(--bg-secondary)]';
+
 function StatusBadge({ status }: { status: PackCatalogRow['status'] }): React.JSX.Element {
   const tone =
     status === 'ready'
@@ -151,6 +169,8 @@ export default function PackCatalogPage(): React.JSX.Element {
   const [printInnerCount, setPrintInnerCount] = useState(1);
   const [printIndividualCount, setPrintIndividualCount] = useState(1);
   const [printing, setPrinting] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [precutOffsets, setPrecutOffsets] = useState<PrecutPrintOffsets>(loadPrecutPrintOffsets);
 
   const packQuery = useQuery({
     queryKey: PACK_DEFINITIONS_QUERY_KEY,
@@ -238,9 +258,15 @@ export default function PackCatalogPage(): React.JSX.Element {
     }
   };
 
-  const handlePrint = async () => {
+  const handlePrecutOffsetsChange = useCallback((next: PrecutPrintOffsets) => {
+    setPrecutOffsets(next);
+    savePrecutPrintOffsets(next);
+  }, []);
+
+  const openLabelsWindow = async (autoPrint: boolean) => {
     if (!printRow || printRow.busyCode == null) return;
-    setPrinting(true);
+    const setBusy = autoPrint ? setPrinting : setPreviewing;
+    setBusy(true);
     try {
       const result = await openPackCatalogLabelsPrint({
         item: printRow.item,
@@ -254,18 +280,25 @@ export default function PackCatalogPage(): React.JSX.Element {
           innerCount: printInnerCount,
           individualCount: printIndividualCount,
         },
+        offsets: precutOffsets,
+        autoPrint,
       });
       if (result.blocked) {
-        toast.error('Allow pop-ups to print labels');
+        toast.error('Allow pop-ups to preview or print labels');
       } else if (result.cardCount === 0) {
         toast.info('Select at least one sticker type with a valid pack size');
-      } else {
+      } else if (autoPrint) {
         toast.success(`Opened print for ${result.cardCount} label${result.cardCount === 1 ? '' : 's'}`);
+      } else {
+        toast.success(`Preview opened (${result.cardCount} label${result.cardCount === 1 ? '' : 's'})`);
       }
     } finally {
-      setPrinting(false);
+      setBusy(false);
     }
   };
+
+  const handlePrint = () => openLabelsWindow(true);
+  const handleFullPreview = () => openLabelsWindow(false);
 
   const handleFileImport = async (file: File) => {
     setImporting(true);
@@ -486,10 +519,11 @@ export default function PackCatalogPage(): React.JSX.Element {
 
             {/* Desktop table */}
             <div className="hidden md:block overflow-x-auto rounded-2xl border border-[var(--border-subtle)]">
-              <table className="w-full min-w-[900px] text-left text-sm">
+              <table className="w-full min-w-[960px] border-separate border-spacing-0 text-left text-sm">
                 <thead className="bg-[var(--bg-secondary)] text-xs text-[var(--content-tertiary)]">
                   <tr>
                     <th className="px-3 py-2 font-semibold">Alias 1</th>
+                    <th className="px-3 py-2 font-semibold">Part description</th>
                     <th className="px-3 py-2 font-semibold">Rack</th>
                     <th className="px-3 py-2 font-semibold">
                       Outer box
@@ -499,16 +533,24 @@ export default function PackCatalogPage(): React.JSX.Element {
                       Inner box
                       <div className="font-normal">pieces per inner</div>
                     </th>
-                    <th className="px-3 py-2 font-semibold">Individual</th>
-                    <th className="px-3 py-2 font-semibold">Structure</th>
-                    <th className="px-3 py-2 font-semibold">Status</th>
-                    <th className="px-3 py-2 font-semibold" />
+                    <th className="px-3 py-2 font-semibold">
+                      Individual
+                      <div className="font-normal">pieces per unit</div>
+                    </th>
+                    <th className={`px-3 py-2 font-semibold ${STICKY_STATUS_HEAD}`}>Status</th>
+                    <th className={`px-3 py-2 font-semibold ${STICKY_ACTIONS_HEAD}`}>Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border-subtle)]">
                   {filteredRows.slice(0, 500).map((row) => (
-                    <tr key={row.item.id} className="bg-[var(--bg-primary)] hover:bg-[var(--bg-secondary)]">
+                    <tr
+                      key={row.item.id}
+                      className="group bg-[var(--bg-primary)] hover:bg-[var(--bg-secondary)]"
+                    >
                       <td className="px-3 py-2 font-mono text-xs font-semibold">{row.alias1Display}</td>
+                      <td className="max-w-[280px] px-3 py-2 text-[var(--content-secondary)]">
+                        {row.item.name?.trim() || '—'}
+                      </td>
                       <td className="px-3 py-2">{row.item.rack_no?.trim() || '—'}</td>
                       <td className="px-3 py-2">
                         <PackQtyInlineCell
@@ -527,18 +569,19 @@ export default function PackCatalogPage(): React.JSX.Element {
                         />
                       </td>
                       <td className="px-3 py-2">
-                        <span className="tabular-nums">1 pc</span>
-                        <span className="ml-1 text-xs text-[var(--content-tertiary)]">
-                          · {sellUnitDisplay(row.sellUnit)}
-                        </span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={1}
+                          readOnly
+                          className="w-16 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-1 text-sm tabular-nums"
+                          title="Piece scan always adds 1 pc"
+                        />
                       </td>
-                      <td className="max-w-[200px] truncate px-3 py-2 text-xs text-[var(--content-secondary)]">
-                        {row.structure ?? '—'}
-                      </td>
-                      <td className="px-3 py-2">
+                      <td className={`px-3 py-2 ${STICKY_STATUS_CELL}`}>
                         <StatusBadge status={row.status} />
                       </td>
-                      <td className="px-3 py-2">
+                      <td className={`px-3 py-2 ${STICKY_ACTIONS_CELL}`}>
                         <div className="flex gap-1">
                           <button
                             type="button"
@@ -578,7 +621,9 @@ export default function PackCatalogPage(): React.JSX.Element {
                   className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4"
                 >
                   <p className="font-mono text-sm font-bold">{row.alias1Display}</p>
-                  <p className="mt-1 text-xs text-[var(--content-tertiary)] line-clamp-2">{row.item.name}</p>
+                  <p className="mt-1 text-sm text-[var(--content-secondary)] line-clamp-2">
+                    {row.item.name?.trim() || '—'}
+                  </p>
                   <p className="mt-2 text-sm">
                     Rack <strong>{row.item.rack_no?.trim() || '—'}</strong>
                   </p>
@@ -597,13 +642,16 @@ export default function PackCatalogPage(): React.JSX.Element {
                       disabled={row.busyCode == null}
                       onSave={(v) => saveInlineQty(row, 'inner', v)}
                     />
-                    <span className="text-xs text-[var(--content-tertiary)]">
-                      · 1 pc · {sellUnitDisplay(row.sellUnit)}
-                    </span>
+                    <span className="text-xs text-[var(--content-tertiary)]">Individual</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={1}
+                      readOnly
+                      className="w-16 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-1 text-sm tabular-nums"
+                      title="Piece scan always adds 1 pc"
+                    />
                   </div>
-                  {row.structure && (
-                    <p className="mt-1 text-xs text-[var(--content-secondary)]">{row.structure}</p>
-                  )}
                   <div className="mt-3 flex items-center justify-between">
                     <StatusBadge status={row.status} />
                     <div className="flex gap-2">
@@ -732,9 +780,18 @@ export default function PackCatalogPage(): React.JSX.Element {
               {printRow.structure ?? 'Set pack sizes to print'}
             </p>
             <p className="text-xs text-[var(--content-tertiary)]">
-              Oddy <strong>ST-24</strong> A4 precut (3×8, 24 per sheet). Alias large, then pack
-              size; outer/inner = pack QR only, individual = piece QR. Print at 100% scale.
+              <strong>{PRECUT_SHEET.name}</strong> · {precutSheetSummary(PRECUT_SHEET)}. Print at
+              100% scale, no fit-to-page.
             </p>
+
+            <PrecutSheetPreview
+              spec={PRECUT_SHEET}
+              outerCount={printOuterCount}
+              innerCount={printInnerCount}
+              individualCount={printIndividualCount}
+              offsets={precutOffsets}
+              onOffsetsChange={handlePrecutOffsetsChange}
+            />
 
             {printRow.outerQty != null && printRow.outerQty >= 1 && (
               <div className="rounded-xl border border-[var(--border-subtle)] p-3">
@@ -804,9 +861,19 @@ export default function PackCatalogPage(): React.JSX.Element {
               </p>
             )}
 
-            <BigButton onClick={() => void handlePrint()} disabled={printing}>
-              {printing ? 'Preparing…' : 'Print selected stickers'}
-            </BigButton>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => void handleFullPreview()}
+                disabled={printing || previewing}
+                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm font-semibold text-[var(--content-primary)] disabled:opacity-50"
+              >
+                {previewing ? 'Opening preview…' : 'Open full-size preview'}
+              </button>
+              <BigButton onClick={() => void handlePrint()} disabled={printing || previewing}>
+                {printing ? 'Preparing…' : 'Print selected stickers'}
+              </BigButton>
+            </div>
           </div>
         )}
       </BottomSheet>
