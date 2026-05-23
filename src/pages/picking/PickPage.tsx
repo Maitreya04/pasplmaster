@@ -626,6 +626,37 @@ export default function PickPage(): React.JSX.Element | null {
     return { kind: 'awaiting_rack', itemId: currentTarget.orderItem.id };
   }, [currentTarget, celebrating, briefAcknowledged, counts.picked, counts.flagged, rackVerifiedIds]);
 
+  const engagedScannerContext = useMemo(() => {
+    if (!engagedScanner) return null;
+    const deckItem = deckItems.find((pi) => pi.orderItem.id === engagedScanner.itemId);
+    if (!deckItem) return null;
+
+    const orderItem = deckItem.orderItem;
+    const targetQty = pickQuantityTarget(orderItem);
+    const pickedQty = Math.min(targetQty, getPickedQtyFromResult(deckItem.scanResult));
+    const partNo =
+      orderItem.catalog_alias1 ??
+      orderItem.catalog_alias ??
+      orderItem.item_alias ??
+      String(orderItem.item_id);
+    const busyCodes = deriveBusyCodeCandidates(orderItem);
+    const mode = engagedScanner.mode;
+
+    return {
+      orderItem,
+      mode,
+      targetQty,
+      pickedQty,
+      partNo,
+      busyCode: busyCodes[0] ?? null,
+      title:
+        mode === 'rack'
+          ? `Scan bin · Rack ${orderItem.rack_no ?? '—'}`
+          : partNo,
+      eyebrow: mode === 'rack' ? 'Bin verification' : 'Product scan',
+    };
+  }, [deckItems, engagedScanner]);
+
   const shelfBinId =
     currentDeckItem && rackVerifiedIds.has(currentDeckItem.orderItem.id)
       ? rackGateBinIdForPickItem(currentDeckItem.orderItem)
@@ -1540,37 +1571,6 @@ export default function PickPage(): React.JSX.Element | null {
     manualQtyTargetItemId !== null ||
     pendingPackConfirmation !== null ||
     fifoOverrideSheet !== null;
-
-  const engagedScannerContext = useMemo(() => {
-    if (!engagedScanner) return null;
-    const deckItem = deckItems.find((pi) => pi.orderItem.id === engagedScanner.itemId);
-    if (!deckItem) return null;
-
-    const orderItem = deckItem.orderItem;
-    const targetQty = pickQuantityTarget(orderItem);
-    const pickedQty = Math.min(targetQty, getPickedQtyFromResult(deckItem.scanResult));
-    const partNo =
-      orderItem.catalog_alias1 ??
-      orderItem.catalog_alias ??
-      orderItem.item_alias ??
-      String(orderItem.item_id);
-    const busyCodes = deriveBusyCodeCandidates(orderItem);
-    const mode = engagedScanner.mode;
-
-    return {
-      orderItem,
-      mode,
-      targetQty,
-      pickedQty,
-      partNo,
-      busyCode: busyCodes[0] ?? null,
-      title:
-        mode === 'rack'
-          ? `Scan bin · Rack ${orderItem.rack_no ?? '—'}`
-          : partNo,
-      eyebrow: mode === 'rack' ? 'Bin verification' : 'Product scan',
-    };
-  }, [deckItems, engagedScanner]);
 
   return (
     <div className="min-h-screen pb-32">
