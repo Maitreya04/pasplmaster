@@ -28,6 +28,15 @@ import { formatCurrency, formatTimestamp, formatTimeAgo } from '../../utils/form
 import { isFocOrderItem } from '../../lib/specialPricing';
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseStock';
+import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
+import {
+  defaultFulfillmentPath,
+  fulfillmentPathLabel,
+  shouldNotifyPickers,
+} from '../../lib/billing/fulfillmentPath';
+import { FulfillmentPathSelector } from '../../components/billing/FulfillmentPathSelector';
+import type { FulfillmentPath } from '../../types';
+import { countPickableOrderLines } from '../../lib/cartSupply';
 
 interface EditableItem extends OrderItem {
   qty_approved: number;
@@ -179,6 +188,15 @@ export default function ReviewPage(): React.JSX.Element | null {
   }, []);
 
   const visibleItems = items.filter((i) => !removedIds.has(i.id));
+  const pickLineCount = useMemo(() => countPickableOrderLines(visibleItems), [visibleItems]);
+  const [fulfillmentPath, setFulfillmentPath] = useState<FulfillmentPath>('warehouse_pick');
+
+  useEffect(() => {
+    if (!order) return;
+    setFulfillmentPath(
+      defaultFulfillmentPath(order.stock_location_code, order.pick_line_count ?? pickLineCount),
+    );
+  }, [order?.id, order?.stock_location_code, order?.pick_line_count, pickLineCount]);
 
   const pendingCount = useMemo(() => {
     let count = 0;
@@ -514,26 +532,33 @@ export default function ReviewPage(): React.JSX.Element | null {
         }
       }
 
-      // Run the complete_billing RPC if we have an active claim
+      const billingFulfillmentPath: FulfillmentPath = resolvingFlags
+        ? 'direct_bill'
+        : fulfillmentPath;
+
       if (claimId && userId) {
-        const { error: rpcError } = await supabase.rpc('complete_billing', {
-          p_order_id: order.id,
-          p_claim_id: claimId,
-          p_user_id: userId,
-          p_is_resolving_flags: resolvingFlags,
+        await completeBillingWithClaim({
+          orderId: order.id,
+          claimId,
+          userId,
+          claim,
+          isResolvingFlags: resolvingFlags,
+          fulfillmentPath: billingFulfillmentPath,
         });
-        if (rpcError) throw rpcError;
       } else {
         // Fallback for orders without claims (e.g. already flagged or old records)
         const orderUpdate: Record<string, unknown> = {
           reviewer_name: reviewer,
           item_count: visibleItems.length,
           total_value: grandTotal,
+          fulfillment_path: billingFulfillmentPath,
         };
 
-        if (resolvingFlags) {
+        if (resolvingFlags || billingFulfillmentPath === 'direct_bill') {
           orderUpdate.workflow_status = 'completed';
           orderUpdate.priority = 'normal';
+          orderUpdate.approved_at = approvedAt;
+          orderUpdate.completed_at = approvedAt;
         } else {
           orderUpdate.workflow_status = 'approved';
           orderUpdate.approved_at = approvedAt;
@@ -542,7 +567,7 @@ export default function ReviewPage(): React.JSX.Element | null {
         await supabase.from('orders').update(orderUpdate).eq('id', order.id);
       }
 
-      if (!resolvingFlags) {
+      if (!resolvingFlags && shouldNotifyPickers(billingFulfillmentPath)) {
         try {
           await sendPickerReadyNotification({
             eventType: 'order_ready_to_pick',
@@ -583,7 +608,9 @@ export default function ReviewPage(): React.JSX.Element | null {
       toast.success(
         order?.workflow_status === 'flagged'
           ? 'Flags resolved and order marked completed'
-          : 'Order approved and sent to picking'
+          : fulfillmentPath === 'warehouse_pick'
+            ? 'Order approved and sent to picking'
+            : 'Order approved — direct bill (no pick queue)',
       );
       navigate('/billing');
     },
@@ -1131,6 +1158,18 @@ export default function ReviewPage(): React.JSX.Element | null {
               </div>
             </Card>
 
+            {order.workflow_status === 'submitted' && (
+              <div className="mt-6 lg:mt-8">
+                <FulfillmentPathSelector
+                  value={fulfillmentPath}
+                  onChange={setFulfillmentPath}
+                  stockLocationCode={order.stock_location_code}
+                  pickLineCount={pickLineCount}
+                  disabled={approveMutation.isPending}
+                />
+              </div>
+            )}
+
             {/* Actions */}
             <div className="mt-6 lg:mt-8 flex flex-col sm:flex-row gap-3">
               {canPrintPickingChalan && (
@@ -1160,7 +1199,7 @@ export default function ReviewPage(): React.JSX.Element | null {
                     className="sm:flex-[2] hover:opacity-90 bg-[var(--bg-positive)]"
                   >
                     <CheckCircle size={20} weight="bold" />
-                    Approve & Send to Picking
+                    Approve — {fulfillmentPathLabel(fulfillmentPath)}
                   </BigButton>
                 </>
               )}

@@ -16,6 +16,12 @@ import {
   sendPickerReadyNotification,
 } from '../../lib/pickerPush';
 import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
+import {
+  defaultFulfillmentPath,
+  shouldNotifyPickers,
+} from '../../lib/billing/fulfillmentPath';
+import { FulfillmentPathSelector } from '../../components/billing/FulfillmentPathSelector';
+import type { FulfillmentPath, StockLocationCode } from '../../types';
 import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseStock';
 import { buildSalesCommunicateDraft } from '../../lib/buildSalesCommunicateDraft';
 import { NotificationBell } from '../../components/notifications/NotificationBell';
@@ -25,6 +31,7 @@ import { Check, Copy, Lightning, CheckCircle, Warning, Question, CaretLeft, Care
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 import type { OrderItem } from '../../types';
 import { isFocOrderItem } from '../../lib/specialPricing';
+import { countPickableOrderLines } from '../../lib/cartSupply';
 
 function sortByUrgencyAndAge(orders: OrderWithClaimInfo[]): OrderWithClaimInfo[] {
   return [...orders].sort((a, b) => {
@@ -143,6 +150,10 @@ function CompactProcess({
   items,
   activeIndex,
   isSubmitting,
+  fulfillmentPath,
+  onFulfillmentPathChange,
+  stockLocationCode,
+  pickLineCount,
   onAdvance,
   onJump,
   onFinish,
@@ -151,6 +162,10 @@ function CompactProcess({
   items: OrderItem[];
   activeIndex: number;
   isSubmitting?: boolean;
+  fulfillmentPath: FulfillmentPath;
+  onFulfillmentPathChange: (path: FulfillmentPath) => void;
+  stockLocationCode: StockLocationCode | null | undefined;
+  pickLineCount: number;
   onAdvance: () => void;
   onJump: (i: number) => void;
   onFinish: () => void;
@@ -238,7 +253,17 @@ function CompactProcess({
             <CheckCircle size={28} weight="fill" className="text-[var(--content-positive)]" />
           </div>
           <h2 className="text-xl font-bold text-[var(--content-primary)] mb-1">All Items Done</h2>
-          <p className="text-xs text-[var(--content-secondary)] mb-6">Press Enter to finalize</p>
+          <p className="text-xs text-[var(--content-secondary)] mb-4">Press Enter to finalize</p>
+          <div className="w-full mb-4">
+            <FulfillmentPathSelector
+              value={fulfillmentPath}
+              onChange={onFulfillmentPathChange}
+              stockLocationCode={stockLocationCode}
+              pickLineCount={pickLineCount}
+              disabled={isSubmitting}
+              compact
+            />
+          </div>
           <button
             onClick={handleFinish}
             disabled={isSubmitting}
@@ -491,6 +516,10 @@ function CompactCommunicate({
   issues,
   decisions,
   manualFlags,
+  fulfillmentPath,
+  onFulfillmentPathChange,
+  stockLocationCode,
+  pickLineCount,
   isSubmitting,
   onSkip,
   onSend,
@@ -502,6 +531,10 @@ function CompactCommunicate({
   issues: FlagIssue[];
   decisions: Record<number, ResolveDecision>;
   manualFlags: Record<number, ManualFlag>;
+  fulfillmentPath: FulfillmentPath;
+  onFulfillmentPathChange: (path: FulfillmentPath) => void;
+  stockLocationCode: StockLocationCode | null | undefined;
+  pickLineCount: number;
   isSubmitting: boolean;
   onSkip: () => void;
   onSend: (draftText: string) => void;
@@ -524,7 +557,15 @@ function CompactCommunicate({
         {draftText}
       </p>
 
-      <div className="w-full space-y-2">
+      <div className="w-full space-y-3">
+        <FulfillmentPathSelector
+          value={fulfillmentPath}
+          onChange={onFulfillmentPathChange}
+          stockLocationCode={stockLocationCode}
+          pickLineCount={pickLineCount}
+          disabled={isSubmitting}
+          compact
+        />
         <button
           onClick={() => onSend(draftText)}
           disabled={isSubmitting}
@@ -612,6 +653,15 @@ export default function CompactQueuePage() {
   // 3. Order Detail
   const { data: order, isLoading: orderLoading } = useOrderDetail(effectiveOrderId);
   const items = useMemo(() => order?.items ?? [], [order]);
+  const pickLineCount = useMemo(() => countPickableOrderLines(items), [items]);
+  const [fulfillmentPath, setFulfillmentPath] = useState<FulfillmentPath>('warehouse_pick');
+
+  useEffect(() => {
+    if (!order) return;
+    setFulfillmentPath(
+      defaultFulfillmentPath(order.stock_location_code, order.pick_line_count ?? pickLineCount),
+    );
+  }, [order?.id, order?.stock_location_code, order?.pick_line_count, pickLineCount]);
 
   // 4. State Machine
   const machine = useBillingFlowMachine(items);
@@ -743,6 +793,7 @@ export default function CompactQueuePage() {
         userId,
         claim,
         isResolvingFlags: false,
+        fulfillmentPath,
       });
 
       if (vars?.salesDraftText) {
@@ -768,17 +819,19 @@ export default function CompactQueuePage() {
         }
       }
 
-      try {
-        await sendPickerReadyNotification({
-          eventType: 'order_ready_to_pick',
-          orderId: order.id,
-          orderNumber: order.order_number,
-          customerName: order.customer_name,
-          priority: order.priority,
-          approvedAt: new Date().toISOString(),
-        });
-      } catch {
-        /* silent */
+      if (shouldNotifyPickers(fulfillmentPath)) {
+        try {
+          await sendPickerReadyNotification({
+            eventType: 'order_ready_to_pick',
+            orderId: order.id,
+            orderNumber: order.order_number,
+            customerName: order.customer_name,
+            priority: order.priority,
+            approvedAt: new Date().toISOString(),
+          });
+        } catch {
+          /* silent */
+        }
       }
 
       return order.order_number;
@@ -850,6 +903,10 @@ export default function CompactQueuePage() {
             items={items}
             activeIndex={machine.activeItemIndex}
             isSubmitting={approveMutation.isPending}
+            fulfillmentPath={fulfillmentPath}
+            onFulfillmentPathChange={setFulfillmentPath}
+            stockLocationCode={order.stock_location_code}
+            pickLineCount={pickLineCount}
             onAdvance={machine.advanceProcessCursor}
             onJump={machine.jumpToItem}
             onFinish={() => {
@@ -884,6 +941,10 @@ export default function CompactQueuePage() {
             issues={machine.issues}
             decisions={machine.decisions}
             manualFlags={machine.manualFlags}
+            fulfillmentPath={fulfillmentPath}
+            onFulfillmentPathChange={setFulfillmentPath}
+            stockLocationCode={order.stock_location_code}
+            pickLineCount={pickLineCount}
             isSubmitting={approveMutation.isPending}
             onSkip={() => approveMutation.mutate(undefined)}
             onSend={(draftText) => approveMutation.mutate({ salesDraftText: draftText })}

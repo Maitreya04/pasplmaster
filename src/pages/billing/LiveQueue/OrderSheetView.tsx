@@ -9,7 +9,10 @@ import {
   Trash,
   Plus,
 } from '@phosphor-icons/react';
-import type { OrderItem } from '../../../types';
+import type { FulfillmentPath, OrderItem, StockLocationCode } from '../../../types';
+import { countPickableOrderLines } from '../../../lib/cartSupply';
+import { defaultFulfillmentPath } from '../../../lib/billing/fulfillmentPath';
+import { FulfillmentPathSelector } from '../../../components/billing/FulfillmentPathSelector';
 import type { BillingLineEdit, ItemFlag } from '../../../hooks/useBillingFlow';
 import {
   billingFreshnessChipLabel,
@@ -41,6 +44,7 @@ interface OrderSheetViewProps {
   totalValue: number;
   priority: string;
   createdAt: string;
+  stockLocationCode?: StockLocationCode | null;
   /** Raw server rows for this order (includes lines marked removed locally). */
   items: OrderItem[];
   flags: Record<number, ItemFlag>;
@@ -60,7 +64,7 @@ interface OrderSheetViewProps {
   onRestoreLine: (orderItemId: number) => void;
   onApplyLiveStock: (orderItemId: number, liveCapacity: number) => Promise<void>;
   onOpenAddLine: () => void;
-  onFinish: () => void;
+  onFinish: (fulfillmentPath: FulfillmentPath) => void;
   onReject: (reason: string) => void;
   onSkip: () => void;
 }
@@ -87,6 +91,7 @@ export function OrderSheetView({
   totalValue,
   priority,
   createdAt,
+  stockLocationCode,
   items,
   flags,
   lineEdits,
@@ -118,6 +123,19 @@ export function OrderSheetView({
     () => items.filter((i) => !lineEdits[i.id]?.removed),
     [items, lineEdits],
   );
+
+  const pickLineCount = useMemo(
+    () => countPickableOrderLines(visibleRows),
+    [visibleRows],
+  );
+
+  const [fulfillmentPath, setFulfillmentPath] = useState<FulfillmentPath>(() =>
+    defaultFulfillmentPath(stockLocationCode, pickLineCount),
+  );
+
+  useEffect(() => {
+    setFulfillmentPath(defaultFulfillmentPath(stockLocationCode, pickLineCount));
+  }, [orderNumber, stockLocationCode, pickLineCount]);
 
   const mergedVisibleRows = useMemo(
     () => visibleRows.map((i) => mergeLine(i, lineEdits[i.id])),
@@ -255,7 +273,7 @@ export function OrderSheetView({
     if (flagCount > 0 || editCount > 0 || removedCount > 0 || addedLinesSessionCount > 0) {
       setShowConfirm(true);
     } else {
-      onFinish();
+      onFinish(fulfillmentPath);
     }
   }, [
     flagCount,
@@ -263,6 +281,7 @@ export function OrderSheetView({
     removedCount,
     addedLinesSessionCount,
     onFinish,
+    fulfillmentPath,
     isClaiming,
     mergedVisibleRows.length,
   ]);
@@ -270,8 +289,8 @@ export function OrderSheetView({
   const confirmFinish = useCallback(() => {
     if (isApproving || isClaiming) return;
     setShowConfirm(false);
-    onFinish();
-  }, [isApproving, isClaiming, onFinish]);
+    onFinish(fulfillmentPath);
+  }, [isApproving, isClaiming, onFinish, fulfillmentPath]);
 
   useEffect(() => {
     if (!showConfirm) return;
@@ -1148,6 +1167,16 @@ export function OrderSheetView({
               </span>
             )}
           </div>
+          <div className="w-full mb-3">
+            <FulfillmentPathSelector
+              value={fulfillmentPath}
+              onChange={setFulfillmentPath}
+              stockLocationCode={stockLocationCode}
+              pickLineCount={pickLineCount}
+              disabled={isApproving || isRejecting || isClaiming}
+              compact
+            />
+          </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
@@ -1194,6 +1223,16 @@ export function OrderSheetView({
             >
               Finish billing {orderName}?
             </h3>
+
+            <div className="mb-4 shrink-0">
+              <FulfillmentPathSelector
+                value={fulfillmentPath}
+                onChange={setFulfillmentPath}
+                stockLocationCode={stockLocationCode}
+                pickLineCount={pickLineCount}
+                disabled={isApproving || isClaiming}
+              />
+            </div>
 
             <div
               className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-2 mb-4 pr-1 -mr-0.5 [scrollbar-gutter:stable]"

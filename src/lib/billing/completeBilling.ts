@@ -1,3 +1,4 @@
+import type { FulfillmentPath } from '../../types';
 import { supabase } from '../supabase/client';
 import { formatSupabaseUserMessage } from '../supabase/formatUserMessage';
 
@@ -18,6 +19,7 @@ interface CompleteBillingOptions {
   claimId: number | null;
   userId: number | null;
   isResolvingFlags?: boolean;
+  fulfillmentPath?: FulfillmentPath;
   claim: () => Promise<ClaimResult>;
 }
 
@@ -40,12 +42,14 @@ async function callCompleteBilling(
   claimId: number,
   userId: number,
   isResolvingFlags: boolean,
+  fulfillmentPath: FulfillmentPath,
 ): Promise<CompleteBillingResult> {
   const { data, error } = await supabase.rpc('complete_billing', {
     p_order_id: orderId,
     p_claim_id: claimId,
     p_user_id: userId,
     p_is_resolving_flags: isResolvingFlags,
+    p_fulfillment_path: fulfillmentPath,
   });
 
   if (error) throw new Error(formatSupabaseUserMessage(error));
@@ -53,16 +57,34 @@ async function callCompleteBilling(
 }
 
 export async function completeBillingWithClaim(options: CompleteBillingOptions): Promise<void> {
-  const { orderId, userId, claim, isResolvingFlags = false } = options;
+  const {
+    orderId,
+    userId,
+    claim,
+    isResolvingFlags = false,
+    fulfillmentPath = 'warehouse_pick',
+  } = options;
   if (!userId) throw new Error('Cannot approve. Missing billing user.');
 
   let activeClaimId = options.claimId ?? await claimForBilling(claim);
-  let result = await callCompleteBilling(orderId, activeClaimId, userId, isResolvingFlags);
+  let result = await callCompleteBilling(
+    orderId,
+    activeClaimId,
+    userId,
+    isResolvingFlags,
+    fulfillmentPath,
+  );
   if (result?.success) return;
 
   // Re-claim once (stale React claim id, heartbeat timeout, tab backgrounded, etc.)
   activeClaimId = await claimForBilling(claim);
-  result = await callCompleteBilling(orderId, activeClaimId, userId, isResolvingFlags);
+  result = await callCompleteBilling(
+    orderId,
+    activeClaimId,
+    userId,
+    isResolvingFlags,
+    fulfillmentPath,
+  );
   if (result?.success) return;
 
   throw billingApprovalError(result);

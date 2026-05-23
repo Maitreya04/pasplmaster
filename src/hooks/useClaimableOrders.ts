@@ -143,6 +143,13 @@ function shouldUseBillingQueueEvents(stage: ClaimStage): boolean {
   return stage === 'billing' && BILLING_QUEUE_EVENTS_ON;
 }
 
+/** Indore warehouse pick queue — excludes direct-bill and non–main-store orders. */
+function isPickQueueEligible(order: Order): boolean {
+  if (order.fulfillment_path === 'direct_bill') return false;
+  if (order.stock_location_code === 'jabalpur') return false;
+  return true;
+}
+
 async function fetchLegacyClaimableOrders(
   options: ClaimableOrdersOptions,
   userId: number | null,
@@ -170,9 +177,13 @@ async function fetchLegacyClaimableOrders(
   if (orderError) throw orderError;
   if (!rawOrders || rawOrders.length === 0) return [];
 
-  const orders = normalizeOrderListBusyItemCount(
+  let orders = normalizeOrderListBusyItemCount(
     rawOrders as OrderRowWithEmbed[],
   );
+
+  if (stage === 'picking') {
+    orders = orders.filter(isPickQueueEligible);
+  }
 
   const orderIds = orders.map((o: Order) => o.id);
   const customerIds = [...new Set(
@@ -560,7 +571,10 @@ export function useClaimableOrders(
   ]);
 
   const categorized = useMemo(() => {
-    const all = result.data ?? [];
+    let all = result.data ?? [];
+    if (stage === 'picking') {
+      all = all.filter(isPickQueueEligible);
+    }
     const available: OrderWithClaimInfo[] = [];
     const myActive: OrderWithClaimInfo[] = [];
     const otherActive: OrderWithClaimInfo[] = [];

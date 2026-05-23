@@ -14,6 +14,8 @@ import {
 } from '../../lib/pickerPush';
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
+import { shouldNotifyPickers } from '../../lib/billing/fulfillmentPath';
+import type { FulfillmentPath } from '../../types';
 import { formatSupabaseUserMessage } from '../../lib/supabase/formatUserMessage';
 import {
   captureBillingLiveQueueBaseline,
@@ -402,7 +404,7 @@ export default function LiveQueuePage() {
 
   // ── Complete Billing (Approve): merges flags + local line edits, deletes removed rows, audits order_events ──
   const approveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (fulfillmentPath: FulfillmentPath) => {
       if (!order) throw new Error('No order selected.');
       if (!userId) {
         throw new Error(
@@ -650,17 +652,20 @@ export default function LiveQueuePage() {
         userId,
         claim,
         isResolvingFlags: false,
+        fulfillmentPath,
       });
 
       const approvedAt = new Date().toISOString();
-      void sendPickerReadyNotification({
-        eventType: 'order_ready_to_pick',
-        orderId: order.id,
-        orderNumber: order.order_number,
-        customerName: order.customer_name,
-        priority: order.priority,
-        approvedAt,
-      }).catch(() => { /* silent */ });
+      if (shouldNotifyPickers(fulfillmentPath)) {
+        void sendPickerReadyNotification({
+          eventType: 'order_ready_to_pick',
+          orderId: order.id,
+          orderNumber: order.order_number,
+          customerName: order.customer_name,
+          priority: order.priority,
+          approvedAt,
+        }).catch(() => { /* silent */ });
+      }
 
       void sendInternalNotification({
         eventType: 'order_update_for_sales',
@@ -843,6 +848,7 @@ export default function LiveQueuePage() {
           totalValue={order.total_value}
           priority={order.priority}
           createdAt={order.created_at}
+          stockLocationCode={order.stock_location_code}
           items={items}
           flags={flow.flags}
           lineEdits={flow.lineEdits}
@@ -861,9 +867,9 @@ export default function LiveQueuePage() {
           onRestoreLine={flow.restoreLine}
           onApplyLiveStock={handleApplyLiveStock}
           onOpenAddLine={() => setAddLineOpen(true)}
-          onFinish={() => {
+          onFinish={(fulfillmentPath) => {
             if (!isClaimedByMe || approveMutation.isPending || rejectMutation.isPending) return;
-            approveMutation.mutate();
+            approveMutation.mutate(fulfillmentPath);
           }}
           onReject={(reason) => rejectMutation.mutate(reason)}
           onSkip={handleSkip}

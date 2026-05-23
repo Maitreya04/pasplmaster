@@ -52,6 +52,9 @@ export type OrderStatus = WorkflowStatus;
 export type OrderPriority = 'normal' | 'urgent';
 export type OrderItemState = 'pending' | 'picked' | 'flagged';
 
+/** Set at billing approval: warehouse pick queue vs skip pick (direct Busy bill). */
+export type FulfillmentPath = 'warehouse_pick' | 'direct_bill';
+
 export interface Order {
   id: number;
   order_number: string;
@@ -66,6 +69,7 @@ export interface Order {
   salesperson_name: string;
   salesperson_user_id?: number | null;
   stock_location_code?: StockLocationCode | null;
+  fulfillment_path?: FulfillmentPath | null;
   reviewer_name: string | null;
   picker_name: string | null;
   workflow_status: WorkflowStatus;
