@@ -3,12 +3,12 @@ import { WebHaptics } from 'web-haptics';
 const STORAGE_KEY = 'paspl_scanner_feedback';
 
 /** Peak Web Audio gain — tuned for noisy warehouse floors (device volume still applies). */
-const SUCCESS_PEAK = 0.72;
-const ERROR_PEAK = 0.68;
+const SUCCESS_PEAK = 0.95;
+const ERROR_PEAK = 0.92;
 
 /** navigator.vibrate patterns (Android / some Chromium). */
-const VIBRATE_SUCCESS_MS = [220, 35, 160] as const;
-const VIBRATE_ERROR_MS = [300, 55, 300, 55, 300] as const;
+const VIBRATE_SUCCESS_MS = [280, 45, 220] as const;
+const VIBRATE_ERROR_MS = [350, 65, 350, 65, 350, 65, 350] as const;
 
 export type ScannerFeedbackPrefs = {
   sound: boolean;
@@ -120,8 +120,8 @@ export function playSuccessBeep(): void {
 
   const dest = getMasterGain(ctx);
   const now = ctx.currentTime;
-  playTone(ctx, dest, 'sine', 1850, now, 0.055, SUCCESS_PEAK);
-  playTone(ctx, dest, 'sine', 2620, now + 0.07, 0.075, SUCCESS_PEAK * 0.95);
+  playTone(ctx, dest, 'sine', 1850, now, 0.07, SUCCESS_PEAK);
+  playTone(ctx, dest, 'sine', 2620, now + 0.08, 0.095, SUCCESS_PEAK * 0.98);
 }
 
 /** Low double-buzz — unmistakable mismatch vs success. */
@@ -133,8 +133,8 @@ export function playErrorBuzz(): void {
 
   const dest = getMasterGain(ctx);
   const now = ctx.currentTime;
-  playTone(ctx, dest, 'square', 165, now, 0.1, ERROR_PEAK);
-  playTone(ctx, dest, 'square', 145, now + 0.14, 0.12, ERROR_PEAK);
+  playTone(ctx, dest, 'square', 165, now, 0.12, ERROR_PEAK);
+  playTone(ctx, dest, 'square', 145, now + 0.16, 0.14, ERROR_PEAK);
 }
 
 function getScannerHaptics(): WebHaptics | null {
@@ -154,9 +154,10 @@ export function vibrateIfEnabled(kind: ScannerVibrateKind): void {
 
   const haptics = getScannerHaptics();
   if (haptics) {
-    void haptics.trigger(kind === 'success' ? 'success' : 'error');
+    void haptics.trigger(kind === 'success' ? 'success' : 'error', { intensity: 1 });
+    void haptics.trigger('heavy', { intensity: 1 });
     if (kind === 'error') {
-      void haptics.trigger('heavy');
+      void haptics.trigger('rigid', { intensity: 1 });
     }
   }
 

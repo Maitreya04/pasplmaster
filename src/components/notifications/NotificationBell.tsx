@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Warning, X, ArrowSquareOut } from '@phosphor-icons/react';
 import { appHaptics } from '../../lib/haptics';
+import { useNotificationArrivalAlerts } from '../../hooks/useNotificationArrivalAlerts';
 import { useUserNotifications } from '../../hooks/useUserNotifications';
 import type { UserNotification } from '../../types';
 
@@ -53,7 +54,7 @@ function deepLinkFromPayload(n: UserNotification): string | null {
     return p.deep_link;
   }
   if (n.type === 'order_ready_to_pick' && n.order_id) {
-    return `/picking?claimOrderId=${n.order_id}`;
+    return `/picking/pick/${n.order_id}`;
   }
   if (n.type === 'item_flagged_by_picker' && n.order_id) {
     return '/sales/orders';
@@ -162,6 +163,8 @@ export function NotificationBell({ userId, role = null }: NotificationBellProps)
     () => filteredItems.filter((n) => n.read_at === null).length,
     [filteredItems],
   );
+
+  useNotificationArrivalAlerts(filteredItems, Boolean(userId));
 
   const sortedItems = useMemo(
     () =>

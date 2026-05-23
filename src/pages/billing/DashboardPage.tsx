@@ -117,15 +117,19 @@ function OrderCard({
             )}
             <StatusBadge status={order.workflow_status} />
             {order.reviewer_name && <BillingApproverChip name={order.reviewer_name} />}
-            {order.picker_name &&
-              (order.workflow_status === 'picking' ||
-                order.workflow_status === 'completed' ||
-                order.workflow_status === 'flagged') && (
-                <PickerAttributionChip
-                  name={order.picker_name}
-                  active={order.workflow_status === 'picking'}
-                />
-              )}
+            {order.picker_name ? (
+              <PickerAttributionChip
+                name={order.picker_name}
+                active={order.workflow_status === 'picking'}
+              />
+            ) : (
+              order.workflow_status === 'approved' &&
+              order.fulfillment_path !== 'direct_bill' && (
+                <span className="inline-flex items-center h-6 px-3 rounded-full border border-[var(--border-opaque)] bg-[var(--bg-tertiary)] text-xs font-semibold text-[var(--content-tertiary)]">
+                  Waiting for picker
+                </span>
+              )
+            )}
           </div>
         </div>
 

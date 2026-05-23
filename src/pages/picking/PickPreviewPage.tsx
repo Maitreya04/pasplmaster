@@ -8,6 +8,7 @@ import { pickQuantityTarget, pickableOrderItems } from '../../lib/cartSupply';
 import { isAskLine } from '../../lib/picking/askBrand';
 import { isLucasLine } from '../../lib/picking/lucasBrand';
 import { BrandLineChip } from '../../components/picking/BrandLineChip';
+import { TransportChip } from '../../components/picking/TransportChip';
 
 function sortByRack(items: OrderItem[]): OrderItem[] {
   return [...items].sort((a, b) => {
@@ -90,7 +91,12 @@ export default function PickPreviewPage(): React.JSX.Element | null {
         {!isLoading && order && (
           <>
             <div className="flex items-baseline justify-between gap-3">
-              <div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  {order.transport_name && (
+                    <TransportChip name={order.transport_name} size="md" />
+                  )}
+                </div>
                 <p className="text-sm text-[var(--content-secondary)] truncate">
                   {order.customer_name}
                 </p>

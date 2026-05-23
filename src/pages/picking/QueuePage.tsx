@@ -16,6 +16,7 @@ import {
 import { supabase } from '../../lib/supabase/client';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
 import { usePickerPushNotifications } from '../../hooks/usePickerPushNotifications';
+import { sendPickerReadyNotification } from '../../lib/pickerPush';
 import { NotificationBell } from '../../components/notifications/NotificationBell';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -30,7 +31,13 @@ import {
 } from '../../components/shared';
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 import { BrandLineChip } from '../../components/picking/BrandLineChip';
+import { TransportChip } from '../../components/picking/TransportChip';
 import { groupPickQueueByApprovalDay } from '../../lib/queueDayBuckets';
+import {
+  groupOrdersByTransport,
+  sortPickQueueOrders,
+  transportQueueKey,
+} from '../../lib/pickQueueTransport';
 
 function pickerLineCount(order: { pick_line_count?: number; item_count: number }): number {
   return order.pick_line_count ?? order.item_count;
@@ -63,16 +70,6 @@ function shortAge(dateStr: string | null | undefined): string {
   return `${hrs}h`;
 }
 
-function sortOrders(orders: OrderWithClaimInfo[]): OrderWithClaimInfo[] {
-  return [...orders].sort((a, b) => {
-    if (a.priority === 'urgent' && b.priority !== 'urgent') return -1;
-    if (a.priority !== 'urgent' && b.priority === 'urgent') return 1;
-    const aTime = a.approved_at ? new Date(a.approved_at).getTime() : 0;
-    const bTime = b.approved_at ? new Date(b.approved_at).getTime() : 0;
-    return bTime - aTime;
-  });
-}
-
 export default function QueuePage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -97,7 +94,7 @@ export default function QueuePage(): React.JSX.Element | null {
   const pushAlerts = usePickerPushNotifications({ role, userId, userName });
 
   const availableOrders = useMemo(
-    () => sortOrders([...available, ...stale].filter(hasPickableLines)),
+    () => sortPickQueueOrders([...available, ...stale].filter(hasPickableLines)),
     [available, stale],
   );
 
@@ -110,7 +107,10 @@ export default function QueuePage(): React.JSX.Element | null {
     const orders = availableOrders.length;
     const items = availableOrders.reduce((sum, o) => sum + pickerLineCount(o), 0);
     const urgent = availableOrders.filter((o) => o.priority === 'urgent').length;
-    return { orders, items, urgent };
+    const transports = new Set(
+      availableOrders.map((o) => transportQueueKey(o.transport_name)),
+    ).size;
+    return { orders, items, urgent, transports };
   }, [availableOrders]);
 
   const clearNotificationIntent = useCallback(() => {
@@ -137,6 +137,23 @@ export default function QueuePage(): React.JSX.Element | null {
     },
     onSuccess: (claimedOrderId) => {
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+      const order =
+        myActive.find((o) => o.id === claimedOrderId) ??
+        availableOrders.find((o) => o.id === claimedOrderId) ??
+        [...available, ...stale].find((o) => o.id === claimedOrderId);
+      if (order && userId) {
+        void sendPickerReadyNotification({
+          eventType: 'order_ready_to_pick',
+          orderId: order.id,
+          orderNumber: order.order_number,
+          customerName: order.customer_name,
+          priority: order.priority,
+          approvedAt: order.approved_at,
+          targetUserId: userId,
+        }).catch(() => {
+          /* best-effort — assignment already saved */
+        });
+      }
       navigate(`/picking/pick/${claimedOrderId}`, { replace: true });
     },
     onError: (err) => {
@@ -264,7 +281,7 @@ export default function QueuePage(): React.JSX.Element | null {
             Hey, {userName ?? 'there'}
           </h2>
           <p className="text-sm text-[var(--content-tertiary)]">
-            Ready orders will appear here as billing approves them.
+            Ready orders will appear here as billing approves them. Grouped by transport — finish one carrier before the next when possible.
           </p>
         </header>
 
@@ -356,23 +373,20 @@ export default function QueuePage(): React.JSX.Element | null {
                 </div>
                 <div className="flex items-center justify-between mb-3">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-0.5">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="font-mono font-bold text-lg text-[var(--content-primary)]">
                         {pick.order_number}
                       </span>
                       {pick.priority === 'urgent' && (
                         <StatusBadge status="urgent" />
                       )}
+                      {pick.transport_name && (
+                        <TransportChip name={pick.transport_name} />
+                      )}
                       <QueueDayTag order={pick} variant="late_billed" />
                     </div>
                     <p className="text-sm text-[var(--content-secondary)] truncate">
                       {pick.customer_name}
-                      {pick.transport_name && (
-                        <span className="text-[var(--content-tertiary)]">
-                          {' '}
-                          · {pick.transport_name}
-                        </span>
-                      )}
                       <span className="text-[var(--content-tertiary)]">
                         {' '}· {pickerLineCount(pick)} items
                       </span>
@@ -426,10 +440,12 @@ export default function QueuePage(): React.JSX.Element | null {
               )}
             </h2>
             {queueHeadline.orders > 0 && (
-              <p className="text-xs text-[var(--content-tertiary)] tabular-nums">
+              <p className="text-xs text-[var(--content-tertiary)] tabular-nums text-right">
+                {queueHeadline.transports} transport{queueHeadline.transports === 1 ? '' : 's'}
+                {' · '}
                 {queueHeadline.orders} order{queueHeadline.orders === 1 ? '' : 's'}
                 {' · '}
-                {queueHeadline.items} item{queueHeadline.items === 1 ? '' : 's'} ready
+                {queueHeadline.items} item{queueHeadline.items === 1 ? '' : 's'}
                 {queueHeadline.urgent > 0 && (
                   <span className="ml-1 text-[var(--content-negative)] font-semibold">
                     · {queueHeadline.urgent} urgent
@@ -466,16 +482,38 @@ export default function QueuePage(): React.JSX.Element | null {
                       </p>
                     )}
                   </div>
-                  {section.orders.map((order) => (
-                    <OrderCard
-                      key={order.id}
-                      order={order}
-                      onClaim={() => claimMutation.mutate(order.id)}
-                      claiming={
-                        claimMutation.isPending &&
-                        claimMutation.variables === order.id
-                      }
-                    />
+                  {groupOrdersByTransport(section.orders).map((transportGroup) => (
+                    <div key={`${section.id}-${transportGroup.transportName}`} className="space-y-2">
+                      <div className="flex items-center gap-2 px-0.5">
+                        {transportGroup.transportName === 'No transport set' ? (
+                          <span className="text-xs font-semibold text-[var(--content-warning)]">
+                            No transport set
+                          </span>
+                        ) : (
+                          <TransportChip name={transportGroup.transportName} size="md" />
+                        )}
+                        <span className="text-xs text-[var(--content-tertiary)] tabular-nums">
+                          {transportGroup.orders.length} order
+                          {transportGroup.orders.length === 1 ? '' : 's'}
+                          {transportGroup.urgentCount > 0 && (
+                            <span className="ml-1 text-[var(--content-negative)] font-semibold">
+                              · {transportGroup.urgentCount} urgent
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      {transportGroup.orders.map((order) => (
+                        <OrderCard
+                          key={order.id}
+                          order={order}
+                          onClaim={() => claimMutation.mutate(order.id)}
+                          claiming={
+                            claimMutation.isPending &&
+                            claimMutation.variables === order.id
+                          }
+                        />
+                      ))}
+                    </div>
                   ))}
                 </div>
               ))}
@@ -503,6 +541,9 @@ export default function QueuePage(): React.JSX.Element | null {
                           {order.order_number}
                         </span>
                         {order.priority === 'urgent' && <StatusBadge status="urgent" />}
+                        {order.transport_name && (
+                          <TransportChip name={order.transport_name} />
+                        )}
                         <StatusBadge status="picking" />
                         {(order.ask_line_count ?? 0) > 0 && (
                           <BrandLineChip brand="ask" count={order.ask_line_count} />
@@ -513,12 +554,6 @@ export default function QueuePage(): React.JSX.Element | null {
                       </div>
                       <p className="text-sm text-[var(--content-secondary)] truncate">
                         {order.customer_name}
-                        {order.transport_name && (
-                          <span className="text-[var(--content-tertiary)]">
-                            {' '}
-                            · {order.transport_name}
-                          </span>
-                        )}
                       </p>
                     </div>
                     <button
@@ -582,6 +617,9 @@ function OrderCard({
               {order.order_number}
             </span>
             {isUrgent && <StatusBadge status="urgent" />}
+            {order.transport_name && (
+              <TransportChip name={order.transport_name} />
+            )}
             <QueueDayTag order={order} variant="late_billed" />
             {askCount > 0 && <BrandLineChip brand="ask" count={askCount} />}
             {lucasCount > 0 && <BrandLineChip brand="lucas" count={lucasCount} />}
@@ -599,12 +637,6 @@ function OrderCard({
                 · {order.customer_city}
               </span>
             )}
-            {order.transport_name && (
-              <span className="text-[var(--content-tertiary)]">
-                {' '}
-                · {order.transport_name}
-              </span>
-            )}
           </p>
         </div>
         <div className="flex items-center gap-1.5 text-xs text-[var(--content-tertiary)] shrink-0 ml-3">
@@ -619,11 +651,6 @@ function OrderCard({
             <Package size={14} />
             {pickerLineCount(order)} items
           </span>
-          {order.transport_name && (
-            <span className="truncate max-w-[140px]">
-              {order.transport_name}
-            </span>
-          )}
         </div>
 
         <div className="flex items-center gap-2 justify-end">

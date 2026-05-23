@@ -28,6 +28,7 @@ import { type QueueSheetRow } from './QueueSheet';
 import { SwipeDeck } from '../../components/picking/SwipeDeck';
 import { PickCard } from '../../components/picking/PickCard';
 import { JumpListSheet } from '../../components/picking/JumpListSheet';
+import { TransportChip } from '../../components/picking/TransportChip';
 import { FlagReasonSheet, type FlagSubmitPayload } from '../../components/picking/FlagReasonSheet';
 import {
   buildDeckOrder,
@@ -1389,6 +1390,26 @@ export default function PickPage(): React.JSX.Element | null {
     ],
   );
 
+  const completeQueueItem = useCallback(
+    (itemId: number) => {
+      const orderItem = order?.items.find((oi) => oi.id === itemId);
+      if (!orderItem) return;
+      const targetQty = pickQuantityTarget(orderItem);
+      const local = localItems.get(itemId);
+      const existingPicked = Math.min(
+        targetQty,
+        getPickedQtyFromResult(local?.scanResult ?? orderItem.scan_result),
+      );
+      const remaining = Math.max(0, targetQty - existingPicked);
+      if (remaining <= 0) return;
+      if (!rackVerifiedIds.has(itemId)) {
+        markRackVerified(itemId, 'override');
+      }
+      void applyPickedQty(itemId, remaining);
+    },
+    [applyPickedQty, localItems, markRackVerified, order?.items, rackVerifiedIds],
+  );
+
   const confirmFifoOverride = useCallback(async () => {
     const sheet = fifoOverrideSheet;
     if (!sheet || fifoOverrideReason.trim().length < 3) {
@@ -1600,15 +1621,21 @@ export default function PickPage(): React.JSX.Element | null {
             <CaretLeft size={24} weight="bold" />
           </button>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-mono font-bold text-lg text-[var(--content-primary)]">
                 {order.order_number}
               </span>
               {order.priority === 'urgent' && <StatusBadge status="urgent" />}
+              {order.transport_name ? (
+                <TransportChip name={order.transport_name} size="md" />
+              ) : (
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-warning)]">
+                  No transport
+                </span>
+              )}
             </div>
             <p className="text-sm text-[var(--content-tertiary)] truncate">
               {order.customer_name}
-              {order.transport_name && ` · ${order.transport_name}`}
             </p>
           </div>
           <div className="text-right shrink-0 tabular-nums">
@@ -1645,9 +1672,13 @@ export default function PickPage(): React.JSX.Element | null {
               <h2 className="text-xl font-bold text-[var(--content-primary)] mt-1">
                 {order.customer_name}
               </h2>
-              {order.transport_name && (
-                <p className="text-sm text-[var(--content-secondary)] mt-0.5">
-                  {order.transport_name}
+              {order.transport_name ? (
+                <div className="mt-2">
+                  <TransportChip name={order.transport_name} size="md" />
+                </div>
+              ) : (
+                <p className="text-sm text-[var(--content-warning)] mt-2 font-semibold">
+                  No transport set — confirm with billing before dispatch
                 </p>
               )}
               <div className="grid grid-cols-3 gap-2 mt-4">
@@ -1721,19 +1752,13 @@ export default function PickPage(): React.JSX.Element | null {
         ) : deckItems.length > 0 ? (
           <div className="space-y-3">
             <p className="text-center text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-              Swipe › next · ↑ queue · ↓ flag
+              Swipe › next · ↑ queue
             </p>
             <SwipeDeck
               currentIndex={safeCardIndex}
               itemCount={deckItems.length}
               onIndexChange={handleCardIndexChange}
               onSwipeUp={() => setQueueSheetOpen(true)}
-              onSwipeDown={() => {
-                const item = deckItems[safeCardIndex];
-                if (item && item.uiState !== 'flagged') {
-                  openFlagSheet(item.orderItem.id);
-                }
-              }}
             >
               {deckItems.map((pi, index) => {
                 const targetQty = pickQuantityTarget(pi.orderItem);
@@ -2093,6 +2118,8 @@ export default function PickPage(): React.JSX.Element | null {
       <JumpListSheet
         isOpen={queueSheetOpen}
         onClose={() => setQueueSheetOpen(false)}
+        transportName={order.transport_name}
+        customerName={order.customer_name}
         rows={queueSheetRows}
         counts={{
           picked: counts.picked,
@@ -2109,6 +2136,7 @@ export default function PickPage(): React.JSX.Element | null {
           setQueueSheetOpen(false);
         }}
         onJump={jumpToItem}
+        onCompleteItem={completeQueueItem}
       />
 
       {/* Undo toast — top-right, 5s window. The only escape hatch we expose,

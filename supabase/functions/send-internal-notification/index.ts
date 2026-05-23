@@ -12,6 +12,7 @@ type InternalRequest =
       customerName: string;
       priority: OrderPriority;
       approvedAt: string | null;
+      targetUserId?: number;
     }
   | {
       eventType: 'item_flagged_by_picker';
@@ -295,17 +296,38 @@ serve(async (req) => {
         return json(400, { error: 'Invalid order_ready_to_pick payload' });
       }
 
+      const targetUserId =
+        typeof payload.targetUserId === 'number' && Number.isFinite(payload.targetUserId)
+          ? payload.targetUserId
+          : null;
+
+      if (targetUserId == null) {
+        return json(200, { success: true, sentCount: 0, failedCount: 0, inboxCount: 0 });
+      }
+
+      const { data: targetUser, error: targetUserError } = await admin
+        .from('users')
+        .select('id')
+        .eq('id', targetUserId)
+        .eq('role', 'picking')
+        .eq('is_active', true)
+        .maybeSingle();
+      if (targetUserError) throw targetUserError;
+      if (!targetUser) {
+        return json(400, { error: 'targetUserId is not an active picker' });
+      }
+
       const title =
         payload.priority === 'urgent'
-          ? `Urgent pick: ${payload.orderNumber}`
-          : `Ready to pick: ${payload.orderNumber}`;
+          ? `Urgent — you're assigned: ${payload.orderNumber}`
+          : `You're assigned: ${payload.orderNumber}`;
       const body =
         payload.priority === 'urgent'
-          ? `${payload.customerName} needs attention in the warehouse.`
-          : `${payload.customerName} is ready for picking.`;
+          ? `${payload.customerName} — start picking now.`
+          : `${payload.customerName} is on your pick list.`;
 
-      const pickingIds = await fetchActiveUserIds(admin, 'picking');
-      const deepLink = `/picking?claimOrderId=${payload.orderId}`;
+      const pickingIds = [targetUserId];
+      const deepLink = `/picking/pick/${payload.orderId}`;
       await insertUserNotifications(
         admin,
         pickingIds.map((user_id) => ({
@@ -320,6 +342,7 @@ serve(async (req) => {
             customerName: payload.customerName,
             priority: payload.priority,
             deep_link: deepLink,
+            assigned: true,
           },
         })),
       );
@@ -327,7 +350,9 @@ serve(async (req) => {
       let sentCount = 0;
       let failedCount = 0;
       if (pushConfigured) {
-        const subs = await fetchPushSubscriptions(admin, cutoffIso, { role: 'picking' });
+        const subs = await fetchPushSubscriptions(admin, cutoffIso, {
+          userIds: [targetUserId],
+        });
         const r = await sendWebPushes(admin, subs, {
           title,
           body,

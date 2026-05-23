@@ -6,8 +6,11 @@ interface JumpListSheetProps {
   rows: QueueSheetRow[];
   counts: QueueSheetCounts;
   currentItemId: number | null;
+  transportName?: string | null;
+  customerName?: string | null;
   onSkipItem: (itemId: number, reason: string) => void;
   onJump: (itemId: number) => void;
+  onCompleteItem?: (itemId: number) => void;
 }
 
 export function JumpListSheet({
@@ -16,8 +19,11 @@ export function JumpListSheet({
   rows,
   counts,
   currentItemId,
+  transportName,
+  customerName,
   onSkipItem,
   onJump,
+  onCompleteItem,
 }: JumpListSheetProps): React.JSX.Element | null {
   return (
     <QueueSheet
@@ -26,8 +32,11 @@ export function JumpListSheet({
       rows={rows}
       counts={counts}
       currentItemId={currentItemId}
+      transportName={transportName}
+      customerName={customerName}
       onSkipItem={onSkipItem}
       onJump={onJump}
+      onCompleteItem={onCompleteItem}
     />
   );
 }

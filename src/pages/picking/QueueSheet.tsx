@@ -1,6 +1,10 @@
-import { useState } from 'react';
-import { CheckCircle, Flag, MapPin, ArrowDown } from '@phosphor-icons/react';
+import { useCallback, useMemo, useState } from 'react';
+import { ArrowDown, CheckCircle, Flag, MapPin, SkipForward } from '@phosphor-icons/react';
 import { BottomSheet, BigButton } from '../../components/shared';
+import { TransportChip } from '../../components/picking/TransportChip';
+import { useSwipeReveal } from '../../hooks/useSwipeReveal';
+
+const SWIPE_ACTION_BUTTON_WIDTH = 80;
 
 export type QueueSheetRowStatus = 'now' | 'next' | 'picked' | 'flagged' | 'skipped';
 
@@ -31,8 +35,12 @@ interface QueueSheetProps {
   onSkipItem: (itemId: number, reason: string) => void;
   /** Item id currently being processed (highlighted as "Now"). */
   currentItemId: number | null;
+  transportName?: string | null;
+  customerName?: string | null;
   /** When set, rows become tappable to jump to that card in the deck. */
   onJump?: (itemId: number) => void;
+  /** Swipe-left to mark a line complete without leaving the queue. */
+  onCompleteItem?: (itemId: number) => void;
 }
 
 const SKIP_REASONS = [
@@ -50,10 +58,16 @@ export function QueueSheet({
   counts,
   onSkipItem,
   currentItemId,
+  transportName,
+  customerName,
   onJump,
+  onCompleteItem,
 }: QueueSheetProps): React.JSX.Element | null {
   const [skipTargetId, setSkipTargetId] = useState<number | null>(null);
   const [skipReason, setSkipReason] = useState<string>('');
+  const [openSwipeItemId, setOpenSwipeItemId] = useState<number | null>(null);
+
+  const closeSwipe = useCallback(() => setOpenSwipeItemId(null), []);
 
   const now = rows.find((r) => r.itemId === currentItemId);
   const nextRows = rows.filter(
@@ -72,6 +86,23 @@ export function QueueSheet({
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose} title="Pick queue">
       <div className="space-y-5">
+        {(transportName || customerName) && (
+          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2.5 space-y-1.5">
+            {customerName && (
+              <p className="text-sm font-semibold text-[var(--content-primary)] truncate">
+                {customerName}
+              </p>
+            )}
+            {transportName ? (
+              <TransportChip name={transportName} size="md" />
+            ) : (
+              <p className="text-xs font-semibold text-[var(--content-warning)]">
+                No transport set
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Counts header */}
         <div className="grid grid-cols-3 gap-2">
           <div className="rounded-xl bg-[var(--bg-positive-subtle)] px-3 py-2">
@@ -96,6 +127,12 @@ export function QueueSheet({
             <p className="text-[10px] text-[var(--content-negative)]/70">lines</p>
           </div>
         </div>
+
+        {onCompleteItem && (
+          <p className="text-[11px] text-[var(--content-tertiary)]">
+            Swipe left on a line to pick or skip without leaving the queue.
+          </p>
+        )}
 
         {/* Audit chips — relegated from header so they don't clutter the operating view */}
         {(counts.packAssisted > 0 || counts.manual > 0 || counts.reasonBadges.length > 0) && (
@@ -127,7 +164,19 @@ export function QueueSheet({
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mb-2">
               Now
             </p>
-            <Row row={now} highlighted onJump={onJump} />
+            <Row
+              row={now}
+              highlighted
+              onJump={onJump}
+              onCompleteItem={onCompleteItem}
+              isSwipeOpen={openSwipeItemId === now.itemId}
+              onSwipeOpenChange={(open) => setOpenSwipeItemId(open ? now.itemId : null)}
+              onSkip={() => {
+                closeSwipe();
+                setSkipTargetId(now.itemId);
+                setSkipReason('');
+              }}
+            />
           </section>
         )}
 
@@ -143,7 +192,11 @@ export function QueueSheet({
                   key={r.itemId}
                   row={r}
                   onJump={onJump}
+                  onCompleteItem={onCompleteItem}
+                  isSwipeOpen={openSwipeItemId === r.itemId}
+                  onSwipeOpenChange={(open) => setOpenSwipeItemId(open ? r.itemId : null)}
                   onSkip={skipTargetId === null ? () => {
+                    closeSwipe();
                     setSkipTargetId(r.itemId);
                     setSkipReason('');
                   } : undefined}
@@ -161,7 +214,14 @@ export function QueueSheet({
             </p>
             <div className="space-y-1.5">
               {skippedRows.map((r) => (
-                <Row key={r.itemId} row={r} onJump={onJump} />
+                <Row
+                  key={r.itemId}
+                  row={r}
+                  onJump={onJump}
+                  onCompleteItem={onCompleteItem}
+                  isSwipeOpen={openSwipeItemId === r.itemId}
+                  onSwipeOpenChange={(open) => setOpenSwipeItemId(open ? r.itemId : null)}
+                />
               ))}
             </div>
           </section>
@@ -229,18 +289,63 @@ function Row({
   highlighted = false,
   onSkip,
   onJump,
+  onCompleteItem,
+  isSwipeOpen = false,
+  onSwipeOpenChange,
 }: {
   row: QueueSheetRow;
   highlighted?: boolean;
   onSkip?: () => void;
   onJump?: (itemId: number) => void;
+  onCompleteItem?: (itemId: number) => void;
+  isSwipeOpen?: boolean;
+  onSwipeOpenChange?: (open: boolean) => void;
 }) {
   const isPicked = row.status === 'picked';
   const isFlagged = row.status === 'flagged';
   const isSkipped = row.status === 'skipped';
-  const canJump = onJump && row.status !== 'picked' && row.status !== 'flagged';
+  const canJump = Boolean(onJump && row.status !== 'picked' && row.status !== 'flagged');
+  const canSwipe = Boolean(onCompleteItem && !isPicked && !isFlagged);
 
-  const inner = (
+  if (canSwipe) {
+    return (
+      <SwipeableQueueRow
+        row={row}
+        highlighted={highlighted}
+        isSkipped={isSkipped}
+        canJump={canJump}
+        onJump={onJump}
+        onSkip={onSkip}
+        onCompleteItem={onCompleteItem!}
+        isOpen={isSwipeOpen}
+        onOpenChange={onSwipeOpenChange ?? (() => {})}
+      />
+    );
+  }
+
+  return (
+    <StaticQueueRow
+      row={row}
+      highlighted={highlighted}
+      isPicked={isPicked}
+      isFlagged={isFlagged}
+      isSkipped={isSkipped}
+      canJump={canJump}
+      onJump={onJump}
+    />
+  );
+}
+
+function QueueRowContent({
+  row,
+  isPicked,
+  isFlagged,
+}: {
+  row: QueueSheetRow;
+  isPicked: boolean;
+  isFlagged: boolean;
+}) {
+  return (
     <>
       <div className="flex items-center gap-1 shrink-0">
         {isPicked ? (
@@ -266,34 +371,50 @@ function Row({
         <p className="font-mono text-sm font-semibold text-[var(--content-primary)] tabular-nums">
           {row.targetQty} pcs
         </p>
-        {onSkip && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onSkip();
-            }}
-            className="text-[10px] font-medium text-[var(--content-warning-on-light)] underline mt-0.5"
-          >
-            Skip
-          </button>
-        )}
       </div>
     </>
   );
+}
 
-  if (canJump) {
+function rowSurfaceClass(highlighted: boolean, isSkipped: boolean): string {
+  if (highlighted) {
+    return 'bg-[var(--bg-secondary)] border-[var(--border-selected)]';
+  }
+  if (isSkipped) {
+    return 'bg-[var(--bg-warning-subtle)] border-[var(--border-warning)]';
+  }
+  return 'bg-[var(--bg-secondary)] border-[var(--border-subtle)]';
+}
+
+function StaticQueueRow({
+  row,
+  highlighted,
+  isPicked,
+  isFlagged,
+  isSkipped,
+  canJump,
+  onJump,
+}: {
+  row: QueueSheetRow;
+  highlighted: boolean;
+  isPicked: boolean;
+  isFlagged: boolean;
+  isSkipped: boolean;
+  canJump: boolean;
+  onJump?: (itemId: number) => void;
+}) {
+  const inner = (
+    <QueueRowContent row={row} isPicked={isPicked} isFlagged={isFlagged} />
+  );
+
+  if (canJump && onJump) {
     return (
       <button
         type="button"
         onClick={() => onJump(row.itemId)}
         className={`
           flex w-full items-center gap-3 px-3 py-2.5 rounded-xl border-[1.5px] text-left pick-pressable
-          ${highlighted
-            ? 'bg-[var(--bg-secondary)] border-[var(--border-selected)]'
-            : isSkipped
-              ? 'bg-[var(--bg-warning-subtle)] border-[var(--border-warning)]'
-              : 'bg-[var(--bg-secondary)] border-[var(--border-subtle)]'}
+          ${rowSurfaceClass(highlighted, isSkipped)}
         `}
       >
         {inner}
@@ -305,14 +426,110 @@ function Row({
     <div
       className={`
         flex items-center gap-3 px-3 py-2.5 rounded-xl border-[1.5px]
-        ${highlighted
-          ? 'bg-[var(--bg-secondary)] border-[var(--border-selected)]'
-          : isSkipped
-            ? 'bg-[var(--bg-warning-subtle)] border-[var(--border-warning)]'
-            : 'bg-[var(--bg-secondary)] border-[var(--border-subtle)]'}
+        ${rowSurfaceClass(highlighted, isSkipped)}
       `}
     >
       {inner}
+    </div>
+  );
+}
+
+function SwipeableQueueRow({
+  row,
+  highlighted,
+  isSkipped,
+  canJump,
+  onJump,
+  onSkip,
+  onCompleteItem,
+  isOpen,
+  onOpenChange,
+}: {
+  row: QueueSheetRow;
+  highlighted: boolean;
+  isSkipped: boolean;
+  canJump: boolean;
+  onJump?: (itemId: number) => void;
+  onSkip?: () => void;
+  onCompleteItem: (itemId: number) => void;
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const actions = useMemo(() => {
+    const next = [];
+    if (onSkip) {
+      next.push({ id: 'skip', widthPx: SWIPE_ACTION_BUTTON_WIDTH });
+    }
+    next.push({ id: 'pick', widthPx: SWIPE_ACTION_BUTTON_WIDTH });
+    return next;
+  }, [onSkip]);
+
+  const { panelRef, bind, close } = useSwipeReveal({
+    actions,
+    isOpen,
+    onOpenChange,
+  });
+
+  return (
+    <div className="relative overflow-hidden rounded-xl">
+      <div className="absolute inset-y-0 right-0 flex">
+        {onSkip && (
+          <button
+            type="button"
+            onClick={() => {
+              close();
+              onSkip();
+            }}
+            className="flex w-20 flex-col items-center justify-center gap-1 border-l border-[color-mix(in_srgb,var(--border-warning)_42%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]"
+            aria-label={`Skip ${row.itemName}`}
+          >
+            <SkipForward size={20} weight="bold" />
+            <span className="text-xs font-semibold">Skip</span>
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            close();
+            onCompleteItem(row.itemId);
+          }}
+          className="flex w-20 flex-col items-center justify-center gap-1 border-l border-[color-mix(in_srgb,var(--border-positive)_42%,var(--border-subtle))] bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]"
+          aria-label={`Mark ${row.itemName} as picked`}
+        >
+          <CheckCircle size={20} weight="bold" />
+          <span className="text-xs font-semibold">Pick</span>
+        </button>
+      </div>
+
+      <div
+        ref={panelRef}
+        className={`
+          relative flex items-center gap-3 border-[1.5px] px-3 py-2.5
+          ${rowSurfaceClass(highlighted, isSkipped)}
+          ${isOpen ? 'z-10 shadow-[0_8px_20px_rgba(15,23,42,0.06)]' : ''}
+        `}
+        style={{ touchAction: 'pan-y pinch-zoom' }}
+        {...bind}
+        onClick={() => {
+          if (isOpen) {
+            close();
+            return;
+          }
+          if (canJump && onJump) {
+            onJump(row.itemId);
+          }
+        }}
+        role={canJump ? 'button' : undefined}
+        tabIndex={canJump ? 0 : undefined}
+        onKeyDown={canJump && onJump ? (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onJump(row.itemId);
+          }
+        } : undefined}
+      >
+        <QueueRowContent row={row} isPicked={false} isFlagged={false} />
+      </div>
     </div>
   );
 }

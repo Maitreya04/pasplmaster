@@ -71,11 +71,36 @@ const patternByIntent = {
   nudge: 'nudge',
 } as const;
 
+const NOTIFICATION_INTENSITY = 1;
+
+/** Extra navigator.vibrate bursts layered on notification outcomes (Android / Chromium). */
+const NOTIFICATION_VIBRATE_MS = {
+  success: [220, 45, 180] as const,
+  warning: [280, 60, 280, 60, 280] as const,
+  error: [350, 70, 350, 70, 350, 70, 350] as const,
+} as const;
+
+function vibrateNotificationOutcome(intent: 'success' | 'warning' | 'error'): void {
+  if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
+  navigator.vibrate([...NOTIFICATION_VIBRATE_MS[intent]]);
+}
+
 export function triggerHaptic(intent: HapticIntent): void {
   const haptics = getHaptics();
   if (!haptics) return;
 
-  void haptics.trigger(patternByIntent[intent]);
+  const isNotificationOutcome =
+    intent === 'success' || intent === 'warning' || intent === 'error';
+  const intensity = isNotificationOutcome ? NOTIFICATION_INTENSITY : undefined;
+
+  void haptics.trigger(patternByIntent[intent], intensity != null ? { intensity } : undefined);
+
+  if (intent === 'success' || intent === 'warning' || intent === 'error') {
+    vibrateNotificationOutcome(intent);
+    if (intent === 'error') {
+      void haptics.trigger('heavy', { intensity: NOTIFICATION_INTENSITY });
+    }
+  }
 }
 
 /** HIG-aligned helpers — use the table in the module docstring when adding new call sites. */

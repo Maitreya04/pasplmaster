@@ -10,11 +10,9 @@ import { useToast } from '../../context/ToastContext';
 import {
   formatInternalNotificationError,
   sendInternalNotification,
-  sendPickerReadyNotification,
 } from '../../lib/pickerPush';
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
-import { shouldNotifyPickers } from '../../lib/billing/fulfillmentPath';
 import { ACCOUNT_HOLD_NOTE } from '../../lib/billing/rejectionKind';
 import type { FulfillmentPath, RejectionKind } from '../../types';
 import { formatSupabaseUserMessage } from '../../lib/supabase/formatUserMessage';
@@ -655,18 +653,6 @@ export default function LiveQueuePage() {
         isResolvingFlags: false,
         fulfillmentPath,
       });
-
-      const approvedAt = new Date().toISOString();
-      if (shouldNotifyPickers(fulfillmentPath)) {
-        void sendPickerReadyNotification({
-          eventType: 'order_ready_to_pick',
-          orderId: order.id,
-          orderNumber: order.order_number,
-          customerName: order.customer_name,
-          priority: order.priority,
-          approvedAt,
-        }).catch(() => { /* silent */ });
-      }
 
       void sendInternalNotification({
         eventType: 'order_update_for_sales',

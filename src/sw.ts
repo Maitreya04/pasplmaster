@@ -62,8 +62,10 @@ self.addEventListener('push', (event: PushEvent) => {
     self.registration.showNotification(title, {
       body,
       tag,
+      silent: false,
+      vibrate: [400, 80, 400, 80, 400, 80, 400],
       data: { url, orderId, type },
-    }),
+    } as NotificationOptions),
   );
 });
 
