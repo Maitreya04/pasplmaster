@@ -118,9 +118,13 @@ function OrderCard({
             <StatusBadge status={order.workflow_status} />
             {order.reviewer_name && <BillingApproverChip name={order.reviewer_name} />}
             {order.picker_name &&
-              (order.workflow_status === 'completed' ||
+              (order.workflow_status === 'picking' ||
+                order.workflow_status === 'completed' ||
                 order.workflow_status === 'flagged') && (
-                <PickerAttributionChip name={order.picker_name} />
+                <PickerAttributionChip
+                  name={order.picker_name}
+                  active={order.workflow_status === 'picking'}
+                />
               )}
           </div>
         </div>

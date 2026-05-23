@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, CheckCircle, XCircle, Hourglass, Warning } from '@phosphor-icons/react';
+import { X, CheckCircle, XCircle, Hourglass, Warning, Printer } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import {
   formatInternalNotificationError,
@@ -19,8 +19,10 @@ import {
   NumberStepper,
   BigButton,
   BottomSheet,
+  BillingApproverChip,
   PickerAttributionChip,
 } from '../../components/shared';
+import { openPickingChalanPrint } from '../../lib/billing/printPickingChalan';
 import type { OrderItem, PendingItem } from '../../types';
 import { formatCurrency, formatTimestamp, formatTimeAgo } from '../../utils/formatters';
 import { isFocOrderItem } from '../../lib/specialPricing';
@@ -654,6 +656,18 @@ export default function ReviewPage(): React.JSX.Element | null {
     rejectMutation.mutate();
   };
 
+  const canPrintPickingChalan =
+    order != null &&
+    ['approved', 'picking', 'completed', 'flagged'].includes(order.workflow_status);
+
+  const handlePrintPickingChalan = useCallback(() => {
+    if (!order) return;
+    const opened = openPickingChalanPrint(order, order.items ?? items);
+    if (!opened) {
+      toast.error('Allow pop-ups to print the picking chalan.');
+    }
+  }, [order, items, toast]);
+
   if (!orderId) {
     navigate('/billing');
     return null;
@@ -664,6 +678,19 @@ export default function ReviewPage(): React.JSX.Element | null {
       <PageHeader
         title={order?.order_number ?? 'Review Order'}
         onBack={() => navigate('/billing')}
+        action={
+          canPrintPickingChalan ? (
+            <button
+              type="button"
+              onClick={handlePrintPickingChalan}
+              className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+              aria-label="Print picking chalan"
+              title="Print picking chalan"
+            >
+              <Printer size={22} weight="bold" />
+            </button>
+          ) : undefined
+        }
       />
 
       <div className="p-4 lg:px-8 lg:py-6 max-w-4xl mx-auto">
@@ -706,7 +733,7 @@ export default function ReviewPage(): React.JSX.Element | null {
                     <span>Transport: {order.transport_name}</span>
                   )}
                 </div>
-                <div className="flex items-center gap-3 pt-2">
+                <div className="flex flex-wrap items-center gap-2 pt-2">
                   <span className="font-mono text-[var(--content-secondary)]">
                     {order.order_number}
                   </span>
@@ -719,7 +746,34 @@ export default function ReviewPage(): React.JSX.Element | null {
                   {order.priority === 'urgent' && (
                     <StatusBadge status="urgent" />
                   )}
+                  {order.reviewer_name && (
+                    <BillingApproverChip name={order.reviewer_name} />
+                  )}
+                  {order.picker_name ? (
+                    <PickerAttributionChip
+                      name={order.picker_name}
+                      active={order.workflow_status === 'picking'}
+                    />
+                  ) : (
+                    (order.workflow_status === 'approved' ||
+                      order.workflow_status === 'picking') && (
+                      <span className="inline-flex items-center h-6 px-3 rounded-full border border-[var(--border-opaque)] bg-[var(--bg-tertiary)] text-xs font-semibold text-[var(--content-tertiary)]">
+                        Waiting for picker
+                      </span>
+                    )
+                  )}
                 </div>
+                {order.workflow_status === 'picking' && order.picker_name && (
+                  <div className="mt-2 text-sm px-3 py-2 rounded-lg bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] font-semibold border border-[var(--border-warning)]">
+                    Picking chalan: accepted by {order.picker_name}
+                    {order.picked_at && (
+                      <span className="font-normal opacity-90">
+                        {' '}
+                        · since {formatTimeAgo(order.picked_at)}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <p className="text-sm text-[var(--content-tertiary)]">
                   {formatTimestamp(order.created_at)}
                 </p>
@@ -1079,33 +1133,49 @@ export default function ReviewPage(): React.JSX.Element | null {
 
             {/* Actions */}
             <div className="mt-6 lg:mt-8 flex flex-col sm:flex-row gap-3">
-              <BigButton
-                variant="danger"
-                onClick={() => setRejectSheetOpen(true)}
-                className="sm:flex-1"
-              >
-                <XCircle size={20} weight="bold" />
-                Reject
-              </BigButton>
-              <BigButton
-                variant="primary"
-                onClick={() => approveMutation.mutate()}
-                loading={approveMutation.isPending}
-                disabled={
-                  order.workflow_status === 'flagged' &&
-                  unresolvedPriceMismatchCount > 0
-                }
-                className={`sm:flex-[2] hover:opacity-90 ${
-                  order.workflow_status === 'flagged'
-                    ? 'bg-[var(--bg-warning)]'
-                    : 'bg-[var(--bg-positive)]'
-                }`}
-              >
-                <CheckCircle size={20} weight="bold" />
-                {order.workflow_status === 'flagged'
-                  ? 'Confirm & Generate Bill'
-                  : 'Approve & Send to Picking'}
-              </BigButton>
+              {canPrintPickingChalan && (
+                <BigButton
+                  variant="secondary"
+                  onClick={handlePrintPickingChalan}
+                  className="sm:flex-1"
+                >
+                  <Printer size={20} weight="bold" />
+                  Print picking chalan
+                </BigButton>
+              )}
+              {order.workflow_status === 'submitted' && (
+                <>
+                  <BigButton
+                    variant="danger"
+                    onClick={() => setRejectSheetOpen(true)}
+                    className="sm:flex-1"
+                  >
+                    <XCircle size={20} weight="bold" />
+                    Reject
+                  </BigButton>
+                  <BigButton
+                    variant="primary"
+                    onClick={() => approveMutation.mutate()}
+                    loading={approveMutation.isPending}
+                    className="sm:flex-[2] hover:opacity-90 bg-[var(--bg-positive)]"
+                  >
+                    <CheckCircle size={20} weight="bold" />
+                    Approve & Send to Picking
+                  </BigButton>
+                </>
+              )}
+              {order.workflow_status === 'flagged' && (
+                <BigButton
+                  variant="primary"
+                  onClick={() => approveMutation.mutate()}
+                  loading={approveMutation.isPending}
+                  disabled={unresolvedPriceMismatchCount > 0}
+                  className="sm:flex-[2] hover:opacity-90 bg-[var(--bg-warning)]"
+                >
+                  <CheckCircle size={20} weight="bold" />
+                  Confirm & Generate Bill
+                </BigButton>
+              )}
             </div>
           </>
         )}
