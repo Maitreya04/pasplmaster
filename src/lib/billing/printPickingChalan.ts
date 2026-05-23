@@ -1,5 +1,5 @@
 import { pickableOrderItems, pickQuantityTarget } from '../cartSupply';
-import { formatCurrency, formatTimestamp, orderLineLabel } from '../../utils/formatters';
+import { formatTimestamp, orderItemProductCode, orderLineLabel } from '../../utils/formatters';
 import type { OrderItem } from '../../types';
 
 function escapeHtml(text: string): string {
@@ -59,7 +59,7 @@ export function openPickingChalanPrint(
   const rows = pickLines
     .map((item, idx) => {
       const qty = pickQuantityTarget(item);
-      const code = item.item_alias?.trim() || item.item_code?.trim() || '—';
+      const code = orderItemProductCode(item) || '—';
       return `<tr>
         <td class="num">${idx + 1}</td>
         <td>${escapeHtml(code)}</td>
