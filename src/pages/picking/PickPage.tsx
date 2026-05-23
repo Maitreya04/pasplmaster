@@ -3,14 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle,
-  Flag,
   CaretLeft,
   Warning,
-  Camera,
   MapPin,
   ArrowRight,
-  Check,
-  ListChecks,
   ArrowUp,
   ArrowCounterClockwise,
 } from '@phosphor-icons/react';
@@ -22,15 +18,23 @@ import { useAuth } from '../../context/AuthContext';
 import {
   BigButton,
   BottomSheet,
-  LiveQrScanner,
   ProgressBar,
   Skeleton,
   StatusBadge,
 } from '../../components/shared';
 import type { OrderItem, OrderItemState, ScanResult } from '../../types';
-import { FLAG_REASONS, type FlagReason } from '../../utils/constants';
 import { PickCompleteScreen } from './PickCompleteScreen';
-import { QueueSheet, type QueueSheetRow } from './QueueSheet';
+import { type QueueSheetRow } from './QueueSheet';
+import { SwipeDeck } from '../../components/picking/SwipeDeck';
+import { PickCard } from '../../components/picking/PickCard';
+import { JumpListSheet } from '../../components/picking/JumpListSheet';
+import { FlagReasonSheet, type FlagSubmitPayload } from '../../components/picking/FlagReasonSheet';
+import {
+  buildDeckOrder,
+  findDeckIndexByItemId,
+  nextPickableIndex,
+  wrapIndex,
+} from '../../lib/picking/deckOrder';
 import { pickQuantityTarget, pickableOrderItems } from '../../lib/cartSupply';
 import { appHaptics } from '../../lib/haptics';
 import { sendInternalNotification } from '../../lib/pickerPush';
@@ -63,7 +67,6 @@ import {
   rackGateBinIdForPickItem,
   STAGING_BIN_DEFAULT,
 } from '../../lib/wms/binLayers';
-import type { BinPickerShelfLayer } from '../../types';
 
 type PickItemUiState =
   | 'pending'
@@ -79,12 +82,6 @@ interface PickItemLocal {
   orderItem: OrderItem;
   uiState: PickItemUiState;
   scanResult: ScanResult | null;
-}
-
-interface LiveScanSession {
-  orderItem: OrderItem;
-  previousUiState: PickItemUiState;
-  previousScanResult: ScanResult | null;
 }
 
 interface PendingPackConfirmation {
@@ -105,10 +102,7 @@ const CELEBRATE_DURATION_MS = 700;
 // sweet spot we tested behaviourally — long enough to react, short enough
 // not to slow the next pick.
 const UNDO_DURATION_MS = 5000;
-// 600ms long-press to mark a rack verified without scanning. Norman's
-// "deliberate confirmation" for a constraint bypass — pickers shouldn't
-// trip into this by accident.
-const RACK_LONG_PRESS_MS = 600;
+const CARD_INDEX_STORAGE_KEY = 'paspl.pick.cardIndex.v1';
 
 const RACK_VERIFY_STORAGE_KEY = 'paspl.pick.rackVerified.v1';
 const SKIPPED_STORAGE_KEY = 'paspl.pick.skipped.v1';
@@ -150,6 +144,27 @@ function writeBriefAck(orderId: number | null, ack: boolean): void {
   }
 }
 
+function readCardIndex(orderId: number | null): number {
+  if (!orderId || typeof window === 'undefined') return 0;
+  try {
+    const raw = window.sessionStorage.getItem(`${CARD_INDEX_STORAGE_KEY}:${orderId}`);
+    if (!raw) return 0;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeCardIndex(orderId: number | null, index: number): void {
+  if (!orderId || typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(`${CARD_INDEX_STORAGE_KEY}:${orderId}`, String(index));
+  } catch {
+    // best-effort
+  }
+}
+
 interface CelebratingState {
   itemId: number;
   expiresAt: number;
@@ -162,38 +177,6 @@ interface UndoSnapshot {
   previousScanResult: ScanResult | null;
   previousState: OrderItemState;
   expiresAt: number;
-}
-
-interface PackSplitText {
-  /** Human-readable line, e.g. "Pick 2 inner packs + 12 loose". Empty if not applicable. */
-  text: string;
-  /** True when the breakdown actually has multiple tiers. */
-  hasMultipleTiers: boolean;
-}
-
-function describePackSplit(
-  breakdown: PackBreakdown | null,
-  packDef: ItemPackDefinition | null | undefined,
-): PackSplitText {
-  if (!breakdown) return { text: '', hasMultipleTiers: false };
-  const parts: string[] = [];
-  if (breakdown.hasOuter && breakdown.outerQty > 0) {
-    const size = packDef?.outer_pack_qty ?? 0;
-    parts.push(
-      `${breakdown.outerQty} outer box${breakdown.outerQty === 1 ? '' : 'es'}${size ? ` (${size} pcs each)` : ''}`,
-    );
-  }
-  if (breakdown.hasInner && breakdown.innerQty > 0) {
-    const size = packDef?.inner_pack_qty ?? 0;
-    parts.push(
-      `${breakdown.innerQty} inner box${breakdown.innerQty === 1 ? '' : 'es'}${size ? ` (${size} pcs each)` : ''}`,
-    );
-  }
-  if (breakdown.looseQty > 0) {
-    parts.push(`${breakdown.looseQty} piece${breakdown.looseQty === 1 ? '' : 's'}`);
-  }
-  if (parts.length === 0) return { text: '', hasMultipleTiers: false };
-  return { text: `Pick ${parts.join(' + ')}`, hasMultipleTiers: parts.length > 1 };
 }
 
 function sortByRack(items: OrderItem[]): OrderItem[] {
@@ -243,64 +226,8 @@ function buildPriceMismatchNotes(rawNotes: string, boxPrice: number): string {
   return base ? `${structured} Picker note: ${base}` : structured;
 }
 
-function isBenignScannerAbort(message: string): boolean {
-  const normalized = message.trim().toLowerCase();
-  return (
-    normalized.includes('operation was aborted') ||
-    normalized.includes('the operation was aborted') ||
-    normalized.includes('aborted')
-  );
-}
-
 function getPickedQtyFromResult(result: ScanResult | null | undefined): number {
   return Math.max(0, result?.progress?.pickedQty ?? 0);
-}
-
-interface PackBreakdown {
-  outerQty: number;
-  outerPcs: number;
-  innerQty: number;
-  innerPcs: number;
-  looseQty: number;
-  totalPcs: number;
-  hasOuter: boolean;
-  hasInner: boolean;
-  hasLoose: boolean;
-}
-
-function computePackBreakdown(
-  targetQty: number,
-  packDef: ItemPackDefinition | null | undefined,
-): PackBreakdown {
-  const outerSize = packDef?.outer_pack_qty ?? 0;
-  const innerSize = packDef?.inner_pack_qty ?? 0;
-
-  let remaining = targetQty;
-  let outerQty = 0;
-  let innerQty = 0;
-  let looseQty = 0;
-
-  if (outerSize > 0) {
-    outerQty = Math.floor(remaining / outerSize);
-    remaining = remaining % outerSize;
-  }
-  if (innerSize > 0) {
-    innerQty = Math.floor(remaining / innerSize);
-    remaining = remaining % innerSize;
-  }
-  looseQty = remaining;
-
-  return {
-    outerQty,
-    outerPcs: outerQty * outerSize,
-    innerQty,
-    innerPcs: innerQty * innerSize,
-    looseQty,
-    totalPcs: targetQty,
-    hasOuter: outerSize > 0,
-    hasInner: innerSize > 0,
-    hasLoose: looseQty > 0 || (outerSize === 0 && innerSize === 0),
-  };
 }
 
 export default function PickPage(): React.JSX.Element | null {
@@ -331,11 +258,6 @@ export default function PickPage(): React.JSX.Element | null {
     new Map(),
   );
 
-  const [flagTarget, setFlagTarget] = useState<number | null>(null);
-  const [flagReason, setFlagReason] = useState<FlagReason | ''>('');
-  const [flagNotes, setFlagNotes] = useState('');
-  const [flagBoxPrice, setFlagBoxPrice] = useState('');
-  const [liveScanSession, setLiveScanSession] = useState<LiveScanSession | null>(null);
   const [pendingPackConfirmation, setPendingPackConfirmation] =
     useState<PendingPackConfirmation | null>(null);
   const [manualQtyTargetItemId, setManualQtyTargetItemId] = useState<number | null>(null);
@@ -360,10 +282,6 @@ export default function PickPage(): React.JSX.Element | null {
   // skippedIds: items the picker chose to come back to. Sorted to the end of
   // the queue so the natural rack-order keeps leading the route.
   const [skippedIds, setSkippedIds] = useState<Set<number>>(new Set());
-  // Scanner mode: 'rack' opens the camera for bin license plate (location /
-  // ITEM / pack QR); 'item' opens it for box picks.
-  // it to scan box / pack / LPN labels.
-  const [scannerMode, setScannerMode] = useState<'rack' | 'item'>('item');
   // celebrating: the just-completed item gets a 700ms green dwell before the
   // next stop slides in. Norman: feedback must be visible enough to register.
   const [celebrating, setCelebrating] = useState<CelebratingState | null>(null);
@@ -371,6 +289,11 @@ export default function PickPage(): React.JSX.Element | null {
   // scan_result + state so we can roll back both DB and local UI cleanly.
   const [undoSnapshot, setUndoSnapshot] = useState<UndoSnapshot | null>(null);
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
+  const [flagSheetOpen, setFlagSheetOpen] = useState(false);
+  const [flagTargetItemId, setFlagTargetItemId] = useState<number | null>(null);
+  const [moreActionsItemId, setMoreActionsItemId] = useState<number | null>(null);
+  const [currentCardIndex, setCurrentCardIndex] = useState(0);
+  const autoForwardCancelledRef = useRef(false);
   const [preferredPickLayer, setPreferredPickLayer] = useState<{
     orderItemId: number;
     layerId: number;
@@ -402,6 +325,7 @@ export default function PickPage(): React.JSX.Element | null {
     setRackVerifiedIds(readIdSet(RACK_VERIFY_STORAGE_KEY, orderId));
     setSkippedIds(readIdSet(SKIPPED_STORAGE_KEY, orderId));
     setBriefAcknowledged(readBriefAck(orderId));
+    setCurrentCardIndex(readCardIndex(orderId));
   }, [orderId]);
 
   useEffect(() => {
@@ -415,6 +339,10 @@ export default function PickPage(): React.JSX.Element | null {
   useEffect(() => {
     writeBriefAck(orderId, briefAcknowledged);
   }, [orderId, briefAcknowledged]);
+
+  useEffect(() => {
+    writeCardIndex(orderId, currentCardIndex);
+  }, [orderId, currentCardIndex]);
 
   // Drive the celebrate window to clear itself; render falls back to the next
   // stop the moment we clear, so the slide-in animation triggers naturally.
@@ -470,7 +398,7 @@ export default function PickPage(): React.JSX.Element | null {
     });
   }, [localItems, orderItems]);
 
-  const { active, done } = useMemo(() => partitionItems(pickItems), [pickItems]);
+  const { active } = useMemo(() => partitionItems(pickItems), [pickItems]);
 
   // Re-order active so skipped items go to the end while preserving rack order
   // within each group. Norman: "natural mapping" — the queue follows the walk,
@@ -484,63 +412,14 @@ export default function PickPage(): React.JSX.Element | null {
     });
   }, [active, skippedIds]);
 
-  const currentTarget = orderedActive[0] ?? null;
-  const upNextOne = orderedActive[1] ?? null;
-
-  // Get pack definition for current target
-  const currentPackDef = useMemo(() => {
-    if (!currentTarget) return null;
-    const busyCodes = deriveBusyCodeCandidates(currentTarget.orderItem);
-    for (const code of busyCodes) {
-      const def = packDefinitionByBusyCode.get(code);
-      if (def) return def;
-    }
-    return null;
-  }, [currentTarget, packDefinitionByBusyCode]);
-
-  const currentTargetProgress = useMemo(() => {
-    if (!currentTarget) return null;
-    const targetQty = pickQuantityTarget(currentTarget.orderItem);
-    const pickedQty = Math.min(
-      targetQty,
-      getPickedQtyFromResult(currentTarget.scanResult),
-    );
-    return {
-      targetQty,
-      pickedQty,
-      remainingQty: Math.max(0, targetQty - pickedQty),
-    };
-  }, [currentTarget]);
-
-  // Pack breakdown for current target
-  const currentBreakdown = useMemo(() => {
-    if (!currentTargetProgress) return null;
-    return computePackBreakdown(currentTargetProgress.targetQty, currentPackDef);
-  }, [currentTargetProgress, currentPackDef]);
-
-  const currentAliasForVerification = useMemo(() => {
-    if (!currentTarget) return null;
-    return (
-      currentTarget.orderItem.catalog_alias1 ??
-      currentTarget.orderItem.catalog_alias ??
-      currentTarget.orderItem.item_alias ??
-      null
-    );
-  }, [currentTarget]);
-
-  // Render-time English description of the recommended pack split (e.g. "Pick 2
-  // inner packs + 12 loose"). The tile breakdown stays as the secondary view.
-  const currentSplitText = useMemo(
-    () => describePackSplit(currentBreakdown, currentPackDef),
-    [currentBreakdown, currentPackDef],
+  const deckItems = useMemo(
+    () => buildDeckOrder(pickItems, skippedIds),
+    [pickItems, skippedIds],
   );
 
-  // The just-completed item we render during `celebrating` lives in `done`, not
-  // `active`. Look it up so the green-dwell card can show its actual contents.
-  const celebratingItem = useMemo(() => {
-    if (!celebrating) return null;
-    return order?.items.find((oi) => oi.id === celebrating.itemId) ?? null;
-  }, [celebrating, order?.items]);
+  const safeCardIndex = deckItems.length > 0 ? wrapIndex(currentCardIndex, deckItems.length) : 0;
+  const currentDeckItem = deckItems[safeCardIndex] ?? null;
+  const currentTarget = currentDeckItem ?? orderedActive[0] ?? null;
 
   // Group the trip-summary view's racks by rack_no so the brief reads as a route,
   // not a list of items. Items without a rack go into a "—" group at the end.
@@ -569,7 +448,7 @@ export default function PickPage(): React.JSX.Element | null {
   const queueSheetRows: QueueSheetRow[] = useMemo(() => {
     const rows: QueueSheetRow[] = [];
     for (const pi of pickItems) {
-      const isCurrent = currentTarget?.orderItem.id === pi.orderItem.id;
+      const isCurrent = currentDeckItem?.orderItem.id === pi.orderItem.id;
       const status: QueueSheetRow['status'] = isCurrent
         ? 'now'
         : pi.uiState === 'picked' || pi.uiState === 'overridden'
@@ -589,7 +468,7 @@ export default function PickPage(): React.JSX.Element | null {
       });
     }
     return rows;
-  }, [pickItems, currentTarget, skippedIds]);
+  }, [pickItems, currentDeckItem, skippedIds]);
 
   const counts = useMemo(() => {
     let picked = 0;
@@ -660,7 +539,7 @@ export default function PickPage(): React.JSX.Element | null {
 
   /** Add an item to the "skipped" set so it sorts to the end of the queue. */
   const skipItem = useCallback((itemId: number, _reason: string) => {
-    void _reason; // reason currently surfaces via toast/log only.
+    void _reason;
     setSkippedIds((prev) => {
       const next = new Set(prev);
       next.add(itemId);
@@ -670,37 +549,35 @@ export default function PickPage(): React.JSX.Element | null {
     toast.info('Skipped — will return at the end of the queue.');
   }, [toast]);
 
-  // ─── Long-press override for missing rack QRs ───
-  // Hold the rack number for ~600ms when there's no QR on the shelf yet. The
-  // delay is intentional: Norman's "deliberate confirmation" pattern.
-  const rackPressTimerRef = useRef<number | null>(null);
-  const rackPressedTargetRef = useRef<number | null>(null);
+  const scheduleAutoForward = useCallback(() => {
+    autoForwardCancelledRef.current = false;
+    window.setTimeout(() => {
+      if (autoForwardCancelledRef.current) return;
+      setCurrentCardIndex((idx) => {
+        const next = nextPickableIndex(deckItems, idx);
+        return next ?? idx;
+      });
+    }, CELEBRATE_DURATION_MS);
+  }, [deckItems]);
 
-  const startRackLongPress = useCallback(
-    (itemId: number) => {
-      rackPressedTargetRef.current = itemId;
-      if (rackPressTimerRef.current) window.clearTimeout(rackPressTimerRef.current);
-      rackPressTimerRef.current = window.setTimeout(() => {
-        if (rackPressedTargetRef.current === itemId) {
-          markRackVerified(itemId, 'override');
-        }
-      }, RACK_LONG_PRESS_MS);
-    },
-    [markRackVerified],
-  );
-
-  const cancelRackLongPress = useCallback(() => {
-    if (rackPressTimerRef.current) {
-      window.clearTimeout(rackPressTimerRef.current);
-      rackPressTimerRef.current = null;
-    }
-    rackPressedTargetRef.current = null;
+  const handleCardIndexChange = useCallback((index: number) => {
+    autoForwardCancelledRef.current = true;
+    setCurrentCardIndex(index);
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (rackPressTimerRef.current) window.clearTimeout(rackPressTimerRef.current);
-    };
+  const jumpToItem = useCallback(
+    (itemId: number) => {
+      const idx = findDeckIndexByItemId(deckItems, itemId);
+      handleCardIndexChange(idx);
+      setQueueSheetOpen(false);
+    },
+    [deckItems, handleCardIndexChange],
+  );
+
+  const openFlagSheet = useCallback((itemId: number) => {
+    appHaptics.selection();
+    setFlagTargetItemId(itemId);
+    setFlagSheetOpen(true);
   }, []);
 
   // ─── Phase derivation ───
@@ -730,17 +607,17 @@ export default function PickPage(): React.JSX.Element | null {
   }, [currentTarget, celebrating, briefAcknowledged, counts.picked, counts.flagged, rackVerifiedIds]);
 
   const shelfBinId =
-    phase.kind === 'verified' && currentTarget
-      ? rackGateBinIdForPickItem(currentTarget.orderItem)
+    currentDeckItem && rackVerifiedIds.has(currentDeckItem.orderItem.id)
+      ? rackGateBinIdForPickItem(currentDeckItem.orderItem)
       : null;
   const shelfBusy =
-    phase.kind === 'verified' && currentTarget
-      ? primaryBusyCodeForOrderItem(currentTarget.orderItem)
+    currentDeckItem && rackVerifiedIds.has(currentDeckItem.orderItem.id)
+      ? primaryBusyCodeForOrderItem(currentDeckItem.orderItem)
       : null;
   const shelfQuery = useQuery({
     queryKey: ['pickerShelf', shelfBinId, shelfBusy],
     queryFn: () => fetchBinPickerShelf(shelfBinId!, shelfBusy!),
-    enabled: Boolean(phase.kind === 'verified' && shelfBinId && shelfBusy != null),
+    enabled: Boolean(shelfBinId && shelfBusy != null),
   });
 
   useEffect(() => {
@@ -927,39 +804,30 @@ export default function PickPage(): React.JSX.Element | null {
     },
   });
 
-  const openLiveScan = useCallback(
-    (orderItem: OrderItem, mode: 'rack' | 'item' = 'item') => {
-      const current = localItems.get(orderItem.id);
-      const fallbackState = current?.uiState ?? uiStateFromDb(orderItem);
-      const fallbackScanResult = current?.scanResult ?? orderItem.scan_result;
-
-      appHaptics.impactLight();
-      setScannerMode(mode);
+  const openManualCodeVerify = useCallback(
+    (orderItem: OrderItem) => {
+      appHaptics.selection();
+      const local = localItems.get(orderItem.id);
+      const targetQty = pickQuantityTarget(orderItem);
+      const picked = Math.min(
+        targetQty,
+        getPickedQtyFromResult(local?.scanResult ?? orderItem.scan_result),
+      );
+      const remaining = Math.max(1, targetQty - picked);
+      setManualCodeVerifyItemId(orderItem.id);
+      setManualCodeInput('');
+      setManualCodeQtyInput(String(remaining));
       setScannerHint(null);
-      // Only flip to 'scanning' visually for item-mode scans. Rack scans should
-      // not disturb the gate-1 layout — the picker is just verifying location.
-      if (mode === 'item') {
-        updateLocalItem(orderItem.id, { uiState: 'scanning' });
-      }
-      setLiveScanSession({
-        orderItem,
-        previousUiState: fallbackState,
-        previousScanResult: fallbackScanResult,
-      });
     },
-    [localItems, updateLocalItem],
+    [localItems],
   );
 
-  /**
-   * Roll back the last completed line within the undo window. Restores both the
-   * DB `state` and the prior `scan_result` (so progress, suggestedQty, etc. are
-   * exactly as they were one tick before completion).
-   */
   const revertLastPick = useCallback(async () => {
     const snapshot = undoSnapshot;
     if (!snapshot) return;
     setUndoSnapshot(null);
     setCelebrating(null);
+    autoForwardCancelledRef.current = true;
     try {
       const { error } = await supabase
         .from('order_items')
@@ -988,47 +856,8 @@ export default function PickPage(): React.JSX.Element | null {
     }
   }, [orderId, queryClient, toast, undoSnapshot, updateLocalItem]);
 
-  const closeLiveScan = useCallback(() => {
-    setLiveScanSession((current) => {
-      if (!current) return null;
-      updateLocalItem(current.orderItem.id, {
-        uiState: current.previousUiState,
-        scanResult: current.previousScanResult,
-      });
-      return null;
-    });
-  }, [updateLocalItem]);
-
-  const openManualCodeVerify = useCallback(
-    (orderItem: OrderItem) => {
-      appHaptics.selection();
-      setLiveScanSession((current) => {
-        if (current) {
-          updateLocalItem(current.orderItem.id, {
-            uiState: current.previousUiState,
-            scanResult: current.previousScanResult,
-          });
-        }
-        return null;
-      });
-      const local = localItems.get(orderItem.id);
-      const targetQty = pickQuantityTarget(orderItem);
-      const picked = Math.min(
-        targetQty,
-        getPickedQtyFromResult(local?.scanResult ?? orderItem.scan_result),
-      );
-      const remaining = Math.max(1, targetQty - picked);
-      setManualCodeVerifyItemId(orderItem.id);
-      setManualCodeInput('');
-      setManualCodeQtyInput(String(remaining));
-      setScannerHint(null);
-    },
-    [localItems, updateLocalItem],
-  );
-
-  const handleScanResolved = useCallback((scan: LiveQrScannerResolved) => {
-    setLiveScanSession((current) => {
-      if (!current) return null;
+  const processEmbeddedScan = useCallback(
+    (orderItem: OrderItem, mode: 'rack' | 'item', scan: LiveQrScannerResolved) => {
       const now = Date.now();
       if (
         lastScanMeta &&
@@ -1036,21 +865,17 @@ export default function PickPage(): React.JSX.Element | null {
         now - lastScanMeta.at < DUPLICATE_SCAN_WINDOW_MS
       ) {
         setScannerHint('Duplicate scan ignored. Keep moving to the next label.');
-        return current;
+        return;
       }
       setLastScanMeta({ rawValue: scan.rawValue, at: now });
 
-      // ─── Rack-gate (gate 1) ───
-      // Warehouses print a "license plate" on the bin: big location text plus
-      // ITEM / pack QRs. Those payloads classify as sku|pack|lpn — not the
-      // dedicated PASPL_RACK format. We accept:
-      //   (a) rack-location QR (RACK:… / PASPL_RACK) matching rack_no;
-      //   (b) ITEM or pack QR that matches this line (LiveQrScanner sets matchesPickItem);
-      //   (c) any decoded token matching rack_no (location string inside the QR).
-      if (scannerMode === 'rack') {
+      const local = localItems.get(orderItem.id);
+      const previousScanResult = local?.scanResult ?? orderItem.scan_result;
+
+      if (mode === 'rack') {
         const classified = classifyScanPayload(scan.rawValue);
-        const expectedRack = current.orderItem.rack_no;
-        const stagingOnly = orderItemUsesStagingOnly(current.orderItem);
+        const expectedRack = orderItem.rack_no;
+        const stagingOnly = orderItemUsesStagingOnly(orderItem);
 
         let gateOk = false;
         if (stagingOnly && scan.matchesPickItem) {
@@ -1064,7 +889,7 @@ export default function PickPage(): React.JSX.Element | null {
               `Wrong shelf — scanned ${scannedCode}, expected ${expectedRack ?? '—'}. Walk to the right rack.`,
             );
             appHaptics.warning();
-            return current;
+            return;
           } else {
             gateOk = true;
           }
@@ -1086,19 +911,15 @@ export default function PickPage(): React.JSX.Element | null {
                 : 'Scan the bin license plate (ITEM or pack QR) for this line.',
           );
           appHaptics.warning();
-          return current;
+          return;
         }
 
-        markRackVerified(current.orderItem.id, 'scan');
+        markRackVerified(orderItem.id, 'scan');
         setScannerHint(null);
-        updateLocalItem(current.orderItem.id, {
-          uiState: current.previousUiState,
-          scanResult: current.previousScanResult,
-        });
-        return null;
+        return;
       }
 
-      const targetQty = pickQuantityTarget(current.orderItem);
+      const targetQty = pickQuantityTarget(orderItem);
       if (targetQty <= 0) {
         const zeroQtyResult: ScanResult = {
           isMatch: false,
@@ -1107,7 +928,7 @@ export default function PickPage(): React.JSX.Element | null {
           extractedDescription: scan.matchedItem?.name ?? undefined,
           reason: 'Line has 0 target qty. Manual qty entry or flag is required.',
           scannedText: scan.rawValue,
-          matchedAgainst: scan.matchedBy ?? current.orderItem.item_name,
+          matchedAgainst: scan.matchedBy ?? orderItem.item_name,
           matchStrategy: 'zero_target_guard',
           ocrExtracted: {
             partNumber: scan.lookupCode ?? null,
@@ -1124,36 +945,37 @@ export default function PickPage(): React.JSX.Element | null {
             source: 'scanner',
           },
         };
-        updateLocalItem(current.orderItem.id, {
+        updateLocalItem(orderItem.id, {
           uiState: 'warning',
           scanResult: zeroQtyResult,
         });
         itemTransitionMutation.mutate({
           transition: {
             kind: 'scan_saved',
-            itemId: current.orderItem.id,
+            itemId: orderItem.id,
             scanResult: zeroQtyResult,
           },
         });
         appHaptics.warning();
         setScannerHint('This line has target qty 0. Enter qty manually or flag it. It will not auto-skip.');
-        return null;
+        return;
       }
+
       const classified = classifyScanPayload(scan.rawValue);
       const lookupCandidates = classified.normalizedCandidates;
       const packPayload = parsePackPickPayload(scan.rawValue);
       const lpnPayload = parseLpnPickPayload(scan.rawValue);
-      const busyCodeCandidates = deriveBusyCodeCandidates(current.orderItem);
+      const busyCodeCandidates = deriveBusyCodeCandidates(orderItem);
       const packDefinitionByPayload = packPayload
         ? packDefinitionByBusyCode.get(packPayload.busyCode) ?? null
         : null;
-      const packDefinitionByCurrentItem = packDefinitionByItemId.get(current.orderItem.item_id) ?? null;
+      const packDefinitionByCurrentItem = packDefinitionByItemId.get(orderItem.item_id) ?? null;
       const payloadMatchesCurrentItem = Boolean(
         packPayload &&
           (
             busyCodeCandidates.includes(packPayload.busyCode) ||
             (packDefinitionByPayload?.item_id_snapshot != null &&
-              packDefinitionByPayload.item_id_snapshot === current.orderItem.item_id) ||
+              packDefinitionByPayload.item_id_snapshot === orderItem.item_id) ||
             (packDefinitionByCurrentItem != null &&
               packDefinitionByCurrentItem.busy_code === packPayload.busyCode)
           ),
@@ -1170,7 +992,7 @@ export default function PickPage(): React.JSX.Element | null {
       const lpnSuggested = lpnPayload?.remainingQty ?? null;
       const existingPickedBefore = Math.min(
         targetQty,
-        getPickedQtyFromResult(current.previousScanResult),
+        getPickedQtyFromResult(previousScanResult),
       );
       const remainingBeforeScan = Math.max(0, targetQty - existingPickedBefore);
       const suggestedQty =
@@ -1216,9 +1038,9 @@ export default function PickPage(): React.JSX.Element | null {
             : `${uomHint ? `${uomHint}. ` : ''}Pack scan (${packPayload?.packType}) verified for ${suggestedQty} units.`
           : classified.kind === 'lpn'
             ? `${uomHint ? `${uomHint}. ` : ''}LPN scan ${lpnPayload?.lpnCode ?? ''} suggests ${suggestedQty} units.`
-          : scan.reason,
+            : scan.reason,
         scannedText: scan.rawValue,
-        matchedAgainst: scan.matchedBy ?? current.orderItem.item_name,
+        matchedAgainst: scan.matchedBy ?? orderItem.item_name,
         matchStrategy,
         ocrExtracted: {
           partNumber: scan.lookupCode ?? null,
@@ -1241,7 +1063,7 @@ export default function PickPage(): React.JSX.Element | null {
               packType: packPayload!.packType,
               packQty: suggestedQty,
               suggestedQty,
-            requiresBreakConfirmation: requiresManualQtyConfirmation,
+              requiresBreakConfirmation: requiresManualQtyConfirmation,
               busyCode: matchedBusyCode!,
             }
           : undefined,
@@ -1254,7 +1076,7 @@ export default function PickPage(): React.JSX.Element | null {
 
       const uiState: PickItemUiState = result.isMatch ? 'matched' : 'error';
 
-      updateLocalItem(current.orderItem.id, {
+      updateLocalItem(orderItem.id, {
         uiState,
         scanResult: result,
       });
@@ -1263,7 +1085,7 @@ export default function PickPage(): React.JSX.Element | null {
         itemTransitionMutation.mutate({
           transition: {
             kind: 'scan_saved',
-            itemId: current.orderItem.id,
+            itemId: orderItem.id,
             scanResult: result,
           },
         });
@@ -1271,7 +1093,7 @@ export default function PickPage(): React.JSX.Element | null {
 
       if (requiresManualQtyConfirmation) {
         setPendingPackConfirmation({
-          orderItemId: current.orderItem.id,
+          orderItemId: orderItem.id,
           scanResult: result,
           suggestedQty,
           targetQty: remainingBeforeScan,
@@ -1291,32 +1113,32 @@ export default function PickPage(): React.JSX.Element | null {
           },
         };
         void (async () => {
-          const inv = await tryConsumeShelfStock(current.orderItem, delta);
+          const inv = await tryConsumeShelfStock(orderItem, delta);
           if (inv === 'override_blocked') {
             setFifoOverrideSheet({
-              orderItemId: current.orderItem.id,
+              orderItemId: orderItem.id,
               qtyDelta: delta,
               qtyToApply: suggestedQty,
               resume: 'scan',
               scanFinalize: {
                 progressedResult,
                 nextRemaining,
-                previousScanResult: current.previousScanResult,
-                suggestedLabel: current.orderItem.item_name,
+                previousScanResult,
+                suggestedLabel: orderItem.item_name,
                 classifiedKind: classified.kind,
               },
             });
             return;
           }
           if (inv === 'abort') return;
-          updateLocalItem(current.orderItem.id, {
+          updateLocalItem(orderItem.id, {
             scanResult: progressedResult,
             uiState: nextRemaining === 0 ? 'picked' : 'matched',
           });
           itemTransitionMutation.mutate({
             transition: {
               kind: 'scan_saved',
-              itemId: current.orderItem.id,
+              itemId: orderItem.id,
               scanResult: progressedResult,
             },
           });
@@ -1324,49 +1146,57 @@ export default function PickPage(): React.JSX.Element | null {
             itemTransitionMutation.mutate({
               transition: {
                 kind: 'picked',
-                itemId: current.orderItem.id,
+                itemId: orderItem.id,
                 scanResult: progressedResult,
               },
               optimisticState: 'picked',
             });
             setUndoSnapshot({
-              itemId: current.orderItem.id,
-              itemName: current.orderItem.item_name,
-              itemCode: current.orderItem.item_alias ?? null,
-              previousScanResult: current.previousScanResult,
+              itemId: orderItem.id,
+              itemName: orderItem.item_name,
+              itemCode: orderItem.item_alias ?? null,
+              previousScanResult,
               previousState: 'pending',
               expiresAt: Date.now() + UNDO_DURATION_MS,
             });
             setCelebrating({
-              itemId: current.orderItem.id,
+              itemId: orderItem.id,
               expiresAt: Date.now() + CELEBRATE_DURATION_MS,
             });
+            scheduleAutoForward();
           }
           appHaptics.success();
           setScannerHint(
             nextRemaining === 0
-              ? `Completed ${current.orderItem.item_name}.`
+              ? `Completed ${orderItem.item_name}.`
               : `Matched ${classified.kind.toUpperCase()} scan. ${nextRemaining} remaining.`,
           );
         })();
       } else {
         appHaptics.warning();
       }
+    },
+    [
+      lastScanMeta,
+      itemTransitionMutation,
+      localItems,
+      markRackVerified,
+      packDefinitionByBusyCode,
+      packDefinitionByItemId,
+      scheduleAutoForward,
+      tryConsumeShelfStock,
+      updateLocalItem,
+      userId,
+      userName,
+    ],
+  );
 
-      return result.isMatch ? null : current;
-    });
-  }, [
-    lastScanMeta,
-    itemTransitionMutation,
-    markRackVerified,
-    packDefinitionByBusyCode,
-    packDefinitionByItemId,
-    scannerMode,
-    tryConsumeShelfStock,
-    updateLocalItem,
-    userId,
-    userName,
-  ]);
+  const makeEmbeddedScanHandler = useCallback(
+    (orderItem: OrderItem, mode: 'rack' | 'item') => (scan: LiveQrScannerResolved) => {
+      processEmbeddedScan(orderItem, mode, scan);
+    },
+    [processEmbeddedScan],
+  );
 
   const applyPickedQty = useCallback(
     async (
@@ -1473,6 +1303,7 @@ export default function PickPage(): React.JSX.Element | null {
           itemId,
           expiresAt: Date.now() + CELEBRATE_DURATION_MS,
         });
+        scheduleAutoForward();
         appHaptics.success();
       }
     },
@@ -1480,6 +1311,7 @@ export default function PickPage(): React.JSX.Element | null {
       itemTransitionMutation,
       localItems,
       order?.items,
+      scheduleAutoForward,
       toast,
       tryConsumeShelfStock,
       updateLocalItem,
@@ -1521,13 +1353,18 @@ export default function PickPage(): React.JSX.Element | null {
     setManualCodeVerifyItemId(null);
     setManualCodeInput('');
     setManualCodeQtyInput('1');
+    if (!rackVerifiedIds.has(itemId)) {
+      markRackVerified(itemId, 'override');
+    }
     void applyPickedQty(itemId, Math.floor(parsedQty), { verifiedProductCode: entered });
   }, [
     applyPickedQty,
     manualCodeInput,
     manualCodeQtyInput,
     manualCodeVerifyItemId,
+    markRackVerified,
     order?.items,
+    rackVerifiedIds,
     toast,
   ]);
 
@@ -1588,6 +1425,7 @@ export default function PickPage(): React.JSX.Element | null {
           itemId: sheet.orderItemId,
           expiresAt: Date.now() + CELEBRATE_DURATION_MS,
         });
+        scheduleAutoForward();
       }
       appHaptics.success();
     }
@@ -1644,65 +1482,38 @@ export default function PickPage(): React.JSX.Element | null {
     [updateLocalItem, itemTransitionMutation, localItems, userId, userName],
   );
 
-  const handleFlag = useCallback(() => {
-    if (!flagTarget || !flagReason) return;
-
-    if (flagReason === 'Price Mismatch') {
-      const raw = flagBoxPrice.trim();
-      if (!raw) {
-        toast.error('Please enter the price printed on the box');
-        return;
-      }
-      const normalized = raw.replace(/,/g, '');
-      const parsed = Number(normalized);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        toast.error('Please enter a valid box price');
-        return;
-      }
+  const handleFlagSubmit = useCallback(
+    (payload: FlagSubmitPayload) => {
+      if (flagTargetItemId === null) return;
       appHaptics.impactMedium();
-      itemTransitionMutation.mutate({
-        transition: {
-          kind: 'flagged',
-          itemId: flagTarget,
-          reason: flagReason,
-          notes: buildPriceMismatchNotes(flagNotes, parsed),
-          boxPrice: parsed,
-          scanResult: localItems.get(flagTarget)?.scanResult ?? null,
+      const notes =
+        payload.reason === 'Price Mismatch' && payload.boxPrice != null
+          ? buildPriceMismatchNotes(payload.notes ?? '', payload.boxPrice)
+          : payload.notes;
+      itemTransitionMutation.mutate(
+        {
+          transition: {
+            kind: 'flagged',
+            itemId: flagTargetItemId,
+            reason: payload.reason,
+            notes,
+            boxPrice: payload.boxPrice,
+            scanResult: localItems.get(flagTargetItemId)?.scanResult ?? null,
+          },
+          optimisticState: 'flagged',
         },
-        optimisticState: 'flagged',
-      });
-      setFlagTarget(null);
-      setFlagReason('');
-      setFlagNotes('');
-      setFlagBoxPrice('');
-      return;
-    }
-
-    appHaptics.impactMedium();
-    itemTransitionMutation.mutate({
-      transition: {
-        kind: 'flagged',
-        itemId: flagTarget,
-        reason: flagReason,
-        notes: flagNotes.trim() || null,
-        boxPrice: null,
-        scanResult: localItems.get(flagTarget)?.scanResult ?? null,
-      },
-      optimisticState: 'flagged',
-    });
-    setFlagTarget(null);
-    setFlagReason('');
-    setFlagNotes('');
-    setFlagBoxPrice('');
-  }, [
-    flagTarget,
-    flagReason,
-    flagNotes,
-    flagBoxPrice,
-    itemTransitionMutation,
-    localItems,
-    toast,
-  ]);
+        {
+          onSuccess: () => {
+            toast.info('Flag sent to billing');
+            setFlagSheetOpen(false);
+            setFlagTargetItemId(null);
+            scheduleAutoForward();
+          },
+        },
+      );
+    },
+    [flagTargetItemId, itemTransitionMutation, localItems, scheduleAutoForward, toast],
+  );
 
   if (!orderId) {
     navigate('/picking');
@@ -1784,16 +1595,15 @@ export default function PickPage(): React.JSX.Element | null {
     );
   }
 
-  const isVerified = phase.kind === 'verified';
-  const isAwaitingRack = phase.kind === 'awaiting_rack';
-  const isCelebrating = phase.kind === 'celebrating';
   const isBriefPhase = phase.kind === 'brief';
-  // Stable key drives the slide-in animation when the active stop changes.
-  const heroKey = isCelebrating
-    ? `celebrate-${celebrating?.itemId ?? 0}`
-    : currentTarget
-      ? `pick-${currentTarget.orderItem.id}`
-      : 'empty';
+  const scannerPaused =
+    flagSheetOpen ||
+    queueSheetOpen ||
+    manualCodeVerifyItemId !== null ||
+    manualQtyTargetItemId !== null ||
+    pendingPackConfirmation !== null ||
+    fifoOverrideSheet !== null ||
+    moreActionsItemId !== null;
 
   return (
     <div className="min-h-screen pb-32">
@@ -1924,344 +1734,122 @@ export default function PickPage(): React.JSX.Element | null {
               Start picking
             </BigButton>
           </div>
-        ) : isCelebrating && celebratingItem ? (
-          /* ─── Celebrating: 700ms green dwell on the just-completed item ─── */
-          <div
-            key={heroKey}
-            className="ds-card p-6 bg-[var(--bg-positive-subtle)] border-2 border-[var(--border-positive)] animate-pick-celebrate"
-          >
-            <div className="flex flex-col items-center text-center gap-3">
-              <div className="w-16 h-16 rounded-full bg-[var(--bg-positive)] flex items-center justify-center">
-                <Check size={32} weight="bold" className="text-[var(--content-on-color)]" />
-              </div>
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-positive)]">
-                  Picked
-                </p>
-                <p className="font-mono font-bold text-base text-[var(--content-primary)] mt-0.5">
-                  {celebratingItem.item_alias ?? celebratingItem.item_id}
-                </p>
-                <p className="text-sm text-[var(--content-secondary)] mt-0.5 line-clamp-2">
-                  {celebratingItem.item_name}
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : currentTarget ? (
-          <>
-            {/* ─── HERO STOP ─── Either gate-1 (awaiting rack) or gate-2 (verified). */}
-            <div
-              key={heroKey}
-              className={`ds-card p-4 animate-pick-stop-enter ${
-                isVerified ? 'ring-1 ring-[var(--border-positive)]' : ''
-              }`}
+        ) : deckItems.length > 0 ? (
+          <div className="space-y-3">
+            <p className="text-center text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+              Swipe for next · Swipe up for list · Swipe down to report issue
+            </p>
+            <SwipeDeck
+              currentIndex={safeCardIndex}
+              itemCount={deckItems.length}
+              onIndexChange={handleCardIndexChange}
+              onSwipeUp={() => setQueueSheetOpen(true)}
+              onSwipeDown={() => {
+                const item = deckItems[safeCardIndex];
+                if (item && item.uiState !== 'flagged') {
+                  openFlagSheet(item.orderItem.id);
+                }
+              }}
             >
-              {/* Item header with SKU + position counter */}
-              <div className="flex items-start justify-between gap-3 pb-3 border-b border-[var(--border-faint)]">
-                <div className="min-w-0 flex-1">
-                  <p className="font-mono font-bold text-sm text-[var(--content-primary)]">
-                    {currentTarget.orderItem.item_alias ?? currentTarget.orderItem.item_id}
-                  </p>
-                  <p className="text-[var(--content-secondary)] text-sm mt-0.5 line-clamp-2">
-                    {currentTarget.orderItem.item_name}
-                  </p>
-                </div>
-                <span className="text-xs px-2 py-1 rounded-full bg-[var(--bg-tertiary)] text-[var(--content-tertiary)] shrink-0 tabular-nums">
-                  {counts.picked + counts.flagged + 1} of {counts.total}
-                </span>
-              </div>
-
-              {/* Rack number — always huge.
-                  Long-press on the rack to override-verify when no QR is on the
-                  shelf yet. The press needs to be deliberate (600ms) to avoid
-                  accidental bypass. */}
-              <button
-                type="button"
-                onPointerDown={() => startRackLongPress(currentTarget.orderItem.id)}
-                onPointerUp={cancelRackLongPress}
-                onPointerLeave={cancelRackLongPress}
-                onPointerCancel={cancelRackLongPress}
-                className={`mt-4 w-full text-left rounded-2xl p-4 transition-colors duration-200 pick-pressable ${
-                  isAwaitingRack
-                    ? 'bg-[var(--bg-tertiary)] border-2 border-dashed border-[var(--border-opaque)]'
-                    : 'bg-[var(--bg-positive-subtle)] border-2 border-[var(--border-positive)]'
-                }`}
-                aria-label="Rack location. Long press to mark verified without scanning."
-              >
-                <div className="flex items-center gap-2">
-                  <MapPin
-                    size={18}
-                    weight="fill"
-                    className={
-                      isAwaitingRack
-                        ? 'text-[var(--content-tertiary)]'
-                        : 'text-[var(--content-positive)]'
-                    }
-                  />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-                    {isAwaitingRack ? 'Walk to rack' : 'Verified rack'}
-                  </span>
-                  {isVerified && (
-                    <Check size={14} weight="bold" className="text-[var(--content-positive)] ml-auto" />
-                  )}
-                </div>
-                <p className="font-mono font-bold text-[64px] leading-none mt-1 text-[var(--content-primary)]">
-                  {currentTarget.orderItem.rack_no ?? '—'}
-                </p>
-                {isVerified && shelfBinId && shelfBusy != null && (
-                  <div className="mt-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-                      Shelf stock (MRP batches)
-                    </p>
-                    {shelfQuery.isLoading && (
-                      <p className="text-xs text-[var(--content-tertiary)] mt-1">Loading shelf…</p>
-                    )}
-                    {shelfQuery.isError && (
-                      <p className="text-xs text-[var(--content-warning)] mt-1">Could not load shelf.</p>
-                    )}
-                    {shelfQuery.data != null && shelfQuery.data.total_ea === 0 && (
-                      <p className="text-xs text-[var(--content-secondary)] mt-1">
-                        No layered stock for this BIN/SKU — check receiving putaway.
-                      </p>
-                    )}
-                    {shelfQuery.data != null && shelfQuery.data.total_ea > 0 && (
-                      <>
-                        <p className="font-mono text-lg font-bold tabular-nums mt-1 text-[var(--content-primary)]">
-                          {shelfQuery.data.total_ea} ea available
-                        </p>
-                        <ul className="mt-2 space-y-1.5">
-                          {shelfQuery.data.layers.map((layer: BinPickerShelfLayer) => (
-                            <li key={layer.id}>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setPreferredPickLayer({
-                                    orderItemId: currentTarget.orderItem.id,
-                                    layerId: layer.id,
-                                  })
-                                }
-                                className={`w-full text-left rounded-lg px-2 py-1.5 text-sm transition-colors ${
-                                  preferredPickLayer?.layerId === layer.id &&
-                                  preferredPickLayer.orderItemId === currentTarget.orderItem.id
-                                    ? 'bg-[var(--bg-accent-subtle)] ring-1 ring-[var(--role-primary)]'
-                                    : 'bg-[var(--bg-primary)]'
-                                }`}
-                              >
-                                <span className="font-mono">₹{Number(layer.mrp_per_ea).toFixed(2)}</span>
-                                <span className="text-[var(--content-secondary)]"> × </span>
-                                <span className="font-mono font-semibold">{layer.qty_ea}</span>
-                                {layer.is_fifo_recommended ? (
-                                  <span className="ml-2 text-[10px] font-bold uppercase text-[var(--content-positive)]">
-                                    Pick first
-                                  </span>
-                                ) : null}
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                        {preferredPickLayer?.orderItemId === currentTarget.orderItem.id && (
-                          <p className="text-[10px] text-[var(--content-accent)] mt-2 font-medium">
-                            Non-FIFO batch selected — a short reason is required when you pick.
-                          </p>
-                        )}
-                      </>
-                    )}
+              {deckItems.map((pi, index) => {
+                const targetQty = pickQuantityTarget(pi.orderItem);
+                const pickedQty = Math.min(
+                  targetQty,
+                  getPickedQtyFromResult(pi.scanResult),
+                );
+                const isCardCurrent = index === safeCardIndex;
+                const rackVerified = rackVerifiedIds.has(pi.orderItem.id);
+                const showShelf =
+                  isCardCurrent &&
+                  rackVerified &&
+                  shelfQuery.data?.layers &&
+                  currentDeckItem?.orderItem.id === pi.orderItem.id;
+                return (
+                  <div key={pi.orderItem.id} className="h-full w-full shrink-0 px-0.5">
+                    <PickCard
+                      orderItem={pi.orderItem}
+                      uiState={pi.uiState}
+                      scanResult={pi.scanResult}
+                      phase={
+                        celebrating?.itemId === pi.orderItem.id
+                          ? 'celebrating'
+                          : pi.uiState === 'flagged'
+                            ? 'flagged'
+                            : !rackVerified
+                              ? 'awaiting_rack'
+                              : 'verified'
+                      }
+                      isCurrent={isCardCurrent}
+                      isCelebrating={celebrating?.itemId === pi.orderItem.id}
+                      rackVerified={rackVerified}
+                      pickedQty={pickedQty}
+                      targetQty={targetQty}
+                      positionLabel={`${index + 1} / ${deckItems.length}`}
+                      flagReason={pi.orderItem.flag_reason}
+                      scannerPaused={scannerPaused || !isCardCurrent}
+                      shelfLayers={showShelf ? shelfQuery.data?.layers ?? null : null}
+                      shelfLoading={isCardCurrent && rackVerified && shelfQuery.isLoading}
+                      preferredLayerId={
+                        preferredPickLayer?.orderItemId === pi.orderItem.id
+                          ? preferredPickLayer.layerId
+                          : null
+                      }
+                      onRackTap={() => {
+                        if (!rackVerifiedIds.has(pi.orderItem.id)) {
+                          openManualCodeVerify(pi.orderItem);
+                        }
+                      }}
+                      onReportIssue={() => openFlagSheet(pi.orderItem.id)}
+                      onScanResolved={
+                        rackVerified
+                          ? makeEmbeddedScanHandler(pi.orderItem, 'item')
+                          : makeEmbeddedScanHandler(pi.orderItem, 'rack')
+                      }
+                      onManualVerify={() => openManualCodeVerify(pi.orderItem)}
+                      onPickOne={() => handlePick(pi.orderItem.id)}
+                      onEnterQty={() => {
+                        setManualQtyTargetItemId(pi.orderItem.id);
+                        setManualQtyInput('1');
+                      }}
+                      onOverride={() => handleOverride(pi.orderItem.id)}
+                      onScanRack={() => {}}
+                      onSelectLayer={(layerId) =>
+                        setPreferredPickLayer({
+                          orderItemId: pi.orderItem.id,
+                          layerId,
+                        })
+                      }
+                      onMoreActions={() => setMoreActionsItemId(pi.orderItem.id)}
+                    />
                   </div>
-                )}
-                {isAwaitingRack && (
-                  <p className="text-[11px] text-[var(--content-tertiary)] mt-2">
-                    Hold to verify without scanning if the label won’t scan
-                  </p>
-                )}
-              </button>
+                );
+              })}
+            </SwipeDeck>
 
-              {/* Qty + pack split.
-                  Veiled (blur + dim) until rack-verified. Norman: a constraint
-                  that prevents picking from the wrong shelf — you can sense the
-                  content exists but can't act on it yet. */}
-              <div
-                className={`pt-4 transition-all duration-200 ${
-                  isAwaitingRack ? 'opacity-55' : 'animate-pick-veil-reveal'
-                }`}
-                style={isAwaitingRack ? { filter: 'blur(6px)' } : undefined}
-                aria-hidden={isAwaitingRack}
-              >
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mb-1">
-                  Remaining qty
-                </p>
-                <div className="flex items-baseline gap-1 tabular-nums">
-                  <span className="font-mono font-bold text-[52px] leading-none text-[var(--content-primary)] transition-opacity duration-150">
-                    {currentTargetProgress?.remainingQty ?? 0}
-                  </span>
-                  <span className="text-sm font-medium text-[var(--content-tertiary)]">pcs</span>
-                </div>
-                {currentTargetProgress && (
-                  <p className="text-xs text-[var(--content-secondary)] mt-1 tabular-nums">
-                    Picked {currentTargetProgress.pickedQty} of {currentTargetProgress.targetQty}
-                  </p>
-                )}
-                {currentSplitText.text && currentSplitText.hasMultipleTiers && (
-                  <p className="text-sm font-semibold text-[var(--content-primary)] mt-2">
-                    {currentSplitText.text}
-                  </p>
-                )}
-                {currentTargetProgress?.targetQty === 0 && (
-                  <div className="mt-2 rounded-lg border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2">
-                    <p className="text-xs font-semibold text-[var(--content-warning-on-light)]">
-                      Qty target is 0. This line will not auto-complete.
-                    </p>
-                    <p className="text-[11px] text-[var(--content-warning-on-light)] mt-0.5">
-                      Use Enter qty for bulk/manual picking or Flag to route for review.
-                    </p>
-                  </div>
-                )}
-
-                {/* Tile breakdown — secondary visual, supports the English line above. */}
-                {currentBreakdown && (currentBreakdown.hasOuter || currentBreakdown.hasInner) && (
-                  <div className="flex gap-2 mt-3">
-                    {currentBreakdown.hasOuter && (
-                      <div
-                        className={`flex-1 rounded-xl p-2.5 border-[1.5px] bg-[var(--bg-accent-subtle)] border-[var(--border-accent)] ${
-                          currentBreakdown.outerQty === 0 ? 'opacity-35' : ''
-                        }`}
-                      >
-                        <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">Outer box</p>
-                        <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-accent)] tabular-nums">
-                          {currentBreakdown.outerQty}
-                        </p>
-                        <p className="text-[9px] font-medium text-[var(--content-accent)]">
-                          ×{currentPackDef?.outer_pack_qty ?? 0} ea
-                        </p>
-                      </div>
-                    )}
-                    {currentBreakdown.hasInner && (
-                      <div
-                        className={`flex-1 rounded-xl p-2.5 border-[1.5px] bg-[var(--bg-positive-subtle)] border-[var(--border-positive)] ${
-                          currentBreakdown.innerQty === 0 ? 'opacity-35' : ''
-                        }`}
-                      >
-                        <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-positive)]">Inner box</p>
-                        <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-positive)] tabular-nums">
-                          {currentBreakdown.innerQty}
-                        </p>
-                        <p className="text-[9px] font-medium text-[var(--content-positive)]">
-                          ×{currentPackDef?.inner_pack_qty ?? 0} = {currentBreakdown.innerPcs}
-                        </p>
-                      </div>
-                    )}
-                    <div
-                      className={`flex-1 rounded-xl p-2.5 border-[1.5px] bg-[var(--bg-tertiary)] border-[var(--border-subtle)] ${
-                        currentBreakdown.looseQty === 0 ? 'opacity-35' : ''
-                      }`}
-                    >
-                      <p className="text-[9px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">Pieces</p>
-                      <p className="font-mono font-bold text-[26px] leading-none text-[var(--content-secondary)] tabular-nums">
-                        {currentBreakdown.looseQty}
-                      </p>
-                      <p className="text-[9px] font-medium text-[var(--content-tertiary)]">
-                        + {currentBreakdown.looseQty} pcs
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Label-verify chip — shown only when verified. The picker eyes
-                    this against the printed alias on the box before scanning. */}
-                {isVerified && currentAliasForVerification && (
-                  <div className="mt-3 rounded-lg border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-3 py-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">
-                      Box label (Alias 1)
-                    </p>
-                    <p className="font-mono text-base font-bold text-[var(--content-primary)] leading-tight break-all">
-                      {currentAliasForVerification}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* ─── ACTIONS ─── different per phase. */}
-            {isAwaitingRack ? (
-              <div className="space-y-2">
-                <BigButton
-                  variant="primary"
-                  onClick={() => openLiveScan(currentTarget.orderItem, 'rack')}
-                  className="bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)]"
-                >
-                  <Camera size={20} weight="bold" />
-                  Scan bin label to unlock pick
-                </BigButton>
-                {scannerHint && (
-                  <p className="text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] rounded-lg px-3 py-2">
-                    {scannerHint}
-                  </p>
-                )}
-              </div>
-            ) : (
-              /* Verified — full pick action set. The tier rows live inside the
-                 scanner sheet when scanning is active; here we keep the surface
-                 clean so the picker can either tap "Scan box" or use manual. */
-              <div className="space-y-3">
-                <BigButton
-                  variant="primary"
-                  onClick={() => openLiveScan(currentTarget.orderItem, 'item')}
-                  className="bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)]"
-                >
-                  <Camera size={20} weight="bold" />
-                  Scan box / pack
-                </BigButton>
-
-                <button
-                  type="button"
-                  onClick={() => openManualCodeVerify(currentTarget.orderItem)}
-                  className="w-full text-center text-xs font-medium text-[var(--content-accent)] py-1 pick-pressable"
-                >
-                  Barcode not scanning? Verify by product code
-                </button>
-
-                <div className="grid grid-cols-4 gap-2">
-                  <button
-                    onClick={() => handlePick(currentTarget.orderItem.id)}
-                    className="h-11 rounded-xl bg-[var(--bg-tertiary)] text-sm font-medium text-[var(--content-secondary)] pick-pressable"
-                  >
-                    +1 manual
-                  </button>
-                  <button
-                    onClick={() => {
-                      setManualQtyTargetItemId(currentTarget.orderItem.id);
-                      setManualQtyInput('1');
-                    }}
-                    className="h-11 rounded-xl bg-[var(--bg-accent-subtle)] text-sm font-medium text-[var(--content-accent)] pick-pressable"
-                  >
-                    Enter qty
-                  </button>
-                  <button
-                    onClick={() => handleOverride(currentTarget.orderItem.id)}
-                    className="h-11 rounded-xl bg-[var(--bg-warning-subtle)] text-sm font-medium text-[var(--content-warning)] pick-pressable"
-                  >
-                    Override
-                  </button>
-                  <button
-                    onClick={() => {
-                      setFlagTarget(currentTarget.orderItem.id);
-                      setFlagReason('');
-                      setFlagNotes('');
-                      setFlagBoxPrice('');
-                    }}
-                    className="h-11 rounded-xl bg-[var(--bg-negative-subtle)] text-sm font-medium text-[var(--content-negative)] pick-pressable"
-                  >
-                    Flag
-                  </button>
-                </div>
-
-                {scannerHint && (
-                  <p className="text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] rounded-lg px-3 py-2">
-                    {scannerHint}
-                  </p>
-                )}
-              </div>
+            {scannerHint && (
+              <p className="text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] rounded-lg px-3 py-2">
+                {scannerHint}
+              </p>
             )}
-          </>
+
+            <button
+              type="button"
+              onClick={() => {
+                appHaptics.selection();
+                setQueueSheetOpen(true);
+              }}
+              className="w-full rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-4 py-3 pick-pressable text-left"
+              aria-label="Open pick queue"
+            >
+              <div className="flex justify-center mb-1.5">
+                <span className="block w-9 h-1 rounded-full bg-[var(--border-opaque)]" />
+              </div>
+              <div className="flex items-center gap-2 justify-center text-[var(--content-tertiary)] text-xs">
+                <ArrowUp size={14} weight="regular" />
+                View full queue · swipe up on card
+              </div>
+            </button>
+          </div>
         ) : (
           <div className="ds-card p-6 text-center">
             <div className="w-14 h-14 bg-[var(--bg-positive-subtle)] rounded-full flex items-center justify-center mx-auto mb-3">
@@ -2274,47 +1862,6 @@ export default function PickPage(): React.JSX.Element | null {
           </div>
         )}
 
-        {/* ─── Up-next peek + queue handle ───
-            One peek line is enough to satisfy "what's coming?" without breaking
-            focus on the current pick. Tap the handle/peek to open the full
-            queue sheet (drag handle inside the sheet itself dismisses it). */}
-        {!isBriefPhase && (currentTarget || done.length > 0) && (
-          <button
-            type="button"
-            onClick={() => {
-              appHaptics.selection();
-              setQueueSheetOpen(true);
-            }}
-            className="w-full rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-4 py-3 pick-pressable text-left"
-            aria-label="Open pick queue"
-          >
-            <div className="flex justify-center mb-1.5">
-              <span className="block w-9 h-1 rounded-full bg-[var(--border-opaque)]" />
-            </div>
-            {upNextOne ? (
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] shrink-0">
-                  Next
-                </span>
-                <span className="font-mono font-bold text-xs text-[var(--content-primary)] min-w-12 shrink-0">
-                  {upNextOne.orderItem.rack_no ?? '—'}
-                </span>
-                <span className="font-mono text-xs text-[var(--content-secondary)] truncate flex-1">
-                  {upNextOne.orderItem.item_alias ?? upNextOne.orderItem.item_name}
-                </span>
-                <span className="font-mono text-xs text-[var(--content-tertiary)] shrink-0 tabular-nums">
-                  ×{pickQuantityTarget(upNextOne.orderItem)}
-                </span>
-                <ListChecks size={16} weight="regular" className="text-[var(--content-tertiary)] shrink-0" />
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 justify-center text-[var(--content-tertiary)] text-xs">
-                <ArrowUp size={14} weight="regular" />
-                View queue
-              </div>
-            )}
-          </button>
-        )}
       </div>
 
       {/* Complete button */}
@@ -2372,89 +1919,38 @@ export default function PickPage(): React.JSX.Element | null {
         </div>
       )}
 
-      {/* Flag bottom sheet */}
+      {/* Flag reason sheet */}
+      <FlagReasonSheet
+        isOpen={flagSheetOpen}
+        onClose={() => {
+          setFlagSheetOpen(false);
+          setFlagTargetItemId(null);
+        }}
+        onSubmit={handleFlagSubmit}
+        loading={itemTransitionMutation.isPending}
+      />
+
       <BottomSheet
-        isOpen={flagTarget !== null}
-        onClose={() => setFlagTarget(null)}
-        title="Flag Item"
+        isOpen={moreActionsItemId !== null}
+        onClose={() => setMoreActionsItemId(null)}
+        title="More actions"
       >
-        <div className="space-y-4">
-          <p className="text-sm text-[var(--content-tertiary)]">
-            Select a reason for flagging this item:
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {FLAG_REASONS.map((reason) => (
-              <button
-                key={reason}
-                onClick={() => setFlagReason(reason)}
-                className={`
-                  px-3 py-3 rounded-xl text-sm font-medium text-left
-                  transition-colors duration-150 min-h-12
-                  ${
-                    flagReason === reason
-                      ? 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] ring-1 ring-[var(--border-negative)]'
-                      : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
-                  }
-                `}
-              >
-                {reason}
-              </button>
-            ))}
+        {moreActionsItemId !== null && (
+          <div className="space-y-2">
+            <BigButton
+              variant="secondary"
+              onClick={() => {
+                openManualCodeVerify(
+                  order!.items.find((i) => i.id === moreActionsItemId)!,
+                );
+                setMoreActionsItemId(null);
+              }}
+              className="w-full"
+            >
+              Verify by product code
+            </BigButton>
           </div>
-          {flagReason === 'Price Mismatch' && (
-            <div className="space-y-1">
-              <p className="text-xs text-[var(--content-secondary)]">
-                Enter the price printed on the box. Billing will see this and can adjust the invoice.
-              </p>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--content-tertiary)]">
-                  ₹
-                </span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="0.01"
-                  min="0"
-                  value={flagBoxPrice}
-                  onChange={(e) => setFlagBoxPrice(e.target.value)}
-                  placeholder="Box price"
-                  className="
-                    w-full pl-7 pr-3 py-3 rounded-xl
-                    bg-[var(--bg-tertiary)] text-[var(--content-primary)]
-                    placeholder-[var(--content-disabled)]
-                    border border-[var(--border-subtle)]
-                    focus:outline-none focus:ring-2 focus:ring-[var(--border-negative)]
-                  "
-                />
-              </div>
-            </div>
-          )}
-          <textarea
-            value={flagNotes}
-            onChange={(e) => setFlagNotes(e.target.value)}
-            placeholder="Additional notes (optional)"
-            className="
-              w-full h-20 px-4 py-3 rounded-xl
-              bg-[var(--bg-tertiary)] text-[var(--content-primary)]
-              placeholder-[var(--content-disabled)]
-              border border-[var(--border-subtle)]
-              focus:outline-none focus:ring-2 focus:ring-[var(--border-negative)]
-            "
-          />
-          <BigButton
-            variant="primary"
-            onClick={handleFlag}
-            disabled={
-              !flagReason ||
-              (flagReason === 'Price Mismatch' && !flagBoxPrice.trim())
-            }
-            loading={itemTransitionMutation.isPending}
-            className="bg-[var(--bg-negative)] text-[var(--content-on-color)]"
-          >
-            <Flag size={18} weight="fill" />
-            Flag Item
-          </BigButton>
-        </div>
+        )}
       </BottomSheet>
 
       <BottomSheet
@@ -2665,8 +2161,7 @@ export default function PickPage(): React.JSX.Element | null {
         )}
       </BottomSheet>
 
-      {/* Queue sheet — opens via the peek-handle below the hero card. */}
-      <QueueSheet
+      <JumpListSheet
         isOpen={queueSheetOpen}
         onClose={() => setQueueSheetOpen(false)}
         rows={queueSheetRows}
@@ -2679,11 +2174,12 @@ export default function PickPage(): React.JSX.Element | null {
           manual: visibility.manual,
           reasonBadges: visibility.reasonBadges,
         }}
-        currentItemId={currentTarget?.orderItem.id ?? null}
+        currentItemId={currentDeckItem?.orderItem.id ?? null}
         onSkipItem={(itemId, reason) => {
           skipItem(itemId, reason);
           setQueueSheetOpen(false);
         }}
+        onJump={jumpToItem}
       />
 
       {/* Undo toast — top-right, 5s window. The only escape hatch we expose,
@@ -2714,38 +2210,6 @@ export default function PickPage(): React.JSX.Element | null {
         </div>
       )}
 
-      {liveScanSession && (
-        <LiveQrScanner
-          title={
-            scannerMode === 'rack'
-              ? `Scan rack ${liveScanSession.orderItem.rack_no ?? ''}`.trim()
-              : liveScanSession.orderItem.item_name
-          }
-          pickItem={{
-            itemId: liveScanSession.orderItem.item_id,
-            name: liveScanSession.orderItem.item_name,
-            alias1: liveScanSession.orderItem.catalog_alias1 ?? null,
-            alias: liveScanSession.orderItem.catalog_alias ?? null,
-            itemCode: liveScanSession.orderItem.item_alias ?? null,
-            busyCode: deriveBusyCodeCandidates(liveScanSession.orderItem)[0] ?? null,
-            mainGroup: liveScanSession.orderItem.catalog_main_group ?? null,
-            parentGroup: liveScanSession.orderItem.catalog_parent_group ?? null,
-          }}
-          onManualVerify={
-            scannerMode === 'item'
-              ? () => openManualCodeVerify(liveScanSession.orderItem)
-              : undefined
-          }
-          onClose={closeLiveScan}
-          onResolved={handleScanResolved}
-          onError={(message) => {
-            if (!isBenignScannerAbort(message)) {
-              toast.error(message);
-            }
-            closeLiveScan();
-          }}
-        />
-      )}
     </div>
   );
 }

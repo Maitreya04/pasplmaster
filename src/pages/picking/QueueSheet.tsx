@@ -31,6 +31,8 @@ interface QueueSheetProps {
   onSkipItem: (itemId: number, reason: string) => void;
   /** Item id currently being processed (highlighted as "Now"). */
   currentItemId: number | null;
+  /** When set, rows become tappable to jump to that card in the deck. */
+  onJump?: (itemId: number) => void;
 }
 
 const SKIP_REASONS = [
@@ -48,6 +50,7 @@ export function QueueSheet({
   counts,
   onSkipItem,
   currentItemId,
+  onJump,
 }: QueueSheetProps): React.JSX.Element | null {
   const [skipTargetId, setSkipTargetId] = useState<number | null>(null);
   const [skipReason, setSkipReason] = useState<string>('');
@@ -121,7 +124,7 @@ export function QueueSheet({
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mb-2">
               Now
             </p>
-            <Row row={now} highlighted />
+            <Row row={now} highlighted onJump={onJump} />
           </section>
         )}
 
@@ -136,6 +139,7 @@ export function QueueSheet({
                 <Row
                   key={r.itemId}
                   row={r}
+                  onJump={onJump}
                   onSkip={skipTargetId === null ? () => {
                     setSkipTargetId(r.itemId);
                     setSkipReason('');
@@ -154,7 +158,7 @@ export function QueueSheet({
             </p>
             <div className="space-y-1.5">
               {skippedRows.map((r) => (
-                <Row key={r.itemId} row={r} />
+                <Row key={r.itemId} row={r} onJump={onJump} />
               ))}
             </div>
           </section>
@@ -221,26 +225,20 @@ function Row({
   row,
   highlighted = false,
   onSkip,
+  onJump,
 }: {
   row: QueueSheetRow;
   highlighted?: boolean;
   onSkip?: () => void;
+  onJump?: (itemId: number) => void;
 }) {
   const isPicked = row.status === 'picked';
   const isFlagged = row.status === 'flagged';
   const isSkipped = row.status === 'skipped';
+  const canJump = onJump && row.status !== 'picked' && row.status !== 'flagged';
 
-  return (
-    <div
-      className={`
-        flex items-center gap-3 px-3 py-2.5 rounded-xl border-[1.5px]
-        ${highlighted
-          ? 'bg-[var(--bg-secondary)] border-[var(--border-selected)]'
-          : isSkipped
-            ? 'bg-[var(--bg-warning-subtle)] border-[var(--border-warning)]'
-            : 'bg-[var(--bg-secondary)] border-[var(--border-subtle)]'}
-      `}
-    >
+  const inner = (
+    <>
       <div className="flex items-center gap-1 shrink-0">
         {isPicked ? (
           <CheckCircle size={16} weight="fill" className="text-[var(--content-positive)]" />
@@ -267,13 +265,51 @@ function Row({
         </p>
         {onSkip && (
           <button
-            onClick={onSkip}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSkip();
+            }}
             className="text-[10px] font-medium text-[var(--content-warning-on-light)] underline mt-0.5"
           >
             Skip
           </button>
         )}
       </div>
+    </>
+  );
+
+  if (canJump) {
+    return (
+      <button
+        type="button"
+        onClick={() => onJump(row.itemId)}
+        className={`
+          flex w-full items-center gap-3 px-3 py-2.5 rounded-xl border-[1.5px] text-left pick-pressable
+          ${highlighted
+            ? 'bg-[var(--bg-secondary)] border-[var(--border-selected)]'
+            : isSkipped
+              ? 'bg-[var(--bg-warning-subtle)] border-[var(--border-warning)]'
+              : 'bg-[var(--bg-secondary)] border-[var(--border-subtle)]'}
+        `}
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className={`
+        flex items-center gap-3 px-3 py-2.5 rounded-xl border-[1.5px]
+        ${highlighted
+          ? 'bg-[var(--bg-secondary)] border-[var(--border-selected)]'
+          : isSkipped
+            ? 'bg-[var(--bg-warning-subtle)] border-[var(--border-warning)]'
+            : 'bg-[var(--bg-secondary)] border-[var(--border-subtle)]'}
+      `}
+    >
+      {inner}
     </div>
   );
 }

@@ -69,9 +69,20 @@ interface LiveQrScannerProps {
   onManualVerify?: () => void;
   onClose: () => void;
   onResolved: (result: LiveQrScannerResolved) => void;
+  /** Fired on every accepted decode in continuous mode (scanner stays open). */
+  onScanAccepted?: (result: LiveQrScannerResolved) => void;
   onError: (message: string) => void;
   /** When true, awaits UOM RPC before onResolved (slower; for UoM onboarding). Default false. */
   resolveUomOnScan?: boolean;
+  /** Keep scanning after a successful match (embedded pick card). */
+  continuous?: boolean;
+  /** Inline card layout instead of full-screen modal. */
+  embedded?: boolean;
+  /** Pause camera decode (sheet open, off-screen card). */
+  paused?: boolean;
+  /** Overlay progress chip on viewfinder (continuous pick). */
+  pickedSoFar?: number;
+  targetQty?: number;
 }
 
 export function LiveQrScanner({
@@ -85,8 +96,14 @@ export function LiveQrScanner({
   onManualVerify,
   onClose,
   onResolved,
+  onScanAccepted,
   onError,
   resolveUomOnScan = false,
+  continuous = false,
+  embedded = false,
+  paused = false,
+  pickedSoFar,
+  targetQty,
 }: LiveQrScannerProps): React.JSX.Element {
   const idleLine = idleStatus ?? 'Point the QR inside the frame';
   const [lockedUi, setLockedUi] = useState(false);
@@ -120,6 +137,7 @@ export function LiveQrScanner({
   const collectMode = mode === 'collect';
   const pickLabMode = mode === 'pickLab';
   const sheetMode = collectMode || pickLabMode;
+  const continuousMode = continuous || pickLabMode;
 
   useEffect(() => {
     pickLabPickedRef.current = pickLabContext?.pickedSoFar ?? 0;
@@ -254,6 +272,18 @@ export function LiveQrScanner({
     restartVideoLoopRef.current?.();
   }, [restartVideoLoopRef]);
 
+  useEffect(() => {
+    if (paused) {
+      stopScanner();
+      return;
+    }
+    if (embedded || continuous) {
+      completedRef.current = false;
+      lockedRef.current = false;
+      resumeVideoLoop();
+    }
+  }, [paused, embedded, continuous, resumeVideoLoop, stopScanner]);
+
   const handleResolvedPayload = useCallback(
     async (rawValue: string) => {
       const debounceKey = normalizeScanCode(rawValue) || rawValue.trim();
@@ -334,6 +364,9 @@ export function LiveQrScanner({
         setLockedUi(true);
         setCanReset(false);
         onResolved(result);
+        if (continuous && onScanAccepted) {
+          onScanAccepted(result);
+        }
 
         if (pickLabMode) {
           setErrorMessage(result.matchesPickItem ? null : result.reason);
@@ -367,6 +400,27 @@ export function LiveQrScanner({
             lockedRef.current = false;
             setLockedUi(false);
             setCanReset(true);
+            setStatus(idleLine);
+            resumeVideoLoop();
+          }, RESET_COOLDOWN_MS);
+          return;
+        }
+
+        if (continuousMode) {
+          if (result.matchesPickItem) {
+            setErrorMessage(null);
+            setStatus('Matched — scan next label…');
+          } else {
+            setErrorMessage(result.reason);
+            setStatus('Wrong label — aim at this line and scan again…');
+          }
+          window.setTimeout(() => {
+            lockedRef.current = false;
+            setLockedUi(false);
+            setCanReset(true);
+            if (result.matchesPickItem) {
+              setErrorMessage(null);
+            }
             setStatus(idleLine);
             resumeVideoLoop();
           }, RESET_COOLDOWN_MS);
@@ -417,6 +471,9 @@ export function LiveQrScanner({
     },
     [
       collectMode,
+      continuous,
+      continuousMode,
+      onScanAccepted,
       pickLabMode,
       pickLabContext,
       flashViewport,
@@ -509,65 +566,76 @@ export function LiveQrScanner({
   const pickLabOuterQty = pickLabContext?.packDefinition?.outer_pack_qty ?? null;
   const pickLabInnerQty = pickLabContext?.packDefinition?.inner_pack_qty ?? null;
 
+  const progressLabel =
+    targetQty != null && pickedSoFar != null
+      ? `${pickedSoFar} / ${targetQty}`
+      : null;
+
+  const rootClass = embedded
+    ? 'relative flex h-full min-h-[180px] flex-col rounded-2xl bg-slate-950 text-white overflow-hidden'
+    : 'fixed inset-0 z-[70] bg-slate-950 text-white';
+
   return (
-    <div className="fixed inset-0 z-[70] bg-slate-950 text-white">
-      <div className="relative flex min-h-full flex-col">
-        <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-[max(0.875rem,env(safe-area-inset-top))]">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
-              {eyebrow ?? (collectMode ? 'Scan Mode' : 'Shelf Verification')}
-            </p>
-            <h2 className="mt-0.5 text-base font-semibold leading-tight text-white">
-              {title ?? scannerPickItem.name}
-            </h2>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {collectMode && scanCount > 0 && (
-              <span className="rounded-full bg-emerald-500/20 px-2.5 py-1 text-xs font-semibold tabular-nums text-emerald-300">
-                {scanCount} scanned
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={toggleFeedbackSound}
-              aria-label={feedbackSoundEnabled ? 'Mute scan beep' : 'Enable scan beep'}
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 active:scale-95"
-              style={{ transition: 'transform 120ms ease-out' }}
-            >
-              {feedbackSoundEnabled ? (
-                <SpeakerSimpleHigh size={17} weight="bold" />
-              ) : (
-                <SpeakerSimpleSlash size={17} weight="bold" />
+    <div className={rootClass}>
+      <div className={`relative flex ${embedded ? 'h-full' : 'min-h-full'} flex-col`}>
+        {!embedded && (
+          <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-[max(0.875rem,env(safe-area-inset-top))]">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                {eyebrow ?? (collectMode ? 'Scan Mode' : 'Shelf Verification')}
+              </p>
+              <h2 className="mt-0.5 text-base font-semibold leading-tight text-white">
+                {title ?? scannerPickItem.name}
+              </h2>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {collectMode && scanCount > 0 && (
+                <span className="rounded-full bg-emerald-500/20 px-2.5 py-1 text-xs font-semibold tabular-nums text-emerald-300">
+                  {scanCount} scanned
+                </span>
               )}
-            </button>
-            <button
-              type="button"
-              onClick={toggleFeedbackHaptics}
-              aria-label={feedbackHapticsEnabled ? 'Disable vibration' : 'Enable vibration'}
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 active:scale-95 disabled:opacity-35"
-              style={{ transition: 'transform 120ms ease-out' }}
-            >
-              {feedbackHapticsEnabled ? (
-                <HandGrabbing size={17} weight="bold" />
-              ) : (
-                <HandPalm size={17} weight="bold" />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={handleClose}
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 active:scale-95"
-              style={{ transition: 'transform 120ms ease-out' }}
-            >
-              <X size={16} weight="bold" />
-            </button>
+              <button
+                type="button"
+                onClick={toggleFeedbackSound}
+                aria-label={feedbackSoundEnabled ? 'Mute scan beep' : 'Enable scan beep'}
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 active:scale-95"
+                style={{ transition: 'transform 120ms ease-out' }}
+              >
+                {feedbackSoundEnabled ? (
+                  <SpeakerSimpleHigh size={17} weight="bold" />
+                ) : (
+                  <SpeakerSimpleSlash size={17} weight="bold" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={toggleFeedbackHaptics}
+                aria-label={feedbackHapticsEnabled ? 'Disable vibration' : 'Enable vibration'}
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 active:scale-95 disabled:opacity-35"
+                style={{ transition: 'transform 120ms ease-out' }}
+              >
+                {feedbackHapticsEnabled ? (
+                  <HandGrabbing size={17} weight="bold" />
+                ) : (
+                  <HandPalm size={17} weight="bold" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={handleClose}
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 active:scale-95"
+                style={{ transition: 'transform 120ms ease-out' }}
+              >
+                <X size={16} weight="bold" />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
-        <p className="px-4 pb-2 text-xs text-slate-400">{status}</p>
+        {!embedded && <p className="px-4 pb-2 text-xs text-slate-400">{status}</p>}
 
-        <div className="flex flex-1 flex-col px-3 pb-3 min-h-0">
-          <div className="relative min-h-[200px] flex-1 overflow-hidden rounded-[24px] border border-white/10 bg-black">
+        <div className={`flex flex-1 flex-col min-h-0 ${embedded ? 'p-0' : 'px-3 pb-3'}`}>
+          <div className={`relative flex-1 overflow-hidden bg-black ${embedded ? 'min-h-[160px]' : 'min-h-[200px] rounded-[24px] border border-white/10'}`}>
             <ViewfinderOverlay
               videoRef={videoRef}
               viewfinderRef={viewfinderRef}
@@ -575,10 +643,36 @@ export function LiveQrScanner({
               detectedBox={detectedBox}
               flashColor={flashColor}
             />
+            {progressLabel && (
+              <div className="absolute left-3 top-3 z-10 rounded-full bg-black/70 px-3 py-1.5 font-mono text-sm font-bold tabular-nums text-emerald-300 ring-1 ring-emerald-400/30">
+                {progressLabel}
+              </div>
+            )}
+            {embedded && (
+              <div className="absolute right-2 top-2 z-10 flex gap-1">
+                <button
+                  type="button"
+                  onClick={toggleFeedbackSound}
+                  aria-label={feedbackSoundEnabled ? 'Mute scan beep' : 'Enable scan beep'}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-black/50 text-white/70"
+                >
+                  {feedbackSoundEnabled ? (
+                    <SpeakerSimpleHigh size={14} weight="bold" />
+                  ) : (
+                    <SpeakerSimpleSlash size={14} weight="bold" />
+                  )}
+                </button>
+              </div>
+            )}
+            {embedded && errorMessage && (
+              <div className="absolute inset-x-2 bottom-2 z-10 rounded-lg bg-red-500/90 px-2 py-1 text-[10px] font-medium text-white">
+                {errorMessage}
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="space-y-3 px-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+        <div className={`space-y-3 ${embedded ? 'hidden' : 'px-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]'}`}>
           {expectedCodes.length > 0 && (
             <div className="flex flex-wrap gap-1.5 px-1">
               {expectedCodes.map((code) => (
