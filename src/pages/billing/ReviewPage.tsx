@@ -9,6 +9,7 @@ import {
   sendPickerReadyNotification,
 } from '../../lib/pickerPush';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
+import { usePickingClaim } from '../../hooks/usePickingClaim';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -29,6 +30,10 @@ import { isFocOrderItem } from '../../lib/specialPricing';
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseStock';
 import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
+import {
+  billingCompleteStalePicking,
+  stalePickingCompleteErrorMessage,
+} from '../../lib/billing/completeStalePicking';
 import {
   defaultFulfillmentPath,
   fulfillmentPathLabel,
@@ -109,6 +114,10 @@ export default function ReviewPage(): React.JSX.Element | null {
 
   const orderId = id ? parseInt(id, 10) : null;
   const { data: order, isLoading, error } = useOrderDetail(orderId);
+  const { data: pickingClaim } = usePickingClaim(
+    orderId,
+    order?.workflow_status === 'picking',
+  );
 
   // Initialize work claim
   const { claimId, isClaimedByMe, claim, error: claimError } = useWorkClaim(
@@ -127,6 +136,7 @@ export default function ReviewPage(): React.JSX.Element | null {
   const [removedIds, setRemovedIds] = useState<Set<number>>(new Set());
   const [pendingIds, setPendingIds] = useState<Set<number>>(new Set());
   const [rejectSheetOpen, setRejectSheetOpen] = useState(false);
+  const [stalePickConfirmOpen, setStalePickConfirmOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [priceResolutionByItemId, setPriceResolutionByItemId] = useState<
     Record<number, PriceResolutionChoice | null>
@@ -683,6 +693,40 @@ export default function ReviewPage(): React.JSX.Element | null {
     rejectMutation.mutate();
   };
 
+  const canCompleteStalePicking =
+    order?.workflow_status === 'picking' &&
+    (pickingClaim == null || pickingClaim.is_stale);
+
+  const completeStalePickingMutation = useMutation({
+    mutationFn: async () => {
+      if (!orderId || !userId) throw new Error('Not signed in');
+      const result = await billingCompleteStalePicking({
+        orderId,
+        userId,
+        userName: userName ?? null,
+      });
+      if (!result.success) {
+        throw new Error(stalePickingCompleteErrorMessage(result));
+      }
+      return result;
+    },
+    onSuccess: (result) => {
+      setStalePickConfirmOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['picking-claim', orderId] });
+      toast.success(
+        result.has_flags
+          ? 'Order completed with flagged lines — review and generate bill'
+          : 'Order marked completed',
+      );
+    },
+    onError: (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to complete order');
+    },
+  });
+
   const canPrintPickingChalan =
     order != null &&
     ['approved', 'picking', 'completed', 'flagged'].includes(order.workflow_status);
@@ -791,12 +835,27 @@ export default function ReviewPage(): React.JSX.Element | null {
                   )}
                 </div>
                 {order.workflow_status === 'picking' && order.picker_name && (
-                  <div className="mt-2 text-sm px-3 py-2 rounded-lg bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] font-semibold border border-[var(--border-warning)]">
+                  <div
+                    className={`mt-2 text-sm px-3 py-2 rounded-lg font-semibold border ${
+                      canCompleteStalePicking
+                        ? 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border-[var(--border-warning)]'
+                        : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)] border-[var(--border-subtle)]'
+                    }`}
+                  >
                     Picking chalan: accepted by {order.picker_name}
                     {order.picked_at && (
                       <span className="font-normal opacity-90">
                         {' '}
                         · since {formatTimeAgo(order.picked_at)}
+                      </span>
+                    )}
+                    {pickingClaim?.is_stale && (
+                      <span className="block font-normal mt-1">
+                        Picker session stale
+                        {pickingClaim.last_heartbeat_at
+                          ? ` (last active ${formatTimeAgo(pickingClaim.last_heartbeat_at)})`
+                          : ''}
+                        . Complete here if warehouse picking is done.
                       </span>
                     )}
                   </div>
@@ -1215,10 +1274,74 @@ export default function ReviewPage(): React.JSX.Element | null {
                   Confirm & Generate Bill
                 </BigButton>
               )}
+              {canCompleteStalePicking && (
+                <BigButton
+                  variant="primary"
+                  onClick={() => setStalePickConfirmOpen(true)}
+                  loading={completeStalePickingMutation.isPending}
+                  className={`sm:flex-[2] hover:opacity-90 ${
+                    (pickingSummary?.flagged ?? 0) > 0
+                      ? 'bg-[var(--bg-warning)] text-[var(--content-primary)]'
+                      : 'bg-[var(--bg-positive)]'
+                  }`}
+                >
+                  {(pickingSummary?.flagged ?? 0) > 0 ? (
+                    <>
+                      <Warning size={20} weight="bold" />
+                      Complete with {pickingSummary?.flagged} flagged
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle size={20} weight="bold" />
+                      Complete order
+                    </>
+                  )}
+                </BigButton>
+              )}
             </div>
           </>
         )}
       </div>
+
+      {/* Stale pick complete confirmation */}
+      <BottomSheet
+        isOpen={stalePickConfirmOpen}
+        onClose={() => setStalePickConfirmOpen(false)}
+        title="Complete stale pick?"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-[var(--content-secondary)]">
+            {order?.picker_name
+              ? `${order.picker_name}'s picking session has gone stale. `
+              : 'The picking session has gone stale. '}
+            Mark this order complete only if warehouse picking is finished.
+          </p>
+          {pickingSummary && pickingSummary.remaining > 0 && (
+            <p className="text-sm text-[var(--content-warning)]">
+              {pickingSummary.remaining} line
+              {pickingSummary.remaining === 1 ? '' : 's'} still not picked or flagged.
+            </p>
+          )}
+          <div className="flex gap-3">
+            <BigButton
+              variant="secondary"
+              onClick={() => setStalePickConfirmOpen(false)}
+              disabled={completeStalePickingMutation.isPending}
+              className="flex-1"
+            >
+              Cancel
+            </BigButton>
+            <BigButton
+              variant="primary"
+              onClick={() => completeStalePickingMutation.mutate()}
+              loading={completeStalePickingMutation.isPending}
+              className="flex-[2] bg-[var(--bg-positive)]"
+            >
+              Confirm complete
+            </BigButton>
+          </div>
+        </div>
+      </BottomSheet>
 
       {/* Reject reason sheet */}
       <BottomSheet

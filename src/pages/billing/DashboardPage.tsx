@@ -1,8 +1,11 @@
+import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Package, Warning } from '@phosphor-icons/react';
 import { useOverdueOrders } from '../../hooks/useOrders';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
+import { PICKING_CLAIM_STALE_MS } from '../../hooks/usePickingClaim';
+import { supabase } from '../../lib/supabase/client';
 import {
   Card,
   StatusBadge,
@@ -90,9 +93,11 @@ function StatCard({
 function OrderCard({
   order,
   onTap,
+  pickingClaimStale,
 }: {
   order: OrderWithClaimInfo;
   onTap: () => void;
+  pickingClaimStale?: boolean;
 }) {
   const claim = order.claim_info;
   const timeSource = order.approved_at ?? order.created_at;
@@ -103,7 +108,7 @@ function OrderCard({
       onClick={onTap}
       className={`
         !p-4 min-h-0
-        ${claim?.is_stale ? 'border-[var(--border-warning)] ring-1 ring-[var(--border-warning)]' : ''}
+        ${claim?.is_stale || pickingClaimStale ? 'border-[var(--border-warning)] ring-1 ring-[var(--border-warning)]' : ''}
       `}
     >
       <div className="flex flex-col gap-1.5">
@@ -134,12 +139,23 @@ function OrderCard({
         </div>
 
         {order.workflow_status === 'picking' && order.picker_name && (
-          <div className="text-xs px-2 py-1 rounded-md inline-flex w-max max-w-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] font-semibold">
+          <div
+            className={`text-xs px-2 py-1 rounded-md inline-flex w-max max-w-full font-semibold ${
+              pickingClaimStale
+                ? 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)]'
+                : 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning)]'
+            }`}
+          >
             Picking by {order.picker_name}
             {order.picked_at && (
               <span className="font-normal opacity-90">
                 {' '}
                 · since {formatTimeAgo(order.picked_at)}
+              </span>
+            )}
+            {pickingClaimStale && (
+              <span className="font-bold uppercase tracking-wide ml-1">
+                · Stale — complete in review
               </span>
             )}
           </div>
@@ -216,6 +232,42 @@ export default function DashboardPage(): React.JSX.Element | null {
 
   const { data: overdueOrders } = useOverdueOrders();
   const overdueCount = overdueOrders?.length ?? 0;
+
+  const pickingOrderIds = useMemo(
+    () =>
+      (orders ?? [])
+        .filter((o) => o.workflow_status === 'picking')
+        .map((o) => o.id),
+    [orders],
+  );
+
+  const { data: stalePickingOrderIds } = useQuery({
+    queryKey: ['picking-claims-stale', pickingOrderIds.join(',')],
+    enabled: pickingOrderIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('work_claims')
+        .select('order_id, last_heartbeat_at')
+        .in('order_id', pickingOrderIds)
+        .eq('stage', 'picking')
+        .eq('status', 'active');
+
+      if (error) throw error;
+
+      const now = Date.now();
+      const stale = new Set<number>();
+      for (const claim of data ?? []) {
+        const age = now - new Date(claim.last_heartbeat_at).getTime();
+        if (age > PICKING_CLAIM_STALE_MS) {
+          stale.add(Number(claim.order_id));
+        }
+      }
+      return stale;
+    },
+    staleTime: 0,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+  });
   
   const { counts, filteredOrders } = useMemo(() => {
     const list = orders ?? [];
@@ -317,6 +369,7 @@ export default function DashboardPage(): React.JSX.Element | null {
                 <OrderCard
                   key={order.id}
                   order={order}
+                  pickingClaimStale={stalePickingOrderIds?.has(order.id)}
                   onTap={() => {
                     if (order.workflow_status === 'submitted') {
                       navigate(`/billing/queue?orderId=${order.id}`);
