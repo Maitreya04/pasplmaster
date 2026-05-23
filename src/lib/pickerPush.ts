@@ -8,7 +8,7 @@ export type PickerReadyPayload = {
   customerName: string;
   priority: OrderPriority;
   approvedAt: string | null;
-  /** When set, notify only this picker (assigned claim). Omit to skip broadcast. */
+  /** When set, notify only this picker. Omit to broadcast to all active pickers. */
   targetUserId?: number;
 };
 

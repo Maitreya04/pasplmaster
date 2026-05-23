@@ -16,7 +16,6 @@ import {
 import { supabase } from '../../lib/supabase/client';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
 import { usePickerPushNotifications } from '../../hooks/usePickerPushNotifications';
-import { sendPickerReadyNotification } from '../../lib/pickerPush';
 import { NotificationBell } from '../../components/notifications/NotificationBell';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -137,23 +136,6 @@ export default function QueuePage(): React.JSX.Element | null {
     },
     onSuccess: (claimedOrderId) => {
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-      const order =
-        myActive.find((o) => o.id === claimedOrderId) ??
-        availableOrders.find((o) => o.id === claimedOrderId) ??
-        [...available, ...stale].find((o) => o.id === claimedOrderId);
-      if (order && userId) {
-        void sendPickerReadyNotification({
-          eventType: 'order_ready_to_pick',
-          orderId: order.id,
-          orderNumber: order.order_number,
-          customerName: order.customer_name,
-          priority: order.priority,
-          approvedAt: order.approved_at,
-          targetUserId: userId,
-        }).catch(() => {
-          /* best-effort — assignment already saved */
-        });
-      }
       navigate(`/picking/pick/${claimedOrderId}`, { replace: true });
     },
     onError: (err) => {

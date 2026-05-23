@@ -301,33 +301,46 @@ serve(async (req) => {
           ? payload.targetUserId
           : null;
 
-      if (targetUserId == null) {
-        return json(200, { success: true, sentCount: 0, failedCount: 0, inboxCount: 0 });
+      const isAssigned = targetUserId != null;
+      let pickingIds: number[];
+
+      if (isAssigned) {
+        const { data: targetUser, error: targetUserError } = await admin
+          .from('users')
+          .select('id')
+          .eq('id', targetUserId)
+          .eq('role', 'picking')
+          .eq('is_active', true)
+          .maybeSingle();
+        if (targetUserError) throw targetUserError;
+        if (!targetUser) {
+          return json(400, { error: 'targetUserId is not an active picker' });
+        }
+        pickingIds = [targetUserId];
+      } else {
+        pickingIds = await fetchActiveUserIds(admin, 'picking');
+        if (pickingIds.length === 0) {
+          return json(200, { success: true, sentCount: 0, failedCount: 0, inboxCount: 0 });
+        }
       }
 
-      const { data: targetUser, error: targetUserError } = await admin
-        .from('users')
-        .select('id')
-        .eq('id', targetUserId)
-        .eq('role', 'picking')
-        .eq('is_active', true)
-        .maybeSingle();
-      if (targetUserError) throw targetUserError;
-      if (!targetUser) {
-        return json(400, { error: 'targetUserId is not an active picker' });
-      }
-
-      const title =
-        payload.priority === 'urgent'
+      const title = isAssigned
+        ? payload.priority === 'urgent'
           ? `Urgent — you're assigned: ${payload.orderNumber}`
-          : `You're assigned: ${payload.orderNumber}`;
-      const body =
-        payload.priority === 'urgent'
+          : `You're assigned: ${payload.orderNumber}`
+        : payload.priority === 'urgent'
+          ? `Urgent — ready to pick: ${payload.orderNumber}`
+          : `Ready to pick: ${payload.orderNumber}`;
+      const body = isAssigned
+        ? payload.priority === 'urgent'
           ? `${payload.customerName} — start picking now.`
-          : `${payload.customerName} is on your pick list.`;
-
-      const pickingIds = [targetUserId];
-      const deepLink = `/picking/pick/${payload.orderId}`;
+          : `${payload.customerName} is on your pick list.`
+        : payload.priority === 'urgent'
+          ? `${payload.customerName} — claim from the queue now.`
+          : `${payload.customerName} is in the pick queue.`;
+      const deepLink = isAssigned
+        ? `/picking/pick/${payload.orderId}`
+        : `/picking?claimOrderId=${payload.orderId}`;
       await insertUserNotifications(
         admin,
         pickingIds.map((user_id) => ({
@@ -342,7 +355,7 @@ serve(async (req) => {
             customerName: payload.customerName,
             priority: payload.priority,
             deep_link: deepLink,
-            assigned: true,
+            assigned: isAssigned,
           },
         })),
       );
@@ -350,9 +363,11 @@ serve(async (req) => {
       let sentCount = 0;
       let failedCount = 0;
       if (pushConfigured) {
-        const subs = await fetchPushSubscriptions(admin, cutoffIso, {
-          userIds: [targetUserId],
-        });
+        const subs = await fetchPushSubscriptions(
+          admin,
+          cutoffIso,
+          isAssigned ? { userIds: pickingIds } : { role: 'picking' },
+        );
         const r = await sendWebPushes(admin, subs, {
           title,
           body,

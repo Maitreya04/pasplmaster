@@ -17,6 +17,7 @@ const DashboardPage = lazy(() => import('./pages/billing/DashboardPage'));
 const NeedsReviewPage = lazy(() => import('./pages/billing/NeedsReviewPage'));
 const ReviewPage = lazy(() => import('./pages/billing/ReviewPage'));
 const HistoryPage = lazy(() => import('./pages/billing/HistoryPage'));
+const RejectedPage = lazy(() => import('./pages/billing/RejectedPage'));
 const PendingPage = lazy(() => import('./pages/billing/PendingPage'));
 const LiveQueuePage = lazy(() => import('./pages/billing/LiveQueuePage'));
 const CompactQueuePage = lazy(() => import('./pages/billing/CompactQueuePage'));
@@ -134,6 +135,7 @@ export default function App(): React.JSX.Element | null {
           <Route path="queue" element={<LiveQueuePage />} />
           <Route path="needs-review" element={<NeedsReviewPage />} />
           <Route path="pending" element={<PendingPage />} />
+          <Route path="rejected" element={<RejectedPage />} />
           <Route path="review/:id" element={<ReviewPage />} />
           <Route path="history" element={<HistoryPage />} />
           <Route path="new-order" element={<BillingNewOrderLayout />}>

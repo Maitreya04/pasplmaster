@@ -420,6 +420,17 @@ export default function PickPage(): React.JSX.Element | null {
   const currentDeckItem = deckItems[safeCardIndex] ?? null;
   const currentTarget = currentDeckItem ?? orderedActive[0] ?? null;
 
+  const mountedDeckIndices = useMemo(() => {
+    const len = deckItems.length;
+    if (len === 0) return new Set<number>();
+    if (len <= 3) return new Set(Array.from({ length: len }, (_, i) => i));
+    return new Set([
+      safeCardIndex,
+      wrapIndex(safeCardIndex - 1, len),
+      wrapIndex(safeCardIndex + 1, len),
+    ]);
+  }, [deckItems.length, safeCardIndex]);
+
   useEffect(() => {
     setEngagedScanner(null);
   }, [safeCardIndex]);
@@ -1775,6 +1786,7 @@ export default function PickPage(): React.JSX.Element | null {
                   currentDeckItem?.orderItem.id === pi.orderItem.id;
                 return (
                   <div key={pi.orderItem.id} className="h-full w-full shrink-0 px-0.5">
+                    {mountedDeckIndices.has(index) ? (
                     <PickCard
                       orderItem={pi.orderItem}
                       uiState={pi.uiState}
@@ -1827,6 +1839,7 @@ export default function PickPage(): React.JSX.Element | null {
                         })
                       }
                     />
+                    ) : null}
                   </div>
                 );
               })}

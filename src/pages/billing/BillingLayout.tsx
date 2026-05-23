@@ -6,6 +6,7 @@ import {
   HourglassHigh,
   Lightning,
   PlusCircle,
+  Prohibit,
 } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
@@ -19,6 +20,7 @@ const preloadDashboard = () => import('./DashboardPage');
 const preloadNeedsReview = () => import('./NeedsReviewPage');
 const preloadPending = () => import('./PendingPage');
 const preloadHistory = () => import('./HistoryPage');
+const preloadRejected = () => import('./RejectedPage');
 const preloadLiveQueue = () => import('./LiveQueuePage');
 const preloadNewOrder = () => import('./BillingNewOrderLayout');
 
@@ -47,6 +49,7 @@ const NAV_ITEMS: BottomNavItem[] = [
     preload: preloadNeedsReview,
   },
   { icon: HourglassHigh, label: 'Pending', path: '/billing/pending', preload: preloadPending },
+  { icon: Prohibit, label: 'Rejected', path: '/billing/rejected', preload: preloadRejected },
   { icon: ClockCounterClockwise, label: 'History', path: '/billing/history', preload: preloadHistory },
 ];
 

@@ -13,9 +13,13 @@ import { formatCurrency } from '../../utils/formatters';
 import {
   formatInternalNotificationError,
   sendInternalNotification,
+  sendPickerReadyNotification,
 } from '../../lib/pickerPush';
 import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
-import { defaultFulfillmentPath } from '../../lib/billing/fulfillmentPath';
+import {
+  defaultFulfillmentPath,
+  shouldNotifyPickers,
+} from '../../lib/billing/fulfillmentPath';
 import { FulfillmentPathSelector } from '../../components/billing/FulfillmentPathSelector';
 import type { FulfillmentPath, StockLocationCode } from '../../types';
 import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseStock';
@@ -812,6 +816,21 @@ export default function CompactQueuePage() {
           toast.error(
             `Sales notification failed: ${formatInternalNotificationError(e)}. Deploy send-internal-notification and run migration 014.`,
           );
+        }
+      }
+
+      if (shouldNotifyPickers(fulfillmentPath)) {
+        try {
+          await sendPickerReadyNotification({
+            eventType: 'order_ready_to_pick',
+            orderId: order.id,
+            orderNumber: order.order_number,
+            customerName: order.customer_name,
+            priority: order.priority,
+            approvedAt: new Date().toISOString(),
+          });
+        } catch {
+          /* silent */
         }
       }
 

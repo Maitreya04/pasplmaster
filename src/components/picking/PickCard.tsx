@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { OrderItem, ScanResult } from '../../types';
 import type { ItemPackDefinition } from '../../lib/packLpn';
 import type { BinPickerShelfLayer } from '../../types';
@@ -29,7 +30,7 @@ export interface PickCardProps {
   onSelectLayer?: (layerId: number) => void;
 }
 
-export function PickCard({
+export const PickCard = memo(function PickCard({
   orderItem,
   uiState,
   isCurrent,
@@ -141,4 +142,4 @@ export function PickCard({
       )}
     </div>
   );
-}
+});

@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase/client';
 import {
   formatInternalNotificationError,
   sendInternalNotification,
+  sendPickerReadyNotification,
 } from '../../lib/pickerPush';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
@@ -31,6 +32,7 @@ import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
 import {
   defaultFulfillmentPath,
   fulfillmentPathLabel,
+  shouldNotifyPickers,
 } from '../../lib/billing/fulfillmentPath';
 import { FulfillmentPathSelector } from '../../components/billing/FulfillmentPathSelector';
 import type { FulfillmentPath } from '../../types';
@@ -563,6 +565,21 @@ export default function ReviewPage(): React.JSX.Element | null {
         }
 
         await supabase.from('orders').update(orderUpdate).eq('id', order.id);
+      }
+
+      if (!resolvingFlags && shouldNotifyPickers(billingFulfillmentPath)) {
+        try {
+          await sendPickerReadyNotification({
+            eventType: 'order_ready_to_pick',
+            orderId: order.id,
+            orderNumber: order.order_number,
+            customerName: order.customer_name,
+            priority: order.priority,
+            approvedAt,
+          });
+        } catch (pushError) {
+          console.error('Failed to send picker push notification', pushError);
+        }
       }
 
       if (order.order_kind === 'recovery') {
