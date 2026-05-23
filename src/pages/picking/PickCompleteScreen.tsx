@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, Warning, Package, Flag } from '@phosphor-icons/react';
+import { CheckCircle, Warning, Package, Flag, ArrowRight } from '@phosphor-icons/react';
 import { BigButton } from '../../components/shared';
 
 interface PickCompleteScreenProps {
@@ -27,7 +27,6 @@ export function PickCompleteScreen({
         ${hasFlagged ? 'bg-[var(--bg-warning)]' : 'bg-[var(--bg-positive)]'}
       `}
     >
-      {/* Icon */}
       <div className="mb-6">
         {hasFlagged ? (
           <Warning size={80} weight="fill" className="text-white/90" />
@@ -36,7 +35,6 @@ export function PickCompleteScreen({
         )}
       </div>
 
-      {/* Title */}
       <h1 className="text-2xl font-bold text-white mb-1">
         {hasFlagged ? 'Completed with Issues' : 'Pick Complete!'}
       </h1>
@@ -44,7 +42,6 @@ export function PickCompleteScreen({
         {orderNumber} — sent to billing for review
       </p>
 
-      {/* Summary card */}
       <div className="w-full max-w-xs bg-white/20 backdrop-blur-sm rounded-2xl p-5 mb-8 space-y-3">
         <p className="text-sm font-medium text-white/80 truncate">
           {customerName}
@@ -70,14 +67,14 @@ export function PickCompleteScreen({
         </div>
       </div>
 
-      {/* Done button */}
       <div className="w-full max-w-xs">
         <BigButton
           variant="secondary"
-          onClick={() => navigate('/picking')}
+          onClick={() => navigate('/picking', { replace: true })}
           className="bg-[var(--bg-primary)] text-[var(--content-primary)] font-semibold"
         >
-          Done
+          <ArrowRight size={20} weight="bold" />
+          Next order
         </BigButton>
       </div>
     </div>

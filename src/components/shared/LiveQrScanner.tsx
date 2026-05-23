@@ -644,8 +644,30 @@ export function LiveQrScanner({
               flashColor={flashColor}
             />
             {progressLabel && (
-              <div className="absolute left-3 top-3 z-10 rounded-full bg-black/70 px-3 py-1.5 font-mono text-sm font-bold tabular-nums text-emerald-300 ring-1 ring-emerald-400/30">
-                {progressLabel}
+              <div
+                className={`absolute left-3 top-3 z-10 backdrop-blur-sm ${
+                  embedded
+                    ? 'rounded-full bg-black/70 px-3 py-1.5 font-mono text-sm font-bold tabular-nums text-emerald-300 ring-1 ring-emerald-400/30'
+                    : 'rounded-2xl bg-black/75 px-4 py-2.5 ring-1 ring-white/10'
+                }`}
+              >
+                {embedded ? (
+                  progressLabel
+                ) : (
+                  <>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      Pick progress
+                    </p>
+                    <p className="mt-0.5 font-mono text-2xl font-bold tabular-nums text-white">
+                      {pickedSoFar}
+                      <span className="text-slate-400 font-normal"> / </span>
+                      {targetQty}
+                    </p>
+                    <p className="text-xs font-medium tabular-nums text-emerald-300">
+                      {Math.max(0, (targetQty ?? 0) - (pickedSoFar ?? 0))} remaining
+                    </p>
+                  </>
+                )}
               </div>
             )}
             {embedded && (

@@ -38,7 +38,7 @@ import {
 import { pickQuantityTarget, pickableOrderItems } from '../../lib/cartSupply';
 import { appHaptics } from '../../lib/haptics';
 import { sendInternalNotification } from '../../lib/pickerPush';
-import type { LiveQrScannerResolved } from '../../components/shared/LiveQrScanner';
+import { LiveQrScanner, type LiveQrScannerResolved } from '../../components/shared/LiveQrScanner';
 import {
   PACK_DEFINITIONS_QUERY_KEY,
   fetchItemPackDefinitions,
@@ -1541,6 +1541,37 @@ export default function PickPage(): React.JSX.Element | null {
     pendingPackConfirmation !== null ||
     fifoOverrideSheet !== null;
 
+  const engagedScannerContext = useMemo(() => {
+    if (!engagedScanner) return null;
+    const deckItem = deckItems.find((pi) => pi.orderItem.id === engagedScanner.itemId);
+    if (!deckItem) return null;
+
+    const orderItem = deckItem.orderItem;
+    const targetQty = pickQuantityTarget(orderItem);
+    const pickedQty = Math.min(targetQty, getPickedQtyFromResult(deckItem.scanResult));
+    const partNo =
+      orderItem.catalog_alias1 ??
+      orderItem.catalog_alias ??
+      orderItem.item_alias ??
+      String(orderItem.item_id);
+    const busyCodes = deriveBusyCodeCandidates(orderItem);
+    const mode = engagedScanner.mode;
+
+    return {
+      orderItem,
+      mode,
+      targetQty,
+      pickedQty,
+      partNo,
+      busyCode: busyCodes[0] ?? null,
+      title:
+        mode === 'rack'
+          ? `Scan bin · Rack ${orderItem.rack_no ?? '—'}`
+          : partNo,
+      eyebrow: mode === 'rack' ? 'Bin verification' : 'Product scan',
+    };
+  }, [deckItems, engagedScanner]);
+
   return (
     <div className="min-h-screen pb-32">
       {/* Header — order summary + global progress.
@@ -1739,11 +1770,6 @@ export default function PickPage(): React.JSX.Element | null {
                           markRackVerified(pi.orderItem.id, 'override');
                         }
                       }}
-                      onScanResolved={
-                        rackVerified
-                          ? makeEmbeddedScanHandler(pi.orderItem, 'item')
-                          : makeEmbeddedScanHandler(pi.orderItem, 'rack')
-                      }
                       onManualQty={() => openManualQty(pi.orderItem)}
                       onFlag={() => openFlagSheet(pi.orderItem.id)}
                       onEngageScanner={() =>
@@ -1867,6 +1893,40 @@ export default function PickPage(): React.JSX.Element | null {
         onSubmit={handleFlagSubmit}
         loading={itemTransitionMutation.isPending}
       />
+
+      {engagedScannerContext && !scannerPaused && (
+        <LiveQrScanner
+          continuous
+          title={engagedScannerContext.title}
+          eyebrow={engagedScannerContext.eyebrow}
+          idleStatus="Point QR in frame — scans continuously"
+          pickItem={{
+            itemId: engagedScannerContext.orderItem.item_id,
+            name: engagedScannerContext.orderItem.item_name,
+            alias1: engagedScannerContext.orderItem.catalog_alias1 ?? null,
+            alias:
+              engagedScannerContext.orderItem.catalog_alias ??
+              engagedScannerContext.orderItem.item_alias,
+            itemCode: engagedScannerContext.orderItem.item_alias,
+            busyCode: engagedScannerContext.busyCode,
+            mainGroup: null,
+            parentGroup: null,
+          }}
+          pickedSoFar={engagedScannerContext.pickedQty}
+          targetQty={engagedScannerContext.targetQty}
+          onClose={() => setEngagedScanner(null)}
+          onResolved={makeEmbeddedScanHandler(
+            engagedScannerContext.orderItem,
+            engagedScannerContext.mode,
+          )}
+          onScanAccepted={makeEmbeddedScanHandler(
+            engagedScannerContext.orderItem,
+            engagedScannerContext.mode,
+          )}
+          onManualVerify={() => openManualQty(engagedScannerContext.orderItem)}
+          onError={(message) => setScannerHint(message)}
+        />
+      )}
 
       <BottomSheet
         isOpen={fifoOverrideSheet !== null}

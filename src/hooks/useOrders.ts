@@ -8,12 +8,13 @@ import {
 } from '../lib/orderItemCount';
 import { subscribeToTable } from '../lib/realtime';
 import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
-import type { Order, WorkflowStatus } from '../types';
+import type { Order, RejectionKind, WorkflowStatus } from '../types';
 
 const REALTIME_ON = isSupabasePostgresChangesEnabled();
 
 interface UseOrdersOptions {
   status?: WorkflowStatus;
+  rejectionKind?: RejectionKind;
   salespersonName?: string | null;
   /** Filter to orders created today (default: false) */
   todayOnly?: boolean;
@@ -79,6 +80,7 @@ export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
         opts.limit ?? 'none',
         opts.sort ?? 'default',
         opts.liveRefreshIntervalMs ?? 'default',
+        opts.rejectionKind ?? 'all',
       ] as const,
     [
       opts.status,
@@ -90,6 +92,7 @@ export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
       opts.limit,
       opts.sort,
       opts.liveRefreshIntervalMs,
+      opts.rejectionKind,
     ],
   );
 
@@ -107,6 +110,9 @@ export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
 
       if (opts.status && !opts.overdueOnly) {
         q = q.eq('workflow_status', opts.status);
+      }
+      if (opts.rejectionKind) {
+        q = q.eq('rejection_kind', opts.rejectionKind);
       }
       if (opts.salespersonName) {
         q = q.eq('salesperson_name', opts.salespersonName);

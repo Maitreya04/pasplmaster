@@ -9,7 +9,8 @@ import {
   Trash,
   Plus,
 } from '@phosphor-icons/react';
-import type { FulfillmentPath, OrderItem, StockLocationCode } from '../../../types';
+import { ACCOUNT_HOLD_NOTE } from '../../../lib/billing/rejectionKind';
+import type { FulfillmentPath, OrderItem, RejectionKind, StockLocationCode } from '../../../types';
 import { countPickableOrderLines } from '../../../lib/cartSupply';
 import { defaultFulfillmentPath } from '../../../lib/billing/fulfillmentPath';
 import { FulfillmentPathSelector } from '../../../components/billing/FulfillmentPathSelector';
@@ -65,7 +66,7 @@ interface OrderSheetViewProps {
   onApplyLiveStock: (orderItemId: number, liveCapacity: number) => Promise<void>;
   onOpenAddLine: () => void;
   onFinish: (fulfillmentPath: FulfillmentPath) => void;
-  onReject: (reason: string) => void;
+  onReject: (payload: { kind: RejectionKind; reason: string }) => void;
   onSkip: () => void;
 }
 
@@ -160,6 +161,7 @@ export function OrderSheetView({
   const [showConfirm, setShowConfirm] = useState(false);
   const confirmFinishRef = useRef<HTMLButtonElement>(null);
   const [showReject, setShowReject] = useState(false);
+  const [rejectKind, setRejectKind] = useState<RejectionKind>('account_hold');
   const [rejectReason, setRejectReason] = useState('');
 
   const [jumpBuffer, setJumpBuffer] = useState('');
@@ -549,10 +551,14 @@ export function OrderSheetView({
   }, [editingRateRow, rateDraft, mergedVisibleRows, onEditLineRate]);
 
   const handleRejectConfirm = useCallback(() => {
+    if (isRejecting) return;
     const trimmedReason = rejectReason.trim();
-    if (!trimmedReason || isRejecting) return;
-    onReject(trimmedReason);
-  }, [rejectReason, isRejecting, onReject]);
+    if (rejectKind === 'terminal' && !trimmedReason) return;
+    onReject({
+      kind: rejectKind,
+      reason: rejectKind === 'account_hold' ? trimmedReason || ACCOUNT_HOLD_NOTE : trimmedReason,
+    });
+  }, [rejectKind, rejectReason, isRejecting, onReject]);
 
   const billedNormalCount = mergedVisibleRows.filter((it) => !flags[it.id]).length;
 
@@ -1338,21 +1344,66 @@ export function OrderSheetView({
               Reject {orderName}?
             </h3>
             <p className="text-sm text-[var(--content-secondary)] mb-4">
-              Enter a reason. Sales will be notified with this message.
+              Choose why billing cannot process this order. Sales will be notified.
             </p>
-            <textarea
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="e.g. Pricing mismatch, customer requested change..."
-              className="w-full h-28 px-3 py-2 rounded-xl border border-[var(--border-opaque)] text-sm text-[var(--content-primary)] bg-[var(--bg-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--role-primary)]"
-              autoFocus
-            />
+            <div className="space-y-2 mb-4">
+              <label className="flex items-start gap-3 rounded-xl border border-[var(--border-opaque)] p-3 cursor-pointer has-[:checked]:border-[var(--border-warning)] has-[:checked]:bg-[var(--bg-warning-subtle)]">
+                <input
+                  type="radio"
+                  name="reject-kind"
+                  value="account_hold"
+                  checked={rejectKind === 'account_hold'}
+                  onChange={() => setRejectKind('account_hold')}
+                  className="mt-1"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-[var(--content-primary)]">
+                    Account locked
+                  </span>
+                  <span className="block text-xs text-[var(--content-secondary)] mt-0.5">
+                    On hold until the account is unlocked. Can be revived from History.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 rounded-xl border border-[var(--border-opaque)] p-3 cursor-pointer has-[:checked]:border-[var(--border-negative)] has-[:checked]:bg-[var(--bg-negative-subtle)]">
+                <input
+                  type="radio"
+                  name="reject-kind"
+                  value="terminal"
+                  checked={rejectKind === 'terminal'}
+                  onChange={() => setRejectKind('terminal')}
+                  className="mt-1"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-[var(--content-primary)]">
+                    Other reason
+                  </span>
+                  <span className="block text-xs text-[var(--content-secondary)] mt-0.5">
+                    Final rejection — not returned to the billing queue.
+                  </span>
+                </span>
+              </label>
+            </div>
+            {rejectKind === 'account_hold' ? (
+              <p className="text-xs text-[var(--content-tertiary)] mb-3 rounded-lg bg-[var(--bg-secondary)] px-3 py-2">
+                {ACCOUNT_HOLD_NOTE}
+              </p>
+            ) : (
+              <textarea
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="e.g. Pricing mismatch, customer requested change..."
+                className="w-full h-28 px-3 py-2 rounded-xl border border-[var(--border-opaque)] text-sm text-[var(--content-primary)] bg-[var(--bg-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--role-primary)]"
+                autoFocus
+              />
+            )}
             <div className="mt-4 flex gap-3">
               <button
                 type="button"
                 onClick={() => {
                   setShowReject(false);
                   setRejectReason('');
+                  setRejectKind('account_hold');
                 }}
                 disabled={isRejecting}
                 className="flex-1 h-11 rounded-xl border border-[var(--border-opaque)] text-sm font-semibold text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
@@ -1362,10 +1413,16 @@ export function OrderSheetView({
               <button
                 type="button"
                 onClick={handleRejectConfirm}
-                disabled={isRejecting || !rejectReason.trim()}
+                disabled={
+                  isRejecting || (rejectKind === 'terminal' && !rejectReason.trim())
+                }
                 className="flex-1 h-11 rounded-xl bg-[var(--bg-negative)] text-white text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
               >
-                {isRejecting ? 'Rejecting...' : 'Confirm Reject'}
+                {isRejecting
+                  ? 'Saving...'
+                  : rejectKind === 'account_hold'
+                    ? 'Place on hold'
+                    : 'Confirm reject'}
               </button>
             </div>
           </div>

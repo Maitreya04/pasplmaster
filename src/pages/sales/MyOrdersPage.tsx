@@ -10,6 +10,10 @@ import { useBillingCustomerUpdate } from '../../hooks/useBillingCustomerUpdate';
 import { usePendingItems } from '../../hooks/usePendingItems';
 import { useUserNotifications } from '../../hooks/useUserNotifications';
 import { Card, BottomSheet, StatusBadge, EmptyState, Skeleton } from '../../components/shared';
+import {
+  accountHoldDisplayNote,
+  isAccountHold,
+} from '../../lib/billing/rejectionKind';
 import type { Order, OrderItem, OrderWithItems, PendingItem } from '../../types';
 
 import { formatCurrency, formatTimeAgo } from '../../utils/formatters';
@@ -76,12 +80,19 @@ function isWholeOrderRejected(order: Order | OrderWithItems): boolean {
   return order.items.length > 0 && order.items.every((item) => item.state !== 'flagged');
 }
 
+function isOrderOnAccountHold(order: Order | OrderWithItems): boolean {
+  return isAccountHold(order);
+}
+
 function badgeStatusForOrder(order: Order | OrderWithItems): Order['workflow_status'] {
   return isWholeOrderRejected(order) ? 'rejected' : order.workflow_status;
 }
 
-function formatRejectReason(notes: string | null | undefined): string | null {
-  const raw = notes?.trim();
+function formatRejectReason(order: Order | OrderWithItems): string | null {
+  if (isOrderOnAccountHold(order)) {
+    return accountHoldDisplayNote(order.notes);
+  }
+  const raw = order.notes?.trim();
   if (!raw) return null;
   const normalized = raw.replace(/\s+/g, ' ');
   if (normalized.toLowerCase().includes('account lock')) {
@@ -369,7 +380,10 @@ function OrderCard({
                 <Warning size={16} weight="fill" className={TEXT_STATUS_CRITICAL} />
               )}
           </div>
-          <StatusBadge status={badgeStatusForOrder(order)} />
+          <StatusBadge
+            status={badgeStatusForOrder(order)}
+            rejectionKind={order.rejection_kind}
+          />
         </div>
         <p className="font-bold text-[var(--content-primary)]">{order.customer_name}</p>
         <div className="flex items-center justify-between text-sm">
@@ -536,7 +550,8 @@ function OrderDetailSheet({
       }, 0)
     : null;
   const isRejected = order ? isWholeOrderRejected(order) : false;
-  const rejectReason = formatRejectReason(order?.notes);
+  const isOnAccountHold = order ? isOrderOnAccountHold(order) : false;
+  const rejectReason = order ? formatRejectReason(order) : null;
   const liveBillingPreview = useMemo(() => {
     if (!order || !billingUpdate) return null;
     return buildBillingCustomerUpdate({
@@ -654,8 +669,8 @@ function OrderDetailSheet({
               )}
             </p>
             {isRejected && rejectReason && (
-              <p className="mt-2 text-sm text-[var(--content-negative)] whitespace-pre-wrap">
-                <span className="font-semibold">Reason:</span> {rejectReason}
+              <p className={`mt-2 text-sm whitespace-pre-wrap ${isOnAccountHold ? 'text-[var(--content-warning)]' : 'text-[var(--content-negative)]'}`}>
+                <span className="font-semibold">{isOnAccountHold ? 'On hold:' : 'Reason:'}</span> {rejectReason}
               </p>
             )}
             {!isRejected && order.notes && (

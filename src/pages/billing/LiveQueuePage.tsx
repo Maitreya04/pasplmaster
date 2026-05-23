@@ -15,7 +15,8 @@ import {
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
 import { shouldNotifyPickers } from '../../lib/billing/fulfillmentPath';
-import type { FulfillmentPath } from '../../types';
+import { ACCOUNT_HOLD_NOTE } from '../../lib/billing/rejectionKind';
+import type { FulfillmentPath, RejectionKind } from '../../types';
 import { formatSupabaseUserMessage } from '../../lib/supabase/formatUserMessage';
 import {
   captureBillingLiveQueueBaseline,
@@ -703,21 +704,50 @@ export default function LiveQueuePage() {
   });
 
   const rejectMutation = useMutation({
-    mutationFn: async (reason: string) => {
+    mutationFn: async ({
+      kind,
+      reason,
+    }: {
+      kind: RejectionKind;
+      reason: string;
+    }) => {
       if (!order) throw new Error('No order selected');
+      if (!userId) throw new Error('Not signed in');
 
       const trimmedReason = reason.trim();
-      if (!trimmedReason) throw new Error('Rejection reason is required');
+      if (kind === 'terminal' && !trimmedReason) {
+        throw new Error('Rejection reason is required');
+      }
 
-      const { error: updateError } = await supabase
-        .from('orders')
-        .update({
-          workflow_status: 'rejected',
-          notes: trimmedReason,
-        })
-        .eq('id', order.id);
+      if (kind === 'account_hold') {
+        const { data, error } = await supabase.rpc('hold_order_for_account_lock', {
+          p_order_id: order.id,
+          p_actor_user_id: userId,
+          p_actor_name: userName ?? 'Billing',
+          p_notes: trimmedReason || ACCOUNT_HOLD_NOTE,
+        });
+        if (error) throw error;
+        const payload = data as { success?: boolean; error?: string };
+        if (!payload?.success) {
+          throw new Error(payload.error ?? 'hold_failed');
+        }
+      } else {
+        const { error: updateError } = await supabase
+          .from('orders')
+          .update({
+            workflow_status: 'rejected',
+            rejection_kind: 'terminal',
+            notes: trimmedReason,
+          })
+          .eq('id', order.id);
 
-      if (updateError) throw updateError;
+        if (updateError) throw updateError;
+      }
+
+      const notifyReason =
+        kind === 'account_hold'
+          ? trimmedReason || ACCOUNT_HOLD_NOTE
+          : trimmedReason;
 
       await sendInternalNotification({
         eventType: 'order_update_for_sales',
@@ -725,26 +755,37 @@ export default function LiveQueuePage() {
         orderNumber: order.order_number,
         customerName: order.customer_name,
         salespersonName: order.salesperson_name,
-        messageBody: `Billing rejected order ${order.order_number}. Reason: ${trimmedReason}`,
+        messageBody:
+          kind === 'account_hold'
+            ? `Billing placed order ${order.order_number} on hold (account locked). ${notifyReason}`
+            : `Billing rejected order ${order.order_number}. Reason: ${notifyReason}`,
       }).catch((e) => {
         console.error('order_update_for_sales', e);
         toast.error(
           `Sales notification failed: ${formatInternalNotificationError(e)}`,
         );
       });
+
+      return kind;
     },
-    onSuccess: () => {
+    onSuccess: (kind) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       void invalidateLocationwiseStockQueries(queryClient);
       if (order) {
         queryClient.invalidateQueries({ queryKey: ['order', order.id] });
       }
-      toast.success('Order rejected and salesperson notified');
+      toast.success(
+        kind === 'account_hold'
+          ? 'Order on hold (account locked) — sales notified'
+          : 'Order rejected and salesperson notified',
+      );
       void handleSkip();
     },
-    onError: () => {
-      toast.error('Failed to reject order');
+    onError: (err: unknown) => {
+      const msg =
+        err instanceof Error && err.message ? err.message : 'Failed to reject order';
+      toast.error(msg);
     },
   });
 
@@ -871,7 +912,7 @@ export default function LiveQueuePage() {
             if (!isClaimedByMe || approveMutation.isPending || rejectMutation.isPending) return;
             approveMutation.mutate(fulfillmentPath);
           }}
-          onReject={(reason) => rejectMutation.mutate(reason)}
+          onReject={(payload) => rejectMutation.mutate(payload)}
           onSkip={handleSkip}
         />
         <AddLineSheet

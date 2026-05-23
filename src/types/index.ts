@@ -47,6 +47,9 @@ export type WorkflowStatus =
   | 'rejected'
   | 'flagged';
 
+/** When workflow_status is rejected: account_hold (revivable) or terminal (final). */
+export type RejectionKind = 'account_hold' | 'terminal';
+
 /** @deprecated Use WorkflowStatus instead */
 export type OrderStatus = WorkflowStatus;
 export type OrderPriority = 'normal' | 'urgent';
@@ -73,6 +76,10 @@ export interface Order {
   reviewer_name: string | null;
   picker_name: string | null;
   workflow_status: WorkflowStatus;
+  rejection_kind?: RejectionKind | null;
+  held_at?: string | null;
+  held_by_user_id?: number | null;
+  revived_at?: string | null;
   priority: OrderPriority;
   notes: string | null;
   /** Busy “items”: number of invoice rows (distinct order_lines), not sum of qty. Prefer live count from order_items when available. */

@@ -9,6 +9,8 @@ type Status =
 
 interface StatusBadgeProps {
   status: Status;
+  /** When status is rejected, show account-hold label instead of Rejected. */
+  rejectionKind?: 'account_hold' | 'terminal' | null;
   className?: string;
 }
 
@@ -72,9 +74,13 @@ const statusConfig: Record<Status, StatusStyle> = {
   },
 };
 
-export function StatusBadge({ status, className = '' }: StatusBadgeProps): React.JSX.Element | null {
+export function StatusBadge({ status, rejectionKind, className = '' }: StatusBadgeProps): React.JSX.Element | null {
   const config = statusConfig[status];
   const isUrgent = status === 'urgent';
+  const label =
+    status === 'rejected' && rejectionKind === 'account_hold'
+      ? 'Account hold'
+      : config.label;
 
   return (
     <span
@@ -91,7 +97,7 @@ export function StatusBadge({ status, className = '' }: StatusBadgeProps): React
       {!isUrgent && (
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${config.dot}`} />
       )}
-      {config.label}
+      {label}
     </span>
   );
 }

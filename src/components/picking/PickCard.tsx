@@ -2,9 +2,7 @@ import type { OrderItem, ScanResult } from '../../types';
 import type { ItemPackDefinition } from '../../lib/packLpn';
 import type { BinPickerShelfLayer } from '../../types';
 import { CardHero, type CardPhase } from './CardHero';
-import { EmbeddedScanner } from './EmbeddedScanner';
 import { PickCardCTAs } from './PickCardCTAs';
-import type { LiveQrScannerResolved } from '../shared/LiveQrScanner';
 
 export interface PickCardProps {
   orderItem: OrderItem;
@@ -25,7 +23,6 @@ export interface PickCardProps {
   shelfLoading?: boolean;
   preferredLayerId?: number | null;
   onRackTap?: () => void;
-  onScanResolved: (scan: LiveQrScannerResolved) => void;
   onManualQty?: () => void;
   onFlag?: () => void;
   onEngageScanner?: () => void;
@@ -48,7 +45,6 @@ export function PickCard({
   shelfLoading,
   preferredLayerId,
   onRackTap,
-  onScanResolved,
   onManualQty,
   onFlag,
   onEngageScanner,
@@ -73,7 +69,6 @@ export function PickCard({
           ? 'awaiting_rack'
           : 'verified';
 
-  const scannerMode = isAwaitingRack ? 'rack' : 'item';
   const scanLabel = isAwaitingRack ? 'Scan bin' : 'Scan item';
   const scannerLive = isCurrent && !scannerPaused && cameraEngaged;
 
@@ -126,25 +121,13 @@ export function PickCard({
         )}
       </div>
 
-      <div className="min-h-[140px] shrink-0 border-t border-[var(--border-faint)]">
-        {isDone ? (
-          <div className="flex h-full min-h-[140px] items-center justify-center p-4 text-center">
-            <p className="text-sm text-[var(--content-tertiary)]">
-              {uiState === 'flagged' ? 'Sent to billing for review' : 'Line complete'}
-            </p>
-          </div>
-        ) : (
-          <EmbeddedScanner
-            active={isCurrent && !scannerPaused}
-            cameraEngaged={scannerLive}
-            orderItem={orderItem}
-            scannerMode={scannerMode}
-            pickedSoFar={isAwaitingRack ? 0 : pickedQty}
-            targetQty={isAwaitingRack ? 1 : targetQty}
-            onResolved={onScanResolved}
-          />
-        )}
-      </div>
+      {isDone && (
+        <div className="shrink-0 border-t border-[var(--border-faint)] px-4 py-3 text-center">
+          <p className="text-sm text-[var(--content-tertiary)]">
+            {uiState === 'flagged' ? 'Sent to billing for review' : 'Line complete'}
+          </p>
+        </div>
+      )}
 
       {!isDone && (
         <PickCardCTAs

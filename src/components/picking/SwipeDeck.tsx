@@ -139,32 +139,34 @@ export function SwipeDeck({
   const trackOffset = -currentIndex * width + dragOffset;
 
   return (
-    <div
-      ref={containerRef}
-      className="relative touch-pan-y select-none"
-      style={{ height: 'min(72vh, 640px)' }}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-    >
+    <div className="space-y-2">
       <div
-        className="flex h-full will-change-transform"
-        style={{
-          transform: `translate3d(${trackOffset}px, 0, 0)`,
-          transition: animating
-            ? `transform ${SNAP_MS}ms cubic-bezier(0.23, 1, 0.32, 1)`
-            : 'none',
-        }}
+        ref={containerRef}
+        className="relative touch-pan-y select-none overflow-hidden"
+        style={{ height: 'min(62vh, 540px)' }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
       >
-        {Children.map(children, (child) => (
-          <div className="h-full shrink-0" style={{ width }}>
-            {child}
-          </div>
-        ))}
+        <div
+          className="flex h-full will-change-transform"
+          style={{
+            transform: `translate3d(${trackOffset}px, 0, 0)`,
+            transition: animating
+              ? `transform ${SNAP_MS}ms cubic-bezier(0.23, 1, 0.32, 1)`
+              : 'none',
+          }}
+        >
+          {Children.map(children, (child) => (
+            <div className="h-full shrink-0 overflow-hidden" style={{ width }}>
+              {child}
+            </div>
+          ))}
+        </div>
       </div>
       {itemCount > 1 && (
-        <div className="pointer-events-none absolute bottom-2 left-0 right-0 flex justify-center gap-1">
+        <div className="flex justify-center gap-1 py-0.5">
           {Array.from({ length: Math.min(itemCount, 12) }).map((_, i) => {
             const dotIndex = itemCount <= 12 ? i : Math.floor((i / 12) * itemCount);
             return (
