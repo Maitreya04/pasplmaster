@@ -32,6 +32,8 @@ import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseS
 import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
 import {
   billingCompleteStalePicking,
+  billingForceCompletePrePick,
+  forceCompletePrePickErrorMessage,
   stalePickingCompleteErrorMessage,
 } from '../../lib/billing/completeStalePicking';
 import {
@@ -137,6 +139,7 @@ export default function ReviewPage(): React.JSX.Element | null {
   const [pendingIds, setPendingIds] = useState<Set<number>>(new Set());
   const [rejectSheetOpen, setRejectSheetOpen] = useState(false);
   const [stalePickConfirmOpen, setStalePickConfirmOpen] = useState(false);
+  const [prePickConfirmOpen, setPrePickConfirmOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [priceResolutionByItemId, setPriceResolutionByItemId] = useState<
     Record<number, PriceResolutionChoice | null>
@@ -697,6 +700,11 @@ export default function ReviewPage(): React.JSX.Element | null {
     order?.workflow_status === 'picking' &&
     (pickingClaim == null || pickingClaim.is_stale);
 
+  const canForceCompletePrePick =
+    order?.workflow_status === 'approved' &&
+    order.fulfillment_path !== 'direct_bill' &&
+    !order.picker_name;
+
   const completeStalePickingMutation = useMutation({
     mutationFn: async () => {
       if (!orderId || !userId) throw new Error('Not signed in');
@@ -721,6 +729,31 @@ export default function ReviewPage(): React.JSX.Element | null {
           ? 'Order completed with flagged lines — review and generate bill'
           : 'Order marked completed',
       );
+    },
+    onError: (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to complete order');
+    },
+  });
+
+  const forceCompletePrePickMutation = useMutation({
+    mutationFn: async () => {
+      if (!orderId || !userId) throw new Error('Not signed in');
+      const result = await billingForceCompletePrePick({
+        orderId,
+        userId,
+        userName: userName ?? null,
+      });
+      if (!result.success) {
+        throw new Error(forceCompletePrePickErrorMessage(result));
+      }
+      return result;
+    },
+    onSuccess: () => {
+      setPrePickConfirmOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+      toast.success('Order completed without warehouse pick');
     },
     onError: (err: unknown) => {
       toast.error(err instanceof Error ? err.message : 'Failed to complete order');
@@ -858,6 +891,14 @@ export default function ReviewPage(): React.JSX.Element | null {
                         . Complete here if warehouse picking is done.
                       </span>
                     )}
+                  </div>
+                )}
+                {canForceCompletePrePick && (
+                  <div className="mt-2 text-sm px-3 py-2 rounded-lg font-semibold border bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border-[var(--border-warning)]">
+                    Waiting in the pick queue — no picker assigned yet.
+                    <span className="block font-normal mt-1">
+                      Force complete here to bill directly without warehouse picking.
+                    </span>
                   </div>
                 )}
                 <p className="text-sm text-[var(--content-tertiary)]">
@@ -1274,6 +1315,17 @@ export default function ReviewPage(): React.JSX.Element | null {
                   Confirm & Generate Bill
                 </BigButton>
               )}
+              {canForceCompletePrePick && (
+                <BigButton
+                  variant="primary"
+                  onClick={() => setPrePickConfirmOpen(true)}
+                  loading={forceCompletePrePickMutation.isPending}
+                  className="sm:flex-[2] hover:opacity-90 bg-[var(--bg-positive)]"
+                >
+                  <CheckCircle size={20} weight="bold" />
+                  Force complete (skip pick)
+                </BigButton>
+              )}
               {canCompleteStalePicking && (
                 <BigButton
                   variant="primary"
@@ -1302,6 +1354,38 @@ export default function ReviewPage(): React.JSX.Element | null {
           </>
         )}
       </div>
+
+      {/* Pre-pick force complete confirmation */}
+      <BottomSheet
+        isOpen={prePickConfirmOpen}
+        onClose={() => setPrePickConfirmOpen(false)}
+        title="Force complete without picking?"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-[var(--content-secondary)]">
+            This order is still waiting for a picker. Mark it complete to bill directly
+            and remove it from the warehouse pick queue.
+          </p>
+          <div className="flex gap-3">
+            <BigButton
+              variant="secondary"
+              onClick={() => setPrePickConfirmOpen(false)}
+              disabled={forceCompletePrePickMutation.isPending}
+              className="flex-1"
+            >
+              Cancel
+            </BigButton>
+            <BigButton
+              variant="primary"
+              onClick={() => forceCompletePrePickMutation.mutate()}
+              loading={forceCompletePrePickMutation.isPending}
+              className="flex-[2] bg-[var(--bg-positive)]"
+            >
+              Confirm complete
+            </BigButton>
+          </div>
+        </div>
+      </BottomSheet>
 
       {/* Stale pick complete confirmation */}
       <BottomSheet
