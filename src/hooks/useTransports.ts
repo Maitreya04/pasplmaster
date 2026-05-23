@@ -9,7 +9,8 @@ export function useTransports() {
       const { data, error } = await supabase
         .from('transports')
         .select('*')
-        .eq('is_active', true);
+        .eq('is_active', true)
+        .order('name');
 
       if (error) throw error;
       return data as Transport[];

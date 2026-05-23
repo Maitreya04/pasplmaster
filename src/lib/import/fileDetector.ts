@@ -6,6 +6,7 @@ export type DetectedFileType =
   | 'items_stock'
   | 'item_pack_definitions'
   | 'customers'
+  | 'transports'
   | 'sales_plan'
   | 'sales_history'
   | 'purchase_po'
@@ -42,6 +43,65 @@ function hasCustomerColumns(headers: string[]): boolean {
     (set.has('sales man') || set.has('salesman')) &&
     (set.has('mobile no.') || set.has('mobile'))
   );
+}
+
+function looksLikeGstin(val: string): boolean {
+  return /^[0-9]{2}[A-Z0-9]{13}$/i.test(val.replace(/\s+/g, ''));
+}
+
+function hasTransportHeaders(headers: string[]): boolean {
+  if (hasCustomerColumns(headers)) return false;
+  const lower = headers.map(h => h.toLowerCase());
+  if (lower.some(h => h === 'transporter' || h === 'transport name' || h === 'transporter name')) {
+    return true;
+  }
+  const hasName = lower.includes('name') || lower.includes('transport');
+  const hasGstin = lower.some(h =>
+    h === 'gstin' || h === 'gst no.' || h === 'gst no' || h === 'gst number',
+  );
+  return hasName && hasGstin;
+}
+
+function detectTransportList(data: unknown[][]): { match: boolean; headerRowIndex: number; rowCount: number } {
+  const scanLimit = Math.min(10, data.length);
+  for (let i = 0; i < scanLimit; i++) {
+    const row = getStringRow(data, i);
+    if (hasTransportHeaders(row)) {
+      return {
+        match: true,
+        headerRowIndex: i,
+        rowCount: countDataRows(data, i + 1),
+      };
+    }
+  }
+
+  const sampleRows = data.slice(0, Math.min(25, data.length)).filter(
+    row => Array.isArray(row) && row.some(c => c != null && String(c).trim() !== ''),
+  );
+  if (sampleRows.length < 5) return { match: false, headerRowIndex: -1, rowCount: 0 };
+
+  let twoColRows = 0;
+  let gstinOrEmpty = 0;
+  for (const row of sampleRows) {
+    const name = String(row[0] ?? '').trim();
+    const gstin = row.length > 1 ? String(row[1] ?? '').trim() : '';
+    if (!name) continue;
+    if (/^(name|transport|transporter|gstin)$/i.test(name)) {
+      return { match: false, headerRowIndex: -1, rowCount: 0 };
+    }
+    const nonEmptyCols = row.filter(c => c != null && String(c).trim() !== '').length;
+    if (nonEmptyCols <= 2) twoColRows++;
+    if (!gstin || looksLikeGstin(gstin)) gstinOrEmpty++;
+  }
+
+  if (twoColRows >= sampleRows.length * 0.8 && gstinOrEmpty >= sampleRows.length * 0.8) {
+    return {
+      match: true,
+      headerRowIndex: -1,
+      rowCount: countDataRows(data, 0),
+    };
+  }
+  return { match: false, headerRowIndex: -1, rowCount: 0 };
 }
 
 function hasPackDefinitionColumns(headers: string[]): boolean {
@@ -110,6 +170,16 @@ export function detectFileType(workbook: XLSX.WorkBook): DetectionResult {
       label: 'Sales History',
       rowCount: countDataRows(data, 1),
       headerRowIndex: 0,
+    };
+  }
+
+  const transportDetection = detectTransportList(data);
+  if (transportDetection.match) {
+    return {
+      type: 'transports',
+      label: 'Transport List',
+      rowCount: transportDetection.rowCount,
+      headerRowIndex: transportDetection.headerRowIndex,
     };
   }
 

@@ -1,24 +1,29 @@
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, Warning, Package, Flag, ArrowRight } from '@phosphor-icons/react';
+import { CheckCircle, Warning, Flag, ArrowRight } from '@phosphor-icons/react';
 import { BigButton } from '../../components/shared';
 
 interface PickCompleteScreenProps {
   orderNumber: string;
   customerName: string;
-  pickedCount: number;
-  flaggedCount: number;
-  totalCount: number;
+  pickedLineCount: number;
+  flaggedLineCount: number;
+  totalLineCount: number;
+  pickedPieceCount: number;
+  totalPieceCount: number;
 }
 
 export function PickCompleteScreen({
   orderNumber,
   customerName,
-  pickedCount,
-  flaggedCount,
-  totalCount,
+  pickedLineCount,
+  flaggedLineCount,
+  totalLineCount,
+  pickedPieceCount,
+  totalPieceCount,
 }: PickCompleteScreenProps): React.JSX.Element | null {
   const navigate = useNavigate();
-  const hasFlagged = flaggedCount > 0;
+  const hasFlagged = flaggedLineCount > 0;
+  const itemLabel = totalLineCount === 1 ? 'item' : 'items';
 
   return (
     <div
@@ -46,25 +51,20 @@ export function PickCompleteScreen({
         <p className="text-sm font-medium text-white/80 truncate">
           {customerName}
         </p>
-        <div className="flex items-center justify-center gap-6">
-          <div className="flex items-center gap-2 text-white">
-            <Package size={18} weight="bold" />
-            <span className="text-lg font-bold tabular-nums">{totalCount}</span>
-            <span className="text-sm text-white/70">items</span>
-          </div>
+        <div className="space-y-1 text-white tabular-nums">
+          <p className="text-lg font-bold">
+            {pickedLineCount}/{totalLineCount} {itemLabel} on bill picked
+          </p>
+          <p className="text-lg font-bold">
+            {pickedPieceCount}/{totalPieceCount} pcs picked
+          </p>
         </div>
-        <div className="flex items-center justify-center gap-4 text-sm">
-          <span className="flex items-center gap-1.5 text-white/90">
-            <CheckCircle size={16} weight="fill" />
-            {pickedCount} picked
-          </span>
-          {flaggedCount > 0 && (
-            <span className="flex items-center gap-1.5 text-white/90">
-              <Flag size={16} weight="fill" />
-              {flaggedCount} flagged
-            </span>
-          )}
-        </div>
+        {flaggedLineCount > 0 && (
+          <p className="flex items-center justify-center gap-1.5 text-sm text-white/90">
+            <Flag size={16} weight="fill" />
+            {flaggedLineCount} flagged for billing
+          </p>
+        )}
       </div>
 
       <div className="w-full max-w-xs">

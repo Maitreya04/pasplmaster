@@ -79,18 +79,21 @@ export function QueueSheet({
             <p className="font-mono font-bold text-2xl text-[var(--content-positive)] leading-tight">
               {counts.picked}
             </p>
+            <p className="text-[10px] text-[var(--content-positive)]/70">lines</p>
           </div>
           <div className="rounded-xl bg-[var(--bg-tertiary)] px-3 py-2">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">Left</p>
             <p className="font-mono font-bold text-2xl text-[var(--content-primary)] leading-tight">
               {counts.remaining}
             </p>
+            <p className="text-[10px] text-[var(--content-tertiary)]">lines</p>
           </div>
           <div className="rounded-xl bg-[var(--bg-negative-subtle)] px-3 py-2">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-negative)]">Flagged</p>
             <p className="font-mono font-bold text-2xl text-[var(--content-negative)] leading-tight">
               {counts.flagged}
             </p>
+            <p className="text-[10px] text-[var(--content-negative)]/70">lines</p>
           </div>
         </div>
 
@@ -261,7 +264,7 @@ function Row({
       </div>
       <div className="text-right shrink-0">
         <p className="font-mono text-sm font-semibold text-[var(--content-primary)] tabular-nums">
-          ×{row.targetQty}
+          {row.targetQty} pcs
         </p>
         {onSkip && (
           <button

@@ -25,7 +25,6 @@ import {
 } from '../../lib/pickerPush';
 import { ITEMS_QUERY_KEY } from '../../hooks/useItems';
 import { broadcastItemsChanged, broadcastInvalidate } from '../../lib/crossTabSync';
-import { useTransports } from '../../hooks/useTransports';
 import {
   getStockQtyForLocation,
   stockLocationLabel,
@@ -42,6 +41,7 @@ import {
   BigButton,
   SelectTrigger,
   BottomSheet,
+  SearchableTransportDropdown,
 } from '../../components/shared';
 import type { Customer, CartItem } from '../../types';
 
@@ -975,7 +975,6 @@ export default function CartPage(): React.JSX.Element | null {
     data: sellableLocationCode = 'main_store',
     isLoading: stockLocationLoading,
   } = useUserStockLocation(userId, userName);
-  const { data: transports = [] } = useTransports();
   const isOnBehalf = userId !== null && authUserId !== null && userId !== authUserId;
 
   const [submitSuccess, setSubmitSuccess] = useState<{
@@ -1541,28 +1540,10 @@ export default function CartPage(): React.JSX.Element | null {
                 <label className="mb-2 block text-sm font-semibold text-[var(--content-secondary)]">
                   Transport
                 </label>
-                <div className="relative">
-                  <select
-                    value={transport?.id ?? ''}
-                    onChange={(e) => {
-                      const id = e.target.value ? Number(e.target.value) : null;
-                      setTransport(id ? transports.find((t) => t.id === id) ?? null : null);
-                    }}
-                    className="h-14 w-full appearance-none rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] pl-4 pr-10 text-[var(--content-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--border-subtle)]"
-                  >
-                    <option value="">Select Transport</option>
-                    {transports.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                  <CaretDown
-                    size={16}
-                    className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[var(--content-tertiary)]"
-                    aria-hidden
-                  />
-                </div>
+                <SearchableTransportDropdown
+                  value={transport}
+                  onChange={setTransport}
+                />
               </div>
 
               {/* Priority */}

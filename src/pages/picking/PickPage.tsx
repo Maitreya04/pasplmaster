@@ -505,6 +505,18 @@ export default function PickPage(): React.JSX.Element | null {
     };
   }, [pickItems]);
 
+  const pieceTotals = useMemo(() => {
+    let target = 0;
+    let picked = 0;
+    for (const pi of pickItems) {
+      const lineTarget = pickQuantityTarget(pi.orderItem);
+      target += lineTarget;
+      const linePicked = Math.min(lineTarget, getPickedQtyFromResult(pi.scanResult));
+      picked += linePicked;
+    }
+    return { target, picked };
+  }, [pickItems]);
+
   const allDone = counts.remaining === 0 && counts.total > 0;
   const hasFlagged = counts.flagged > 0;
   const visibility = useMemo(() => {
@@ -1494,9 +1506,11 @@ export default function PickPage(): React.JSX.Element | null {
       <PickCompleteScreen
         orderNumber={order.order_number}
         customerName={order.customer_name}
-        pickedCount={counts.picked}
-        flaggedCount={counts.flagged}
-        totalCount={counts.total}
+        pickedLineCount={counts.picked}
+        flaggedLineCount={counts.flagged}
+        totalLineCount={counts.total}
+        pickedPieceCount={pieceTotals.picked}
+        totalPieceCount={pieceTotals.target}
       />
     );
   }
@@ -1598,11 +1612,14 @@ export default function PickPage(): React.JSX.Element | null {
             </p>
           </div>
           <div className="text-right shrink-0 tabular-nums">
-            <p className="text-2xl font-bold text-[var(--content-primary)]">
+            <p className="text-2xl font-bold text-[var(--content-primary)] leading-none">
               {counts.picked + counts.flagged}
               <span className="text-[var(--content-tertiary)] text-base font-normal">
                 /{counts.total}
               </span>
+            </p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mt-0.5">
+              on bill
             </p>
           </div>
         </div>
@@ -1751,7 +1768,7 @@ export default function PickPage(): React.JSX.Element | null {
                       rackVerified={rackVerified}
                       pickedQty={pickedQty}
                       targetQty={targetQty}
-                      positionLabel={`${index + 1} / ${deckItems.length}`}
+                      positionLabel={`Line ${index + 1} of ${deckItems.length}`}
                       flagReason={pi.orderItem.flag_reason}
                       scannerPaused={scannerPaused || !isCardCurrent}
                       shelfLayers={showShelf ? shelfQuery.data?.layers ?? null : null}
@@ -1819,10 +1836,28 @@ export default function PickPage(): React.JSX.Element | null {
             <div className="w-14 h-14 bg-[var(--bg-positive-subtle)] rounded-full flex items-center justify-center mx-auto mb-3">
               <CheckCircle size={28} weight="fill" className="text-[var(--content-positive)]" />
             </div>
-            <p className="font-semibold text-[var(--content-primary)]">All items processed</p>
-            <p className="text-sm text-[var(--content-tertiary)] mt-1">
-              {counts.picked} picked, {counts.flagged} flagged
-            </p>
+            <p className="font-semibold text-[var(--content-primary)]">All done</p>
+            <div className="mt-2 space-y-1 text-sm text-[var(--content-tertiary)] tabular-nums">
+              <p>
+                <span className="font-mono font-bold text-[var(--content-primary)]">
+                  {counts.picked}/{counts.total}
+                </span>
+                {' '}
+                {counts.total === 1 ? 'item' : 'items'} on bill picked
+              </p>
+              <p>
+                <span className="font-mono font-bold text-[var(--content-primary)]">
+                  {pieceTotals.picked}/{pieceTotals.target}
+                </span>
+                {' '}
+                pcs picked
+              </p>
+              {counts.flagged > 0 && (
+                <p className="text-[var(--content-negative)]">
+                  {counts.flagged} flagged for billing
+                </p>
+              )}
+            </div>
           </div>
         )}
 
@@ -1832,27 +1867,26 @@ export default function PickPage(): React.JSX.Element | null {
       {allDone && (
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-[var(--bg-primary)] border-t border-[var(--border-subtle)] space-y-3">
           {/* Summary receipt */}
-          <div className="bg-[var(--bg-tertiary)] rounded-xl p-3 space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-[var(--content-tertiary)]">Items picked</span>
-              <span className="font-mono font-bold text-[var(--content-positive)]">
-                {counts.picked}
-              </span>
-            </div>
-            {counts.flagged > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-[var(--content-tertiary)]">Items flagged</span>
-                <span className="font-mono font-bold text-[var(--content-negative)]">
-                  {counts.flagged}
-                </span>
-              </div>
-            )}
-            <div className="flex justify-between text-sm pt-2 border-t border-[var(--border-faint)]">
-              <span className="text-[var(--content-secondary)] font-medium">Total confirmed</span>
+          <div className="bg-[var(--bg-tertiary)] rounded-xl p-3 space-y-1.5">
+            <p className="text-sm text-[var(--content-secondary)] tabular-nums">
               <span className="font-mono font-bold text-[var(--content-primary)]">
-                {counts.total} items
+                {counts.picked}/{counts.total}
               </span>
-            </div>
+              {' '}
+              {counts.total === 1 ? 'item' : 'items'} on bill picked
+            </p>
+            <p className="text-sm text-[var(--content-secondary)] tabular-nums">
+              <span className="font-mono font-bold text-[var(--content-primary)]">
+                {pieceTotals.picked}/{pieceTotals.target}
+              </span>
+              {' '}
+              pcs picked
+            </p>
+            {counts.flagged > 0 && (
+              <p className="text-sm text-[var(--content-negative)] tabular-nums">
+                {counts.flagged} flagged for billing
+              </p>
+            )}
           </div>
 
           <BigButton

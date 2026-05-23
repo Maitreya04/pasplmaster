@@ -124,6 +124,7 @@ export function CardHero({
             {pickedQty}
             <span className="text-[var(--content-tertiary)] font-normal"> / </span>
             {targetQty}
+            <span className="ml-1 text-xs font-semibold text-[var(--content-tertiary)]">pcs</span>
           </div>
         </div>
       )}

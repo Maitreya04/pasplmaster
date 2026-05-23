@@ -147,7 +147,7 @@ export default function PickPreviewPage(): React.JSX.Element | null {
                           {ask && <BrandLineChip brand="ask" />}
                           {lucas && <BrandLineChip brand="lucas" />}
                           <span className="text-sm font-semibold tabular-nums text-[var(--content-secondary)]">
-                            ×{qty}
+                            {qty} pcs
                           </span>
                         </div>
                       </div>

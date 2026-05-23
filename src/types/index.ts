@@ -36,6 +36,7 @@ export interface Customer {
 export interface Transport {
   id: number;
   name: string;
+  gstin: string | null;
   is_active: boolean;
 }
 

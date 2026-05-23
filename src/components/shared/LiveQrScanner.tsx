@@ -656,7 +656,7 @@ export function LiveQrScanner({
                 ) : (
                   <>
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Pick progress
+                      Pieces picked
                     </p>
                     <p className="mt-0.5 font-mono text-2xl font-bold tabular-nums text-white">
                       {pickedSoFar}

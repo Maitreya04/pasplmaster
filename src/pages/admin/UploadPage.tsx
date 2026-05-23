@@ -15,6 +15,7 @@ import { useToast } from '../../context/ToastContext';
 import { detectFileType, type DetectionResult } from '../../lib/import/fileDetector';
 import { importItems, type ImportProgress } from '../../lib/import/itemImporter';
 import { importCustomers } from '../../lib/import/customerImporter';
+import { importTransports } from '../../lib/import/transportImporter';
 import { importStock } from '../../lib/import/stockImporter';
 import { importPackDefinitions } from '../../lib/import/packDefinitionsImporter';
 import { importSalesTargets } from '../../lib/import/salesTargetsImporter';
@@ -65,7 +66,7 @@ export default function UploadPage(): React.JSX.Element | null {
       setDetection(result);
       if (result.type === 'unknown') {
         setState('error');
-        setErrorMsg('Could not identify this file. Expected a Price List, Customer List, Stock file, Pack Definitions file, or Sales Plan.');
+        setErrorMsg('Could not identify this file. Expected a Price List, Customer List, Transport List, Stock file, Pack Definitions file, or Sales Plan.');
       } else {
         setState('detected');
       }
@@ -98,6 +99,8 @@ export default function UploadPage(): React.JSX.Element | null {
         result = await importSalesTargets(workbook, fileName, setProgress);
       } else if (detection.type === 'sales_history') {
         result = await importSalesHistory(workbook, fileName, setProgress);
+      } else if (detection.type === 'transports') {
+        result = await importTransports(workbook, fileName, detection.headerRowIndex, setProgress);
       } else {
         result = await importCustomers(workbook, fileName, detection.headerRowIndex, setProgress);
       }
@@ -110,6 +113,9 @@ export default function UploadPage(): React.JSX.Element | null {
       }
       if (detection.type === 'item_pack_definitions') {
         void queryClient.invalidateQueries({ queryKey: PACK_DEFINITIONS_QUERY_KEY });
+      }
+      if (detection.type === 'transports') {
+        void queryClient.invalidateQueries({ queryKey: ['transports'] });
       }
 
       // Invalidate dashboard + smart suggestions when targets or sales history change
@@ -170,7 +176,7 @@ export default function UploadPage(): React.JSX.Element | null {
           </button>
           <h1 className="text-2xl font-bold text-[var(--content-primary)]">Upload Data</h1>
             <p className="text-sm text-[var(--content-tertiary)] mt-1">
-            Import Excel files for items, stock, pack definitions, customers, sales targets &amp; sales history
+            Import Excel files for items, stock, pack definitions, customers, transports, sales targets &amp; sales history
           </p>
         </div>
 
