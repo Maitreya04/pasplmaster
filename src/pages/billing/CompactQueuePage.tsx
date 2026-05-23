@@ -702,8 +702,18 @@ export default function CompactQueuePage() {
       });
 
       for (const item of finalItems) {
-        const update: Record<string, unknown> = { qty_approved: item.approvedQty };
-        if (item.decision === 'drop_entirely') update.qty_approved = 0;
+        const approvedQty = item.approvedQty;
+        const qtyPo = Math.max(0, item.qty_requested - approvedQty);
+        const update: Record<string, unknown> = {
+          qty_approved: approvedQty,
+          qty_shippable: approvedQty,
+          qty_po: qtyPo,
+        };
+        if (item.decision === 'drop_entirely') {
+          update.qty_approved = 0;
+          update.qty_shippable = 0;
+          update.qty_po = item.qty_requested;
+        }
         const { error: updateError } = await supabase.from('order_items').update(update).eq('id', item.id);
         if (updateError) throw updateError;
 

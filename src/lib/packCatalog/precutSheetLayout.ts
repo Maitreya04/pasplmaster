@@ -19,6 +19,8 @@ export interface PrecutSheetSpec {
   labelsPerPage: number;
   qrColumnMm: number;
   qrSvgMm: number;
+  /** Inner safe zone from die-cut edge (mm). */
+  labelPaddingMm: number;
   aliasFontPt: number;
   packFontPt: number;
   nameFontPt: number;
@@ -42,11 +44,12 @@ export const ODDY_ST24_A4: PrecutSheetSpec = {
   columns: 3,
   rows: 8,
   labelsPerPage: 24,
-  qrColumnMm: 24,
-  qrSvgMm: 22,
-  aliasFontPt: 9.5,
-  packFontPt: 6.5,
-  nameFontPt: 5,
+  qrColumnMm: 18,
+  qrSvgMm: 16,
+  labelPaddingMm: 4,
+  aliasFontPt: 9,
+  packFontPt: 6,
+  nameFontPt: 4.5,
 };
 
 /** Active Oddy precut sheet for Pack Catalog print. */
@@ -164,11 +167,20 @@ export function buildPrecutPrintCss(
     width: ${spec.labelWidthMm}mm;
     height: ${spec.labelHeightMm}mm;
     overflow: hidden;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) ${spec.qrColumnMm}mm;
+    display: flex;
     align-items: center;
-    gap: 1.5mm;
-    padding: 2mm 2.2mm;
+    justify-content: center;
+    padding: ${spec.labelPaddingMm}mm;
+  }
+
+  .sticker-body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2mm;
+    width: 100%;
+    max-height: 100%;
+    min-width: 0;
   }
 
   @media screen {
@@ -192,27 +204,33 @@ export function buildPrecutPrintCss(
   }
 
   .sticker-copy {
+    flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
+    align-items: center;
     justify-content: center;
-    gap: 0.8mm;
+    text-align: center;
+    gap: 0.45mm;
   }
 
   .sticker-alias {
     font-size: ${spec.aliasFontPt}pt;
     font-weight: 900;
-    line-height: 1.02;
+    line-height: 1.05;
     letter-spacing: -0.02em;
-    color: #0f172a;
-    word-break: break-all;
+    color: #000000;
+    word-break: break-word;
+    hyphens: auto;
+    max-width: 100%;
   }
 
   .sticker-pack {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 1mm;
+    justify-content: center;
+    gap: 0.8mm;
     font-size: ${spec.packFontPt}pt;
     font-weight: 700;
     line-height: 1.15;
@@ -238,25 +256,32 @@ export function buildPrecutPrintCss(
   .sticker-pack-qty {
     font-variant-numeric: tabular-nums;
     font-weight: 800;
-    color: #0f172a;
+    color: #000000;
   }
 
   .sticker-name {
     font-size: ${spec.nameFontPt}pt;
-    font-weight: 500;
-    color: #64748b;
-    line-height: 1.15;
-    white-space: nowrap;
+    font-weight: 600;
+    line-height: 1.12;
+    color: #000000;
+    text-align: center;
+    max-width: 100%;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
     overflow: hidden;
-    text-overflow: ellipsis;
+    word-break: break-word;
+    hyphens: auto;
   }
 
   .sticker-qr {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     width: ${spec.qrColumnMm}mm;
     height: ${spec.qrColumnMm}mm;
+    padding: 0.35mm;
   }
 
   .sticker-qr svg {

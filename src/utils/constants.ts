@@ -23,6 +23,8 @@ export const PICKER_NAMES = [
   'Dharmendra',
   'Abhishek',
   'Harsh',
+  'Sameer',
+  'Bittu',
 ];
 
 export const SALES_NAMES = [

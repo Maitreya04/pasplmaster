@@ -26,12 +26,19 @@ import {
   StatusBadge,
   EmptyState,
   Skeleton,
+  QueueDayTag,
 } from '../../components/shared';
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 import { BrandLineChip } from '../../components/picking/BrandLineChip';
+import { groupPickQueueByApprovalDay } from '../../lib/queueDayBuckets';
 
 function pickerLineCount(order: { pick_line_count?: number; item_count: number }): number {
   return order.pick_line_count ?? order.item_count;
+}
+
+function hasPickableLines(order: { pick_line_count?: number; item_count: number }): boolean {
+  if (order.pick_line_count != null) return order.pick_line_count > 0;
+  return order.item_count > 0;
 }
 
 function timeAgo(dateStr: string | null): string {
@@ -90,8 +97,13 @@ export default function QueuePage(): React.JSX.Element | null {
   const pushAlerts = usePickerPushNotifications({ role, userId, userName });
 
   const availableOrders = useMemo(
-    () => sortOrders([...available, ...stale]),
+    () => sortOrders([...available, ...stale].filter(hasPickableLines)),
     [available, stale],
+  );
+
+  const availableSections = useMemo(
+    () => groupPickQueueByApprovalDay<OrderWithClaimInfo>(availableOrders),
+    [availableOrders],
   );
 
   const queueHeadline = useMemo(() => {
@@ -351,6 +363,7 @@ export default function QueuePage(): React.JSX.Element | null {
                       {pick.priority === 'urgent' && (
                         <StatusBadge status="urgent" />
                       )}
+                      <QueueDayTag order={pick} variant="late_billed" />
                     </div>
                     <p className="text-sm text-[var(--content-secondary)] truncate">
                       {pick.customer_name}
@@ -431,17 +444,34 @@ export default function QueuePage(): React.JSX.Element | null {
               description="Approved orders will appear here for picking"
             />
           ) : (
-            <div className="space-y-3">
-              {availableOrders.map((order) => (
-                <OrderCard
-                  key={order.id}
-                  order={order}
-                  onClaim={() => claimMutation.mutate(order.id)}
-                  claiming={
-                    claimMutation.isPending &&
-                    claimMutation.variables === order.id
-                  }
-                />
+            <div className="space-y-6">
+              {availableSections.map((section) => (
+                <div key={section.id} className="space-y-3">
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+                      {section.title}
+                      <span className="ml-2 text-[var(--content-secondary)] normal-case">
+                        ({section.orders.length})
+                      </span>
+                    </h3>
+                    {section.description && (
+                      <p className="mt-1 text-xs text-[var(--content-quaternary)] leading-snug">
+                        {section.description}
+                      </p>
+                    )}
+                  </div>
+                  {section.orders.map((order) => (
+                    <OrderCard
+                      key={order.id}
+                      order={order}
+                      onClaim={() => claimMutation.mutate(order.id)}
+                      claiming={
+                        claimMutation.isPending &&
+                        claimMutation.variables === order.id
+                      }
+                    />
+                  ))}
+                </div>
               ))}
             </div>
           )}
@@ -540,6 +570,7 @@ function OrderCard({
               {order.order_number}
             </span>
             {isUrgent && <StatusBadge status="urgent" />}
+            <QueueDayTag order={order} variant="late_billed" />
             {askCount > 0 && <BrandLineChip brand="ask" count={askCount} />}
             {lucasCount > 0 && <BrandLineChip brand="lucas" count={lucasCount} />}
             {order.claim_info?.is_stale && (

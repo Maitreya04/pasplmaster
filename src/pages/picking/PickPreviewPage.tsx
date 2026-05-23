@@ -29,7 +29,7 @@ export default function PickPreviewPage(): React.JSX.Element | null {
     return sortByRack(pickableOrderItems(order.items));
   }, [order?.items]);
 
-  const pickLineCount = order?.pick_line_count ?? rows.length;
+  const pickLineCount = rows.length;
 
   const previewBrandCounts = useMemo(() => {
     let ask = 0;
@@ -119,7 +119,15 @@ export default function PickPreviewPage(): React.JSX.Element | null {
             </div>
 
             <ul className="space-y-2">
-              {rows.map((line) => {
+              {rows.length === 0 ? (
+                <Card className="py-4 px-4">
+                  <p className="font-semibold text-[var(--content-primary)]">Nothing to pick</p>
+                  <p className="text-sm text-[var(--content-secondary)] mt-1">
+                    Billing approved this order with no shippable stock — all lines are on purchase order.
+                  </p>
+                </Card>
+              ) : (
+              rows.map((line) => {
                 const qty = pickQuantityTarget(line);
                 const brandLine = {
                   item_name: line.item_name,
@@ -154,7 +162,8 @@ export default function PickPreviewPage(): React.JSX.Element | null {
                     </Card>
                   </li>
                 );
-              })}
+              })
+              )}
             </ul>
           </>
         )}

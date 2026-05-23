@@ -5,7 +5,7 @@ import {
   captureViewfinderImageData,
   type RoiCrop,
 } from '../lib/scanner/roiProcessor';
-import { getViewfinderVideoCrop, isBoundingBoxInsideCrop } from '../lib/scanner/viewfinderCrop';
+import { acceptDecodedHit, getViewfinderVideoCrop } from '../lib/scanner/viewfinderCrop';
 import type { BarcodeDetectorLike, BarcodeDetectorResult } from '../context/CameraContext';
 import { useOptionalPickingCamera } from '../context/CameraContext';
 import { REQUESTED_BARCODE_FORMATS } from '../lib/scanner/barcodeFormats';
@@ -21,7 +21,7 @@ import {
   type BarcodeHit,
   type PickBarcodeContext,
 } from '../lib/scanner/pickBarcodeSelection';
-import { oemCaptureBoost } from '../lib/scanner/labelPreprocess';
+import { oemCaptureBoost, stretchContrast, suppressGlare } from '../lib/scanner/labelPreprocess';
 import { isScannerDebugEnabled, scannerDebugLog } from '../lib/scanner/scannerDebug';
 
 type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => BarcodeDetectorLike;
@@ -35,6 +35,23 @@ const WORKER_SCAN_INTERVAL_MS = 28;
 const BURST_SCAN_INTERVAL_MS = 0;
 const BURST_WINDOW_MS = 700;
 const WORKER_MAX_PENDING_FRAMES = 2;
+/** After this many native misses, run ZXing+ZBar (tryRotate) on the same frame. */
+const NATIVE_AUX_WORKER_MISS = 3;
+
+async function detectOnImageData(
+  detector: BarcodeDetectorLike,
+  imageData: ImageData,
+): Promise<BarcodeDetectorResult[]> {
+  if (typeof createImageBitmap !== 'function') return [];
+  try {
+    const bitmap = await createImageBitmap(imageData);
+    const codes = await detector.detect(bitmap);
+    bitmap.close();
+    return codes;
+  } catch {
+    return [];
+  }
+}
 
 function oemHardeningActive(pickContext?: PickBarcodeContext): boolean {
   return Boolean(pickContext?.oemMultiBarcodeMode && pickContext.expectedCodes.length > 0);
@@ -235,6 +252,7 @@ export function useQRScanner({
   const viewfinderRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const engineRef = useRef<ScannerEnginePath | null>(null);
+  const auxWorkerRef = useRef<Extract<ScannerEnginePath, { type: 'worker' }> | null>(null);
   const videoLoopStopRef = useRef<(() => void) | null>(null);
   const scanFrameRef = useRef<(() => void) | null>(null);
   const scanInFlightRef = useRef(false);
@@ -297,6 +315,12 @@ export function useQRScanner({
       } else {
         engine.worker.onmessage = null;
       }
+    }
+
+    const aux = auxWorkerRef.current;
+    if (aux) {
+      aux.worker.terminate();
+      auxWorkerRef.current = null;
     }
 
     scanInFlightRef.current = false;
@@ -381,27 +405,30 @@ export function useQRScanner({
           if (engine.type === 'native') {
             let selected: PickedDetectedValue | null = null;
             const viewfinderCrop = getViewfinderVideoCrop(video, viewfinderRef.current);
+            const acceptHit = (bbox?: { x: number; y: number; width: number; height: number }) =>
+              acceptDecodedHit(bbox, viewfinderCrop, { collectMode });
 
-            try {
-              const fullCodes = await engine.detector.detect(video);
-              const fullPick = pickBestDetectedRawValue(
-                fullCodes,
+            const pickFromCodes = (codes: BarcodeDetectorResult[]) => {
+              const pick = pickBestDetectedRawValue(
+                codes,
                 collectMode,
                 video,
                 pickContextRef.current,
               );
-              if (fullPick) {
-                const bbox = fullPick.boundingBox;
-                if (!viewfinderCrop || !bbox || isBoundingBoxInsideCrop(bbox, viewfinderCrop)) {
-                  selected = fullPick;
-                }
-              }
+              if (pick && acceptHit(pick.boundingBox)) return pick;
+              return null;
+            };
+
+            try {
+              selected = pickFromCodes(await engine.detector.detect(video));
             } catch {
-              /* fall through to ROI bitmap */
+              /* fall through */
             }
 
+            const captureOpts = captureOptionsForPick(pickContextRef.current);
+            const missStreak = noHitFrameCountRef.current;
+
             if (!selected) {
-              const captureOpts = captureOptionsForPick(pickContextRef.current);
               const roiCapture = await captureViewfinderBitmap(video, {
                 maxLongEdge: captureOpts.maxLongEdge,
                 upscale: captureOpts.upscale,
@@ -409,21 +436,107 @@ export function useQRScanner({
               });
 
               if (roiCapture) {
-                const roiCodes = await engine.detector.detect(roiCapture.bitmap);
-                const roiPick = pickBestDetectedRawValue(
-                  roiCodes,
-                  collectMode,
-                  video,
-                  pickContextRef.current,
-                );
-                if (roiPick) {
-                  const projected = projectRoiPickToVideo(roiPick, roiCapture);
-                  const bbox = projected.boundingBox;
-                  if (!viewfinderCrop || !bbox || isBoundingBoxInsideCrop(bbox, viewfinderCrop)) {
-                    selected = projected;
+                try {
+                  const roiPick = pickFromCodes(await engine.detector.detect(roiCapture.bitmap));
+                  if (roiPick) {
+                    selected = projectRoiPickToVideo(roiPick, roiCapture);
+                  }
+                } finally {
+                  roiCapture.bitmap.close();
+                }
+              }
+            }
+
+            if (!selected && missStreak >= 1) {
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d', { willReadFrequently: true });
+              if (ctx) {
+                const capture = captureViewfinderImageData(video, canvas, ctx, {
+                  maxLongEdge: captureOpts.maxLongEdge,
+                  upscale: captureOpts.upscale,
+                  viewfinderEl: viewfinderRef.current,
+                });
+                if (capture) {
+                  const variants = [
+                    capture.imageData,
+                    suppressGlare(capture.imageData),
+                    stretchContrast(capture.imageData),
+                  ];
+                  for (const variant of variants) {
+                    const pick = pickFromCodes(await detectOnImageData(engine.detector, variant));
+                    if (pick) {
+                      selected = pick;
+                      break;
+                    }
                   }
                 }
-                roiCapture.bitmap.close();
+              }
+            }
+
+            if (!selected && missStreak >= NATIVE_AUX_WORKER_MISS) {
+              let aux = auxWorkerRef.current;
+              if (!aux) {
+                try {
+                  const worker = new Worker(new URL('../workers/qrScanner.worker', import.meta.url), {
+                    type: 'module',
+                  });
+                  await new Promise<void>((resolve, reject) => {
+                    const timer = window.setTimeout(() => reject(new Error('aux worker timeout')), 12000);
+                    const onReady = (e: MessageEvent) => {
+                      if (e.data?.type !== 'ready') return;
+                      worker.removeEventListener('message', onReady);
+                      window.clearTimeout(timer);
+                      resolve();
+                    };
+                    worker.addEventListener('message', onReady);
+                  });
+                  const auxCanvas = document.createElement('canvas');
+                  const auxCtx = auxCanvas.getContext('2d', { willReadFrequently: true });
+                  if (!auxCtx) throw new Error('no 2d ctx');
+                  aux = {
+                    type: 'worker',
+                    worker,
+                    workerCanvas: auxCanvas,
+                    workerCtx: auxCtx,
+                    pending: new Set(),
+                    pendingCaptures: new Map(),
+                  };
+                  auxWorkerRef.current = aux;
+                  attachWorkerOnMessage(worker);
+                } catch {
+                  aux = null;
+                }
+              }
+              if (aux && aux.pending.size < WORKER_MAX_PENDING_FRAMES) {
+                const capture = captureViewfinderImageData(
+                  video,
+                  aux.workerCanvas,
+                  aux.workerCtx,
+                  {
+                    maxLongEdge: captureOpts.maxLongEdge,
+                    upscale: captureOpts.upscale,
+                    viewfinderEl: viewfinderRef.current,
+                  },
+                );
+                if (capture) {
+                  const frameId = Date.now();
+                  aux.pending.add(frameId);
+                  aux.pendingCaptures.set(frameId, {
+                    sourceCrop: capture.sourceCrop,
+                    imageWidth: capture.imageData.width,
+                    imageHeight: capture.imageData.height,
+                  });
+                  aux.worker.postMessage(
+                    {
+                      type: 'scan',
+                      frameId,
+                      imageData: capture.imageData,
+                      missStreak: missStreak,
+                      pickContext: pickContextRef.current,
+                    },
+                    [capture.imageData.data.buffer],
+                  );
+                }
               }
             }
 
@@ -522,8 +635,13 @@ export function useQRScanner({
         const data = event.data;
         if (data.type === 'scan-result') {
           const engineNow = engineRef.current;
+          const auxNow = auxWorkerRef.current;
           let captureMeta: WorkerCaptureMeta | undefined;
-          if (engineNow?.type === 'worker') {
+          if (auxNow?.worker === worker) {
+            auxNow.pending.delete(data.frameId);
+            captureMeta = auxNow.pendingCaptures.get(data.frameId);
+            auxNow.pendingCaptures.delete(data.frameId);
+          } else if (engineNow?.type === 'worker' && engineNow.worker === worker) {
             engineNow.pending.delete(data.frameId);
             captureMeta = engineNow.pendingCaptures.get(data.frameId);
             engineNow.pendingCaptures.delete(data.frameId);
@@ -540,7 +658,7 @@ export function useQRScanner({
                 width: data.boundingBox.width * scaleX,
                 height: data.boundingBox.height * scaleY,
               };
-              if (!isBoundingBoxInsideCrop(videoBBox, viewfinderCrop)) {
+              if (!acceptDecodedHit(videoBBox, viewfinderCrop, { collectMode })) {
                 noHitFrameCountRef.current += 1;
                 return;
               }
@@ -583,9 +701,14 @@ export function useQRScanner({
         } else if (data.type === 'error') {
           console.error('QR Worker error:', data.message);
           const engineNow = engineRef.current;
-          if (engineNow?.type === 'worker') {
+          if (engineNow?.type === 'worker' && engineNow.worker === worker) {
             engineNow.pending.clear();
             engineNow.pendingCaptures.clear();
+          }
+          const auxNow = auxWorkerRef.current;
+          if (auxNow?.worker === worker) {
+            auxNow.pending.clear();
+            auxNow.pendingCaptures.clear();
           }
         }
       };

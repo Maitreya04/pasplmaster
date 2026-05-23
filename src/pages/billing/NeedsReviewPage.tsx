@@ -2,18 +2,17 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ClipboardText } from '@phosphor-icons/react';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
-import { Card, StatusBadge, EmptyState, Skeleton } from '../../components/shared';
-import { formatCurrency, formatTimeAgo, formatOverdueDate } from '../../utils/formatters';
+import { Card, StatusBadge, EmptyState, Skeleton, QueueDayTag } from '../../components/shared';
+import { formatCurrency, formatTimeAgo } from '../../utils/formatters';
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
+import { groupBillingQueueBySubmissionDay } from '../../lib/queueDayBuckets';
 
 function OrderCard({
   order,
   onTap,
-  isOverdue,
 }: {
   order: OrderWithClaimInfo;
   onTap: () => void;
-  isOverdue?: boolean;
 }) {
   const claim = order.claim_info;
 
@@ -24,17 +23,13 @@ function OrderCard({
           <span className="font-mono text-sm text-[var(--content-secondary)]">
             {order.order_number}
           </span>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
             {order.order_kind === 'recovery' && (
               <span className="text-xs font-semibold px-2 py-0.5 rounded bg-[var(--bg-accent-subtle)] text-[var(--bg-accent)]">
                 Recovery
               </span>
             )}
-            {isOverdue && (
-              <span className="text-xs font-medium px-2 py-0.5 rounded bg-[var(--bg-warning-subtle)] text-[var(--content-warning)]">
-                Since {formatOverdueDate(order.created_at)}
-              </span>
-            )}
+            <QueueDayTag order={order} variant="late_to_bill" />
             {order.priority === 'urgent' && order.workflow_status !== 'completed' && (
               <StatusBadge status="urgent" className="text-xs" />
             )}
@@ -80,26 +75,12 @@ export default function NeedsReviewPage(): React.JSX.Element | null {
     workflowStatus: 'submitted',
   });
 
-  const { overdueOrders, todayOrders } = useMemo(() => {
-    const overdue: OrderWithClaimInfo[] = [];
-    const today: OrderWithClaimInfo[] = [];
-    const todayIso = new Date();
-    todayIso.setHours(0, 0, 0, 0);
-    const msToday = todayIso.getTime();
+  const sections = useMemo(
+    () => groupBillingQueueBySubmissionDay(submittedOrders),
+    [submittedOrders],
+  );
 
-    for (const order of submittedOrders) {
-      if (new Date(order.created_at).getTime() < msToday) {
-        overdue.push(order);
-      } else {
-        today.push(order);
-      }
-    }
-    return { overdueOrders: overdue, todayOrders: today };
-  }, [submittedOrders]);
-
-  const hasOverdue = overdueOrders.length > 0;
-  const hasToday = todayOrders.length > 0;
-  const isEmpty = !hasOverdue && !hasToday;
+  const isEmpty = sections.length === 0;
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
@@ -123,44 +104,40 @@ export default function NeedsReviewPage(): React.JSX.Element | null {
           />
         ) : (
           <div className="mt-6 lg:mt-8 space-y-8">
-            {/* Section 1: Overdue */}
-            {hasOverdue && (
-              <section>
-                <h2 className="text-lg font-semibold text-[var(--content-warning)] mb-3 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-[var(--bg-warning)]" />
-                  From previous days ({overdueOrders!.length})
+            {sections.map((section) => (
+              <section key={section.id}>
+                <h2
+                  className={`text-lg font-semibold mb-3 flex items-center gap-2 ${
+                    section.id === 'today'
+                      ? 'text-[var(--content-primary)]'
+                      : 'text-[var(--content-warning)]'
+                  }`}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      section.id === 'today'
+                        ? 'bg-[var(--bg-accent)]'
+                        : 'bg-[var(--bg-warning)]'
+                    }`}
+                  />
+                  {section.title} ({section.orders.length})
                 </h2>
+                {section.description && (
+                  <p className="text-sm text-[var(--content-tertiary)] mb-3 -mt-1">
+                    {section.description}
+                  </p>
+                )}
                 <div className="space-y-3">
-                  {overdueOrders!.map((order) => (
+                  {section.orders.map((order) => (
                     <OrderCard
                       key={order.id}
                       order={order}
                       onTap={() => navigate(`/billing/review/${order.id}`)}
-                      isOverdue
                     />
                   ))}
                 </div>
               </section>
-            )}
-
-            {/* Section 2: Today's submitted */}
-            {hasToday && (
-              <section>
-                <h2 className="text-lg font-semibold text-[var(--content-primary)] mb-3 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-[var(--bg-accent)]" />
-                  Today&apos;s submitted ({todayOrders.length})
-                </h2>
-                <div className="space-y-3">
-                  {todayOrders.map((order) => (
-                    <OrderCard
-                      key={order.id}
-                      order={order}
-                      onTap={() => navigate(`/billing/review/${order.id}`)}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+            ))}
           </div>
         )}
       </div>

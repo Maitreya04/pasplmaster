@@ -88,44 +88,43 @@ export function isFullyPo(item: Item, cartQty: number): boolean {
   return cartQty > 0 && splitCartLine(cartQty, item.stock_qty).ship === 0;
 }
 
-/** Quantity picker should physically pick (cap by shippable, then approval). */
-export function pickQuantityTarget(oi: {
+export type PickLineQty = {
   qty_requested: number;
-  qty_shippable?: number;
+  qty_shippable?: number | null;
+  qty_po?: number | null;
   qty_approved?: number | null;
-}): number {
-  const shipCap = oi.qty_shippable ?? oi.qty_requested;
+};
+
+/** Max units this line can ship from on-hand stock (not PO backlog). */
+export function shippableCapForPick(oi: PickLineQty): number {
+  if (oi.qty_shippable != null && Number.isFinite(oi.qty_shippable)) {
+    return Math.max(0, Math.floor(oi.qty_shippable));
+  }
+  const requested = Math.max(0, Math.floor(oi.qty_requested ?? 0));
+  if (oi.qty_po != null && Number.isFinite(oi.qty_po)) {
+    return Math.max(0, requested - Math.max(0, Math.floor(oi.qty_po)));
+  }
+  return requested;
+}
+
+/** Quantity picker should physically pick (cap by shippable, then approval). */
+export function pickQuantityTarget(oi: PickLineQty): number {
+  const shipCap = shippableCapForPick(oi);
   if (oi.qty_approved != null && Number.isFinite(oi.qty_approved)) {
-    return Math.min(oi.qty_approved, shipCap);
+    return Math.min(Math.max(0, Math.floor(oi.qty_approved)), shipCap);
   }
   return shipCap;
 }
 
 /** True when billing approved at least one unit to pick from stock. */
-export function isPickableOrderLine(oi: {
-  qty_requested: number;
-  qty_shippable?: number;
-  qty_approved?: number | null;
-}): boolean {
+export function isPickableOrderLine(oi: PickLineQty): boolean {
   return pickQuantityTarget(oi) > 0;
 }
 
-export function pickableOrderItems<
-  T extends {
-    qty_requested: number;
-    qty_shippable?: number;
-    qty_approved?: number | null;
-  },
->(items: T[]): T[] {
+export function pickableOrderItems<T extends PickLineQty>(items: T[]): T[] {
   return items.filter(isPickableOrderLine);
 }
 
-export function countPickableOrderLines(
-  items: {
-    qty_requested: number;
-    qty_shippable?: number;
-    qty_approved?: number | null;
-  }[],
-): number {
+export function countPickableOrderLines(items: PickLineQty[]): number {
   return pickableOrderItems(items).length;
 }

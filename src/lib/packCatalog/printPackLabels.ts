@@ -32,11 +32,17 @@ interface PrecutLabelCell {
   qrSvg: string;
 }
 
+function truncateItemName(name: string, maxLen = 56): string {
+  const trimmed = name.trim();
+  if (trimmed.length <= maxLen) return trimmed;
+  return `${trimmed.slice(0, maxLen - 1)}…`;
+}
+
 async function buildPackOnlyQr(busyCode: number, packType: 'inner' | 'outer'): Promise<string> {
   const payload = packPickPayload(busyCode, packType);
   return QRCode.toString(payload, {
     type: 'svg',
-    margin: 0,
+    margin: 1,
     errorCorrectionLevel: 'M',
     width: 256,
   });
@@ -49,7 +55,7 @@ async function buildItemQr(
   const payload = receivingItemPickPayload(item, busyCode);
   return QRCode.toString(payload, {
     type: 'svg',
-    margin: 0,
+    margin: 1,
     errorCorrectionLevel: 'M',
     width: 256,
   });
@@ -76,15 +82,17 @@ function renderSticker(
     cell.tier === 'piece' ? 'Piece' : cell.tier === 'inner' ? 'Inner' : 'Outer';
   const pos = stickerPositionStyle(spec, index, offsets);
   return `<div class="sticker" style="${pos}">
-    <div class="sticker-copy">
-      <div class="sticker-alias">${escapeHtml(cell.aliasHeading)}</div>
-      <div class="sticker-pack">
-        <span class="sticker-pack-tier" data-tier="${tierAttr}">${escapeHtml(tierShort)}</span>
-        <span class="sticker-pack-qty">${escapeHtml(qtyLine)}</span>
+    <div class="sticker-body">
+      <div class="sticker-copy">
+        <div class="sticker-alias">${escapeHtml(cell.aliasHeading)}</div>
+        <div class="sticker-pack">
+          <span class="sticker-pack-tier" data-tier="${tierAttr}">${escapeHtml(tierShort)}</span>
+          <span class="sticker-pack-qty">${escapeHtml(qtyLine)}</span>
+        </div>
+        <div class="sticker-name">${escapeHtml(cell.itemName)}</div>
       </div>
-      <div class="sticker-name">${escapeHtml(cell.itemName)}</div>
+      <div class="sticker-qr" aria-label="${escapeHtml(cell.scanHint)}">${cell.qrSvg}</div>
     </div>
-    <div class="sticker-qr" aria-label="${escapeHtml(cell.scanHint)}">${cell.qrSvg}</div>
   </div>`;
 }
 
@@ -134,6 +142,17 @@ export interface PackCatalogPrintSelection {
   individualCount: number;
 }
 
+export function openPackCatalogPrintWindow(): Window | null {
+  const w = window.open('about:blank', '_blank');
+  if (w) {
+    w.document.write(
+      '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pack labels</title></head><body><p style="font:14px sans-serif;padding:24px;color:#64748b">Preparing labels…</p></body></html>',
+    );
+    w.document.close();
+  }
+  return w;
+}
+
 export async function openPackCatalogLabelsPrint(opts: {
   item: Item;
   busyCode: number;
@@ -145,14 +164,16 @@ export async function openPackCatalogLabelsPrint(opts: {
   offsets?: PrecutPrintOffsets;
   /** When false, opens a full-size on-screen sheet (dashed cells) without triggering print. */
   autoPrint?: boolean;
+  /** Pass a window opened synchronously from the click handler to avoid popup blockers. */
+  targetWindow?: Window | null;
 }): Promise<{ cardCount: number; blocked: boolean }> {
   const spec = getPrecutSheet();
-  const w = window.open('', '_blank');
+  const w = opts.targetWindow ?? window.open('about:blank', '_blank');
   if (!w) return { cardCount: 0, blocked: true };
 
   const { item, busyCode, selection } = opts;
   const alias = aliasDisplayForItem(item);
-  const itemName = item.name.length > 72 ? `${item.name.slice(0, 69)}…` : item.name;
+  const itemName = truncateItemName(item.name);
   const cells: PrecutLabelCell[] = [];
 
   if (selection.outerCount > 0 && opts.outerPackQty != null && opts.outerPackQty >= 1) {
@@ -219,6 +240,7 @@ export async function openPackCatalogLabelsPrint(opts: {
         Preview only — use the browser Print button when ready (100% scale, no fit-to-page).
       </p>`;
 
+  w.document.open();
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pack labels — ${escapeHtml(alias.heading)}</title>
     <style>${printCss}</style></head><body>
     ${sheetsHtml}
@@ -257,8 +279,7 @@ export async function openBulkPieceLabelsPrint(opts: {
       qrByBusy.set(req.busyCode, qrSvg);
     }
     const alias = aliasDisplayForItem(req.item);
-    const itemName =
-      req.item.name.length > 72 ? `${req.item.name.slice(0, 69)}…` : req.item.name;
+    const itemName = truncateItemName(req.item.name);
     for (let i = 0; i < req.count; i += 1) {
       cells.push({
         tier: 'piece',

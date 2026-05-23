@@ -1,9 +1,10 @@
-import { useState, useEffect, type ReactElement } from 'react';
+import { useState, useEffect, useMemo, type ReactElement } from 'react';
 import { Lock, Tray } from '@phosphor-icons/react';
 import type { OrderWithClaimInfo } from '../../../hooks/useClaimableOrders';
 import { isSalesEditFreshLock } from '../../../hooks/useClaimableOrders';
-import { StatusBadge, EmptyState } from '../../../components/shared';
+import { StatusBadge, EmptyState, QueueDayTag } from '../../../components/shared';
 import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
+import { groupBillingQueueBySubmissionDay } from '../../../lib/queueDayBuckets';
 
 interface QueueViewProps {
   available: OrderWithClaimInfo[];
@@ -16,16 +17,31 @@ interface QueueViewProps {
   onTakeover: (orderId: number) => void;
 }
 
-function SectionHeader({ label, count }: { label: string; count: number }) {
+function SectionHeader({
+  label,
+  count,
+  description,
+}: {
+  label: string;
+  count: number;
+  description?: string;
+}) {
   if (count === 0) return null;
   return (
-    <div className="flex items-center gap-3 pt-6 pb-2 px-1 first:pt-0">
-      <span className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-        {label}
-      </span>
-      <span className="text-xs font-mono font-semibold text-[var(--content-quaternary)] bg-[var(--bg-tertiary)] rounded-full px-2 py-0.5">
-        {count}
-      </span>
+    <div className="pt-6 pb-2 px-1 first:pt-0">
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+          {label}
+        </span>
+        <span className="text-xs font-mono font-semibold text-[var(--content-quaternary)] bg-[var(--bg-tertiary)] rounded-full px-2 py-0.5">
+          {count}
+        </span>
+      </div>
+      {description && (
+        <p className="mt-1 text-xs text-[var(--content-quaternary)] leading-snug px-0.5">
+          {description}
+        </p>
+      )}
     </div>
   );
 }
@@ -76,8 +92,9 @@ function OrderRow({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             {isUrgent && <StatusBadge status="urgent" />}
+            <QueueDayTag order={order} variant="late_to_bill" />
             {hasSpecialRate && (
               <span className="ds-chip ds-chip--warning ds-chip--sm">
                 Special rate
@@ -189,6 +206,11 @@ export function QueueView({
   onSelect,
   onTakeover,
 }: QueueViewProps): ReactElement {
+  const availableSections = useMemo(
+    () => groupBillingQueueBySubmissionDay(available),
+    [available],
+  );
+
   // Keyboard navigation includes frozen rows (visible but not selectable via Enter)
   const navigable = [...myActive, ...available, ...stale, ...salesLocked];
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -294,28 +316,36 @@ export function QueueView({
           </>
         )}
 
-        {/* Available orders */}
+        {/* Available orders — grouped by submission day */}
         {available.length > 0 && (
           <>
-            <SectionHeader label="Available" count={available.length} />
-            <div className="space-y-2">
-              {available.map((order) => {
-                const idx = navIndex++;
-                return (
-                  <OrderRow
-                    key={order.id}
-                    order={order}
-                    isSelected={idx === selectedIndex}
-                    isClaimed={false}
-                    isStale={false}
-                    onClick={() => {
-                      setSelectedIndex(idx);
-                      onSelect(order.id);
-                    }}
-                  />
-                );
-              })}
-            </div>
+            {availableSections.map((section) => (
+              <div key={section.id}>
+                <SectionHeader
+                  label={section.title}
+                  count={section.orders.length}
+                  description={section.description}
+                />
+                <div className="space-y-2">
+                  {section.orders.map((order) => {
+                    const idx = navIndex++;
+                    return (
+                      <OrderRow
+                        key={order.id}
+                        order={order}
+                        isSelected={idx === selectedIndex}
+                        isClaimed={false}
+                        isStale={false}
+                        onClick={() => {
+                          setSelectedIndex(idx);
+                          onSelect(order.id);
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </>
         )}
 

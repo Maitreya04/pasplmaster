@@ -980,7 +980,7 @@ export default function PickScanLabPage(): React.JSX.Element {
           title="Product Scan Mode"
           eyebrow="Test Scan Lab"
           idleStatus="Point at product barcode or QR"
-          helpText="This mode only scans and recognizes products based on current alias and barcode mappings."
+          helpText="Hold the label flatter when you can. Steep angles and crumpled QRs need torch and 1–2× zoom — 3× is for tiny flat codes only."
           onClose={closeScanOnly}
           onResolved={handleScanOnlyResolved}
           onError={(message) => {

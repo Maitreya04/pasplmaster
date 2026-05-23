@@ -206,6 +206,22 @@ export default function AdminPage(): React.JSX.Element | null {
 
           <button
             type="button"
+            onClick={() => navigate('/admin/stock-audit-labels')}
+            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
+          >
+            <div className="w-12 h-12 rounded-xl bg-[var(--bg-accent-subtle)] flex items-center justify-center">
+              <Printer size={22} weight="regular" className="text-[var(--content-accent)]" />
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-[var(--content-primary)]">Stock audit label print</p>
+              <p className="text-sm text-[var(--content-tertiary)]">
+                Upload Busy stock CSV · one piece sticker per counted unit · skips zero/negative
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
             onClick={() => navigate('/admin/labels')}
             className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
           >

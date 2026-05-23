@@ -11,6 +11,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   MagnifyingGlass,
+  MapPin,
   Printer,
   UploadSimple,
   DownloadSimple,
@@ -56,7 +57,11 @@ import {
   formatImportSummary,
   packCatalogTemplateCsv,
 } from '../../lib/packCatalog/exportPackCatalogCsv';
-import { openPackCatalogLabelsPrint } from '../../lib/packCatalog/printPackLabels';
+import { openPackCatalogLabelsPrint, openPackCatalogPrintWindow } from '../../lib/packCatalog/printPackLabels';
+import { openRackLabelsPrint, openRackLabelsPrintWindow } from '../../lib/packCatalog/printRackLabels';
+import { normalizeRackNo, saveItemRackNo } from '../../lib/packCatalog/saveItemRack';
+import { ITEMS_QUERY_KEY } from '../../hooks/useItems';
+import type { Item } from '../../types';
 import {
   loadPrecutPrintOffsets,
   PRECUT_SHEET,
@@ -66,6 +71,54 @@ import {
 } from '../../lib/packCatalog/precutSheetLayout';
 import { PrecutSheetPreview } from '../../components/packCatalog/PrecutSheetPreview';
 import { BottomSheet, BigButton } from '../../components/shared';
+
+function RackInlineCell({
+  value,
+  disabled,
+  onSave,
+}: {
+  value: string | null;
+  disabled?: boolean;
+  onSave: (next: string | null) => Promise<void>;
+}): React.JSX.Element {
+  const [draft, setDraft] = useState(value?.trim() ?? '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(value?.trim() ?? '');
+  }, [value]);
+
+  const commit = async () => {
+    const next = normalizeRackNo(draft);
+    const current = normalizeRackNo(value);
+    if (next === current) return;
+    setSaving(true);
+    try {
+      await onSave(next);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      disabled={disabled || saving}
+      value={draft}
+      placeholder="52R-49C"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => void commit()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          void commit();
+        }
+      }}
+      className="min-w-[7rem] max-w-[10rem] rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-1 font-mono text-xs uppercase disabled:opacity-50"
+      title="Type rack location, then click away to save"
+    />
+  );
+}
 
 function PackQtyInlineCell({
   value,
@@ -121,13 +174,13 @@ function PackQtyInlineCell({
 
 /** Keeps status + edit/print visible when the table scrolls horizontally. */
 const STICKY_STATUS_CELL =
-  'sticky right-[5.5rem] z-10 min-w-[6.5rem] border-l border-[var(--border-subtle)] bg-[var(--bg-primary)] group-hover:bg-[var(--bg-secondary)]';
+  'sticky right-[7.75rem] z-10 min-w-[6.5rem] border-l border-[var(--border-subtle)] bg-[var(--bg-primary)] group-hover:bg-[var(--bg-secondary)]';
 const STICKY_ACTIONS_CELL =
-  'sticky right-0 z-20 min-w-[5.5rem] border-l border-[var(--border-subtle)] bg-[var(--bg-primary)] shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.12)] group-hover:bg-[var(--bg-secondary)]';
+  'sticky right-0 z-20 min-w-[7.75rem] border-l border-[var(--border-subtle)] bg-[var(--bg-primary)] shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.12)] group-hover:bg-[var(--bg-secondary)]';
 const STICKY_STATUS_HEAD =
-  'sticky right-[5.5rem] z-10 min-w-[6.5rem] border-l border-[var(--border-subtle)] bg-[var(--bg-secondary)]';
+  'sticky right-[7.75rem] z-10 min-w-[6.5rem] border-l border-[var(--border-subtle)] bg-[var(--bg-secondary)]';
 const STICKY_ACTIONS_HEAD =
-  'sticky right-0 z-20 min-w-[5.5rem] border-l border-[var(--border-subtle)] bg-[var(--bg-secondary)]';
+  'sticky right-0 z-20 min-w-[7.75rem] border-l border-[var(--border-subtle)] bg-[var(--bg-secondary)]';
 
 function StatusBadge({ status }: { status: PackCatalogRow['status'] }): React.JSX.Element {
   const tone =
@@ -172,6 +225,10 @@ export default function PackCatalogPage(): React.JSX.Element {
   const [previewing, setPreviewing] = useState(false);
   const [precutOffsets, setPrecutOffsets] = useState<PrecutPrintOffsets>(loadPrecutPrintOffsets);
 
+  const [rackPrintRow, setRackPrintRow] = useState<PackCatalogRow | null>(null);
+  const [rackPrintCount, setRackPrintCount] = useState(1);
+  const [rackPrinting, setRackPrinting] = useState(false);
+
   const packQuery = useQuery({
     queryKey: PACK_DEFINITIONS_QUERY_KEY,
     queryFn: fetchItemPackDefinitions,
@@ -211,6 +268,11 @@ export default function PackCatalogPage(): React.JSX.Element {
     setPrintOuterCount(row.outerQty != null ? 1 : 0);
     setPrintInnerCount(row.innerQty != null ? 1 : 0);
     setPrintIndividualCount(row.sellUnit !== 'PACK' ? 1 : 0);
+  }, []);
+
+  const openRackPrint = useCallback((row: PackCatalogRow) => {
+    setRackPrintRow(row);
+    setRackPrintCount(1);
   }, []);
 
   const editStructure = useMemo(() => {
@@ -265,6 +327,11 @@ export default function PackCatalogPage(): React.JSX.Element {
 
   const openLabelsWindow = async (autoPrint: boolean) => {
     if (!printRow || printRow.busyCode == null) return;
+    const printWindow = openPackCatalogPrintWindow();
+    if (!printWindow) {
+      toast.error('Allow pop-ups to preview or print labels');
+      return;
+    }
     const setBusy = autoPrint ? setPrinting : setPreviewing;
     setBusy(true);
     try {
@@ -282,6 +349,7 @@ export default function PackCatalogPage(): React.JSX.Element {
         },
         offsets: precutOffsets,
         autoPrint,
+        targetWindow: printWindow,
       });
       if (result.blocked) {
         toast.error('Allow pop-ups to preview or print labels');
@@ -299,6 +367,54 @@ export default function PackCatalogPage(): React.JSX.Element {
 
   const handlePrint = () => openLabelsWindow(true);
   const handleFullPreview = () => openLabelsWindow(false);
+
+  const handleRackPrint = () => {
+    if (!rackPrintRow) return;
+    const binId = normalizeRackNo(rackPrintRow.item.rack_no);
+    if (!binId) {
+      toast.error('Set a rack number before printing rack labels');
+      return;
+    }
+    const printWindow = openRackLabelsPrintWindow();
+    if (!printWindow) {
+      toast.error('Allow pop-ups to print rack labels');
+      return;
+    }
+    setRackPrinting(true);
+    void (async () => {
+      try {
+        const fpq = rackPrintRow.packDef?.bin_forward_pick_qty;
+        const label = {
+          binId,
+          itemName: rackPrintRow.item.name?.trim() || rackPrintRow.alias1Display,
+          pickCode: rackPrintRow.pickCode,
+          busyCode: rackPrintRow.busyCode,
+          forwardPickQty: fpq != null && fpq >= 1 ? fpq : null,
+        };
+        const labels = Array.from({ length: Math.max(1, rackPrintCount) }, () => label);
+        const result = await openRackLabelsPrint({
+          labels,
+          autoPrint: true,
+          targetWindow: printWindow,
+        });
+        if (result.blocked) {
+          toast.error('Allow pop-ups to print rack labels');
+        } else if (result.labelCount === 0) {
+          toast.info('No rack labels to print');
+        } else {
+          toast.success(
+            `Opened print for ${result.labelCount} rack label${result.labelCount === 1 ? '' : 's'}`,
+          );
+          setRackPrintRow(null);
+        }
+      } catch (e) {
+        printWindow.close();
+        toast.error(e instanceof Error ? e.message : 'Could not print rack labels');
+      } finally {
+        setRackPrinting(false);
+      }
+    })();
+  };
 
   const handleFileImport = async (file: File) => {
     setImporting(true);
@@ -326,6 +442,25 @@ export default function PackCatalogPage(): React.JSX.Element {
       if (fileRef.current) fileRef.current.value = '';
     }
   };
+
+  const saveInlineRack = useCallback(
+    async (row: PackCatalogRow, value: string | null) => {
+      try {
+        await saveItemRackNo(row.item.id, value);
+        queryClient.setQueryData<Item[]>(ITEMS_QUERY_KEY, (prev) =>
+          (prev ?? []).map((item) =>
+            item.id === row.item.id ? { ...item, rack_no: value } : item,
+          ),
+        );
+        await queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY });
+        toast.success(value ? 'Rack saved' : 'Rack cleared');
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Could not save rack');
+        throw e;
+      }
+    },
+    [queryClient, toast],
+  );
 
   const saveInlineQty = useCallback(
     async (row: PackCatalogRow, field: 'outer' | 'inner', value: number | null) => {
@@ -505,8 +640,8 @@ export default function PackCatalogPage(): React.JSX.Element {
         </div>
 
         <p className="mb-3 text-xs text-[var(--content-tertiary)]">
-          Tip: click Outer box / Inner box cells to type sizes when the spreadsheet row was empty (e.g.
-          TIDCA2).
+          Tip: click Rack, Outer box, or Inner box cells to edit inline when the spreadsheet row was
+          empty.
         </p>
 
         {loading ? (
@@ -551,7 +686,12 @@ export default function PackCatalogPage(): React.JSX.Element {
                       <td className="max-w-[280px] px-3 py-2 text-[var(--content-secondary)]">
                         {row.item.name?.trim() || '—'}
                       </td>
-                      <td className="px-3 py-2">{row.item.rack_no?.trim() || '—'}</td>
+                      <td className="px-3 py-2">
+                        <RackInlineCell
+                          value={row.item.rack_no}
+                          onSave={(v) => saveInlineRack(row, v)}
+                        />
+                      </td>
                       <td className="px-3 py-2">
                         <PackQtyInlineCell
                           value={row.outerQty}
@@ -593,10 +733,19 @@ export default function PackCatalogPage(): React.JSX.Element {
                           </button>
                           <button
                             type="button"
+                            onClick={() => openRackPrint(row)}
+                            disabled={!row.item.rack_no?.trim()}
+                            className="rounded-lg p-2 hover:bg-[var(--bg-tertiary)] disabled:opacity-40"
+                            title="Print rack label"
+                          >
+                            <MapPin size={18} />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => openPrint(row)}
                             disabled={row.busyCode == null}
                             className="rounded-lg p-2 hover:bg-[var(--bg-tertiary)] disabled:opacity-40"
-                            title="Print labels"
+                            title="Print pack labels"
                           >
                             <Printer size={18} />
                           </button>
@@ -624,9 +773,13 @@ export default function PackCatalogPage(): React.JSX.Element {
                   <p className="mt-1 text-sm text-[var(--content-secondary)] line-clamp-2">
                     {row.item.name?.trim() || '—'}
                   </p>
-                  <p className="mt-2 text-sm">
-                    Rack <strong>{row.item.rack_no?.trim() || '—'}</strong>
-                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                    <span className="text-xs text-[var(--content-tertiary)]">Rack</span>
+                    <RackInlineCell
+                      value={row.item.rack_no}
+                      onSave={(v) => saveInlineRack(row, v)}
+                    />
+                  </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
                     <span className="text-xs text-[var(--content-tertiary)]">Outer</span>
                     <PackQtyInlineCell
@@ -664,11 +817,19 @@ export default function PackCatalogPage(): React.JSX.Element {
                       </button>
                       <button
                         type="button"
+                        onClick={() => openRackPrint(row)}
+                        disabled={!row.item.rack_no?.trim()}
+                        className="rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 text-xs font-semibold disabled:opacity-40"
+                      >
+                        Rack
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => openPrint(row)}
                         disabled={row.busyCode == null}
                         className="rounded-lg bg-[var(--role-primary)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
                       >
-                        Print
+                        Pack
                       </button>
                     </div>
                   </div>
@@ -769,9 +930,43 @@ export default function PackCatalogPage(): React.JSX.Element {
       </BottomSheet>
 
       <BottomSheet
+        isOpen={rackPrintRow != null}
+        onClose={() => setRackPrintRow(null)}
+        title="Print rack label"
+      >
+        {rackPrintRow && (
+          <div className="space-y-4 px-4 pb-6">
+            <p className="text-sm font-semibold">{rackPrintRow.item.name}</p>
+            <p className="text-xs text-[var(--content-tertiary)]">
+              Rack <strong className="font-mono">{normalizeRackNo(rackPrintRow.item.rack_no) ?? '—'}</strong>{' '}
+              · {rackPrintRow.pickCode}
+            </p>
+            <p className="text-xs text-[var(--content-tertiary)]">
+              1.2″ rack strip with location, description, pick code, and bin QR (same as Label Studio
+              bin labels).
+            </p>
+            <label className="flex items-center gap-2 text-sm">
+              Labels to print
+              <input
+                type="number"
+                min={1}
+                max={99}
+                value={rackPrintCount}
+                onChange={(e) => setRackPrintCount(Math.max(1, Number(e.target.value) || 1))}
+                className="w-20 rounded-lg border px-2 py-1"
+              />
+            </label>
+            <BigButton onClick={() => void handleRackPrint()} disabled={rackPrinting}>
+              {rackPrinting ? 'Preparing…' : 'Print rack labels'}
+            </BigButton>
+          </div>
+        )}
+      </BottomSheet>
+
+      <BottomSheet
         isOpen={printRow != null}
         onClose={() => setPrintRow(null)}
-        title="Print labels"
+        title="Print pack labels"
       >
         {printRow && printRow.busyCode != null && (
           <div className="space-y-4 px-4 pb-6">

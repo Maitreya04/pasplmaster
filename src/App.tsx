@@ -33,6 +33,7 @@ const UploadPage = lazy(() => import('./pages/admin/UploadPage'));
 const LabelStudioPage = lazy(() => import('./pages/admin/LabelStudioPage'));
 const PackCatalogPage = lazy(() => import('./pages/admin/PackCatalogPage'));
 const ParetoLabelPrintPage = lazy(() => import('./pages/admin/ParetoLabelPrintPage'));
+const StockAuditLabelPrintPage = lazy(() => import('./pages/admin/StockAuditLabelPrintPage'));
 const CycleCountPage = lazy(() => import('./pages/admin/CycleCountPage'));
 const PickScanLabPage = lazy(() => import('./pages/admin/PickScanLabPage'));
 const OcrOrderLabPage = lazy(() => import('./pages/admin/OcrOrderLabPage'));
@@ -213,6 +214,16 @@ export default function App(): React.JSX.Element | null {
             <RequireRole>
               <RequireAdminUnlock>
                 <ParetoLabelPrintPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/stock-audit-labels"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <StockAuditLabelPrintPage />
               </RequireAdminUnlock>
             </RequireRole>
           }

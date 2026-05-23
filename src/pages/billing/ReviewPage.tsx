@@ -19,9 +19,10 @@ import {
   NumberStepper,
   BigButton,
   BottomSheet,
+  PickerAttributionChip,
 } from '../../components/shared';
 import type { OrderItem, PendingItem } from '../../types';
-import { formatCurrency, formatTimestamp } from '../../utils/formatters';
+import { formatCurrency, formatTimestamp, formatTimeAgo } from '../../utils/formatters';
 import { isFocOrderItem } from '../../lib/specialPricing';
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseStock';
@@ -330,6 +331,7 @@ export default function ReviewPage(): React.JSX.Element | null {
         const finalState = deriveFinalBillingLineState(item, pendingIds.has(item.id));
         const update: Record<string, unknown> = {
           qty_approved: finalState.qtyBilled,
+          qty_shippable: finalState.qtyBilled,
           qty_po: finalState.qtyPending,
         };
         // Allow billing to override price when resolving flags
@@ -732,6 +734,12 @@ export default function ReviewPage(): React.JSX.Element | null {
                   <div className="space-y-1">
                     <p className="text-sm font-semibold text-[var(--content-warning)]">
                       This order was flagged during picking
+                      {order.picker_name && (
+                        <span className="font-normal">
+                          {' '}
+                          by {order.picker_name}
+                        </span>
+                      )}
                     </p>
                     <p className="text-sm text-[var(--content-warning)]">
                       Review the flagged lines below, adjust prices/quantities if needed,
@@ -746,14 +754,35 @@ export default function ReviewPage(): React.JSX.Element | null {
             {pickingSummary &&
               (order.workflow_status === 'approved' ||
                 order.workflow_status === 'picking' ||
-                order.workflow_status === 'completed') && (
+                order.workflow_status === 'completed' ||
+                order.workflow_status === 'flagged') && (
                 <Card className="mb-6 lg:mb-8">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-[var(--content-primary)]">
-                        Picking progress
-                      </p>
-                      <p className="text-sm font-mono text-[var(--content-secondary)]">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[var(--content-primary)]">
+                          Picking progress
+                        </p>
+                        {order.workflow_status === 'approved' && (
+                          <p className="text-xs text-[var(--content-tertiary)] mt-0.5">
+                            Waiting for picker
+                          </p>
+                        )}
+                        {order.picker_name && order.workflow_status !== 'approved' && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                            <PickerAttributionChip
+                              name={order.picker_name}
+                              active={order.workflow_status === 'picking'}
+                            />
+                            {order.workflow_status === 'picking' && order.picked_at && (
+                              <span className="text-xs text-[var(--content-tertiary)]">
+                                since {formatTimeAgo(order.picked_at)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-sm font-mono text-[var(--content-secondary)] shrink-0">
                         {pickingSummary.done}/{pickingSummary.totalLines} items
                         done
                       </p>

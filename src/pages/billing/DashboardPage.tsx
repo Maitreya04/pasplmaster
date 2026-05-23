@@ -8,6 +8,8 @@ import {
   StatusBadge,
   EmptyState,
   Skeleton,
+  BillingApproverChip,
+  PickerAttributionChip,
 } from '../../components/shared';
 import { formatCurrency, formatTimeAgo } from '../../utils/formatters';
 import type { WorkflowStatus } from '../../types';
@@ -85,25 +87,6 @@ function StatCard({
   );
 }
 
-/** Matches StatusBadge “approved” so billing attribution reads as one system with workflow. */
-function BillingApproverChip({ name }: { name: string }): React.JSX.Element {
-  return (
-    <span
-      title={`Approved by ${name}`}
-      aria-label={`Approved by ${name}`}
-      className="
-        inline-flex items-center h-6 max-w-[11rem] sm:max-w-[14rem]
-        rounded-full border gap-1 pl-2.5 pr-3
-        text-xs font-semibold leading-none shrink-0
-        bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border-[var(--border-positive)]
-      "
-    >
-      <span className="opacity-80 font-medium">By</span>
-      <span className="font-bold truncate min-w-0">{name}</span>
-    </span>
-  );
-}
-
 function OrderCard({
   order,
   onTap,
@@ -134,8 +117,25 @@ function OrderCard({
             )}
             <StatusBadge status={order.workflow_status} />
             {order.reviewer_name && <BillingApproverChip name={order.reviewer_name} />}
+            {order.picker_name &&
+              (order.workflow_status === 'completed' ||
+                order.workflow_status === 'flagged') && (
+                <PickerAttributionChip name={order.picker_name} />
+              )}
           </div>
         </div>
+
+        {order.workflow_status === 'picking' && order.picker_name && (
+          <div className="text-xs px-2 py-1 rounded-md inline-flex w-max max-w-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] font-semibold">
+            Picking by {order.picker_name}
+            {order.picked_at && (
+              <span className="font-normal opacity-90">
+                {' '}
+                · since {formatTimeAgo(order.picked_at)}
+              </span>
+            )}
+          </div>
+        )}
 
         {order.workflow_status === 'submitted' && claim && (
           <div

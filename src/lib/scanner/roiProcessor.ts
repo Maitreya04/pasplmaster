@@ -1,4 +1,4 @@
-import { getViewfinderVideoCrop } from './viewfinderCrop';
+import { getViewfinderVideoCrop, type ViewfinderCropOptions } from './viewfinderCrop';
 
 export type RoiLevel = 'tight' | 'medium' | 'full';
 
@@ -59,13 +59,23 @@ export function getNextRoiLevel(_frameNumber: number): RoiLevel {
   return 'tight';
 }
 
+const DECODE_CROP_PADDING = 1.38;
+
 export async function captureViewfinderBitmap(
   video: HTMLVideoElement,
-  options: { maxLongEdge?: number; upscale?: number; viewfinderEl?: HTMLElement | null } = {},
+  options: {
+    maxLongEdge?: number;
+    upscale?: number;
+    viewfinderEl?: HTMLElement | null;
+    cropPadding?: number;
+  } = {},
 ): Promise<RoiBitmapCapture | null> {
   if (typeof createImageBitmap !== 'function') return null;
 
-  const sourceCrop = getViewfinderVideoCrop(video, options.viewfinderEl);
+  const cropOpts: ViewfinderCropOptions = {
+    paddingFactor: options.cropPadding ?? DECODE_CROP_PADDING,
+  };
+  const sourceCrop = getViewfinderVideoCrop(video, options.viewfinderEl, cropOpts);
   if (!sourceCrop) return null;
 
   const { width, height } = getTargetSize(sourceCrop, options.maxLongEdge ?? 1280, options.upscale ?? 1.85);
@@ -90,9 +100,17 @@ export function captureViewfinderImageData(
   video: HTMLVideoElement,
   canvas: HTMLCanvasElement,
   ctx: CanvasRenderingContext2D,
-  options: { maxLongEdge?: number; upscale?: number; viewfinderEl?: HTMLElement | null } = {},
+  options: {
+    maxLongEdge?: number;
+    upscale?: number;
+    viewfinderEl?: HTMLElement | null;
+    cropPadding?: number;
+  } = {},
 ): RoiImageDataCapture | null {
-  const sourceCrop = getViewfinderVideoCrop(video, options.viewfinderEl);
+  const cropOpts: ViewfinderCropOptions = {
+    paddingFactor: options.cropPadding ?? DECODE_CROP_PADDING,
+  };
+  const sourceCrop = getViewfinderVideoCrop(video, options.viewfinderEl, cropOpts);
   if (!sourceCrop) return null;
 
   const { width, height } = getTargetSize(sourceCrop, options.maxLongEdge ?? 1280, options.upscale ?? 1.85);
