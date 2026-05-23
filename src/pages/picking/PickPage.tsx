@@ -49,11 +49,9 @@ import {
   classifyScanPayload,
   parsePackPickPayload,
   parseLpnPickPayload,
-  productCodeMatchesExpected,
   rackCodesMatch,
 } from '../../lib/scanner/qrPayload';
 import { formatUomPickHint } from '../../lib/scanner/uomMapper';
-import { orderItemProductCode } from '../../utils/formatters';
 import {
   defaultPickItemTransitionAdapter,
   type PickItemTransition,
@@ -262,9 +260,10 @@ export default function PickPage(): React.JSX.Element | null {
     useState<PendingPackConfirmation | null>(null);
   const [manualQtyTargetItemId, setManualQtyTargetItemId] = useState<number | null>(null);
   const [manualQtyInput, setManualQtyInput] = useState('1');
-  const [manualCodeVerifyItemId, setManualCodeVerifyItemId] = useState<number | null>(null);
-  const [manualCodeInput, setManualCodeInput] = useState('');
-  const [manualCodeQtyInput, setManualCodeQtyInput] = useState('1');
+  const [engagedScanner, setEngagedScanner] = useState<{
+    itemId: number;
+    mode: 'rack' | 'item';
+  } | null>(null);
   const [showComplete, setShowComplete] = useState(false);
   const [scannerHint, setScannerHint] = useState<string | null>(null);
   const [lastScanMeta, setLastScanMeta] = useState<{
@@ -291,7 +290,6 @@ export default function PickPage(): React.JSX.Element | null {
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
   const [flagSheetOpen, setFlagSheetOpen] = useState(false);
   const [flagTargetItemId, setFlagTargetItemId] = useState<number | null>(null);
-  const [moreActionsItemId, setMoreActionsItemId] = useState<number | null>(null);
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const autoForwardCancelledRef = useRef(false);
   const [preferredPickLayer, setPreferredPickLayer] = useState<{
@@ -420,6 +418,28 @@ export default function PickPage(): React.JSX.Element | null {
   const safeCardIndex = deckItems.length > 0 ? wrapIndex(currentCardIndex, deckItems.length) : 0;
   const currentDeckItem = deckItems[safeCardIndex] ?? null;
   const currentTarget = currentDeckItem ?? orderedActive[0] ?? null;
+
+  useEffect(() => {
+    setEngagedScanner(null);
+  }, [safeCardIndex]);
+
+  useEffect(() => {
+    if (
+      flagSheetOpen ||
+      queueSheetOpen ||
+      manualQtyTargetItemId !== null ||
+      pendingPackConfirmation !== null ||
+      fifoOverrideSheet !== null
+    ) {
+      setEngagedScanner(null);
+    }
+  }, [
+    flagSheetOpen,
+    queueSheetOpen,
+    manualQtyTargetItemId,
+    pendingPackConfirmation,
+    fifoOverrideSheet,
+  ]);
 
   // Group the trip-summary view's racks by rack_no so the brief reads as a route,
   // not a list of items. Items without a rack go into a "—" group at the end.
@@ -804,22 +824,27 @@ export default function PickPage(): React.JSX.Element | null {
     },
   });
 
-  const openManualCodeVerify = useCallback(
-    (orderItem: OrderItem) => {
-      appHaptics.selection();
-      const local = localItems.get(orderItem.id);
-      const targetQty = pickQuantityTarget(orderItem);
-      const picked = Math.min(
-        targetQty,
-        getPickedQtyFromResult(local?.scanResult ?? orderItem.scan_result),
-      );
-      const remaining = Math.max(1, targetQty - picked);
-      setManualCodeVerifyItemId(orderItem.id);
-      setManualCodeInput('');
-      setManualCodeQtyInput(String(remaining));
+  const openManualQty = useCallback((orderItem: OrderItem) => {
+    appHaptics.selection();
+    const local = localItems.get(orderItem.id);
+    const targetQty = pickQuantityTarget(orderItem);
+    const picked = Math.min(
+      targetQty,
+      getPickedQtyFromResult(local?.scanResult ?? orderItem.scan_result),
+    );
+    const remaining = Math.max(1, targetQty - picked);
+    setManualQtyTargetItemId(orderItem.id);
+    setManualQtyInput(String(remaining));
+    setScannerHint(null);
+  }, [localItems]);
+
+  const engageScanner = useCallback(
+    (orderItem: OrderItem, mode: 'rack' | 'item') => {
+      appHaptics.impactMedium();
+      setEngagedScanner({ itemId: orderItem.id, mode });
       setScannerHint(null);
     },
-    [localItems],
+    [],
   );
 
   const revertLastPick = useCallback(async () => {
@@ -915,6 +940,7 @@ export default function PickPage(): React.JSX.Element | null {
         }
 
         markRackVerified(orderItem.id, 'scan');
+        setEngagedScanner({ itemId: orderItem.id, mode: 'item' });
         setScannerHint(null);
         return;
       }
@@ -1320,54 +1346,6 @@ export default function PickPage(): React.JSX.Element | null {
     ],
   );
 
-  const confirmManualCodeVerify = useCallback(() => {
-    if (manualCodeVerifyItemId === null) return;
-    const orderItem = order?.items.find((oi) => oi.id === manualCodeVerifyItemId);
-    if (!orderItem) return;
-
-    const entered = manualCodeInput.trim();
-    if (!entered) {
-      toast.error('Enter the product code printed on the box');
-      return;
-    }
-
-    const expectedCodes = [
-      orderItem.catalog_alias1,
-      orderItem.catalog_alias,
-      orderItem.item_alias,
-      orderItemProductCode(orderItem),
-    ];
-    if (!productCodeMatchesExpected(entered, expectedCodes)) {
-      appHaptics.warning();
-      toast.error('Product code does not match this line. Check the label and try again.');
-      return;
-    }
-
-    const parsedQty = Number(manualCodeQtyInput);
-    if (!Number.isFinite(parsedQty) || parsedQty <= 0) {
-      toast.error('Enter a valid quantity');
-      return;
-    }
-
-    const itemId = manualCodeVerifyItemId;
-    setManualCodeVerifyItemId(null);
-    setManualCodeInput('');
-    setManualCodeQtyInput('1');
-    if (!rackVerifiedIds.has(itemId)) {
-      markRackVerified(itemId, 'override');
-    }
-    void applyPickedQty(itemId, Math.floor(parsedQty), { verifiedProductCode: entered });
-  }, [
-    applyPickedQty,
-    manualCodeInput,
-    manualCodeQtyInput,
-    manualCodeVerifyItemId,
-    markRackVerified,
-    order?.items,
-    rackVerifiedIds,
-    toast,
-  ]);
-
   const confirmFifoOverride = useCallback(async () => {
     const sheet = fifoOverrideSheet;
     if (!sheet || fifoOverrideReason.trim().length < 3) {
@@ -1441,46 +1419,6 @@ export default function PickPage(): React.JSX.Element | null {
     updateLocalItem,
     userId,
   ]);
-
-  const handlePick = useCallback(
-    (itemId: number) => {
-      void applyPickedQty(itemId, 1);
-    },
-    [applyPickedQty],
-  );
-
-  const handleOverride = useCallback(
-    (itemId: number) => {
-      appHaptics.impactMedium();
-      updateLocalItem(itemId, { uiState: 'overridden' });
-      const local = localItems.get(itemId);
-      const manualScanResult: ScanResult = local?.scanResult ?? {
-        scannedText: 'MANUAL_OVERRIDE',
-        confidence: 70,
-        isMatch: false,
-        matchedAgainst: 'manual',
-        matchStrategy: 'manual_override',
-        ocrExtracted: { partNumber: null, mrp: null },
-        method: 'manual',
-        timestamp: new Date().toISOString(),
-        reason: 'Picker override after scan mismatch',
-        operatorContext: {
-          pickerName: userName,
-          pickerUserId: userId,
-          source: 'manual',
-        },
-      };
-      itemTransitionMutation.mutate({
-        transition: {
-          kind: 'picked',
-          itemId,
-          scanResult: manualScanResult,
-        },
-        optimisticState: 'overridden',
-      });
-    },
-    [updateLocalItem, itemTransitionMutation, localItems, userId, userName],
-  );
 
   const handleFlagSubmit = useCallback(
     (payload: FlagSubmitPayload) => {
@@ -1599,11 +1537,9 @@ export default function PickPage(): React.JSX.Element | null {
   const scannerPaused =
     flagSheetOpen ||
     queueSheetOpen ||
-    manualCodeVerifyItemId !== null ||
     manualQtyTargetItemId !== null ||
     pendingPackConfirmation !== null ||
-    fifoOverrideSheet !== null ||
-    moreActionsItemId !== null;
+    fifoOverrideSheet !== null;
 
   return (
     <div className="min-h-screen pb-32">
@@ -1737,7 +1673,7 @@ export default function PickPage(): React.JSX.Element | null {
         ) : deckItems.length > 0 ? (
           <div className="space-y-3">
             <p className="text-center text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-              Swipe for next · Swipe up for list · Swipe down to report issue
+              Swipe › next · ↑ queue · ↓ flag
             </p>
             <SwipeDeck
               currentIndex={safeCardIndex}
@@ -1794,32 +1730,34 @@ export default function PickPage(): React.JSX.Element | null {
                           ? preferredPickLayer.layerId
                           : null
                       }
+                      cameraEngaged={
+                        engagedScanner?.itemId === pi.orderItem.id &&
+                        !scannerPaused
+                      }
                       onRackTap={() => {
                         if (!rackVerifiedIds.has(pi.orderItem.id)) {
-                          openManualCodeVerify(pi.orderItem);
+                          markRackVerified(pi.orderItem.id, 'override');
                         }
                       }}
-                      onReportIssue={() => openFlagSheet(pi.orderItem.id)}
                       onScanResolved={
                         rackVerified
                           ? makeEmbeddedScanHandler(pi.orderItem, 'item')
                           : makeEmbeddedScanHandler(pi.orderItem, 'rack')
                       }
-                      onManualVerify={() => openManualCodeVerify(pi.orderItem)}
-                      onPickOne={() => handlePick(pi.orderItem.id)}
-                      onEnterQty={() => {
-                        setManualQtyTargetItemId(pi.orderItem.id);
-                        setManualQtyInput('1');
-                      }}
-                      onOverride={() => handleOverride(pi.orderItem.id)}
-                      onScanRack={() => {}}
+                      onManualQty={() => openManualQty(pi.orderItem)}
+                      onFlag={() => openFlagSheet(pi.orderItem.id)}
+                      onEngageScanner={() =>
+                        engageScanner(
+                          pi.orderItem,
+                          rackVerified ? 'item' : 'rack',
+                        )
+                      }
                       onSelectLayer={(layerId) =>
                         setPreferredPickLayer({
                           orderItemId: pi.orderItem.id,
                           layerId,
                         })
                       }
-                      onMoreActions={() => setMoreActionsItemId(pi.orderItem.id)}
                     />
                   </div>
                 );
@@ -1931,29 +1869,6 @@ export default function PickPage(): React.JSX.Element | null {
       />
 
       <BottomSheet
-        isOpen={moreActionsItemId !== null}
-        onClose={() => setMoreActionsItemId(null)}
-        title="More actions"
-      >
-        {moreActionsItemId !== null && (
-          <div className="space-y-2">
-            <BigButton
-              variant="secondary"
-              onClick={() => {
-                openManualCodeVerify(
-                  order!.items.find((i) => i.id === moreActionsItemId)!,
-                );
-                setMoreActionsItemId(null);
-              }}
-              className="w-full"
-            >
-              Verify by product code
-            </BigButton>
-          </div>
-        )}
-      </BottomSheet>
-
-      <BottomSheet
         isOpen={fifoOverrideSheet !== null}
         onClose={() => {
           setFifoOverrideSheet(null);
@@ -2038,98 +1953,14 @@ export default function PickPage(): React.JSX.Element | null {
       </BottomSheet>
 
       <BottomSheet
-        isOpen={manualCodeVerifyItemId !== null}
-        onClose={() => {
-          setManualCodeVerifyItemId(null);
-          setManualCodeInput('');
-          setManualCodeQtyInput('1');
-        }}
-        title="Verify product code"
-      >
-        {manualCodeVerifyItemId !== null && (() => {
-          const verifyItem = order?.items.find((oi) => oi.id === manualCodeVerifyItemId);
-          if (!verifyItem) return null;
-          const expectedCode = orderItemProductCode(verifyItem);
-          const verifyTargetQty = pickQuantityTarget(verifyItem);
-          const verifyPicked = Math.min(
-            verifyTargetQty,
-            getPickedQtyFromResult(
-              localItems.get(verifyItem.id)?.scanResult ?? verifyItem.scan_result,
-            ),
-          );
-          const verifyRemaining = Math.max(0, verifyTargetQty - verifyPicked);
-          return (
-            <div className="space-y-4">
-              <p className="text-sm text-[var(--content-secondary)]">
-                Type the product code printed on the box label, then enter how many you picked.
-              </p>
-              {expectedCode ? (
-                <div className="rounded-xl border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-3 py-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-accent)]">
-                    Expected code
-                  </p>
-                  <p className="font-mono text-base font-bold text-[var(--content-primary)] break-all">
-                    {expectedCode}
-                  </p>
-                </div>
-              ) : null}
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-[var(--content-secondary)]">
-                  Product code on box
-                </label>
-                <input
-                  type="text"
-                  inputMode="text"
-                  autoCapitalize="characters"
-                  autoComplete="off"
-                  value={manualCodeInput}
-                  onChange={(e) => setManualCodeInput(e.target.value)}
-                  placeholder="Enter printed code"
-                  className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3 font-mono text-[var(--content-primary)]"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-[var(--content-secondary)]">
-                  Quantity picked
-                  {verifyRemaining > 0 ? (
-                    <span className="text-[var(--content-tertiary)] font-normal">
-                      {' '}
-                      ({verifyRemaining} remaining)
-                    </span>
-                  ) : null}
-                </label>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  step={1}
-                  value={manualCodeQtyInput}
-                  onChange={(e) => setManualCodeQtyInput(e.target.value)}
-                  className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3 text-[var(--content-primary)]"
-                />
-              </div>
-              <BigButton
-                variant="primary"
-                onClick={confirmManualCodeVerify}
-                disabled={!manualCodeInput.trim()}
-                className="bg-[var(--bg-accent)] text-[var(--content-on-color)]"
-              >
-                Verify &amp; apply qty
-              </BigButton>
-            </div>
-          );
-        })()}
-      </BottomSheet>
-
-      <BottomSheet
         isOpen={manualQtyTargetItemId !== null}
         onClose={() => setManualQtyTargetItemId(null)}
-        title="Enter Picked Qty"
+        title="Manual qty"
       >
         {manualQtyTargetItemId !== null && (
           <div className="space-y-4">
             <p className="text-sm text-[var(--content-secondary)]">
-              For bulk lines without inner packs, enter the quantity picked in this action.
+              Enter how many pieces you picked for this line. No need to re-type the product code.
             </p>
             <input
               type="number"
@@ -2139,7 +1970,7 @@ export default function PickPage(): React.JSX.Element | null {
               value={manualQtyInput}
               onChange={(e) => setManualQtyInput(e.target.value)}
               className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3 text-[var(--content-primary)]"
-              placeholder="Enter qty"
+              placeholder="Quantity"
             />
             <BigButton
               variant="primary"
@@ -2149,13 +1980,17 @@ export default function PickPage(): React.JSX.Element | null {
                   toast.error('Enter a valid quantity');
                   return;
                 }
-                void applyPickedQty(manualQtyTargetItemId, Math.floor(parsed));
+                const itemId = manualQtyTargetItemId;
+                if (!rackVerifiedIds.has(itemId)) {
+                  markRackVerified(itemId, 'override');
+                }
+                void applyPickedQty(itemId, Math.floor(parsed));
                 setManualQtyTargetItemId(null);
                 setManualQtyInput('1');
               }}
               className="bg-[var(--bg-accent)] text-[var(--content-on-color)]"
             >
-              Apply Picked Qty
+              Apply qty
             </BigButton>
           </div>
         )}

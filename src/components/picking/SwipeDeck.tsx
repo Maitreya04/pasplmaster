@@ -5,6 +5,8 @@ const VELOCITY_THRESHOLD = 0.45;
 const VERTICAL_DOMINANCE = 1.4;
 const VERTICAL_MIN_PX = 12;
 const VERTICAL_OPEN_PX = 48;
+const EDGE_RUBBER_BAND = 0.32;
+const SNAP_MS = 320;
 
 interface SwipeDeckProps {
   currentIndex: number;
@@ -34,6 +36,17 @@ export function SwipeDeck({
 
   const width = viewportWidth || containerRef.current?.clientWidth || 320;
 
+  const rubberBand = useCallback(
+    (deltaX: number) => {
+      const atStart = currentIndex <= 0;
+      const atEnd = currentIndex >= itemCount - 1;
+      if (atStart && deltaX > 0) return deltaX * EDGE_RUBBER_BAND;
+      if (atEnd && deltaX < 0) return deltaX * EDGE_RUBBER_BAND;
+      return deltaX;
+    },
+    [currentIndex, itemCount],
+  );
+
   const snapTo = useCallback(
     (nextIndex: number) => {
       if (itemCount <= 0) return;
@@ -41,7 +54,7 @@ export function SwipeDeck({
       setAnimating(true);
       setDragOffset(0);
       onIndexChange(wrapped);
-      window.setTimeout(() => setAnimating(false), 280);
+      window.setTimeout(() => setAnimating(false), SNAP_MS);
     },
     [itemCount, onIndexChange],
   );
@@ -66,7 +79,10 @@ export function SwipeDeck({
 
     if (gestureRef.current === 'none') {
       if (Math.abs(deltaX) < 8 && Math.abs(deltaY) < 8) return;
-      if (Math.abs(deltaY) > Math.abs(deltaX) * VERTICAL_DOMINANCE && Math.abs(deltaY) > VERTICAL_MIN_PX) {
+      if (
+        Math.abs(deltaY) > Math.abs(deltaX) * VERTICAL_DOMINANCE &&
+        Math.abs(deltaY) > VERTICAL_MIN_PX
+      ) {
         gestureRef.current = 'vertical';
         return;
       }
@@ -76,7 +92,7 @@ export function SwipeDeck({
     }
 
     if (gestureRef.current === 'horizontal') {
-      setDragOffset(deltaX);
+      setDragOffset(rubberBand(deltaX));
     }
   };
 
@@ -92,14 +108,26 @@ export function SwipeDeck({
       else if (deltaY > VERTICAL_OPEN_PX) onSwipeDown?.();
     } else if (gestureRef.current === 'horizontal') {
       const threshold = width * SWIPE_THRESHOLD_RATIO;
+      const atStart = currentIndex <= 0;
+      const atEnd = currentIndex >= itemCount - 1;
       if (deltaX < -threshold || (velocity > VELOCITY_THRESHOLD && deltaX < 0)) {
-        snapTo(currentIndex + 1);
+        if (!atEnd) snapTo(currentIndex + 1);
+        else {
+          setAnimating(true);
+          setDragOffset(0);
+          window.setTimeout(() => setAnimating(false), SNAP_MS);
+        }
       } else if (deltaX > threshold || (velocity > VELOCITY_THRESHOLD && deltaX > 0)) {
-        snapTo(currentIndex - 1);
+        if (!atStart) snapTo(currentIndex - 1);
+        else {
+          setAnimating(true);
+          setDragOffset(0);
+          window.setTimeout(() => setAnimating(false), SNAP_MS);
+        }
       } else {
         setAnimating(true);
         setDragOffset(0);
-        window.setTimeout(() => setAnimating(false), 280);
+        window.setTimeout(() => setAnimating(false), SNAP_MS);
       }
     }
 
@@ -113,7 +141,7 @@ export function SwipeDeck({
   return (
     <div
       ref={containerRef}
-      className="relative overflow-hidden touch-pan-y"
+      className="relative touch-pan-y select-none"
       style={{ height: 'min(72vh, 640px)' }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -121,10 +149,12 @@ export function SwipeDeck({
       onPointerCancel={handlePointerUp}
     >
       <div
-        className="flex h-full"
+        className="flex h-full will-change-transform"
         style={{
           transform: `translate3d(${trackOffset}px, 0, 0)`,
-          transition: animating ? 'transform 280ms cubic-bezier(0.23, 1, 0.32, 1)' : 'none',
+          transition: animating
+            ? `transform ${SNAP_MS}ms cubic-bezier(0.23, 1, 0.32, 1)`
+            : 'none',
         }}
       >
         {Children.map(children, (child) => (
@@ -134,13 +164,13 @@ export function SwipeDeck({
         ))}
       </div>
       {itemCount > 1 && (
-        <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
+        <div className="pointer-events-none absolute bottom-2 left-0 right-0 flex justify-center gap-1">
           {Array.from({ length: Math.min(itemCount, 12) }).map((_, i) => {
             const dotIndex = itemCount <= 12 ? i : Math.floor((i / 12) * itemCount);
             return (
               <span
                 key={dotIndex}
-                className={`h-1.5 rounded-full transition-all ${
+                className={`h-1.5 rounded-full transition-all duration-300 ${
                   dotIndex === currentIndex
                     ? 'w-4 bg-[var(--role-primary)]'
                     : 'w-1.5 bg-[var(--border-opaque)]'

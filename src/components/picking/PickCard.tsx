@@ -1,15 +1,9 @@
-import {
-  Camera,
-  DotsThree,
-  Hash,
-  HandTap,
-  Warning,
-} from '@phosphor-icons/react';
 import type { OrderItem, ScanResult } from '../../types';
 import type { ItemPackDefinition } from '../../lib/packLpn';
 import type { BinPickerShelfLayer } from '../../types';
 import { CardHero, type CardPhase } from './CardHero';
 import { EmbeddedScanner } from './EmbeddedScanner';
+import { PickCardCTAs } from './PickCardCTAs';
 import type { LiveQrScannerResolved } from '../shared/LiveQrScanner';
 
 export interface PickCardProps {
@@ -25,20 +19,17 @@ export interface PickCardProps {
   positionLabel?: string;
   flagReason?: string | null;
   scannerPaused?: boolean;
+  cameraEngaged?: boolean;
   packDef?: ItemPackDefinition | null;
   shelfLayers?: BinPickerShelfLayer[] | null;
   shelfLoading?: boolean;
   preferredLayerId?: number | null;
   onRackTap?: () => void;
-  onReportIssue?: () => void;
   onScanResolved: (scan: LiveQrScannerResolved) => void;
-  onManualVerify?: () => void;
-  onPickOne?: () => void;
-  onEnterQty?: () => void;
-  onOverride?: () => void;
-  onScanRack?: () => void;
+  onManualQty?: () => void;
+  onFlag?: () => void;
+  onEngageScanner?: () => void;
   onSelectLayer?: (layerId: number) => void;
-  onMoreActions?: () => void;
 }
 
 export function PickCard({
@@ -52,19 +43,16 @@ export function PickCard({
   positionLabel,
   flagReason,
   scannerPaused = false,
+  cameraEngaged = false,
   shelfLayers,
   shelfLoading,
   preferredLayerId,
   onRackTap,
-  onReportIssue,
   onScanResolved,
-  onManualVerify,
-  onPickOne,
-  onEnterQty,
-  onOverride,
-  onScanRack,
+  onManualQty,
+  onFlag,
+  onEngageScanner,
   onSelectLayer,
-  onMoreActions,
 }: PickCardProps): React.JSX.Element {
   const isDone = uiState === 'picked' || uiState === 'flagged' || uiState === 'overridden';
   const isAwaitingRack = !rackVerified && !isDone;
@@ -85,13 +73,17 @@ export function PickCard({
           ? 'awaiting_rack'
           : 'verified';
 
+  const scannerMode = isAwaitingRack ? 'rack' : 'item';
+  const scanLabel = isAwaitingRack ? 'Scan bin' : 'Scan item';
+  const scannerLive = isCurrent && !scannerPaused && cameraEngaged;
+
   return (
     <div
       className={`flex h-full flex-col overflow-hidden rounded-3xl border-[1.5px] bg-[var(--bg-secondary)] shadow-sm transition-opacity ${
         isDone ? 'opacity-70 border-[var(--border-subtle)]' : 'border-[var(--border-subtle)]'
       } ${isCelebrating ? 'animate-pick-celebrate ring-2 ring-[var(--border-positive)]' : ''}`}
     >
-      <div className="flex-[11] min-h-0 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <CardHero
           rackNo={orderItem.rack_no}
           partNo={partNo}
@@ -102,13 +94,12 @@ export function PickCard({
           flagReason={flagReason}
           positionLabel={positionLabel}
           onRackTap={onRackTap}
-          onReportIssue={onReportIssue}
           isFlagged={uiState === 'flagged'}
         />
 
         {isVerified && shelfLayers && shelfLayers.length > 0 && (
           <div className="px-4 pb-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mb-1">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
               Shelf batches
             </p>
             <ul className="flex gap-1.5 overflow-x-auto pb-1">
@@ -117,7 +108,7 @@ export function PickCard({
                   <button
                     type="button"
                     onClick={() => onSelectLayer?.(layer.id)}
-                    className={`rounded-lg px-2 py-1 text-xs font-mono whitespace-nowrap ${
+                    className={`whitespace-nowrap rounded-lg px-2 py-1 font-mono text-xs ${
                       preferredLayerId === layer.id
                         ? 'bg-[var(--bg-accent-subtle)] ring-1 ring-[var(--role-primary)]'
                         : 'bg-[var(--bg-tertiary)]'
@@ -133,84 +124,38 @@ export function PickCard({
         {isVerified && shelfLoading && (
           <p className="px-4 pb-2 text-xs text-[var(--content-tertiary)]">Loading shelf…</p>
         )}
-
-        {isVerified && !isDone && (
-          <div className="px-4 pb-2 flex gap-1.5">
-            <button
-              type="button"
-              onClick={onPickOne}
-              className="flex-1 h-10 rounded-xl bg-[var(--bg-tertiary)] text-xs font-medium text-[var(--content-secondary)] pick-pressable inline-flex items-center justify-center gap-1"
-            >
-              <HandTap size={14} weight="bold" />
-              +1
-            </button>
-            <button
-              type="button"
-              onClick={onEnterQty}
-              className="flex-1 h-10 rounded-xl bg-[var(--bg-accent-subtle)] text-xs font-medium text-[var(--content-accent)] pick-pressable inline-flex items-center justify-center gap-1"
-            >
-              <Hash size={14} weight="bold" />
-              Qty
-            </button>
-            <button
-              type="button"
-              onClick={onOverride}
-              className="flex-1 h-10 rounded-xl bg-[var(--bg-warning-subtle)] text-xs font-medium text-[var(--content-warning)] pick-pressable inline-flex items-center justify-center gap-1"
-            >
-              <Warning size={14} weight="bold" />
-              Override
-            </button>
-            <button
-              type="button"
-              onClick={onMoreActions}
-              className="h-10 w-10 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-secondary)] pick-pressable inline-flex items-center justify-center"
-              aria-label="More actions"
-            >
-              <DotsThree size={18} weight="bold" />
-            </button>
-          </div>
-        )}
       </div>
 
-      <div className="flex-[9] min-h-[180px] border-t border-[var(--border-faint)]">
+      <div className="min-h-[140px] shrink-0 border-t border-[var(--border-faint)]">
         {isDone ? (
-          <div className="flex h-full items-center justify-center p-4 text-center">
+          <div className="flex h-full min-h-[140px] items-center justify-center p-4 text-center">
             <p className="text-sm text-[var(--content-tertiary)]">
               {uiState === 'flagged' ? 'Sent to billing for review' : 'Line complete'}
             </p>
           </div>
-        ) : isAwaitingRack ? (
-          <div className="flex h-full flex-col p-3 gap-2">
-            <button
-              type="button"
-              onClick={onScanRack}
-              className="flex-1 rounded-2xl bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)] font-semibold text-sm pick-pressable inline-flex items-center justify-center gap-2"
-            >
-              <Camera size={20} weight="bold" />
-              Scan bin label
-            </button>
-            <EmbeddedScanner
-              active={isCurrent && !scannerPaused}
-              orderItem={orderItem}
-              scannerMode="rack"
-              pickedSoFar={0}
-              targetQty={1}
-              onResolved={onScanResolved}
-              onManualVerify={onManualVerify}
-            />
-          </div>
         ) : (
           <EmbeddedScanner
             active={isCurrent && !scannerPaused}
+            cameraEngaged={scannerLive}
             orderItem={orderItem}
-            scannerMode="item"
-            pickedSoFar={pickedQty}
-            targetQty={targetQty}
+            scannerMode={scannerMode}
+            pickedSoFar={isAwaitingRack ? 0 : pickedQty}
+            targetQty={isAwaitingRack ? 1 : targetQty}
             onResolved={onScanResolved}
-            onManualVerify={onManualVerify}
           />
         )}
       </div>
+
+      {!isDone && (
+        <PickCardCTAs
+          scanLabel={scanLabel}
+          cameraEngaged={scannerLive}
+          disabled={!isCurrent || scannerPaused}
+          onManualQty={() => onManualQty?.()}
+          onFlag={() => onFlag?.()}
+          onScan={() => onEngageScanner?.()}
+        />
+      )}
     </div>
   );
 }

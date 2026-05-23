@@ -1,4 +1,4 @@
-import { Check, Flag, MapPin } from '@phosphor-icons/react';
+import { Check, MapPin } from '@phosphor-icons/react';
 import { ProgressBar } from '../shared';
 
 export type CardPhase = 'awaiting_rack' | 'verified' | 'picked' | 'flagged' | 'overridden' | 'celebrating';
@@ -13,7 +13,6 @@ export interface CardHeroProps {
   flagReason?: string | null;
   positionLabel?: string;
   onRackTap?: () => void;
-  onReportIssue?: () => void;
   isFlagged?: boolean;
 }
 
@@ -27,7 +26,6 @@ export function CardHero({
   flagReason,
   positionLabel,
   onRackTap,
-  onReportIssue,
   isFlagged = false,
 }: CardHeroProps): React.JSX.Element {
   const isAwaitingRack = phase === 'awaiting_rack';
@@ -54,20 +52,10 @@ export function CardHero({
             {positionLabel}
           </span>
         )}
-        {isFlagged ? (
+        {isFlagged && (
           <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-[var(--bg-negative-subtle)] px-2.5 py-1 text-[10px] font-semibold text-[var(--content-negative)]">
-            <Flag size={12} weight="fill" />
             Flagged
           </span>
-        ) : (
-          <button
-            type="button"
-            onClick={onReportIssue}
-            className="ml-auto inline-flex items-center gap-1 rounded-full bg-[var(--bg-warning-subtle)] px-2.5 py-1 text-[10px] font-semibold text-[var(--content-warning-on-light)] pick-pressable"
-          >
-            <Flag size={12} weight="fill" />
-            Report issue
-          </button>
         )}
       </div>
 
@@ -82,7 +70,7 @@ export function CardHero({
               ? 'bg-[var(--bg-positive-subtle)] border-2 border-[var(--border-positive)]'
               : 'bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] opacity-80'
         }`}
-        aria-label={isAwaitingRack ? 'Walk to rack. Tap if label missing.' : 'Verified rack'}
+        aria-label={isAwaitingRack ? 'Confirm you are at this rack' : 'Verified rack'}
       >
         <div className="flex items-center gap-2">
           <MapPin
@@ -106,7 +94,7 @@ export function CardHero({
         </p>
         {isAwaitingRack && (
           <p className="text-[11px] text-[var(--content-tertiary)] mt-1">
-            Tap if bin label is missing
+            Tap when you&apos;re at this rack (no label to scan)
           </p>
         )}
       </button>
