@@ -15,6 +15,8 @@ export { AliasChip } from './AliasChip.tsx';
 export { BillingApproverChip, PickerAttributionChip } from './AttributionChips.tsx';
 export { QueueDayTag } from './QueueDayTag.tsx';
 export { ProgressBar } from './ProgressBar.tsx';
+export { QueueSectionHeader } from './QueueSectionHeader.tsx';
+export { InitialsAvatar } from './InitialsAvatar.tsx';
 export { SelectTrigger } from './SelectTrigger.tsx';
 export { LiveQrScanner } from './LiveQrScanner.tsx';
 export { SalespersonSelectorSheet } from './SalespersonSelectorSheet.tsx';

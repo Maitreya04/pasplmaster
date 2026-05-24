@@ -19,20 +19,38 @@ import { ITEMS_QUERY_KEY } from '../hooks/useItems';
  * one-time snapshot — payloads shrink by ~40–60% with zero UI regression.
  */
 export const ORDERS_SELECT_WITH_ITEM_LINE_COUNT =
-  '*, order_items(item_id,price_quoted,price_system,qty_requested,qty_shippable,qty_po,qty_approved,item_name)' as const;
+  '*, order_items(item_id,price_quoted,price_system,qty_requested,qty_shippable,qty_po,qty_approved,item_name,state,rack_no)' as const;
+
+export type OrderItemEmbedRow = {
+  item_id?: number | null;
+  price_quoted?: number | null;
+  price_system?: number | null;
+  qty_requested?: number;
+  qty_shippable?: number;
+  qty_po?: number;
+  qty_approved?: number | null;
+  item_name?: string | null;
+  state?: string | null;
+  rack_no?: string | null;
+};
+
+export type OrderItemsPreview = {
+  item_name: string | null;
+  state: string;
+  rack_no: string | null;
+}[];
 
 export type OrderRowWithEmbed = Order & {
-  order_items?: {
-    item_id?: number | null;
-    price_quoted?: number | null;
-    price_system?: number | null;
-    qty_requested?: number;
-    qty_shippable?: number;
-    qty_po?: number;
-    qty_approved?: number | null;
-    item_name?: string | null;
-  }[] | null;
+  order_items?: OrderItemEmbedRow[] | null;
 };
+
+function buildOrderItemsPreview(embed: OrderItemEmbedRow[] | null | undefined): OrderItemsPreview {
+  return (embed ?? []).map((item) => ({
+    item_name: item.item_name ?? null,
+    state: item.state ?? 'pending',
+    rack_no: item.rack_no ?? null,
+  }));
+}
 
 function lookupCatalogGroups(itemId: number | null | undefined): {
   main_group: string | null;
@@ -63,6 +81,7 @@ function lookupCatalogGroups(itemId: number | null | undefined): {
 export function normalizeOrderBusyItemCount(row: OrderRowWithEmbed): Order & {
   special_rate_line_count: number;
   special_rate_qty: number;
+  order_items_preview: OrderItemsPreview;
 } {
   const { order_items: embed, ...rest } = row;
   const liveLineCount = embed?.length ?? rest.item_count;
@@ -98,6 +117,7 @@ export function normalizeOrderBusyItemCount(row: OrderRowWithEmbed): Order & {
     lucas_line_count: lucasLineCount,
     special_rate_line_count: specialLineCount,
     special_rate_qty: specialQty,
+    order_items_preview: buildOrderItemsPreview(embed),
   };
 }
 
@@ -110,7 +130,11 @@ export function normalizeOrderBusyItemCount(row: OrderRowWithEmbed): Order & {
  */
 export function normalizeOrderListBusyItemCount(
   rows: OrderRowWithEmbed[],
-): (Order & { special_rate_line_count: number; special_rate_qty: number })[] {
+): (Order & {
+  special_rate_line_count: number;
+  special_rate_qty: number;
+  order_items_preview: OrderItemsPreview;
+})[] {
   const items = queryClient.getQueryData<Item[]>(ITEMS_QUERY_KEY);
   const byId = new Map<number, { main_group: string | null; parent_group: string | null }>();
   if (items) {
@@ -161,6 +185,7 @@ export function normalizeOrderListBusyItemCount(
       lucas_line_count: lucasLineCount,
       special_rate_line_count: specialLineCount,
       special_rate_qty: specialQty,
+      order_items_preview: buildOrderItemsPreview(embed),
     };
   });
 }

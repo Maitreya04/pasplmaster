@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
   normalizeOrderListBusyItemCount,
+  type OrderItemsPreview,
   type OrderRowWithEmbed,
 } from '../lib/orderItemCount';
 import { subscribeToTable } from '../lib/realtime';
@@ -65,6 +66,8 @@ export interface OrderWithClaimInfo extends Order {
   special_rate_line_count: number;
   /** Total units carrying a special rate. */
   special_rate_qty: number;
+  /** Lightweight line preview for queue cards (legacy fetch only). */
+  order_items_preview?: OrderItemsPreview;
 }
 
 interface UseClaimableOrdersReturn {
@@ -148,6 +151,29 @@ function isPickQueueEligible(order: Order): boolean {
   if (order.fulfillment_path === 'direct_bill') return false;
   if (order.stock_location_code === 'jabalpur') return false;
   return true;
+}
+
+type PickQueueBucket = 'available' | 'myActive' | 'otherActive' | 'stale';
+
+/** Bucket a pick-queue row — hide in-progress picks from other pickers' available list. */
+function categorizePickQueueOrder(
+  order: OrderWithClaimInfo,
+  userName: string | null,
+): PickQueueBucket {
+  const claim = order.claim_info;
+
+  if (claim?.is_stale) return 'stale';
+  if (claim && order.is_mine) return 'myActive';
+  if (claim && !order.is_mine) return 'otherActive';
+
+  // Claim row not loaded yet — trust workflow_status + picker_name.
+  if (order.workflow_status === 'picking') {
+    if (userName != null && order.picker_name === userName) return 'myActive';
+    return 'otherActive';
+  }
+  if (order.workflow_status === 'approved') return 'available';
+
+  return 'otherActive';
 }
 
 async function fetchLegacyClaimableOrders(
@@ -320,6 +346,7 @@ async function fetchBillingQueueSnapshot(
       ask_line_count: Number(row.ask_line_count ?? 0),
       special_rate_line_count: Number(row.special_rate_line_count ?? 0),
       special_rate_qty: Number(row.special_rate_qty ?? 0),
+      order_items_preview: [],
       total_value: Number(row.total_value ?? 0),
       created_at: row.created_at,
       approved_at: row.approved_at,
@@ -342,7 +369,7 @@ async function fetchBillingQueueSnapshot(
 export function useClaimableOrders(
   options: ClaimableOrdersOptions,
 ): UseClaimableOrdersReturn {
-  const { userId } = useAuth();
+  const { userId, userName } = useAuth();
   const { stage, workflowStatus, todayOnly } = options;
   const [billingSnapshotFailed, setBillingSnapshotFailed] = useState(false);
   const [billingRealtimeStatus, setBillingRealtimeStatus] =
@@ -556,9 +583,21 @@ export function useClaimableOrders(
       onReconnect: invalidateNow,
     });
 
+    const unsubClaims =
+      stage === 'picking'
+        ? subscribeToTable({
+            channelName: `claimable-orders-claims:${statusKey}:${todayOnly ?? false}`,
+            table: 'work_claims',
+            filter: 'stage=eq.picking',
+            onChange: scheduleInvalidate,
+            onReconnect: invalidateNow,
+          })
+        : null;
+
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       unsubOrders();
+      unsubClaims?.();
     };
   }, [
     billingEventsEnabled,
@@ -582,6 +621,24 @@ export function useClaimableOrders(
     const salesLocked: OrderWithClaimInfo[] = [];
 
     for (const order of all) {
+      if (stage === 'picking') {
+        switch (categorizePickQueueOrder(order, userName)) {
+          case 'myActive':
+            myActive.push(order);
+            break;
+          case 'stale':
+            stale.push(order);
+            break;
+          case 'otherActive':
+            otherActive.push(order);
+            break;
+          case 'available':
+            available.push(order);
+            break;
+        }
+        continue;
+      }
+
       const billing = order.claim_info;
       const se = order.sales_edit_claim_info;
       const freshSalesLock = Boolean(se && !se.is_stale);
@@ -600,7 +657,7 @@ export function useClaimableOrders(
     }
 
     return { available, myActive, otherActive, stale, salesLocked, all };
-  }, [result.data]);
+  }, [result.data, stage, userName]);
 
   return {
     ...categorized,

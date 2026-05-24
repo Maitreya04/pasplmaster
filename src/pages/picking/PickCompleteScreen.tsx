@@ -1,10 +1,13 @@
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle, Warning, Flag, ArrowRight } from '@phosphor-icons/react';
 import { BigButton } from '../../components/shared';
+import { formatLineCountLabel } from '../../lib/picking/pickQueueDisplay';
 
 interface PickCompleteScreenProps {
   orderNumber: string;
   customerName: string;
+  customerCity?: string | null;
+  transportName?: string | null;
   pickedLineCount: number;
   flaggedLineCount: number;
   totalLineCount: number;
@@ -15,15 +18,15 @@ interface PickCompleteScreenProps {
 export function PickCompleteScreen({
   orderNumber,
   customerName,
+  customerCity,
+  transportName,
   pickedLineCount,
   flaggedLineCount,
-  totalLineCount,
   pickedPieceCount,
   totalPieceCount,
 }: PickCompleteScreenProps): React.JSX.Element | null {
   const navigate = useNavigate();
   const hasFlagged = flaggedLineCount > 0;
-  const itemLabel = totalLineCount === 1 ? 'item' : 'items';
 
   return (
     <div
@@ -40,27 +43,31 @@ export function PickCompleteScreen({
         )}
       </div>
 
-      <h1 className="text-2xl font-bold text-white mb-1">
-        {hasFlagged ? 'Completed with Issues' : 'Pick Complete!'}
+      <h1 className="text-2xl font-bold text-white mb-1 leading-tight max-w-sm">
+        {customerName}
       </h1>
-      <p className="text-white/75 text-base mb-8">
-        {orderNumber} — sent to billing for review
+      {customerCity && (
+        <p className="text-white/80 text-base mb-2">{customerCity}</p>
+      )}
+      {transportName && (
+        <p className="text-white/85 text-sm font-semibold mb-4">{transportName}</p>
+      )}
+
+      <p className="text-white/75 text-sm mb-8">
+        {hasFlagged ? 'Sent to billing with flags' : 'Pick complete'}
+        {' · '}
+        <span className="font-mono">{orderNumber}</span>
       </p>
 
-      <div className="w-full max-w-xs bg-white/20 backdrop-blur-sm rounded-2xl p-5 mb-8 space-y-3">
-        <p className="text-sm font-medium text-white/80 truncate">
-          {customerName}
+      <div className="w-full max-w-xs bg-white/20 backdrop-blur-sm rounded-2xl p-5 mb-8 space-y-2 text-white/90 text-sm">
+        <p className="tabular-nums">
+          {formatLineCountLabel(pickedLineCount, { short: true })} picked
         </p>
-        <div className="space-y-1 text-white tabular-nums">
-          <p className="text-lg font-bold">
-            {pickedLineCount}/{totalLineCount} {itemLabel} on bill picked
-          </p>
-          <p className="text-lg font-bold">
-            {pickedPieceCount}/{totalPieceCount} pcs picked
-          </p>
-        </div>
+        <p className="tabular-nums text-white/75">
+          {pickedPieceCount}/{totalPieceCount} pcs
+        </p>
         {flaggedLineCount > 0 && (
-          <p className="flex items-center justify-center gap-1.5 text-sm text-white/90">
+          <p className="flex items-center justify-center gap-1.5">
             <Flag size={16} weight="fill" />
             {flaggedLineCount} flagged for billing
           </p>

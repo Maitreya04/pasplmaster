@@ -42,6 +42,41 @@ export function sortPickQueueOrders<T extends PickQueueOrder>(orders: T[]): T[] 
   return [...orders].sort(comparePickQueueOrders);
 }
 
+/**
+ * Available pick queue: urgent first, then newest approved/created within each tier.
+ */
+export function compareAvailablePickQueueOrders(
+  a: PickQueueOrder,
+  b: PickQueueOrder,
+): number {
+  if (a.priority === 'urgent' && b.priority !== 'urgent') return -1;
+  if (a.priority !== 'urgent' && b.priority === 'urgent') return 1;
+
+  const aTime = new Date(a.approved_at ?? a.created_at).getTime();
+  const bTime = new Date(b.approved_at ?? b.created_at).getTime();
+  if (aTime !== bTime) return bTime - aTime;
+
+  return b.id - a.id;
+}
+
+export function sortAvailablePickQueueOrders<T extends PickQueueOrder>(orders: T[]): T[] {
+  return [...orders].sort(compareAvailablePickQueueOrders);
+}
+
+/** Being-picked carousel: most recently claimed first. */
+export function sortBeingPickedOrders<
+  T extends PickQueueOrder & {
+    claim_info?: { claimed_at: string } | null;
+  },
+>(orders: T[]): T[] {
+  return [...orders].sort((a, b) => {
+    const aTime = new Date(a.claim_info?.claimed_at ?? a.approved_at ?? a.created_at).getTime();
+    const bTime = new Date(b.claim_info?.claimed_at ?? b.approved_at ?? b.created_at).getTime();
+    if (aTime !== bTime) return bTime - aTime;
+    return b.id - a.id;
+  });
+}
+
 export interface PickQueueTransportSection<T extends Order = Order> {
   transportName: string;
   orders: T[];

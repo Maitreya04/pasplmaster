@@ -8,6 +8,8 @@ interface JumpListSheetProps {
   currentItemId: number | null;
   transportName?: string | null;
   customerName?: string | null;
+  billedAt?: string | null;
+  orderNumber?: string | null;
   onSkipItem: (itemId: number, reason: string) => void;
   onJump: (itemId: number) => void;
   onCompleteItem?: (itemId: number) => void;
@@ -21,6 +23,8 @@ export function JumpListSheet({
   currentItemId,
   transportName,
   customerName,
+  billedAt,
+  orderNumber,
   onSkipItem,
   onJump,
   onCompleteItem,
@@ -34,6 +38,8 @@ export function JumpListSheet({
       currentItemId={currentItemId}
       transportName={transportName}
       customerName={customerName}
+      billedAt={billedAt}
+      orderNumber={orderNumber}
       onSkipItem={onSkipItem}
       onJump={onJump}
       onCompleteItem={onCompleteItem}

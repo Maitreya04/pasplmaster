@@ -29,6 +29,10 @@ import { SwipeDeck } from '../../components/picking/SwipeDeck';
 import { PickCard } from '../../components/picking/PickCard';
 import { JumpListSheet } from '../../components/picking/JumpListSheet';
 import { TransportChip } from '../../components/picking/TransportChip';
+import {
+  formatBilledLabel,
+  formatLineCountLabel,
+} from '../../lib/picking/pickQueueDisplay';
 import { FlagReasonSheet, type FlagSubmitPayload } from '../../components/picking/FlagReasonSheet';
 import {
   buildDeckOrder,
@@ -289,6 +293,7 @@ export default function PickPage(): React.JSX.Element | null {
   // scan_result + state so we can roll back both DB and local UI cleanly.
   const [undoSnapshot, setUndoSnapshot] = useState<UndoSnapshot | null>(null);
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
+  const [completeSheetOpen, setCompleteSheetOpen] = useState(false);
   const [flagSheetOpen, setFlagSheetOpen] = useState(false);
   const [flagTargetItemId, setFlagTargetItemId] = useState<number | null>(null);
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
@@ -439,6 +444,7 @@ export default function PickPage(): React.JSX.Element | null {
     if (
       flagSheetOpen ||
       queueSheetOpen ||
+      completeSheetOpen ||
       manualQtyTargetItemId !== null ||
       pendingPackConfirmation !== null ||
       fifoOverrideSheet !== null
@@ -448,6 +454,7 @@ export default function PickPage(): React.JSX.Element | null {
   }, [
     flagSheetOpen,
     queueSheetOpen,
+    completeSheetOpen,
     manualQtyTargetItemId,
     pendingPackConfirmation,
     fifoOverrideSheet,
@@ -531,6 +538,10 @@ export default function PickPage(): React.JSX.Element | null {
 
   const allDone = counts.remaining === 0 && counts.total > 0;
   const hasFlagged = counts.flagged > 0;
+
+  useEffect(() => {
+    if (allDone) setCompleteSheetOpen(true);
+  }, [allDone]);
   const visibility = useMemo(() => {
     let packAssisted = 0;
     let manual = 0;
@@ -1538,6 +1549,8 @@ export default function PickPage(): React.JSX.Element | null {
       <PickCompleteScreen
         orderNumber={order.order_number}
         customerName={order.customer_name}
+        customerCity={order.customer_city}
+        transportName={order.transport_name}
         pickedLineCount={counts.picked}
         flaggedLineCount={counts.flagged}
         totalLineCount={counts.total}
@@ -1614,6 +1627,7 @@ export default function PickPage(): React.JSX.Element | null {
   const scannerPaused =
     flagSheetOpen ||
     queueSheetOpen ||
+    completeSheetOpen ||
     manualQtyTargetItemId !== null ||
     pendingPackConfirmation !== null ||
     fifoOverrideSheet !== null;
@@ -1632,33 +1646,41 @@ export default function PickPage(): React.JSX.Element | null {
             <CaretLeft size={24} weight="bold" />
           </button>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-mono font-bold text-lg text-[var(--content-primary)]">
-                {order.order_number}
-              </span>
-              {order.priority === 'urgent' && <StatusBadge status="urgent" />}
+            <h1 className="text-lg font-bold text-[var(--content-primary)] truncate leading-tight">
+              {order.customer_name}
+            </h1>
+            {order.customer_city && (
+              <p className="text-sm text-[var(--content-secondary)] truncate">
+                {order.customer_city}
+              </p>
+            )}
+            {formatBilledLabel(order.approved_at, order.created_at) && (
+              <p className="mt-0.5 text-xs font-medium text-[var(--content-tertiary)]">
+                {formatBilledLabel(order.approved_at, order.created_at)}
+              </p>
+            )}
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
               {order.transport_name ? (
-                <TransportChip name={order.transport_name} size="md" />
+                <TransportChip name={order.transport_name} size="sm" />
               ) : (
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-warning)]">
                   No transport
                 </span>
               )}
+              {order.priority === 'urgent' && <StatusBadge status="urgent" />}
+              <span className="font-mono text-[10px] text-[var(--content-quaternary)]">
+                {order.order_number}
+              </span>
             </div>
-            <p className="text-sm text-[var(--content-tertiary)] truncate">
-              {order.customer_name}
-            </p>
           </div>
           <div className="text-right shrink-0 tabular-nums">
-            <p className="text-2xl font-bold text-[var(--content-primary)] leading-none">
+            <p className="text-sm font-semibold text-[var(--content-secondary)] leading-none">
               {counts.picked + counts.flagged}
-              <span className="text-[var(--content-tertiary)] text-base font-normal">
+              <span className="text-[var(--content-quaternary)] font-normal">
                 /{counts.total}
               </span>
             </p>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mt-0.5">
-              on bill
-            </p>
+            <p className="text-[10px] text-[var(--content-quaternary)] mt-0.5">lines done</p>
           </div>
         </div>
 
@@ -1678,46 +1700,40 @@ export default function PickPage(): React.JSX.Element | null {
           <div className="space-y-4 animate-pick-stop-enter">
             <div className="ds-card p-5">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-                Trip summary
+                Ready to pick
               </p>
-              <h2 className="text-xl font-bold text-[var(--content-primary)] mt-1">
+              <h2 className="text-2xl font-bold text-[var(--content-primary)] mt-1 leading-tight">
                 {order.customer_name}
               </h2>
-              {order.transport_name ? (
-                <div className="mt-2">
-                  <TransportChip name={order.transport_name} size="md" />
-                </div>
-              ) : (
-                <p className="text-sm text-[var(--content-warning)] mt-2 font-semibold">
-                  No transport set — confirm with billing before dispatch
+              {order.customer_city && (
+                <p className="mt-1 text-sm text-[var(--content-secondary)]">
+                  {order.customer_city}
                 </p>
               )}
-              <div className="grid grid-cols-3 gap-2 mt-4">
-                <div className="rounded-xl bg-[var(--bg-tertiary)] px-3 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-                    Lines
+              {formatBilledLabel(order.approved_at, order.created_at) && (
+                <p className="mt-2 text-sm font-medium text-[var(--content-secondary)]">
+                  {formatBilledLabel(order.approved_at, order.created_at)}
+                </p>
+              )}
+              <div className="mt-3">
+                {order.transport_name ? (
+                  <TransportChip name={order.transport_name} size="md" />
+                ) : (
+                  <p className="text-sm text-[var(--content-warning)] font-semibold">
+                    No transport set — confirm with billing before dispatch
                   </p>
-                  <p className="font-mono font-bold text-2xl text-[var(--content-primary)] leading-tight tabular-nums">
-                    {briefTotals.lines}
-                  </p>
-                </div>
-                <div className="rounded-xl bg-[var(--bg-tertiary)] px-3 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-                    Pieces
-                  </p>
-                  <p className="font-mono font-bold text-2xl text-[var(--content-primary)] leading-tight tabular-nums">
-                    {briefTotals.pieces}
-                  </p>
-                </div>
-                <div className="rounded-xl bg-[var(--bg-tertiary)] px-3 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-                    Racks
-                  </p>
-                  <p className="font-mono font-bold text-2xl text-[var(--content-primary)] leading-tight tabular-nums">
-                    {briefRacks.length}
-                  </p>
-                </div>
+                )}
               </div>
+              <p className="mt-4 text-sm text-[var(--content-tertiary)]">
+                {formatLineCountLabel(briefTotals.lines, { short: true })}
+                {' · '}
+                {briefRacks.length} rack{briefRacks.length === 1 ? '' : 's'}
+                {' · '}
+                {briefTotals.pieces} pcs total
+              </p>
+              <p className="mt-1 font-mono text-xs text-[var(--content-quaternary)]">
+                {order.order_number}
+              </p>
             </div>
 
             <div className="ds-card p-4">
@@ -1874,57 +1890,64 @@ export default function PickPage(): React.JSX.Element | null {
             <div className="w-14 h-14 bg-[var(--bg-positive-subtle)] rounded-full flex items-center justify-center mx-auto mb-3">
               <CheckCircle size={28} weight="fill" className="text-[var(--content-positive)]" />
             </div>
-            <p className="font-semibold text-[var(--content-primary)]">All done</p>
-            <div className="mt-2 space-y-1 text-sm text-[var(--content-tertiary)] tabular-nums">
-              <p>
-                <span className="font-mono font-bold text-[var(--content-primary)]">
-                  {counts.picked}/{counts.total}
-                </span>
-                {' '}
-                {counts.total === 1 ? 'item' : 'items'} on bill picked
-              </p>
-              <p>
-                <span className="font-mono font-bold text-[var(--content-primary)]">
-                  {pieceTotals.picked}/{pieceTotals.target}
-                </span>
-                {' '}
-                pcs picked
-              </p>
-              {counts.flagged > 0 && (
-                <p className="text-[var(--content-negative)]">
-                  {counts.flagged} flagged for billing
-                </p>
-              )}
-            </div>
+            <p className="font-bold text-lg text-[var(--content-primary)]">{order.customer_name}</p>
+            {order.transport_name && (
+              <p className="mt-1 text-sm text-[var(--content-secondary)]">{order.transport_name}</p>
+            )}
+            <p className="mt-3 text-sm text-[var(--content-tertiary)]">
+              All lines handled — open the finish sheet below to send to billing.
+            </p>
           </div>
         )}
 
       </div>
 
-      {/* Complete button */}
-      {allDone && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-[var(--bg-primary)] border-t border-[var(--border-subtle)] space-y-3">
-          {/* Summary receipt */}
-          <div className="bg-[var(--bg-tertiary)] rounded-xl p-3 space-y-1.5">
-            <p className="text-sm text-[var(--content-secondary)] tabular-nums">
-              <span className="font-mono font-bold text-[var(--content-primary)]">
-                {counts.picked}/{counts.total}
-              </span>
-              {' '}
-              {counts.total === 1 ? 'item' : 'items'} on bill picked
+      {/* Finish pick — party-first confirmation sheet */}
+      <BottomSheet
+        isOpen={allDone && completeSheetOpen}
+        onClose={() => setCompleteSheetOpen(false)}
+        title="Finish this pick"
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-2">
+            <p className="text-xl font-bold text-[var(--content-primary)] leading-tight">
+              {order.customer_name}
             </p>
-            <p className="text-sm text-[var(--content-secondary)] tabular-nums">
-              <span className="font-mono font-bold text-[var(--content-primary)]">
-                {pieceTotals.picked}/{pieceTotals.target}
-              </span>
-              {' '}
-              pcs picked
-            </p>
-            {counts.flagged > 0 && (
-              <p className="text-sm text-[var(--content-negative)] tabular-nums">
-                {counts.flagged} flagged for billing
+            {order.customer_city && (
+              <p className="text-sm text-[var(--content-secondary)]">{order.customer_city}</p>
+            )}
+            {formatBilledLabel(order.approved_at, order.created_at) && (
+              <p className="text-sm text-[var(--content-tertiary)]">
+                {formatBilledLabel(order.approved_at, order.created_at)}
               </p>
             )}
+            <div className="pt-1">
+              {order.transport_name ? (
+                <TransportChip name={order.transport_name} size="md" />
+              ) : (
+                <p className="text-sm font-semibold text-[var(--content-warning)]">
+                  No transport on order
+                </p>
+              )}
+            </div>
+            <p className="font-mono text-xs text-[var(--content-quaternary)] pt-1">
+              {order.order_number}
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-[var(--bg-tertiary)] px-4 py-3 text-sm text-[var(--content-secondary)] space-y-1">
+            <p className="tabular-nums">
+              {formatLineCountLabel(counts.picked, { short: true })} picked
+              {counts.flagged > 0 && (
+                <span className="text-[var(--content-negative)]">
+                  {' '}
+                  · {counts.flagged} flagged
+                </span>
+              )}
+            </p>
+            <p className="tabular-nums text-[var(--content-tertiary)]">
+              {pieceTotals.picked}/{pieceTotals.target} pcs picked
+            </p>
           </div>
 
           <BigButton
@@ -1943,15 +1966,28 @@ export default function PickPage(): React.JSX.Element | null {
             {hasFlagged ? (
               <>
                 <Warning size={20} weight="bold" />
-                Complete with {counts.flagged} Flagged
+                Send to billing with {counts.flagged} flagged
               </>
             ) : (
               <>
                 <ArrowRight size={20} weight="bold" />
-                Complete Order
+                Finish pick for {order.customer_name.split(/\s+/)[0]}
               </>
             )}
           </BigButton>
+        </div>
+      </BottomSheet>
+
+      {allDone && !completeSheetOpen && (
+        <div className="fixed bottom-0 left-0 right-0 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
+          <button
+            type="button"
+            onClick={() => setCompleteSheetOpen(true)}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--bg-positive)] py-3 text-sm font-semibold text-[var(--content-on-color)]"
+          >
+            <CheckCircle size={18} weight="fill" />
+            Finish pick — {order.customer_name}
+          </button>
         </div>
       )}
 
@@ -2133,6 +2169,8 @@ export default function PickPage(): React.JSX.Element | null {
         onClose={() => setQueueSheetOpen(false)}
         transportName={order.transport_name}
         customerName={order.customer_name}
+        billedAt={order.approved_at ?? order.created_at}
+        orderNumber={order.order_number}
         rows={queueSheetRows}
         counts={{
           picked: counts.picked,

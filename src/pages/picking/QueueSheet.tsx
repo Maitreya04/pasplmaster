@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { ArrowDown, CheckCircle, Flag, MapPin, SkipForward } from '@phosphor-icons/react';
 import { BottomSheet, BigButton } from '../../components/shared';
 import { TransportChip } from '../../components/picking/TransportChip';
+import { formatBilledLabel, formatLineCountLabel } from '../../lib/picking/pickQueueDisplay';
 import { useSwipeReveal } from '../../hooks/useSwipeReveal';
 
 const SWIPE_ACTION_BUTTON_WIDTH = 80;
@@ -37,6 +38,8 @@ interface QueueSheetProps {
   currentItemId: number | null;
   transportName?: string | null;
   customerName?: string | null;
+  billedAt?: string | null;
+  orderNumber?: string | null;
   /** When set, rows become tappable to jump to that card in the deck. */
   onJump?: (itemId: number) => void;
   /** Swipe-left to mark a line complete without leaving the queue. */
@@ -60,6 +63,8 @@ export function QueueSheet({
   currentItemId,
   transportName,
   customerName,
+  billedAt,
+  orderNumber,
   onJump,
   onCompleteItem,
 }: QueueSheetProps): React.JSX.Element | null {
@@ -84,13 +89,18 @@ export function QueueSheet({
   }
 
   return (
-    <BottomSheet isOpen={isOpen} onClose={onClose} title="Pick queue">
+    <BottomSheet isOpen={isOpen} onClose={onClose} title="Line queue">
       <div className="space-y-5">
         {(transportName || customerName) && (
-          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2.5 space-y-1.5">
+          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3 space-y-2">
             {customerName && (
-              <p className="text-sm font-semibold text-[var(--content-primary)] truncate">
+              <p className="text-lg font-bold text-[var(--content-primary)] truncate leading-tight">
                 {customerName}
+              </p>
+            )}
+            {billedAt && (
+              <p className="text-sm text-[var(--content-secondary)]">
+                {formatBilledLabel(billedAt)}
               </p>
             )}
             {transportName ? (
@@ -100,32 +110,28 @@ export function QueueSheet({
                 No transport set
               </p>
             )}
+            {orderNumber && (
+              <p className="font-mono text-xs text-[var(--content-quaternary)]">{orderNumber}</p>
+            )}
           </div>
         )}
 
-        {/* Counts header */}
-        <div className="grid grid-cols-3 gap-2">
-          <div className="rounded-xl bg-[var(--bg-positive-subtle)] px-3 py-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-positive)]">Done</p>
-            <p className="font-mono font-bold text-2xl text-[var(--content-positive)] leading-tight">
-              {counts.picked}
-            </p>
-            <p className="text-[10px] text-[var(--content-positive)]/70">lines</p>
-          </div>
-          <div className="rounded-xl bg-[var(--bg-tertiary)] px-3 py-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">Left</p>
-            <p className="font-mono font-bold text-2xl text-[var(--content-primary)] leading-tight">
-              {counts.remaining}
-            </p>
-            <p className="text-[10px] text-[var(--content-tertiary)]">lines</p>
-          </div>
-          <div className="rounded-xl bg-[var(--bg-negative-subtle)] px-3 py-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-negative)]">Flagged</p>
-            <p className="font-mono font-bold text-2xl text-[var(--content-negative)] leading-tight">
-              {counts.flagged}
-            </p>
-            <p className="text-[10px] text-[var(--content-negative)]/70">lines</p>
-          </div>
+        {/* Progress — de-emphasized counts */}
+        <div className="flex items-center justify-between gap-3 rounded-xl bg-[var(--bg-tertiary)] px-3 py-2.5 text-sm">
+          <span className="text-[var(--content-positive)] font-semibold tabular-nums">
+            {counts.picked} done
+          </span>
+          <span className="text-[var(--content-secondary)] tabular-nums">
+            {counts.remaining} left
+          </span>
+          {counts.flagged > 0 && (
+            <span className="text-[var(--content-negative)] font-semibold tabular-nums">
+              {counts.flagged} flagged
+            </span>
+          )}
+          <span className="ml-auto text-xs text-[var(--content-quaternary)] tabular-nums">
+            {formatLineCountLabel(counts.total, { short: true })}
+          </span>
         </div>
 
         {onCompleteItem && (
