@@ -8,7 +8,16 @@ import {
   useOpenPoDemandLines,
   type OpenPoDemandLine,
 } from '../../hooks/useOpenPoDemandLines';
+import {
+  demandLocationFilterLabel,
+  demandLocationFilterParam,
+  matchesDemandLocationFilter,
+  parseDemandLocationFilter,
+  resolveDemandLineLocation,
+} from '../../lib/purchase/openPoDemand';
+import { stockLocationLabel } from '../../hooks/useLocationwiseStock';
 import { formatCurrency, formatShortDate, formatTimeAgo } from '../../utils/formatters';
+import type { StockLocationCode } from '../../types';
 
 function ageDays(createdAt: string): number {
   return Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000);
@@ -89,7 +98,7 @@ function formatDateRangeLabel(from: string, to: string): string {
   if (from && to) return `${formatShortDate(from)} - ${formatShortDate(to)}`;
   if (from) return `From ${formatShortDate(from)}`;
   if (to) return `Until ${formatShortDate(to)}`;
-  return 'All active pending orders';
+  return 'All open purchase demand';
 }
 
 function MetricCard({
@@ -142,6 +151,16 @@ function AliasChip({
   );
 }
 
+function lossSourceLabel(source: 'sales' | 'billing' | 'picking'): string {
+  if (source === 'billing') return 'Billing';
+  if (source === 'picking') return 'Picking';
+  return 'Sales';
+}
+
+function demandLocationLabel(code: StockLocationCode | null | undefined): string {
+  return stockLocationLabel(code === 'jabalpur' ? 'jabalpur' : 'main_store');
+}
+
 export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
   const navigate = useNavigate();
   const { itemId: itemIdParam } = useParams();
@@ -150,7 +169,9 @@ export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
   const legacyDate = cleanDateParam(searchParams.get('date'));
   const selectedDateFrom = cleanDateParam(searchParams.get('from')) || legacyDate;
   const selectedDateTo = cleanDateParam(searchParams.get('to')) || legacyDate;
+  const locationFilter = parseDemandLocationFilter(searchParams.get('warehouse'));
   const activeRangeLabel = formatDateRangeLabel(selectedDateFrom, selectedDateTo);
+  const activeLocationLabel = demandLocationFilterLabel(locationFilter);
   const hasDateRange = Boolean(selectedDateFrom || selectedDateTo);
   const fromTab = searchParams.get('fromTab') === 'sku' ? 'sku' : 'brand';
 
@@ -169,6 +190,7 @@ export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
     () =>
       openLines.filter((row) => {
         if (!Number.isInteger(itemId) || row.item_id !== itemId) return false;
+        if (!matchesDemandLocationFilter(resolveDemandLineLocation(row), locationFilter)) return false;
         if (!selectedDateFrom && !selectedDateTo) return true;
         const order = normalizeEmbeddedOrder(row.orders);
         if (!order?.created_at) return false;
@@ -177,7 +199,7 @@ export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
         if (selectedDateTo && orderDate > selectedDateTo) return false;
         return true;
       }),
-    [itemId, openLines, selectedDateFrom, selectedDateTo],
+    [itemId, openLines, locationFilter, selectedDateFrom, selectedDateTo],
   );
 
   const summary = useMemo(() => {
@@ -216,6 +238,8 @@ export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
     next.set('tab', fromTab);
     if (selectedDateFrom) next.set('from', selectedDateFrom);
     if (selectedDateTo) next.set('to', selectedDateTo);
+    const warehouse = demandLocationFilterParam(locationFilter);
+    if (warehouse) next.set('warehouse', warehouse);
     navigate(`/admin/supply?${next.toString()}`);
   };
 
@@ -268,6 +292,7 @@ export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
               <p className="mt-2 text-sm text-[var(--content-tertiary)]">
                 {brandLabel ?? 'Item detail'}
                 {` · ${activeRangeLabel}`}
+                {locationFilter !== 'all' ? ` · ${activeLocationLabel}` : ''}
               </p>
             </div>
             {summary.oldestCreatedAt && <AgePill createdAt={summary.oldestCreatedAt} />}
@@ -331,6 +356,14 @@ export default function SupplyDemandSkuDetailPage(): React.JSX.Element {
                       <span>Shippable {formatNumber(line.qty_shippable)}</span>
                       <span>{formatCurrency(poValue)}</span>
                       <span className="rounded-md bg-[var(--bg-primary)] px-2 py-0.5">{groupLabel(line)}</span>
+                      {line.loss_source && (
+                        <span className="rounded-md bg-[var(--bg-warning-subtle)] px-2 py-0.5 text-[var(--content-warning)]">
+                          {lossSourceLabel(line.loss_source)} loss
+                        </span>
+                      )}
+                      <span className="rounded-md bg-[var(--bg-primary)] px-2 py-0.5">
+                        {demandLocationLabel(line.stock_location_code ?? order?.stock_location_code)}
+                      </span>
                       {order?.salesperson_name && (
                         <span className="inline-flex items-center gap-1">
                           <UserIcon size={11} />

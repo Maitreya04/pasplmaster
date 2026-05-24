@@ -23,8 +23,18 @@ import {
   normalizeEmbeddedItem,
   type OpenPoDemandLine,
 } from '../../hooks/useOpenPoDemandLines';
+import {
+  demandLocationFilterLabel,
+  demandLocationFilterParam,
+  matchesDemandLocationFilter,
+  parseDemandLocationFilter,
+  resolveDemandLineLocation,
+  resolvePendingItemLocation,
+  type DemandLocationFilter,
+} from '../../lib/purchase/openPoDemand';
+import { stockLocationLabel } from '../../hooks/useLocationwiseStock';
 import { formatCurrency, formatShortDate, formatTimeAgo } from '../../utils/formatters';
-import type { PendingItem } from '../../types';
+import type { PendingItem, StockLocationCode } from '../../types';
 
 type TabId = 'brand' | 'sku' | 'lines' | 'pending';
 
@@ -173,7 +183,7 @@ function formatDateRangeLabel(from: string, to: string): string {
   if (from && to) return `${formatShortDate(from)} - ${formatShortDate(to)}`;
   if (from) return `From ${formatShortDate(from)}`;
   if (to) return `Until ${formatShortDate(to)}`;
-  return 'All active pending orders';
+  return 'All open purchase demand';
 }
 
 function isToday(value: string): boolean {
@@ -355,7 +365,9 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
   const legacyDate = cleanDateParam(searchParams.get('date'));
   const selectedDateFrom = cleanDateParam(searchParams.get('from')) || legacyDate;
   const selectedDateTo = cleanDateParam(searchParams.get('to')) || legacyDate;
+  const locationFilter = parseDemandLocationFilter(searchParams.get('warehouse'));
   const activeRangeLabel = formatDateRangeLabel(selectedDateFrom, selectedDateTo);
+  const activeLocationLabel = demandLocationFilterLabel(locationFilter);
   const hasDateRange = Boolean(selectedDateFrom || selectedDateTo);
   const [draftDateFrom, setDraftDateFrom] = useState(selectedDateFrom);
   const [draftDateTo, setDraftDateTo] = useState(selectedDateTo);
@@ -398,6 +410,13 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
     });
   }, [openLines, selectedDateFrom, selectedDateTo]);
 
+  const locationDemandLines = useMemo(() => {
+    if (locationFilter === 'all') return demandLines;
+    return demandLines.filter((row) =>
+      matchesDemandLocationFilter(resolveDemandLineLocation(row), locationFilter),
+    );
+  }, [demandLines, locationFilter]);
+
   const byBrand = useMemo<BrandSummary[]>(() => {
     const brandMap = new Map<
       string,
@@ -427,7 +446,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
       }
     >();
 
-    for (const row of demandLines) {
+    for (const row of locationDemandLines) {
       const order = normalizeEmbeddedOrder(row.orders);
       const label = groupLabel(row);
       const brand = brandMap.get(label) ?? {
@@ -506,7 +525,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
           .sort((a, b) => b.totalPo - a.totalPo),
       }))
       .sort((a, b) => b.totalPo - a.totalPo);
-  }, [demandLines]);
+  }, [locationDemandLines]);
 
   const bySku = useMemo<SkuSummary[]>(() => {
     const skuMap = new Map<
@@ -525,7 +544,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
       }
     >();
 
-    for (const row of demandLines) {
+    for (const row of locationDemandLines) {
       const order = normalizeEmbeddedOrder(row.orders);
       const prev = skuMap.get(row.item_id) ?? {
         item_id: row.item_id,
@@ -566,7 +585,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
         oldestCreatedAt: sku.oldestCreatedAt,
       }))
       .sort((a, b) => b.totalPo - a.totalPo);
-  }, [demandLines]);
+  }, [locationDemandLines]);
 
   const totals = useMemo(() => {
     let poPieces = 0;
@@ -574,7 +593,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
     const orderIds = new Set<number>();
     const customers = new Set<string>();
 
-    for (const row of demandLines) {
+    for (const row of locationDemandLines) {
       poPieces += row.qty_po;
       totalValue += linePoValue(row);
       orderIds.add(row.order_id);
@@ -583,7 +602,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
     }
 
     return {
-      lineCount: demandLines.length,
+      lineCount: locationDemandLines.length,
       poPieces,
       skuCount: bySku.length,
       brandCount: byBrand.length,
@@ -591,29 +610,31 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
       customerCount: customers.size,
       totalValue,
     };
-  }, [demandLines, byBrand.length, bySku.length]);
+  }, [locationDemandLines, byBrand.length, bySku.length]);
 
   const allReps = useMemo(() => {
     const names = new Set<string>();
-    for (const row of demandLines) {
+    for (const row of locationDemandLines) {
       const order = normalizeEmbeddedOrder(row.orders);
       if (order?.salesperson_name) names.add(order.salesperson_name);
     }
     return [...names].sort();
-  }, [demandLines]);
+  }, [locationDemandLines]);
 
   const filteredLines = useMemo(() => {
-    if (!repFilter) return demandLines;
-    return demandLines.filter((row) => {
+    if (!repFilter) return locationDemandLines;
+    return locationDemandLines.filter((row) => {
       const order = normalizeEmbeddedOrder(row.orders);
       return order?.salesperson_name === repFilter;
     });
-  }, [demandLines, repFilter]);
+  }, [locationDemandLines, repFilter]);
 
-  const pendingItems = useMemo(
-    () => pendingItemsRaw.filter((item) => item.source !== 'sales'),
-    [pendingItemsRaw],
-  );
+  const pendingItems = useMemo(() => {
+    if (locationFilter === 'all') return pendingItemsRaw;
+    return pendingItemsRaw.filter((item) =>
+      matchesDemandLocationFilter(resolvePendingItemLocation(item), locationFilter),
+    );
+  }, [pendingItemsRaw, locationFilter]);
 
   const pendingByDay = useMemo<PendingDayRow[]>(() => {
     const dayMap = new Map<string, { itemCount: number; qtyPending: number }>();
@@ -718,11 +739,21 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
     applyDateRange(from, to);
   };
 
+  const applyLocationFilter = (filter: DemandLocationFilter) => {
+    const next = new URLSearchParams(searchParams);
+    const param = demandLocationFilterParam(filter);
+    if (param) next.set('warehouse', param);
+    else next.delete('warehouse');
+    setSearchParams(next, { replace: true });
+  };
+
   const openSkuDetail = (itemId: number, fromTab: 'brand' | 'sku') => {
     const next = new URLSearchParams();
     next.set('fromTab', fromTab);
     if (selectedDateFrom) next.set('from', selectedDateFrom);
     if (selectedDateTo) next.set('to', selectedDateTo);
+    const warehouse = demandLocationFilterParam(locationFilter);
+    if (warehouse) next.set('warehouse', warehouse);
     navigate(`/admin/supply/sku/${itemId}?${next.toString()}`);
   };
 
@@ -891,8 +922,58 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
           </div>
         </section>
 
+        <section className="mt-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-[var(--content-primary)]">Warehouse</p>
+              <p className="mt-1 text-sm text-[var(--content-tertiary)]">
+                Split pending demand by Indore (main store) vs Jabalpur stock location.
+              </p>
+            </div>
+            <span
+              className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${
+                locationFilter !== 'all'
+                  ? 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--bg-primary)] text-[var(--content-secondary)]'
+              }`}
+            >
+              {activeLocationLabel}
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(
+              [
+                ['all', 'All locations'],
+                ['main_store', 'Indore'],
+                ['jabalpur', 'Jabalpur'],
+              ] as const
+            ).map(([id, label]) => {
+              const active = locationFilter === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => applyLocationFilter(id)}
+                  className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                    active
+                      ? 'border-[var(--bg-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+                      : 'border-[var(--border-subtle)] bg-[var(--bg-primary)] text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
         <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--content-secondary)]">
           <span className="font-semibold text-[var(--content-primary)]">{activeRangeLabel}</span>
+          {locationFilter !== 'all' && (
+            <span className="rounded-full bg-[var(--bg-primary)] px-2 py-0.5 text-xs font-semibold text-[var(--content-accent)]">
+              {activeLocationLabel}
+            </span>
+          )}
           <span>{countLabel(totals.skuCount, 'item')}</span>
           <span>{countLabel(totals.brandCount, 'brand')}</span>
           <span>{countLabel(totals.orderCount, 'order')}</span>
@@ -954,7 +1035,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
           {tab === 'lines' && (
             <LinesTab
               lines={filteredLines}
-              allLines={demandLines}
+              allLines={locationDemandLines}
               allReps={allReps}
               repFilter={repFilter}
               onRepFilter={setRepFilter}
@@ -1000,7 +1081,7 @@ function BrandTab({
   if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading brands...</p>;
   if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load brand demand.</p>;
   if (rows.length === 0) {
-    return <EmptyBlock text={hasDateRange ? `No purchase demand for ${activeRangeLabel}.` : 'No open PO demand on active orders.'} />;
+    return <EmptyBlock text={hasDateRange ? `No purchase demand for ${activeRangeLabel}.` : 'No open purchase demand right now.'} />;
   }
 
   return (
@@ -1110,7 +1191,7 @@ function SkuTab({
 }) {
   if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading items...</p>;
   if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load item demand.</p>;
-  if (rows.length === 0) return <EmptyBlock text="No open PO demand on active orders." />;
+  if (rows.length === 0) return <EmptyBlock text="No open purchase demand right now." />;
 
   return (
     <ul className="space-y-3">
@@ -1168,7 +1249,7 @@ function LinesTab({
 }) {
   if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading lines...</p>;
   if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load PO lines.</p>;
-  if (allLines.length === 0) return <EmptyBlock text="No open PO demand on active orders." />;
+  if (allLines.length === 0) return <EmptyBlock text="No open purchase demand right now." />;
 
   return (
     <div className="space-y-3">
@@ -1233,6 +1314,14 @@ function LinesTab({
                   <span>Requested {formatNumber(row.qty_requested)}</span>
                   <span>{formatCurrency(poValue)}</span>
                   <span className="rounded-md bg-[var(--bg-primary)] px-2 py-0.5">{groupLabel(row)}</span>
+                  {row.loss_source && (
+                    <span className="rounded-md bg-[var(--bg-warning-subtle)] px-2 py-0.5 text-[var(--content-warning)]">
+                      {pendingSourceLabel(row.loss_source)} loss
+                    </span>
+                  )}
+                  <span className="rounded-md bg-[var(--bg-primary)] px-2 py-0.5">
+                    {demandLocationLabel(row.stock_location_code ?? order?.stock_location_code)}
+                  </span>
                   {order?.salesperson_name && (
                     <span className="flex items-center gap-1">
                       <UserIcon size={11} />
@@ -1261,6 +1350,10 @@ function pendingSourceLabel(source: PendingItem['source']): string {
   return 'Sales';
 }
 
+function demandLocationLabel(code: StockLocationCode | null | undefined): string {
+  return stockLocationLabel(code === 'jabalpur' ? 'jabalpur' : 'main_store');
+}
+
 function PendingTab({
   items,
   loading,
@@ -1286,7 +1379,7 @@ function PendingTab({
       <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
         <SectionCard
           title="Queue summary"
-          subtitle="This is the operational follow-up list for billing and picking only. Sales mirror rows are excluded so the qty stays consistent with the main purchase total."
+          subtitle="Every open pending row from sales checkout, billing, or picking. Totals above already include these quantities without double-counting."
         >
           <div className="grid gap-3 sm:grid-cols-3">
             <MetricCard label="Queue Records" value={formatNumber(items.length)} hint="Current tracking records" tone="warning" />
@@ -1351,7 +1444,15 @@ function PendingTab({
               <AgePill createdAt={item.created_at} />
             </div>
 
-            <p className="mt-3 text-sm text-[var(--content-secondary)]">{item.item_name}</p>
+            <p className="mt-1 text-sm text-[var(--content-secondary)]">{item.item_name}</p>
+            <div className="mt-3 flex flex-wrap gap-2 text-sm text-[var(--content-secondary)]">
+              <span>
+                Pending <span className="font-mono font-bold text-[var(--content-warning)]">{formatNumber(item.qty_pending)}</span>
+              </span>
+              <span className="rounded-md bg-[var(--bg-primary)] px-2 py-0.5">
+                {demandLocationLabel(item.stock_location_code)}
+              </span>
+            </div>
 
             <div className="mt-3 flex flex-wrap gap-2 text-sm text-[var(--content-secondary)]">
               <span>
