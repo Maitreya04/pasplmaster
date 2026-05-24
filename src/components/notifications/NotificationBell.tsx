@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Warning, X, ArrowSquareOut } from '@phosphor-icons/react';
 import { appHaptics } from '../../lib/haptics';
-import { useNotificationArrivalAlerts } from '../../hooks/useNotificationArrivalAlerts';
 import { useUserNotifications } from '../../hooks/useUserNotifications';
 import type { UserNotification } from '../../types';
 
@@ -163,8 +162,6 @@ export function NotificationBell({ userId, role = null }: NotificationBellProps)
     () => filteredItems.filter((n) => n.read_at === null).length,
     [filteredItems],
   );
-
-  useNotificationArrivalAlerts(filteredItems, Boolean(userId));
 
   const sortedItems = useMemo(
     () =>
