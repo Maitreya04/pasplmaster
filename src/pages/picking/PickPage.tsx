@@ -7,7 +7,6 @@ import {
   Warning,
   MapPin,
   ArrowRight,
-  ArrowUp,
   ArrowCounterClockwise,
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
@@ -18,15 +17,19 @@ import { useAuth } from '../../context/AuthContext';
 import {
   BigButton,
   BottomSheet,
-  ProgressBar,
   Skeleton,
   StatusBadge,
 } from '../../components/shared';
 import type { OrderItem, OrderItemState, ScanResult } from '../../types';
 import { PickCompleteScreen } from './PickCompleteScreen';
 import { type QueueSheetRow } from './QueueSheet';
-import { SwipeDeck, type SwipeDeckDotStatus } from '../../components/picking/SwipeDeck';
+import type { SwipeDeckDotStatus } from '../../components/picking/SwipeDeck';
+import { PickSwipeDeck } from '../../components/picker-v10/PickSwipeDeck';
 import { PickCard } from '../../components/picking/PickCard';
+import {
+  PickLineStatusPanel,
+  type PickLineStatusRow,
+} from '../../components/picking/PickLineStatusPanel';
 import { JumpListSheet } from '../../components/picking/JumpListSheet';
 import { TransportChip } from '../../components/picking/TransportChip';
 import {
@@ -36,7 +39,6 @@ import {
 import { FlagReasonSheet, type FlagSubmitPayload } from '../../components/picking/FlagReasonSheet';
 import {
   buildDeckOrder,
-  buildDeckBrandPositionLabels,
   buildPickWalkBrandSections,
   findDeckIndexByItemId,
   nextPickableIndex,
@@ -256,6 +258,14 @@ export default function PickPage(): React.JSX.Element | null {
   const orderId = id ? parseInt(id, 10) : null;
   const { data: order, isLoading, error } = useOrderDetail(orderId);
 
+  // Assigned but not started — send picker through preview + Start gate.
+  useEffect(() => {
+    if (!orderId || !order) return;
+    if (order.workflow_status === 'approved') {
+      navigate(`/picking/preview/${orderId}`, { replace: true });
+    }
+  }, [navigate, order, orderId]);
+
   // Initialize work claim for heartbeats
   const { claimId, isClaimedByMe, claim, error: claimError } = useWorkClaim(
     orderId,
@@ -304,6 +314,7 @@ export default function PickPage(): React.JSX.Element | null {
   // scan_result + state so we can roll back both DB and local UI cleanly.
   const [undoSnapshot, setUndoSnapshot] = useState<UndoSnapshot | null>(null);
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
+  const [queueDragProgress, setQueueDragProgress] = useState(0);
   const [completeSheetOpen, setCompleteSheetOpen] = useState(false);
   const [flagSheetOpen, setFlagSheetOpen] = useState(false);
   const [flagTargetItemId, setFlagTargetItemId] = useState<number | null>(null);
@@ -469,11 +480,6 @@ export default function PickPage(): React.JSX.Element | null {
     fifoOverrideSheet,
   ]);
 
-  const deckBrandLabels = useMemo(
-    () => buildDeckBrandPositionLabels(deckItems.map((d) => d.orderItem)),
-    [deckItems],
-  );
-
   // Trip brief: brand blocks (Varroc → TVS → …) with rack stops inside each brand.
   const briefBrandSections = useMemo(() => {
     if (!orderItems?.length) return [];
@@ -503,7 +509,11 @@ export default function PickPage(): React.JSX.Element | null {
       rows.push({
         itemId: pi.orderItem.id,
         rackNo: pi.orderItem.rack_no,
-        itemCode: pi.orderItem.item_alias ?? null,
+        itemCode:
+          pi.orderItem.catalog_alias1 ??
+          pi.orderItem.catalog_alias ??
+          pi.orderItem.item_alias ??
+          null,
         itemName: pi.orderItem.item_name,
         brandLabel: orderItemBrandLabel(pi.orderItem),
         targetQty: pickQuantityTarget(pi.orderItem),
@@ -629,6 +639,7 @@ export default function PickPage(): React.JSX.Element | null {
       const idx = findDeckIndexByItemId(deckItems, itemId);
       handleCardIndexChange(idx);
       setQueueSheetOpen(false);
+      appHaptics.selection();
     },
     [deckItems, handleCardIndexChange],
   );
@@ -944,6 +955,7 @@ export default function PickPage(): React.JSX.Element | null {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      queryClient.invalidateQueries({ queryKey: ['picker-daily-stats'] });
       appHaptics.success();
       setShowComplete(true);
     },
@@ -1682,6 +1694,75 @@ export default function PickPage(): React.JSX.Element | null {
     [beginLineOutcome, flagTargetItemId, itemTransitionMutation, localItems, toast],
   );
 
+  // These derived values depend only on hook-provided state, so they must stay
+  // above all early returns to satisfy the Rules of Hooks (hook call count must
+  // be identical on every render regardless of which early return fires).
+  const manualQtyOrderItem = useMemo(() => {
+    if (manualQtyTargetItemId == null || !order?.items) return null;
+    return order.items.find((oi) => oi.id === manualQtyTargetItemId) ?? null;
+  }, [manualQtyTargetItemId, order?.items]);
+
+  const manualQtyPicked = useMemo(() => {
+    if (!manualQtyOrderItem) return 0;
+    const target = pickQuantityTarget(manualQtyOrderItem);
+    return Math.min(
+      target,
+      getPickedQtyFromResult(
+        localItems.get(manualQtyOrderItem.id)?.scanResult ?? manualQtyOrderItem.scan_result,
+      ),
+    );
+  }, [localItems, manualQtyOrderItem]);
+
+  const isBriefPhase = phase.kind === 'brief';
+
+  const deckDotStatus = useMemo((): SwipeDeckDotStatus[] => {
+    return deckItems.map((pi, index) => {
+      if (index === safeCardIndex) return 'active';
+      if (pi.uiState === 'flagged') return 'flagged';
+      if (pi.uiState === 'picked' || pi.uiState === 'overridden') return 'done';
+      const targetQty = pickQuantityTarget(pi.orderItem);
+      const pickedQty = Math.min(targetQty, getPickedQtyFromResult(pi.scanResult));
+      if (pickedQty > 0 && pickedQty < targetQty) return 'partial';
+      return 'pending';
+    });
+  }, [deckItems, safeCardIndex]);
+
+  const pickStatusRows = useMemo((): PickLineStatusRow[] => {
+    return deckItems.map((pi) => {
+      const isCurrent = currentDeckItem?.orderItem.id === pi.orderItem.id;
+      const targetQty = pickQuantityTarget(pi.orderItem);
+      const pickedQty = Math.min(targetQty, getPickedQtyFromResult(pi.scanResult));
+      const isPicked = pi.uiState === 'picked' || pi.uiState === 'overridden';
+      const isFlagged = pi.uiState === 'flagged';
+      const isSkipped = skippedIds.has(pi.orderItem.id);
+      let status: PickLineStatusRow['status'] = 'pending';
+      if (isCurrent) status = 'now';
+      else if (isFlagged) status = 'flagged';
+      else if (isPicked) status = 'picked';
+      else if (pickedQty > 0 && pickedQty < targetQty) status = 'partial';
+      else if (isSkipped) status = 'skipped';
+
+      return {
+        itemId: pi.orderItem.id,
+        code:
+          pi.orderItem.catalog_alias1 ??
+          pi.orderItem.catalog_alias ??
+          pi.orderItem.item_alias ??
+          String(pi.orderItem.item_id),
+        rackNo: pi.orderItem.rack_no,
+        itemName: pi.orderItem.item_name,
+        targetQty,
+        pickedQty,
+        status,
+        flagReason: pi.orderItem.flag_reason,
+        brandLabel: orderItemBrandLabel(pi.orderItem),
+      };
+    });
+  }, [currentDeckItem?.orderItem.id, deckItems, skippedIds]);
+
+  const pickProgressPct =
+    counts.total > 0 ? ((counts.picked + counts.flagged) / counts.total) * 100 : 0;
+
   if (!orderId) {
     navigate('/picking');
     return null;
@@ -1766,33 +1847,6 @@ export default function PickPage(): React.JSX.Element | null {
     );
   }
 
-  const manualQtyOrderItem = useMemo(() => {
-    if (manualQtyTargetItemId == null || !order?.items) return null;
-    return order.items.find((oi) => oi.id === manualQtyTargetItemId) ?? null;
-  }, [manualQtyTargetItemId, order?.items]);
-
-  const manualQtyPicked = useMemo(() => {
-    if (!manualQtyOrderItem) return 0;
-    const target = pickQuantityTarget(manualQtyOrderItem);
-    return Math.min(
-      target,
-      getPickedQtyFromResult(
-        localItems.get(manualQtyOrderItem.id)?.scanResult ?? manualQtyOrderItem.scan_result,
-      ),
-    );
-  }, [localItems, manualQtyOrderItem]);
-
-  const isBriefPhase = phase.kind === 'brief';
-
-  const deckDotStatus = useMemo((): SwipeDeckDotStatus[] => {
-    return deckItems.map((pi, index) => {
-      if (index === safeCardIndex) return 'active';
-      if (pi.uiState === 'flagged') return 'flagged';
-      if (pi.uiState === 'picked' || pi.uiState === 'overridden') return 'done';
-      return 'pending';
-    });
-  }, [deckItems, safeCardIndex]);
-
   const scannerPaused =
     flagSheetOpen ||
     queueSheetOpen ||
@@ -1804,33 +1858,26 @@ export default function PickPage(): React.JSX.Element | null {
     lineOutcome !== null;
 
   return (
-    <div className="min-h-screen pb-32">
-      {/* Header — order summary + global progress.
-          Audit chips were removed from here on purpose: pickers don't need to
-          read 'Pack-assisted: 3' while walking. They live in the Queue sheet now. */}
-      <header className="sticky top-0 z-40 bg-[var(--bg-primary)]/90 backdrop-blur-md px-4 py-3 space-y-2">
-        <div className="flex items-center gap-3">
+    <div className="role-picking min-h-[100dvh] bg-[var(--bg-primary)] pb-32">
+      <header className="sticky top-0 z-40 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-md">
+        <div className="flex items-start gap-2 px-3 py-3 sm:px-4">
           <button
             onClick={() => navigate('/picking')}
-            className="min-h-11 min-w-11 flex items-center justify-center rounded-lg text-[var(--content-secondary)] pick-pressable"
+            className="min-h-11 min-w-11 flex shrink-0 items-center justify-center rounded-xl text-[var(--content-secondary)] pick-pressable"
+            aria-label="Back to queue"
           >
             <CaretLeft size={24} weight="bold" />
           </button>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-lg font-bold text-[var(--content-primary)] truncate leading-tight">
+          <div className="min-w-0 flex-1 pt-0.5">
+            <h1 className="truncate text-sm font-bold tracking-tight text-[var(--content-primary)]">
               {order.customer_name}
             </h1>
-            {order.customer_city && (
-              <p className="text-sm text-[var(--content-secondary)] truncate">
-                {order.customer_city}
-              </p>
-            )}
-            {formatBilledLabel(order.approved_at, order.created_at) && (
-              <p className="mt-0.5 text-xs font-medium text-[var(--content-tertiary)]">
-                {formatBilledLabel(order.approved_at, order.created_at)}
-              </p>
-            )}
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+              {order.customer_city && (
+                <p className="truncate text-[11px] text-[var(--content-tertiary)]">
+                  {order.customer_city}
+                </p>
+              )}
               {order.transport_name ? (
                 <TransportChip name={order.transport_name} size="sm" />
               ) : (
@@ -1839,33 +1886,36 @@ export default function PickPage(): React.JSX.Element | null {
                 </span>
               )}
               {order.priority === 'urgent' && <StatusBadge status="urgent" />}
-              <span className="font-mono text-[10px] text-[var(--content-quaternary)]">
-                {order.order_number}
-              </span>
             </div>
+            {formatBilledLabel(order.approved_at, order.created_at) && (
+              <p className="mt-1 text-[10px] font-medium text-[var(--content-quaternary)]">
+                {formatBilledLabel(order.approved_at, order.created_at)}
+                {' · '}
+                <span className="font-mono">{order.order_number}</span>
+              </p>
+            )}
           </div>
-          <div className="text-right shrink-0 tabular-nums">
-            <p className="text-sm font-semibold text-[var(--content-secondary)] leading-none">
+          <div className="shrink-0 text-right tabular-nums">
+            <p className="font-mono text-3xl font-extrabold leading-none tracking-tight text-[var(--content-primary)]">
               {counts.picked + counts.flagged}
-              <span className="text-[var(--content-quaternary)] font-normal">
+              <span className="text-sm font-normal text-[var(--content-tertiary)]">
                 /{counts.total}
               </span>
             </p>
-            <p className="text-[10px] text-[var(--content-quaternary)] mt-0.5">lines done</p>
+            <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+              lines done
+            </p>
           </div>
         </div>
-
-        <ProgressBar
-          segments={[
-            { value: counts.picked, color: 'green' },
-            { value: counts.flagged, color: 'red' },
-            { value: counts.remaining, color: 'gray' },
-          ]}
-          total={counts.total}
-        />
+        <div className="mx-3 mb-2 h-1 overflow-hidden rounded bg-[var(--border-subtle)] sm:mx-4">
+          <div
+            className="h-full rounded bg-[var(--bg-inverse-primary)] transition-all duration-500"
+            style={{ width: `${pickProgressPct}%` }}
+          />
+        </div>
       </header>
 
-      <div className="px-4 pt-3 space-y-4">
+      <div className="mx-auto w-full max-w-lg px-1.5 pt-2 space-y-3 sm:px-2">
         {isBriefPhase ? (
           /* ─── Order Brief: trip summary before walking the route ─── */
           <div className="space-y-4 animate-pick-stop-enter">
@@ -1958,14 +2008,17 @@ export default function PickPage(): React.JSX.Element | null {
           </div>
         ) : deckItems.length > 0 ? (
           <div className="space-y-3">
-            <SwipeDeck
-              variant="carousel"
+            <PickSwipeDeck
               currentIndex={safeCardIndex}
               itemCount={deckItems.length}
               onIndexChange={handleCardIndexChange}
-              onSwipeUp={() => setQueueSheetOpen(true)}
+              onSwipeUp={() => {
+                appHaptics.impactLight();
+                setQueueSheetOpen(true);
+              }}
+              onSwipeUpDrag={setQueueDragProgress}
+              onSwipeUpDragEnd={() => setQueueDragProgress(0)}
               dotStatus={deckDotStatus}
-              hint="Swipe › next line · ‹ previous · ↑ queue"
             >
               {deckItems.map((pi, index) => {
                 const targetQty = pickQuantityTarget(pi.orderItem);
@@ -2013,7 +2066,7 @@ export default function PickPage(): React.JSX.Element | null {
                       rackVerified={rackVerified}
                       pickedQty={pickedQty}
                       targetQty={targetQty}
-                      positionLabel={deckBrandLabels.get(pi.orderItem.id)}
+                      positionLabel={`${orderItemBrandLabel(pi.orderItem)} · ${index + 1} of ${deckItems.length}`}
                       flagReason={pi.orderItem.flag_reason}
                       scannerPaused={scannerPaused || !isCardCurrent}
                       lineOutcome={cardOutcome?.kind ?? null}
@@ -2070,7 +2123,7 @@ export default function PickPage(): React.JSX.Element | null {
                   </div>
                 );
               })}
-            </SwipeDeck>
+            </PickSwipeDeck>
 
             {scannerHint && (
               <p className="text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] rounded-lg px-3 py-2">
@@ -2078,23 +2131,19 @@ export default function PickPage(): React.JSX.Element | null {
               </p>
             )}
 
-            <button
-              type="button"
-              onClick={() => {
+            <PickLineStatusPanel
+              rows={pickStatusRows}
+              pickedCount={counts.picked}
+              flaggedCount={counts.flagged}
+              remainingCount={counts.remaining}
+              totalCount={counts.total}
+              dragProgress={queueDragProgress}
+              onJump={jumpToItem}
+              onOpenQueue={() => {
                 appHaptics.selection();
                 setQueueSheetOpen(true);
               }}
-              className="w-full rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-4 py-3 pick-pressable text-left"
-              aria-label="Open pick queue"
-            >
-              <div className="flex justify-center mb-1.5">
-                <span className="block w-9 h-1 rounded-full bg-[var(--border-opaque)]" />
-              </div>
-              <div className="flex items-center gap-2 justify-center text-[var(--content-tertiary)] text-xs">
-                <ArrowUp size={14} weight="regular" />
-                View full queue · swipe up on card
-              </div>
-            </button>
+            />
           </div>
         ) : (
           <div className="ds-card p-6 text-center">

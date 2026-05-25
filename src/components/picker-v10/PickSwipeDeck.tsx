@@ -10,6 +10,8 @@ export interface PickSwipeDeckProps {
   /** Per-line status for colored page dots. */
   dotStatus?: SwipeDeckDotStatus[];
   onSwipeUp?: () => void;
+  onSwipeUpDrag?: (progress: number) => void;
+  onSwipeUpDragEnd?: () => void;
   children: ReactNode;
 }
 
@@ -23,6 +25,8 @@ export function PickSwipeDeck({
   onIndexChange,
   dotStatus,
   onSwipeUp,
+  onSwipeUpDrag,
+  onSwipeUpDragEnd,
   children,
 }: PickSwipeDeckProps): React.JSX.Element {
   return (
@@ -33,7 +37,13 @@ export function PickSwipeDeck({
       onIndexChange={onIndexChange}
       dotStatus={dotStatus}
       onSwipeUp={onSwipeUp}
-      hint="Swipe › next line · ‹ previous"
+      onSwipeUpDrag={onSwipeUpDrag}
+      onSwipeUpDragEnd={onSwipeUpDragEnd}
+      hint={
+        onSwipeUp
+          ? 'Swipe › next line · ‹ previous · ↑ queue'
+          : 'Swipe › next line · ‹ previous'
+      }
     >
       {children}
     </SwipeDeck>

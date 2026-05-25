@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase/client';
+import { queryClient } from '../lib/queryClient';
 import { useAuth } from '../context/AuthContext';
 import {
   ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
@@ -162,7 +163,7 @@ function categorizePickQueueOrder(
 ): PickQueueBucket {
   const claim = order.claim_info;
 
-  if (claim?.is_stale) return 'stale';
+  if (claim?.is_stale && order.workflow_status === 'picking') return 'stale';
   if (claim && order.is_mine) return 'myActive';
   if (claim && !order.is_mine) return 'otherActive';
 
@@ -360,6 +361,52 @@ async function fetchBillingQueueSnapshot(
   });
 }
 
+function buildClaimableOrdersQueryKey(
+  stage: ClaimStage,
+  statusKey: string,
+  todayOnly: boolean | undefined,
+  billingEventsEnabled: boolean,
+) {
+  return [
+    'claimable-orders',
+    stage,
+    statusKey,
+    todayOnly ?? false,
+    billingEventsEnabled ? 'billing-events' : 'legacy',
+  ] as const;
+}
+
+/** Fire-and-forget prefetch — warm queue data before the picker screen mounts. */
+export function prefetchClaimableOrders(
+  options: ClaimableOrdersOptions,
+  userId: number | null,
+): void {
+  const statusKey = Array.isArray(options.workflowStatus)
+    ? options.workflowStatus.join(',')
+    : options.workflowStatus ?? 'all';
+  const billingEventsEnabled = shouldUseBillingQueueEvents(options.stage);
+
+  void queryClient.prefetchQuery({
+    queryKey: buildClaimableOrdersQueryKey(
+      options.stage,
+      statusKey,
+      options.todayOnly,
+      billingEventsEnabled,
+    ),
+    queryFn: async () => {
+      if (!billingEventsEnabled) {
+        return fetchLegacyClaimableOrders(options, userId);
+      }
+      try {
+        return await fetchBillingQueueSnapshot(options, userId);
+      } catch {
+        return fetchLegacyClaimableOrders(options, userId);
+      }
+    },
+    staleTime: 0,
+  });
+}
+
 /**
  * Fetch orders enriched with active claim info for a given stage.
  *
@@ -382,13 +429,7 @@ export function useClaimableOrders(
     : workflowStatus ?? 'all';
 
   const queryKey = useMemo(
-    () => [
-      'claimable-orders',
-      stage,
-      statusKey,
-      todayOnly ?? false,
-      billingEventsEnabled ? 'billing-events' : 'legacy',
-    ] as const,
+    () => buildClaimableOrdersQueryKey(stage, statusKey, todayOnly, billingEventsEnabled),
     [stage, statusKey, todayOnly, billingEventsEnabled],
   );
 

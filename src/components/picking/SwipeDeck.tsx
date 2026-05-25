@@ -14,7 +14,8 @@ const VELOCITY_THRESHOLD = 0.22;
 const VELOCITY_DISTANCE_MIN_PX = 14;
 const VERTICAL_DOMINANCE = 1.35;
 const VERTICAL_MIN_PX = 10;
-const VERTICAL_OPEN_PX = 44;
+const VERTICAL_OPEN_PX = 36;
+const VERTICAL_DRAG_MAX_PX = 72;
 const GESTURE_LOCK_PX = 5;
 const DRAG_OVERSCROLL_RATIO = 1.05;
 const SNAP_MS = 220;
@@ -28,6 +29,10 @@ interface SwipeDeckProps {
   onIndexChange: (index: number) => void;
   /** Swipe up on the deck (e.g. open queue). Downward swipes are never intercepted — PWA pull-to-refresh stays available. */
   onSwipeUp?: () => void;
+  /** 0–1 while dragging up — use to lift the status panel below the deck. */
+  onSwipeUpDrag?: (progress: number) => void;
+  /** Called when a vertical swipe gesture ends (progress resets to 0). */
+  onSwipeUpDragEnd?: () => void;
   /** `carousel` — centered dots, slide inset, inactive scale. */
   variant?: 'default' | 'carousel';
   dotStatus?: SwipeDeckDotStatus[];
@@ -45,6 +50,8 @@ export function SwipeDeck({
   itemCount,
   onIndexChange,
   onSwipeUp,
+  onSwipeUpDrag,
+  onSwipeUpDragEnd,
   variant = 'default',
   dotStatus,
   hint,
@@ -58,6 +65,8 @@ export function SwipeDeck({
   const itemCountRef = useRef(itemCount);
   const onIndexChangeRef = useRef(onIndexChange);
   const onSwipeUpRef = useRef(onSwipeUp);
+  const onSwipeUpDragRef = useRef(onSwipeUpDrag);
+  const onSwipeUpDragEndRef = useRef(onSwipeUpDragEnd);
   const startXRef = useRef<number | null>(null);
   const startYRef = useRef<number | null>(null);
   const startTimeRef = useRef<number>(0);
@@ -70,6 +79,8 @@ export function SwipeDeck({
   itemCountRef.current = itemCount;
   onIndexChangeRef.current = onIndexChange;
   onSwipeUpRef.current = onSwipeUp;
+  onSwipeUpDragRef.current = onSwipeUpDrag;
+  onSwipeUpDragEndRef.current = onSwipeUpDragEnd;
 
   const getTrackOffset = useCallback((index: number, drag: number) => {
     return -index * widthRef.current + drag;
@@ -169,9 +180,24 @@ export function SwipeDeck({
 
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || itemCount <= 1) return;
+    if (!el) return;
 
     const swipeUpEnabled = () => Boolean(onSwipeUpRef.current);
+    const emitDragProgress = (deltaY: number) => {
+      if (deltaY >= 0) {
+        el.style.setProperty('--swipe-up-progress', '0');
+        onSwipeUpDragRef.current?.(0);
+        return;
+      }
+      const progress = Math.min(1, Math.abs(deltaY) / VERTICAL_DRAG_MAX_PX);
+      el.style.setProperty('--swipe-up-progress', String(progress));
+      onSwipeUpDragRef.current?.(progress);
+    };
+    const endVerticalDrag = () => {
+      el.style.setProperty('--swipe-up-progress', '0');
+      onSwipeUpDragRef.current?.(0);
+      onSwipeUpDragEndRef.current?.();
+    };
 
     const finishGesture = (clientX: number, clientY: number) => {
       if (startXRef.current === null || startYRef.current === null) return;
@@ -180,13 +206,19 @@ export function SwipeDeck({
       const deltaY = clientY - startYRef.current;
       const elapsed = Math.max(1, performance.now() - startTimeRef.current);
       const velocity = Math.abs(deltaX) / elapsed;
+      const verticalVelocity = Math.abs(deltaY) / elapsed;
       const width = widthRef.current;
       const swipeThreshold = Math.max(SWIPE_THRESHOLD_MIN_PX, width * SWIPE_THRESHOLD_RATIO);
       const idx = currentIndexRef.current;
       const count = itemCountRef.current;
 
       if (gestureRef.current === 'vertical') {
-        if (deltaY < -VERTICAL_OPEN_PX) onSwipeUpRef.current?.();
+        endVerticalDrag();
+        const flingUp = verticalVelocity > VELOCITY_THRESHOLD && deltaY < -VELOCITY_DISTANCE_MIN_PX;
+        if (deltaY < -VERTICAL_OPEN_PX || flingUp) {
+          appHaptics.impactLight();
+          onSwipeUpRef.current?.();
+        }
       } else if (gestureRef.current === 'horizontal') {
         const fling = velocity > VELOCITY_THRESHOLD && Math.abs(deltaX) > VELOCITY_DISTANCE_MIN_PX;
         const goNext = deltaX < -swipeThreshold || (fling && deltaX < 0);
@@ -218,7 +250,8 @@ export function SwipeDeck({
     };
 
     const onTouchStart = (event: TouchEvent) => {
-      if (animatingRef.current || itemCountRef.current <= 1) return;
+      if (animatingRef.current) return;
+      if (itemCountRef.current <= 1 && !swipeUpEnabled()) return;
       const touch = event.changedTouches[0];
       if (!touch) return;
       startXRef.current = touch.clientX;
@@ -260,6 +293,11 @@ export function SwipeDeck({
         }
       }
 
+      if (gestureRef.current === 'vertical') {
+        emitDragProgress(deltaY);
+        return;
+      }
+
       if (gestureRef.current !== 'horizontal') return;
 
       const clampedDrag = Math.max(-maxDrag, Math.min(maxDrag, deltaX));
@@ -282,7 +320,8 @@ export function SwipeDeck({
 
     const onPointerDown = (event: PointerEvent) => {
       if (event.pointerType === 'touch') return;
-      if (animatingRef.current || itemCountRef.current <= 1) return;
+      if (animatingRef.current) return;
+      if (itemCountRef.current <= 1 && !swipeUpEnabled()) return;
       startXRef.current = event.clientX;
       startYRef.current = event.clientY;
       startTimeRef.current = performance.now();
@@ -319,6 +358,11 @@ export function SwipeDeck({
         } else if (Math.abs(deltaX) >= Math.abs(deltaY)) {
           gestureRef.current = 'horizontal';
         }
+      }
+
+      if (gestureRef.current === 'vertical') {
+        emitDragProgress(deltaY);
+        return;
       }
 
       if (gestureRef.current !== 'horizontal') return;
@@ -373,6 +417,17 @@ export function SwipeDeck({
     }
   };
 
+  const dotAriaLabel = (index: number): string => {
+    const status = dotStatus?.[index] ?? (index === currentIndex ? 'active' : 'pending');
+    const statusWord =
+      status === 'done'
+        ? 'picked'
+        : status === 'active'
+          ? 'current'
+          : status;
+    return `Line ${index + 1} of ${itemCount}, ${statusWord}`;
+  };
+
   return (
     <div className="space-y-2">
       <div
@@ -380,9 +435,17 @@ export function SwipeDeck({
         className={`relative overflow-hidden select-none touch-pan-y ${isCarousel ? 'px-0.5' : ''} pick-deck-height`}
         style={{
           touchAction: 'pan-y pinch-zoom',
-          contain: 'strict',
+          ['--swipe-up-progress' as string]: '0',
         }}
       >
+        <div
+          className="pick-deck-swipe-hint pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-end justify-center pb-2"
+          aria-hidden
+        >
+          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)]/90 px-2.5 py-1 text-[10px] font-semibold text-[var(--content-secondary)] shadow-sm backdrop-blur-sm">
+            ↑ Queue
+          </span>
+        </div>
         <div
           ref={trackRef}
           className="flex h-full"
@@ -435,13 +498,17 @@ export function SwipeDeck({
                   type="button"
                   role="tab"
                   aria-selected={isActive}
-                  aria-label={`Line ${index + 1} of ${itemCount}`}
+                  aria-label={dotAriaLabel(index)}
                   onClick={() => {
                     if (index === currentIndexRef.current) return;
                     snapToIndex(index, true);
                   }}
-                  className={`shrink-0 rounded-full pick-pressable transition-all duration-200 ${dotClass(index)}`}
-                />
+                  className="flex min-h-11 min-w-11 shrink-0 items-center justify-center pick-pressable"
+                >
+                  <span
+                    className={`rounded-full transition-all duration-200 ${dotClass(index)}`}
+                  />
+                </button>
               );
             })}
           </div>

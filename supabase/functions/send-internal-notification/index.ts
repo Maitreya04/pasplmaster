@@ -376,14 +376,12 @@ serve(async (req) => {
           : `Ready to pick: ${payload.orderNumber}`;
       const body = isAssigned
         ? payload.priority === 'urgent'
-          ? `${payload.customerName} — start picking now.`
-          : `${payload.customerName} is on your pick list.`
+          ? `${payload.customerName} — tap to review your pick list.`
+          : `${payload.customerName} is on your pick list — review before you start.`
         : payload.priority === 'urgent'
-          ? `${payload.customerName} — claim from the queue now.`
+          ? `${payload.customerName} — review and start from the queue.`
           : `${payload.customerName} is in the pick queue.`;
-      const deepLink = isAssigned
-        ? `/picking/pick/${payload.orderId}`
-        : `/picking?claimOrderId=${payload.orderId}`;
+      const deepLink = `/picking/preview/${payload.orderId}?source=${isAssigned ? 'assigned' : 'pool'}`;
       await insertUserNotifications(
         admin,
         pickingIds.map((user_id) => ({

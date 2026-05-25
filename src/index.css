@@ -405,8 +405,30 @@ select {
 }
 
 .pick-deck-height {
-  height: clamp(280px, 52dvh, 560px);
-  height: clamp(280px, 52vh, 560px);
+  height: clamp(260px, min(48dvh, 52dvh), 520px);
+  height: clamp(260px, min(48vh, 52vh), 520px);
+}
+
+.pick-deck-swipe-hint {
+  opacity: calc(var(--swipe-up-progress, 0) * 1);
+  transform: translateY(calc((1 - var(--swipe-up-progress, 0)) * 8px));
+  transition: opacity 80ms ease-out, transform 80ms ease-out;
+}
+
+.pick-status-list {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+@media (max-height: 640px) {
+  .pick-deck-height {
+    height: clamp(220px, 44dvh, 420px);
+    height: clamp(220px, 44vh, 420px);
+  }
+
+  .pick-status-list {
+    max-height: min(9rem, 24dvh) !important;
+  }
 }
 
 @media (max-height: 640px) {

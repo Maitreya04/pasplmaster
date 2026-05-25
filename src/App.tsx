@@ -24,10 +24,17 @@ const BillingDeskPage = lazy(() => import('./pages/billing/BillingDeskPage'));
 const CompactQueuePage = lazy(() => import('./pages/billing/CompactQueuePage'));
 const BillingNewOrderLayout = lazy(() => import('./pages/billing/BillingNewOrderLayout'));
 
-const PickingLayout = lazy(() => import('./pages/picking/PickingLayout'));
+const PickingLayout = lazy(() =>
+  import('./pages/picking/PickingLayout').then((module) => {
+    // Start QueuePage chunk in parallel so /picking doesn't wait on two serial lazy loads.
+    void import('./pages/picking/QueuePage');
+    return module;
+  }),
+);
 const QueuePage = lazy(() => import('./pages/picking/QueuePage'));
 const PickPage = lazy(() => import('./pages/picking/PickPage'));
 const PickPreviewPage = lazy(() => import('./pages/picking/PickPreviewPage'));
+const ActivePicksPage = lazy(() => import('./pages/picking/ActivePicksPage'));
 
 const AdminPage = lazy(() => import('./pages/admin/AdminPage'));
 const AdminPasscodePage = lazy(() => import('./pages/admin/AdminPasscodePage'));
@@ -168,6 +175,7 @@ export default function App(): React.JSX.Element | null {
           }
         >
           <Route index element={<QueuePage />} />
+          <Route path="active" element={<ActivePicksPage />} />
           <Route path="barcode-mapping" element={<BarcodeMappingPage />} />
           <Route path="pick/:id" element={<PickPage />} />
           <Route path="preview/:id" element={<PickPreviewPage />} />

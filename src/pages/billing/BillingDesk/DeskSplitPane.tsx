@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 const STORAGE_KEY = 'billing-desk-split-ratio-v1';
-const DEFAULT_RATIO = 0.5;
+const DEFAULT_RATIO = 0.4;
 const MIN_RATIO = 0.28;
 const MAX_RATIO = 0.72;
 

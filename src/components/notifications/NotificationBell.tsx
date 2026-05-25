@@ -58,7 +58,16 @@ function deepLinkFromPayload(n: UserNotification): string | null {
     return `/picking?focusOrderId=${n.order_id}`;
   }
   if (n.type === 'order_ready_to_pick' && n.order_id) {
-    return `/picking/pick/${n.order_id}`;
+    const dl = payloadDeepLink(n);
+    if (dl) {
+      // Legacy inbox rows may still use ?claimOrderId=
+      if (dl.includes('claimOrderId=')) {
+        const match = dl.match(/claimOrderId=(\d+)/);
+        if (match?.[1]) return `/picking/preview/${match[1]}?source=pool`;
+      }
+      return dl;
+    }
+    return `/picking/preview/${n.order_id}?source=assigned`;
   }
   if (n.type === 'item_flagged_by_picker' && n.order_id) {
     return `/billing/desk?orderId=${n.order_id}`;

@@ -1,11 +1,15 @@
 import { Outlet, useLocation } from 'react-router-dom';
-import { Queue, ListChecks, Barcode } from '@phosphor-icons/react';
+import { useEffect } from 'react';
+import { Queue, UsersThree, Barcode } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
 import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
 import { useCameraPermissionWarmup } from '../../context/CameraContext';
+import { useAuth } from '../../context/AuthContext';
+import { warmPickQueueRoute } from '../../lib/picking/warmPickQueue';
 
 const preloadQueue = () => import('./QueuePage');
+const preloadActivePicks = () => import('./ActivePicksPage');
 const preloadBarcodeMapping = () => import('../admin/BarcodeMappingPage');
 
 const NAV_ITEMS: BottomNavItem[] = [
@@ -18,13 +22,12 @@ const NAV_ITEMS: BottomNavItem[] = [
     preload: preloadQueue,
   },
   {
-    icon: ListChecks,
-    label: 'Active Pick',
-    path: '/picking',
+    icon: UsersThree,
+    label: 'Active',
+    path: '/picking/active',
     navKey: 'picking-active',
-    match: (pathname) =>
-      pathname.startsWith('/picking/pick/') || pathname.startsWith('/picking/preview/'),
-    preload: preloadQueue,
+    match: (pathname) => pathname === '/picking/active',
+    preload: preloadActivePicks,
   },
   {
     icon: Barcode,
@@ -41,11 +44,14 @@ export default function PickingLayout(): React.JSX.Element | null {
 
 function PickingLayoutInner(): React.JSX.Element | null {
   const location = useLocation();
-  const isPickPage =
-    location.pathname.startsWith('/picking/pick/') ||
-    location.pathname.startsWith('/picking/preview/');
+  const isPickPage = location.pathname.startsWith('/picking/pick/');
+  const { userId } = useAuth();
 
   const { permissionState, requestWarmup } = useCameraPermissionWarmup();
+
+  useEffect(() => {
+    warmPickQueueRoute(userId);
+  }, [userId]);
 
   return (
     <div className="role-picking min-h-screen bg-[var(--bg-primary)] relative">

@@ -8,7 +8,7 @@ import type { WorkflowStatus } from '../types';
 
 export type { DeskPickerFlagLine };
 
-export type DeskOrderTab = 'all' | 'picking' | 'stale';
+export type DeskOrderTab = 'all' | 'picking' | 'stale' | 'completed';
 
 export type DeskOrderStatus =
   | 'picking'
@@ -113,7 +113,8 @@ export function useBillingDeskOrders() {
     const staleSet = stalePickingIds ?? new Set<number>();
     const flagsMap = pickerFlagsByOrder ?? new Map<number, DeskPickerFlagLine[]>();
     return monitorOrders.map((order) => {
-      const pickingClaimStale = staleSet.has(order.id);
+      const pickingClaimStale =
+        order.workflow_status === 'picking' && staleSet.has(order.id);
       return {
         ...order,
         pickingClaimStale,
@@ -144,14 +145,22 @@ export function useBillingDeskOrders() {
     [listOrders],
   );
 
+  const completedCount = useMemo(
+    () => listOrders.filter((o) => o.deskStatus === 'checking').length,
+    [listOrders],
+  );
+
   return {
     isLoading,
     all: enriched,
     flaggedOrders,
     listOrders,
     staleCount,
+    completedCount,
   };
 }
+
+const ACTIVE_PICK_STATUSES: DeskOrderStatus[] = ['unassigned', 'no_ack', 'picking'];
 
 export function filterDeskOrdersByTab(
   orders: DeskOrderRow[],
@@ -159,13 +168,10 @@ export function filterDeskOrdersByTab(
 ): DeskOrderRow[] {
   if (tab === 'all') return orders;
   if (tab === 'picking') {
-    return orders.filter(
-      (o) =>
-        o.deskStatus === 'picking' ||
-        o.deskStatus === 'checking' ||
-        o.deskStatus === 'no_ack' ||
-        o.deskStatus === 'unassigned',
-    );
+    return orders.filter((o) => ACTIVE_PICK_STATUSES.includes(o.deskStatus));
+  }
+  if (tab === 'completed') {
+    return orders.filter((o) => o.deskStatus === 'checking');
   }
   return orders.filter(
     (o) =>

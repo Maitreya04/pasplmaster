@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Package,
   ArrowRight,
@@ -8,9 +7,9 @@ import {
   GearSix,
   Barcode,
 } from '@phosphor-icons/react';
-import { supabase } from '../../lib/supabase/client';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
 import { usePickerPushNotifications } from '../../hooks/usePickerPushNotifications';
+import { usePickerDailyStats } from '../../hooks/usePickerDailyStats';
 import { NotificationBell } from '../../components/notifications/NotificationBell';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -22,13 +21,15 @@ import {
   QueueSectionHeader,
   InitialsAvatar,
 } from '../../components/shared';
-import { BeingPickedCarousel } from '../../components/picking/BeingPickedCarousel';
 import { AvailableOrderRow } from '../../components/picking/AvailableOrderRow';
+import { AssignedOrderRow } from '../../components/picking/AssignedOrderRow';
 import { IncompletePickBanner } from '../../components/picking/IncompletePickBanner';
+import { PickerDailyStatsStrip } from '../../components/picking/PickerDailyStatsStrip';
+import { sortAvailablePickQueueOrders } from '../../lib/pickQueueTransport';
 import {
-  sortAvailablePickQueueOrders,
-  sortBeingPickedOrders,
-} from '../../lib/pickQueueTransport';
+  isInProgressPick,
+  isMyAssignedPending,
+} from '../../lib/picking/pickLifecycle';
 
 function hasPickableLines(order: { pick_line_count?: number; item_count: number }): boolean {
   if (order.pick_line_count != null) return order.pick_line_count > 0;
@@ -38,152 +39,74 @@ function hasPickableLines(order: { pick_line_count?: number; item_count: number 
 export default function QueuePage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const queryClient = useQueryClient();
   const toast = useToast();
   const { role, userId, userName } = useAuth();
-  const autoClaimAttemptRef = useRef<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const claimOrderIdParam = searchParams.get('claimOrderId');
-  const autoClaimOrderId = claimOrderIdParam ? Number.parseInt(claimOrderIdParam, 10) : null;
+
   const focusOrderIdParam = searchParams.get('focusOrderId');
   const focusOrderId = focusOrderIdParam ? Number.parseInt(focusOrderIdParam, 10) : null;
+  const claimOrderIdParam = searchParams.get('claimOrderId');
+  const legacyClaimOrderId = claimOrderIdParam ? Number.parseInt(claimOrderIdParam, 10) : null;
+
+  // Old push notifications used ?claimOrderId= — send to preview instead of auto-claiming.
+  useEffect(() => {
+    if (!claimOrderIdParam) return;
+    if (!Number.isInteger(legacyClaimOrderId) || (legacyClaimOrderId ?? 0) <= 0) {
+      navigate('/picking', { replace: true });
+      return;
+    }
+    navigate(`/picking/preview/${legacyClaimOrderId}?source=pool`, { replace: true });
+  }, [claimOrderIdParam, legacyClaimOrderId, navigate]);
 
   const {
     available,
     myActive,
-    otherActive,
     stale,
     isLoading,
   } = useClaimableOrders({
     stage: 'picking',
     workflowStatus: ['approved', 'picking'],
   });
+
+  const dailyStats = usePickerDailyStats();
   const pushAlerts = usePickerPushNotifications({ role, userId, userName });
+
+  const inProgressPicks = useMemo(
+    () => myActive.filter(isInProgressPick),
+    [myActive],
+  );
+
+  const assignedToMe = useMemo(
+    () =>
+      myActive.filter(
+        (order) => isMyAssignedPending(order, userName) && hasPickableLines(order),
+      ),
+    [myActive, userName],
+  );
+
+  const resumePick = useMemo(() => {
+    if (inProgressPicks.length === 0) return null;
+    if (focusOrderId != null && Number.isInteger(focusOrderId)) {
+      const focused = inProgressPicks.find((order) => order.id === focusOrderId);
+      if (focused) return focused;
+    }
+    return [...inProgressPicks].sort((a, b) => {
+      const aTime = new Date(a.claim_info?.claimed_at ?? a.approved_at ?? a.created_at).getTime();
+      const bTime = new Date(b.claim_info?.claimed_at ?? b.approved_at ?? b.created_at).getTime();
+      return bTime - aTime;
+    })[0];
+  }, [focusOrderId, inProgressPicks]);
 
   const availableOrders = useMemo(
     () => sortAvailablePickQueueOrders([...available, ...stale].filter(hasPickableLines)),
     [available, stale],
   );
 
-  const resumePick = useMemo(() => {
-    if (myActive.length === 0) return null;
-    if (focusOrderId != null && Number.isInteger(focusOrderId)) {
-      const focused = myActive.find((order) => order.id === focusOrderId);
-      if (focused) return focused;
-    }
-    return [...myActive].sort((a, b) => {
-      const aTime = new Date(a.claim_info?.claimed_at ?? a.approved_at ?? a.created_at).getTime();
-      const bTime = new Date(b.claim_info?.claimed_at ?? b.approved_at ?? b.created_at).getTime();
-      return bTime - aTime;
-    })[0];
-  }, [focusOrderId, myActive]);
+  const hasOpenWork = inProgressPicks.length > 0 || assignedToMe.length > 0;
 
-  /** Carousel: skip your own pick when the sticky resume banner is showing. */
-  const carouselOrders = useMemo(
-    () =>
-      sortBeingPickedOrders(
-        resumePick != null ? otherActive : [...myActive, ...otherActive],
-      ),
-    [myActive, otherActive, resumePick],
-  );
-
-  const myOrderIds = useMemo(
-    () => new Set(myActive.map((order) => order.id)),
-    [myActive],
-  );
-
-  const clearNotificationIntent = useCallback(() => {
-    navigate('/picking', { replace: true });
-  }, [navigate]);
-
-  const claimMutation = useMutation({
-    mutationFn: async (orderId: number) => {
-      if (!userId) throw new Error('Not logged in');
-      if (myActive.length > 0) {
-        throw new Error('OPEN_PICK');
-      }
-      const { data, error } = await supabase.rpc('claim_order', {
-        p_order_id: orderId,
-        p_stage: 'picking',
-        p_user_id: userId,
-      });
-      if (error) throw error;
-      const result = data as { success: boolean; reason?: string; claimed_by?: string };
-      if (!result.success) {
-        if (result.reason === 'already_claimed') {
-          throw new Error(`ALREADY_CLAIMED:${result.claimed_by || 'someone'}`);
-        }
-        throw new Error(result.reason || 'CLAIM_FAILED');
-      }
-      return orderId;
-    },
-    onSuccess: (claimedOrderId) => {
-      queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-      navigate(`/picking/pick/${claimedOrderId}`, { replace: true });
-    },
-    onError: (err) => {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg === 'OPEN_PICK') {
-        toast.info('Finish your open pick before starting a new order.');
-        return;
-      }
-      if (msg.startsWith('ALREADY_CLAIMED:')) {
-        const pickerName = msg.replace('ALREADY_CLAIMED:', '');
-        toast.error(`This order is already being picked by ${pickerName}. Please choose another.`);
-      } else if (msg === 'Missing orderId or userId') {
-        toast.error('Select a picker name before claiming orders.');
-      } else if (msg === 'Order not found') {
-        toast.error('This order is no longer available for picking.');
-      } else {
-        toast.error('Failed to claim order.');
-      }
-      queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-      if (claimOrderIdParam) {
-        clearNotificationIntent();
-      }
-    },
-  });
-
-  useEffect(() => {
-    if (!claimOrderIdParam) {
-      autoClaimAttemptRef.current = null;
-    }
-  }, [claimOrderIdParam]);
-
-  useEffect(() => {
-    if (!claimOrderIdParam || !userId) return;
-    if (!Number.isInteger(autoClaimOrderId) || (autoClaimOrderId ?? 0) <= 0) {
-      toast.error('That picker alert is no longer valid.');
-      clearNotificationIntent();
-      return;
-    }
-    const claimTargetId = autoClaimOrderId as number;
-    if (autoClaimAttemptRef.current === claimOrderIdParam || claimMutation.isPending) return;
-
-    if (myActive.length > 0) {
-      const existingClaim = myActive.find((order) => order.id === claimTargetId);
-      autoClaimAttemptRef.current = claimOrderIdParam;
-      if (existingClaim) {
-        navigate(`/picking/pick/${existingClaim.id}`, { replace: true });
-      } else {
-        toast.info('Finish or release your current pick before claiming another order.');
-        clearNotificationIntent();
-      }
-      return;
-    }
-
-    autoClaimAttemptRef.current = claimOrderIdParam;
-    claimMutation.mutate(claimTargetId);
-  }, [
-    autoClaimOrderId,
-    claimMutation,
-    claimOrderIdParam,
-    clearNotificationIntent,
-    myActive,
-    navigate,
-    toast,
-    userId,
-  ]);
+  const openPreview = (orderId: number, source: 'assigned' | 'pool') => {
+    navigate(`/picking/preview/${orderId}?source=${source}`);
+  };
 
   const handleEnableAlerts = async () => {
     const result = await pushAlerts.enable();
@@ -206,7 +129,8 @@ export default function QueuePage(): React.JSX.Element | null {
 
   const queueIsEmpty =
     !isLoading &&
-    carouselOrders.length === 0 &&
+    assignedToMe.length === 0 &&
+    !resumePick &&
     availableOrders.length === 0;
 
   return (
@@ -250,6 +174,8 @@ export default function QueuePage(): React.JSX.Element | null {
         }
       />
 
+      <PickerDailyStatsStrip stats={dailyStats.data} isLoading={dailyStats.isLoading} />
+
       {resumePick && (
         <IncompletePickBanner
           order={resumePick}
@@ -264,18 +190,38 @@ export default function QueuePage(): React.JSX.Element | null {
           </div>
         ) : (
           <>
-            <BeingPickedCarousel
-              orders={carouselOrders}
-              myOrderIds={myOrderIds}
-              onResume={(orderId) => navigate(`/picking/pick/${orderId}`)}
-            />
+            {assignedToMe.length > 0 && (
+              <section>
+                <QueueSectionHeader label="Assigned to me" count={assignedToMe.length} />
+                <div className="space-y-2">
+                  {assignedToMe.map((order) => (
+                    <AssignedOrderRow
+                      key={order.id}
+                      order={order}
+                      onOpen={() => openPreview(order.id, 'assigned')}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
             <section>
-              <QueueSectionHeader label="Available to pick" count={availableOrders.length} />
+              <QueueSectionHeader
+                label="Available — unassigned"
+                count={availableOrders.length}
+                className="opacity-80"
+              />
+              <p className="mb-2 text-xs text-[var(--content-tertiary)]">
+                Only claim if billing has not assigned anyone yet.
+              </p>
 
               {resumePick ? (
                 <p className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
                   Finish your open pick above before starting a new order.
+                </p>
+              ) : hasOpenWork && assignedToMe.length > 0 ? (
+                <p className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
+                  Start your assigned orders first. Use Available only as a fallback.
                 </p>
               ) : availableOrders.length === 0 ? (
                 queueIsEmpty ? (
@@ -286,16 +232,13 @@ export default function QueuePage(): React.JSX.Element | null {
                   />
                 ) : null
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-2 opacity-90">
                   {availableOrders.map((order) => (
                     <AvailableOrderRow
                       key={order.id}
                       order={order}
-                      onClaim={() => claimMutation.mutate(order.id)}
-                      claiming={
-                        claimMutation.isPending &&
-                        claimMutation.variables === order.id
-                      }
+                      onOpen={() => openPreview(order.id, 'pool')}
+                      disabled={inProgressPicks.length > 0}
                     />
                   ))}
                 </div>

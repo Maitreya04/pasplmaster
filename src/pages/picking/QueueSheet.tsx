@@ -90,7 +90,7 @@ export function QueueSheet({
   }
 
   return (
-    <BottomSheet isOpen={isOpen} onClose={onClose} title="Line queue">
+    <BottomSheet isOpen={isOpen} onClose={onClose} title="Pick status & queue">
       <div className="space-y-5">
         {(transportName || customerName) && (
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3 space-y-2">
@@ -117,23 +117,53 @@ export function QueueSheet({
           </div>
         )}
 
-        {/* Progress — de-emphasized counts */}
-        <div className="flex items-center justify-between gap-3 rounded-xl bg-[var(--bg-tertiary)] px-3 py-2.5 text-sm">
-          <span className="text-[var(--content-positive)] font-semibold tabular-nums">
-            {counts.picked} done
-          </span>
-          <span className="text-[var(--content-secondary)] tabular-nums">
-            {counts.remaining} left
-          </span>
-          {counts.flagged > 0 && (
-            <span className="text-[var(--content-negative)] font-semibold tabular-nums">
-              {counts.flagged} flagged
+        {/* Progress — picked / flagged / remaining */}
+        <div className="space-y-1.5">
+          <div className="flex h-1.5 overflow-hidden rounded-full bg-[var(--border-subtle)]">
+            {counts.picked > 0 && (
+              <div
+                className="h-full bg-[var(--bg-positive)] transition-all duration-300"
+                style={{ width: `${(counts.picked / counts.total) * 100}%` }}
+              />
+            )}
+            {counts.flagged > 0 && (
+              <div
+                className="h-full bg-[var(--bg-negative)] transition-all duration-300"
+                style={{ width: `${(counts.flagged / counts.total) * 100}%` }}
+              />
+            )}
+            {counts.remaining > 0 && (
+              <div
+                className="h-full bg-[var(--border-opaque)] transition-all duration-300"
+                style={{ width: `${(counts.remaining / counts.total) * 100}%` }}
+              />
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <span className="inline-flex items-center gap-1 font-semibold tabular-nums text-[var(--content-positive)]">
+              <CheckCircle size={14} weight="fill" />
+              {counts.picked} picked
             </span>
-          )}
-          <span className="ml-auto text-xs text-[var(--content-quaternary)] tabular-nums">
-            {formatLineCountLabel(counts.total, { short: true })}
-          </span>
+            {counts.flagged > 0 && (
+              <span className="inline-flex items-center gap-1 font-semibold tabular-nums text-[var(--content-negative)]">
+                <Flag size={14} weight="fill" />
+                {counts.flagged} flagged
+              </span>
+            )}
+            <span className="tabular-nums text-[var(--content-secondary)]">
+              {counts.remaining} left
+            </span>
+            <span className="ml-auto text-[var(--content-quaternary)] tabular-nums">
+              {formatLineCountLabel(counts.total, { short: true })}
+            </span>
+          </div>
         </div>
+
+        {onJump && (
+          <p className="text-[11px] text-[var(--content-tertiary)]">
+            Tap any line to jump to it in the pick deck.
+          </p>
+        )}
 
         {onCompleteItem && (
           <p className="text-[11px] text-[var(--content-tertiary)]">
@@ -246,7 +276,7 @@ export function QueueSheet({
 
         {/* Done — collapsed by default */}
         {doneRows.length > 0 && (
-          <DoneSection rows={doneRows} />
+          <DoneSection rows={doneRows} onJump={onJump} />
         )}
       </div>
 
@@ -321,7 +351,7 @@ function Row({
   const isPicked = row.status === 'picked';
   const isFlagged = row.status === 'flagged';
   const isSkipped = row.status === 'skipped';
-  const canJump = Boolean(onJump && row.status !== 'picked' && row.status !== 'flagged');
+  const canJump = Boolean(onJump);
   const canSwipe = Boolean(onCompleteItem && !isPicked && !isFlagged);
 
   if (canSwipe) {
@@ -556,26 +586,36 @@ function SwipeableQueueRow({
   );
 }
 
-function DoneSection({ rows }: { rows: QueueSheetRow[] }) {
-  const [expanded, setExpanded] = useState(false);
+function DoneSection({
+  rows,
+  onJump,
+}: {
+  rows: QueueSheetRow[];
+  onJump?: (itemId: number) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
   return (
     <section>
       <button
+        type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mb-2 pick-pressable"
+        className="mb-2 flex min-h-11 w-full items-center gap-1.5 pick-pressable text-left"
       >
+        <CheckCircle size={14} weight="fill" className="text-[var(--content-positive)]" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+          Picked &amp; flagged ({rows.length})
+        </span>
         <ArrowDown
           size={12}
           weight="bold"
-          className={expanded ? 'rotate-0' : '-rotate-90'}
+          className={`ml-auto text-[var(--content-quaternary)] ${expanded ? 'rotate-0' : '-rotate-90'}`}
           style={{ transition: 'transform 160ms cubic-bezier(0.23, 1, 0.32, 1)' }}
         />
-        Done ({rows.length})
       </button>
       {expanded && (
         <div className="space-y-1.5">
           {rows.map((r) => (
-            <Row key={r.itemId} row={r} />
+            <Row key={r.itemId} row={r} onJump={onJump} />
           ))}
         </div>
       )}

@@ -4,6 +4,7 @@ import { ShoppingCart, ClipboardText, Package } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { BottomSheet } from '../components/shared';
 import { useTeamUsers } from '../hooks/useTeamUsers';
+import { warmPickQueueRoute } from '../lib/picking/warmPickQueue';
 
 type SheetMode = 'sales' | 'billing' | 'picking' | null;
 
@@ -78,6 +79,7 @@ export default function RoleSelectPage(): React.JSX.Element | null {
   function handlePickerSelect(name: string) {
     selectRole('picking', name);
     setSheetMode(null);
+    warmPickQueueRoute(null);
     navigate('/picking');
   }
 
@@ -102,6 +104,7 @@ export default function RoleSelectPage(): React.JSX.Element | null {
               if (key === 'billing') {
                 setSheetMode('billing');
               } else if (key === 'picking') {
+                warmPickQueueRoute(null);
                 setSheetMode('picking');
               } else {
                 setSheetMode('sales');

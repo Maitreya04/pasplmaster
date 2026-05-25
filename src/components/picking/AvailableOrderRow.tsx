@@ -1,17 +1,17 @@
-import { Truck, SpinnerGap } from '@phosphor-icons/react';
+import { Truck } from '@phosphor-icons/react';
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 import { PickQueuePartyBlock } from './PickQueuePartyBlock';
 
 interface AvailableOrderRowProps {
   order: OrderWithClaimInfo;
-  onClaim: () => void;
-  claiming: boolean;
+  onOpen: () => void;
+  disabled?: boolean;
 }
 
 export function AvailableOrderRow({
   order,
-  onClaim,
-  claiming,
+  onOpen,
+  disabled = false,
 }: AvailableOrderRowProps): React.JSX.Element {
   const isUrgent = order.priority === 'urgent';
   const isStale = Boolean(order.claim_info?.is_stale);
@@ -19,12 +19,12 @@ export function AvailableOrderRow({
   return (
     <button
       type="button"
-      onClick={onClaim}
-      disabled={claiming}
+      onClick={onOpen}
+      disabled={disabled}
       className={`
         relative flex w-full items-start gap-3 rounded-2xl border p-4 text-left
         transition-all duration-150 hover:bg-[var(--bg-tertiary)]
-        active:scale-[0.99] disabled:cursor-wait
+        active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50
         ${
           isUrgent
             ? 'border-[var(--border-negative)] border-l-4 bg-[var(--bg-negative-subtle)]'
@@ -38,7 +38,7 @@ export function AvailableOrderRow({
           ${
             isUrgent
               ? 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]'
-              : 'bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+              : 'bg-[var(--bg-tertiary)] text-[var(--content-tertiary)]'
           }
         `}
         aria-hidden="true"
@@ -48,16 +48,14 @@ export function AvailableOrderRow({
 
       <PickQueuePartyBlock order={order} />
 
-      {isStale && (
-        <span className="absolute bottom-3 right-3 font-ds-micro uppercase font-bold text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] px-2 py-0.5 rounded border border-[var(--border-warning)]">
-          Stale (Takeover)
-        </span>
-      )}
+      <span className="absolute bottom-3 right-3 rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--content-tertiary)]">
+        Unassigned
+      </span>
 
-      {claiming && (
-        <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-[var(--bg-primary)]/60">
-          <SpinnerGap size={24} className="animate-spin text-[var(--content-accent)]" />
-        </div>
+      {isStale && (
+        <span className="absolute top-3 right-3 font-ds-micro uppercase font-bold text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] px-2 py-0.5 rounded border border-[var(--border-warning)]">
+          Stale
+        </span>
       )}
     </button>
   );

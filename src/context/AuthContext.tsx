@@ -8,6 +8,7 @@ import {
 } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { clearCartDraft } from '../lib/cartDraftStorage';
+import { warmPickQueueRoute } from '../lib/picking/warmPickQueue';
 
 type Role = 'sales' | 'billing' | 'picking' | 'admin' | null;
 
@@ -131,6 +132,12 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
       cancelled = true;
     };
   }, [userName, role, userId]);
+
+  // Keep pick queue warm for returning pickers (re-warm when userId backfills).
+  useEffect(() => {
+    if (role !== 'picking') return;
+    warmPickQueueRoute(userId);
+  }, [role, userId]);
 
   const login = useCallback(async (code: string): Promise<boolean> => {
     const { data, error } = await supabase

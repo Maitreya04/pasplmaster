@@ -6,6 +6,8 @@ interface DeskPickProgressProps {
   order: DeskOrderRow;
   progress: PickLineProgress | undefined;
   isLoading?: boolean;
+  /** Hide the empty progress bar on unassigned rows — assign lives in the toolbar. */
+  compact?: boolean;
 }
 
 function progressLabel(order: DeskOrderRow, progress: PickLineProgress | undefined): string {
@@ -14,6 +16,9 @@ function progressLabel(order: DeskOrderRow, progress: PickLineProgress | undefin
   }
   if (order.deskStatus === 'checking') {
     return 'All pick lines done — at check table or dispatch.';
+  }
+  if (order.deskStatus === 'no_ack') {
+    return 'Assigned — waiting for picker to tap Start.';
   }
   if (!progress || progress.total === 0) {
     return order.deskStatus === 'picking' ? 'Pick started — loading line counts…' : 'No pickable lines';
@@ -43,12 +48,13 @@ export function DeskPickProgress({
   order,
   progress,
   isLoading,
+  compact,
 }: DeskPickProgressProps): React.JSX.Element | null {
   const showBar =
     order.deskStatus === 'picking' ||
     order.deskStatus === 'checking' ||
     order.deskStatus === 'no_ack' ||
-    order.deskStatus === 'unassigned';
+    (order.deskStatus === 'unassigned' && !compact);
 
   if (!showBar) return null;
 
@@ -65,6 +71,8 @@ export function DeskPickProgress({
               ? 'Loading pick progress…'
               : order.deskStatus === 'unassigned'
                 ? 'Awaiting picker'
+              : order.deskStatus === 'no_ack'
+                ? 'Waiting to start'
                 : order.deskStatus === 'checking'
                   ? 'Pick complete'
                   : progress && progress.total > 0
