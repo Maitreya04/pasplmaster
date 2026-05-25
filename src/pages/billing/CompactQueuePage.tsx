@@ -31,7 +31,7 @@ import { Check, Copy, Lightning, CheckCircle, Warning, Question, CaretLeft, Care
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 import type { OrderItem } from '../../types';
 import { isFocOrderItem } from '../../lib/specialPricing';
-import { countPickableOrderLines } from '../../lib/cartSupply';
+import { applyWarehousePickSkipForPoOnlyLine, countPickableOrderLines } from '../../lib/cartSupply';
 
 function sortByUrgencyAndAge(orders: OrderWithClaimInfo[]): OrderWithClaimInfo[] {
   return [...orders].sort((a, b) => {
@@ -764,6 +764,10 @@ export default function CompactQueuePage() {
           update.qty_shippable = 0;
           update.qty_po = item.qty_requested;
         }
+        applyWarehousePickSkipForPoOnlyLine(update, item, {
+          fulfillmentPath,
+          currentState: item.state,
+        });
         const { error: updateError } = await supabase.from('order_items').update(update).eq('id', item.id);
         if (updateError) throw updateError;
 

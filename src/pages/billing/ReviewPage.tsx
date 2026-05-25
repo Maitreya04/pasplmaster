@@ -43,7 +43,12 @@ import {
 } from '../../lib/billing/fulfillmentPath';
 import { FulfillmentPathSelector } from '../../components/billing/FulfillmentPathSelector';
 import type { FulfillmentPath } from '../../types';
-import { countPickableOrderLines } from '../../lib/cartSupply';
+import {
+  applyWarehousePickSkipForPoOnlyLine,
+  computePickLineProgress,
+  countPickableOrderLines,
+  isPickableOrderLine,
+} from '../../lib/cartSupply';
 
 interface EditableItem extends OrderItem {
   qty_approved: number;
@@ -202,6 +207,14 @@ export default function ReviewPage(): React.JSX.Element | null {
 
   const visibleItems = items.filter((i) => !removedIds.has(i.id));
   const pickLineCount = useMemo(() => countPickableOrderLines(visibleItems), [visibleItems]);
+  const pickableVisibleItems = useMemo(
+    () => visibleItems.filter((i) => isPickableOrderLine(i)),
+    [visibleItems],
+  );
+  const poOnlyVisibleItems = useMemo(
+    () => visibleItems.filter((i) => !isPickableOrderLine(i)),
+    [visibleItems],
+  );
   const [fulfillmentPath, setFulfillmentPath] = useState<FulfillmentPath>('warehouse_pick');
 
   useEffect(() => {
@@ -263,23 +276,15 @@ export default function ReviewPage(): React.JSX.Element | null {
     if (!order?.items) {
       return null;
     }
-    const totalLines = order.items.length;
-    let picked = 0;
-    let flagged = 0;
-    for (const i of order.items) {
-      if (i.state === 'picked') picked += 1;
-      else if (i.state === 'flagged') flagged += 1;
-    }
-    const done = picked + flagged;
-    const remaining = Math.max(0, totalLines - done);
+    const progress = computePickLineProgress(order.items);
     return {
-      totalLines,
-      picked,
-      flagged,
-      remaining,
-      done,
+      totalLines: progress.total,
+      picked: progress.picked,
+      flagged: progress.flagged,
+      remaining: progress.remaining,
+      done: progress.done,
     };
-  }, [order]);
+  }, [order?.items]);
 
   const updateQty = useCallback((itemId: number, qty: number) => {
     setItems((prev) =>
@@ -367,6 +372,11 @@ export default function ReviewPage(): React.JSX.Element | null {
           qty_shippable: finalState.qtyBilled,
           qty_po: finalState.qtyPending,
         };
+        applyWarehousePickSkipForPoOnlyLine(update, item, {
+          fulfillmentPath,
+          currentState: item.state,
+          skip: finalState.shouldFlagBillingPending,
+        });
         // Allow billing to override price when resolving flags
         if (typeof item.price_quoted === 'number') {
           update.price_quoted = item.price_quoted;
@@ -999,9 +1009,14 @@ export default function ReviewPage(): React.JSX.Element | null {
 
             {/* Item list */}
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-[var(--content-primary)]">Items</h2>
+              <h2 className="text-lg font-semibold text-[var(--content-primary)]">
+                {order.workflow_status === 'submitted' ? 'Items' : 'Warehouse pick lines'}
+              </h2>
               <div className="space-y-3">
-                {visibleItems.map((item) => {
+                {(order.workflow_status === 'submitted'
+                  ? visibleItems
+                  : pickableVisibleItems
+                ).map((item) => {
                   const price = item.price_quoted ?? item.price_system ?? 0;
                   const finalState = deriveFinalBillingLineState(item, pendingIds.has(item.id));
                   const lineTotal = finalState.qtyBilled * price;
@@ -1168,6 +1183,39 @@ export default function ReviewPage(): React.JSX.Element | null {
                   );
                 })}
               </div>
+              {order.workflow_status !== 'submitted' && poOnlyVisibleItems.length > 0 && (
+                <div className="space-y-3 pt-2">
+                  <h3 className="text-sm font-semibold text-[var(--content-secondary)]">
+                    Purchase order — not sent to warehouse
+                  </h3>
+                  {poOnlyVisibleItems.map((item) => {
+                    const price = item.price_quoted ?? item.price_system ?? 0;
+                    const finalState = deriveFinalBillingLineState(item, pendingIds.has(item.id));
+                    const poGap = finalState.qtyPending;
+                    return (
+                      <Card
+                        key={item.id}
+                        className="flex flex-col gap-2 border-[var(--border-subtle)] bg-[var(--bg-tertiary)]"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-semibold text-[var(--content-primary)] text-base">
+                            {item.item_name}
+                          </p>
+                          <p className="text-sm text-[var(--content-secondary)] mt-1">
+                            Requested: {item.qty_requested} · Unit: ₹
+                            {price.toLocaleString('en-IN')}
+                          </p>
+                          {poGap > 0 && (
+                            <p className="text-xs text-[var(--content-tertiary)] mt-1">
+                              PO: {poGap}
+                            </p>
+                          )}
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Notes */}

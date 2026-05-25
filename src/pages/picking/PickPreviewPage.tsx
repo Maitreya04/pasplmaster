@@ -3,21 +3,14 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Eye } from '@phosphor-icons/react';
 import { PageHeader, Card, Skeleton } from '../../components/shared';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
-import type { OrderItem } from '../../types';
 import { pickQuantityTarget, pickableOrderItems } from '../../lib/cartSupply';
 import { isAskLine } from '../../lib/picking/askBrand';
 import { isLucasLine } from '../../lib/picking/lucasBrand';
 import { BrandLineChip } from '../../components/picking/BrandLineChip';
 import { TransportChip } from '../../components/picking/TransportChip';
 
-function sortByRack(items: OrderItem[]): OrderItem[] {
-  return [...items].sort((a, b) => {
-    if (!a.rack_no && !b.rack_no) return 0;
-    if (!a.rack_no) return 1;
-    if (!b.rack_no) return -1;
-    return a.rack_no.localeCompare(b.rack_no, undefined, { numeric: true });
-  });
-}
+import { sortPickWalkOrder } from '../../lib/picking/pickWalkOrder';
+import { buildPickWalkBrandSections, orderItemBrandLabel } from '../../lib/picking/deckOrder';
 
 export default function PickPreviewPage(): React.JSX.Element | null {
   const navigate = useNavigate();
@@ -27,8 +20,13 @@ export default function PickPreviewPage(): React.JSX.Element | null {
 
   const rows = useMemo(() => {
     if (!order?.items?.length) return [];
-    return sortByRack(pickableOrderItems(order.items));
+    return sortPickWalkOrder(pickableOrderItems(order.items));
   }, [order?.items]);
+
+  const brandSections = useMemo(
+    () => buildPickWalkBrandSections(rows, pickQuantityTarget),
+    [rows],
+  );
 
   const pickLineCount = rows.length;
 
@@ -133,8 +131,10 @@ export default function PickPreviewPage(): React.JSX.Element | null {
                   </p>
                 </Card>
               ) : (
-              rows.map((line) => {
+              rows.map((line, index) => {
                 const qty = pickQuantityTarget(line);
+                const brand = orderItemBrandLabel(line);
+                const prevBrand = index > 0 ? orderItemBrandLabel(rows[index - 1]!) : null;
                 const brandLine = {
                   item_name: line.item_name,
                   main_group: line.catalog_main_group,
@@ -144,6 +144,13 @@ export default function PickPreviewPage(): React.JSX.Element | null {
                 const lucas = isLucasLine(brandLine);
                 return (
                   <li key={line.id}>
+                    {brand !== prevBrand ? (
+                      <p className="mb-1.5 mt-2 text-[10px] font-bold uppercase tracking-wide text-[var(--content-tertiary)] first:mt-0">
+                        {brand}
+                        {' · '}
+                        {brandSections.find((s) => s.brand === brand)?.lines ?? 0} lines
+                      </p>
+                    ) : null}
                     <Card className="py-3 px-4 space-y-1.5">
                       <div className="flex items-start justify-between gap-2">
                         <p className="font-mono text-base font-bold text-[var(--content-primary)] leading-tight">

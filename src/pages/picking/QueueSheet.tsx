@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, Fragment } from 'react';
 import { ArrowDown, CheckCircle, Flag, MapPin, SkipForward } from '@phosphor-icons/react';
 import { BottomSheet, BigButton } from '../../components/shared';
 import { TransportChip } from '../../components/picking/TransportChip';
@@ -14,6 +14,7 @@ export interface QueueSheetRow {
   rackNo: string | null;
   itemCode: string | null;
   itemName: string;
+  brandLabel?: string | null;
   targetQty: number;
   status: QueueSheetRowStatus;
 }
@@ -193,21 +194,31 @@ export function QueueSheet({
               Up next ({nextRows.length})
             </p>
             <div className="space-y-1.5">
-              {nextRows.map((r) => (
-                <Row
-                  key={r.itemId}
-                  row={r}
-                  onJump={onJump}
-                  onCompleteItem={onCompleteItem}
-                  isSwipeOpen={openSwipeItemId === r.itemId}
-                  onSwipeOpenChange={(open) => setOpenSwipeItemId(open ? r.itemId : null)}
-                  onSkip={skipTargetId === null ? () => {
-                    closeSwipe();
-                    setSkipTargetId(r.itemId);
-                    setSkipReason('');
-                  } : undefined}
-                />
-              ))}
+              {nextRows.map((r, index) => {
+                const prevBrand = index > 0 ? nextRows[index - 1]?.brandLabel : null;
+                const showBrandHeader = Boolean(r.brandLabel && r.brandLabel !== prevBrand);
+                return (
+                  <Fragment key={r.itemId}>
+                    {showBrandHeader ? (
+                      <p className="pt-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--content-tertiary)]">
+                        {r.brandLabel}
+                      </p>
+                    ) : null}
+                    <Row
+                      row={r}
+                      onJump={onJump}
+                      onCompleteItem={onCompleteItem}
+                      isSwipeOpen={openSwipeItemId === r.itemId}
+                      onSwipeOpenChange={(open) => setOpenSwipeItemId(open ? r.itemId : null)}
+                      onSkip={skipTargetId === null ? () => {
+                        closeSwipe();
+                        setSkipTargetId(r.itemId);
+                        setSkipReason('');
+                      } : undefined}
+                    />
+                  </Fragment>
+                );
+              })}
             </div>
           </section>
         )}
@@ -370,6 +381,11 @@ function QueueRowContent({
           {row.itemCode ?? row.itemId}
         </p>
         <p className="text-xs text-[var(--content-tertiary)] truncate">
+          {row.brandLabel ? (
+            <span className="mr-1.5 rounded bg-[var(--bg-tertiary)] px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--content-quaternary)]">
+              {row.brandLabel}
+            </span>
+          ) : null}
           {row.itemName}
         </p>
       </div>

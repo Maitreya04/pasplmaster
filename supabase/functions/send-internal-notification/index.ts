@@ -32,6 +32,18 @@ type InternalRequest =
       salespersonName: string;
       messageBody: string;
       billingCustomerUpdateId?: number;
+    }
+  | {
+      eventType: 'pick_complete_reminder';
+      kind: 'all_done' | 'stalled';
+      orderId: number;
+      orderNumber: string;
+      customerName: string;
+      priority: OrderPriority;
+      targetUserId: number;
+      linesDone: number;
+      linesTotal: number;
+      linesRemaining: number;
     };
 
 interface PushSubscriptionRow {
@@ -105,6 +117,7 @@ function json(status: number, body: Record<string, unknown>) {
 }
 
 const CUTOFF_MS = 30 * 24 * 60 * 60 * 1000;
+const PICK_REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
 
 function pushBodyPreview(text: string, max = 220): string {
   const t = text.trim();
@@ -302,6 +315,36 @@ serve(async (req) => {
           : null;
 
       const isAssigned = targetUserId != null;
+
+      const { data: orderRow, error: orderError } = await admin
+        .from('orders')
+        .select('workflow_status')
+        .eq('id', payload.orderId)
+        .maybeSingle();
+      if (orderError) throw orderError;
+      if (!orderRow) {
+        return json(400, { error: 'Order not found' });
+      }
+
+      const workflowStatus = orderRow.workflow_status as string;
+      if (isAssigned) {
+        if (workflowStatus !== 'approved' && workflowStatus !== 'picking') {
+          return json(200, {
+            success: true,
+            skipped: true,
+            reason: 'pick_no_longer_open',
+            workflow_status: workflowStatus,
+          });
+        }
+      } else if (workflowStatus !== 'approved') {
+        return json(200, {
+          success: true,
+          skipped: true,
+          reason: 'not_in_pick_queue',
+          workflow_status: workflowStatus,
+        });
+      }
+
       let pickingIds: number[];
 
       if (isAssigned) {
@@ -396,6 +439,121 @@ serve(async (req) => {
       });
 
       return json(200, { success: true, sentCount, failedCount, inboxCount: pickingIds.length });
+    }
+
+    if (eventType === 'pick_complete_reminder') {
+      const payload = raw as Partial<Extract<InternalRequest, { eventType: 'pick_complete_reminder' }>>;
+      if (
+        typeof payload.orderId !== 'number' ||
+        typeof payload.orderNumber !== 'string' ||
+        typeof payload.customerName !== 'string' ||
+        (payload.priority !== 'normal' && payload.priority !== 'urgent') ||
+        typeof payload.targetUserId !== 'number' ||
+        (payload.kind !== 'all_done' && payload.kind !== 'stalled') ||
+        typeof payload.linesDone !== 'number' ||
+        typeof payload.linesTotal !== 'number' ||
+        typeof payload.linesRemaining !== 'number'
+      ) {
+        return json(400, { error: 'Invalid pick_complete_reminder payload' });
+      }
+
+      const { data: orderRow, error: orderError } = await admin
+        .from('orders')
+        .select('workflow_status')
+        .eq('id', payload.orderId)
+        .maybeSingle();
+      if (orderError) throw orderError;
+      if (!orderRow || orderRow.workflow_status !== 'picking') {
+        return json(200, { success: true, skipped: true, reason: 'not_picking' });
+      }
+
+      const cooldownIso = new Date(Date.now() - PICK_REMINDER_COOLDOWN_MS).toISOString();
+      const { data: recentReminders, error: recentError } = await admin
+        .from('notification_events')
+        .select('id')
+        .eq('order_id', payload.orderId)
+        .eq('event_type', 'pick_complete_reminder')
+        .gte('created_at', cooldownIso)
+        .limit(1);
+      if (recentError) throw recentError;
+      if ((recentReminders ?? []).length > 0) {
+        return json(200, { success: true, skipped: true, reason: 'cooldown' });
+      }
+
+      const { data: targetUser, error: targetUserError } = await admin
+        .from('users')
+        .select('id')
+        .eq('id', payload.targetUserId)
+        .eq('role', 'picking')
+        .eq('is_active', true)
+        .maybeSingle();
+      if (targetUserError) throw targetUserError;
+      if (!targetUser) {
+        return json(400, { error: 'targetUserId is not an active picker' });
+      }
+
+      const deepLink = `/picking?focusOrderId=${payload.orderId}`;
+      const title = 'Did you complete this pick?';
+      const body = `${payload.orderNumber} · ${payload.customerName}`;
+
+      await insertUserNotifications(
+        admin,
+        [
+          {
+            user_id: payload.targetUserId,
+            title,
+            body,
+            type: 'pick_complete_reminder',
+            order_id: payload.orderId,
+            payload: {
+              eventType: 'pick_complete_reminder',
+              kind: payload.kind,
+              orderNumber: payload.orderNumber,
+              customerName: payload.customerName,
+              priority: payload.priority,
+              deep_link: deepLink,
+              linesDone: payload.linesDone,
+              linesTotal: payload.linesTotal,
+              linesRemaining: payload.linesRemaining,
+            },
+          },
+        ],
+      );
+
+      let sentCount = 0;
+      let failedCount = 0;
+      if (pushConfigured) {
+        const subs = await fetchPushSubscriptions(admin, cutoffIso, {
+          userIds: [payload.targetUserId],
+        });
+        const r = await sendWebPushes(admin, subs, {
+          title,
+          body,
+          url: deepLink,
+          tag: `pick-reminder-${payload.orderId}`,
+          payload: {
+            eventType: 'pick_complete_reminder',
+            kind: payload.kind,
+            orderId: payload.orderId,
+            orderNumber: payload.orderNumber,
+            customerName: payload.customerName,
+            priority: payload.priority,
+          },
+        });
+        sentCount = r.sentCount;
+        failedCount = r.failedCount;
+      }
+
+      await admin.from('notification_events').insert({
+        event_type: 'pick_complete_reminder',
+        order_id: payload.orderId,
+        payload: raw,
+        target_role: 'picking',
+        sent_count: sentCount,
+        failed_count: failedCount,
+      });
+
+      return json(200, { success: true, sentCount, failedCount, inboxCount: 1 });
     }
 
     if (eventType === 'item_flagged_by_picker') {

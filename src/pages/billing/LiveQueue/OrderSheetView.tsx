@@ -35,6 +35,7 @@ const SHORTCUT_COPY_ALL = 'Alt+C';
 const SHORTCUT_FINISH = 'Ctrl+Enter';
 
 interface OrderSheetViewProps {
+  embedded?: boolean;
   orderName: string;
   orderNumber: string;
   salesperson: string | null;
@@ -82,6 +83,7 @@ function mergeLine(item: OrderItem, edit?: BillingLineEdit): OrderItem {
 }
 
 export function OrderSheetView({
+  embedded = false,
   orderName,
   orderNumber,
   salesperson,
@@ -562,8 +564,12 @@ export function OrderSheetView({
 
   const billedNormalCount = mergedVisibleRows.filter((it) => !flags[it.id]).length;
 
+  const shellClass = embedded
+    ? 'density-compact h-full min-h-0 bg-[var(--bg-primary)] flex flex-col animate-slide-up overflow-hidden'
+    : 'density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col animate-slide-up';
+
   return (
-    <div className="density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col animate-slide-up">
+    <div className={shellClass}>
 
       <div className="px-4 lg:px-6 py-3 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] shrink-0">
         <button

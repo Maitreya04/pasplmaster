@@ -240,6 +240,22 @@ export default function AdminPage(): React.JSX.Element | null {
 
           <button
             type="button"
+            onClick={() => navigate('/admin/picker-ux-lab')}
+            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
+          >
+            <div className="w-12 h-12 rounded-xl bg-[var(--bg-warning-subtle)] flex items-center justify-center">
+              <Package size={22} weight="regular" className="text-[var(--content-warning-on-light)]" />
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-[var(--content-primary)]">Picker UX Lab (v10)</p>
+              <p className="text-sm text-[var(--content-tertiary)]">
+                Same PickCard as production — MRP from stock_mrpwise, tap qty/MRP to edit
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
             onClick={() => navigate('/admin/pick-scan-lab')}
             className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
           >

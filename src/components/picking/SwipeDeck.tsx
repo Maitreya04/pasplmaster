@@ -6,6 +6,7 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
+import { appHaptics } from '../../lib/haptics';
 
 const SWIPE_THRESHOLD_RATIO = 0.11;
 const SWIPE_THRESHOLD_MIN_PX = 32;
@@ -19,12 +20,18 @@ const DRAG_OVERSCROLL_RATIO = 1.05;
 const SNAP_MS = 220;
 const SNAP_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
+export type SwipeDeckDotStatus = 'pending' | 'active' | 'done' | 'partial' | 'flagged';
+
 interface SwipeDeckProps {
   currentIndex: number;
   itemCount: number;
   onIndexChange: (index: number) => void;
   /** Swipe up on the deck (e.g. open queue). Downward swipes are never intercepted — PWA pull-to-refresh stays available. */
   onSwipeUp?: () => void;
+  /** `carousel` — centered dots, slide inset, inactive scale. */
+  variant?: 'default' | 'carousel';
+  dotStatus?: SwipeDeckDotStatus[];
+  hint?: string;
   children: ReactNode;
 }
 
@@ -38,8 +45,12 @@ export function SwipeDeck({
   itemCount,
   onIndexChange,
   onSwipeUp,
+  variant = 'default',
+  dotStatus,
+  hint,
   children,
 }: SwipeDeckProps): React.JSX.Element {
+  const isCarousel = variant === 'carousel';
   const containerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const widthRef = useRef(320);
@@ -75,11 +86,15 @@ export function SwipeDeck({
     const count = itemCountRef.current;
     if (count <= 0) return;
     const wrapped = wrapIndex(nextIndex, count);
+    const changed = wrapped !== currentIndexRef.current;
     dragOffsetRef.current = 0;
     draggingRef.current = false;
     animatingRef.current = animate;
     paintTrack(wrapped, 0, animate);
     onIndexChangeRef.current(wrapped);
+    if (changed) {
+      appHaptics.selection();
+    }
     if (animate) {
       window.setTimeout(() => {
         animatingRef.current = false;
@@ -108,6 +123,7 @@ export function SwipeDeck({
       dragOffsetRef.current = 0;
       paintTrack(targetIndex, 0, false);
       onIndexChangeRef.current(targetIndex);
+      appHaptics.selection();
       window.requestAnimationFrame(() => {
         animatingRef.current = false;
       });
@@ -339,13 +355,31 @@ export function SwipeDeck({
 
   const childArray = Children.toArray(children);
 
+  const dotClass = (index: number): string => {
+    const status = dotStatus?.[index] ?? (index === currentIndex ? 'active' : 'pending');
+    const isActive = index === currentIndex || status === 'active';
+    if (isActive) {
+      return 'h-2.5 w-6 bg-[var(--role-primary)] shadow-sm';
+    }
+    switch (status) {
+      case 'done':
+        return 'h-2 w-2 bg-[var(--bg-positive)]';
+      case 'partial':
+        return 'h-2 w-2 bg-[var(--bg-warning)]';
+      case 'flagged':
+        return 'h-2 w-2 bg-[var(--bg-negative)]';
+      default:
+        return 'h-2 w-2 bg-[var(--border-opaque)] hover:bg-[var(--content-tertiary)]';
+    }
+  };
+
   return (
     <div className="space-y-2">
       <div
         ref={containerRef}
-        className="relative overflow-hidden select-none touch-pan-y"
+        className={`relative overflow-hidden select-none touch-pan-y ${isCarousel ? 'px-0.5' : ''}`}
         style={{
-          height: 'min(62vh, 540px)',
+          height: isCarousel ? 'min(64vh, 560px)' : 'min(62vh, 540px)',
           touchAction: 'pan-y pinch-zoom',
           contain: 'strict',
         }}
@@ -355,44 +389,66 @@ export function SwipeDeck({
           className="flex h-full"
           style={{ willChange: 'transform', backfaceVisibility: 'hidden' }}
         >
-          {childArray.map((child, index) => (
-            <div
-              key={index}
-              className="h-full shrink-0 overflow-hidden"
-              style={{ width: 'var(--swipe-slide-width, 100%)' }}
-            >
-              {child}
-            </div>
-          ))}
+          {childArray.map((child, index) => {
+            const isActive = index === currentIndex;
+            return (
+              <div
+                key={index}
+                className="h-full shrink-0 overflow-hidden"
+                style={{ width: 'var(--swipe-slide-width, 100%)' }}
+              >
+                <div
+                  className={`h-full transition-[transform,opacity] duration-200 ease-out ${
+                    isCarousel ? 'px-1.5' : ''
+                  } ${
+                    isActive
+                      ? 'scale-100 opacity-100'
+                      : isCarousel
+                        ? 'scale-[0.94] opacity-80'
+                        : 'scale-100 opacity-100'
+                  }`}
+                  style={{
+                    transform: isActive ? 'translateZ(0)' : undefined,
+                    willChange: isCarousel ? 'transform, opacity' : undefined,
+                  }}
+                >
+                  {child}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
       {itemCount > 1 && (
-        <div
-          className="flex max-w-full justify-start gap-1.5 overflow-x-auto px-3 py-1.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          role="tablist"
-          aria-label="Pick lines"
-        >
-          {Array.from({ length: itemCount }).map((_, index) => {
-            const isActive = index === currentIndex;
-            return (
-              <button
-                key={index}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                aria-label={`Line ${index + 1} of ${itemCount}`}
-                onClick={() => {
-                  if (index === currentIndexRef.current) return;
-                  snapToIndex(index, false);
-                }}
-                className={`shrink-0 rounded-full pick-pressable transition-all duration-200 ${
-                  isActive
-                    ? 'h-2 w-5 bg-[var(--role-primary)]'
-                    : 'h-2 w-2 bg-[var(--border-opaque)] hover:bg-[var(--content-tertiary)]'
-                }`}
-              />
-            );
-          })}
+        <div className="space-y-1.5">
+          <div
+            className={`flex max-w-full gap-2 overflow-x-auto py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
+              isCarousel ? 'justify-center px-4' : 'justify-start px-3'
+            }`}
+            role="tablist"
+            aria-label="Pick lines"
+          >
+            {Array.from({ length: itemCount }).map((_, index) => {
+              const isActive = index === currentIndex;
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  aria-label={`Line ${index + 1} of ${itemCount}`}
+                  onClick={() => {
+                    if (index === currentIndexRef.current) return;
+                    snapToIndex(index, true);
+                  }}
+                  className={`shrink-0 rounded-full pick-pressable transition-all duration-200 ${dotClass(index)}`}
+                />
+              );
+            })}
+          </div>
+          {hint ? (
+            <p className="text-center text-[10px] font-medium text-[var(--content-tertiary)]">{hint}</p>
+          ) : null}
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 import type { Order, Item } from '../types';
-import { countPickableOrderLines } from './cartSupply';
+import { countPickableOrderLines, isPickableOrderLine } from './cartSupply';
 import { isAskLine } from './picking/askBrand';
 import { isLucasLine } from './picking/lucasBrand';
 import { summarizeSpecialPricing } from './specialPricing';
@@ -45,11 +45,20 @@ export type OrderRowWithEmbed = Order & {
 };
 
 function buildOrderItemsPreview(embed: OrderItemEmbedRow[] | null | undefined): OrderItemsPreview {
-  return (embed ?? []).map((item) => ({
-    item_name: item.item_name ?? null,
-    state: item.state ?? 'pending',
-    rack_no: item.rack_no ?? null,
-  }));
+  return (embed ?? [])
+    .filter((item) =>
+      isPickableOrderLine({
+        qty_requested: item.qty_requested ?? 0,
+        qty_shippable: item.qty_shippable,
+        qty_po: item.qty_po,
+        qty_approved: item.qty_approved,
+      }),
+    )
+    .map((item) => ({
+      item_name: item.item_name ?? null,
+      state: item.state ?? 'pending',
+      rack_no: item.rack_no ?? null,
+    }));
 }
 
 function lookupCatalogGroups(itemId: number | null | undefined): {

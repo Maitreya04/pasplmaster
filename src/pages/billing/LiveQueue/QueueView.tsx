@@ -7,6 +7,7 @@ import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
 import { groupBillingQueueBySubmissionDay } from '../../../lib/queueDayBuckets';
 
 interface QueueViewProps {
+  embedded?: boolean;
   available: OrderWithClaimInfo[];
   otherActive: OrderWithClaimInfo[];
   stale: OrderWithClaimInfo[];
@@ -197,6 +198,7 @@ function OrderRow({
 }
 
 export function QueueView({
+  embedded = false,
   available,
   otherActive,
   stale,
@@ -245,10 +247,16 @@ export function QueueView({
 
   const totalCount = available.length + stale.length + myActive.length + salesLocked.length;
 
+  const shellClass = embedded
+    ? 'density-compact h-full min-h-0 bg-[var(--bg-primary)] p-3 flex flex-col overflow-hidden'
+    : 'density-compact min-h-screen bg-[var(--bg-primary)] p-4 lg:p-8';
+
+  const innerClass = embedded ? 'flex-1 min-h-0 overflow-y-auto' : 'max-w-2xl mx-auto';
+
   if (isLoading) {
     return (
-      <div className="density-compact min-h-screen bg-[var(--bg-primary)] p-4 lg:p-8">
-        <div className="max-w-2xl mx-auto">
+      <div className={shellClass}>
+        <div className={innerClass}>
           <div className="h-7 w-40 bg-[var(--bg-tertiary)] rounded-lg animate-pulse mb-6" />
           <div className="space-y-3">
             {[1, 2, 3].map(i => (
@@ -262,7 +270,7 @@ export function QueueView({
 
   if (totalCount === 0 && otherActive.length === 0 && salesLocked.length === 0) {
     return (
-      <div className="density-compact min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
+      <div className={`${shellClass} flex items-center justify-center`}>
         <EmptyState
           icon={Tray}
           title="No orders waiting"
@@ -275,21 +283,41 @@ export function QueueView({
   // Track a running navigable index to highlight the correct row across sections
   let navIndex = 0;
 
-  return (
-    <div className="density-compact min-h-screen bg-[var(--bg-primary)] p-4 lg:p-8">
-      <div className="max-w-2xl mx-auto">
-
-        {/* Header */}
-        <div className="flex items-baseline justify-between mb-6">
-          <h1 className="text-xl font-bold text-[var(--content-primary)]">
-            Billing Queue
-          </h1>
-          {totalCount > 0 && (
-            <span className="text-sm font-mono font-semibold text-[var(--content-secondary)] bg-[var(--bg-tertiary)] px-2.5 py-0.5 rounded-full">
-              {totalCount}
-            </span>
+  const queueHeader = (
+    <div className={`${embedded ? 'shrink-0 px-3 pt-3 pb-2.5 border-b border-[var(--border-faint)]' : 'mb-6'}`}>
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            {embedded && (
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-[var(--content-positive)] animate-pulse shrink-0"
+                aria-hidden
+              />
+            )}
+            <h1 className={`font-bold text-[var(--content-primary)] ${embedded ? 'text-base' : 'text-xl'}`}>
+              {embedded ? 'Live queue' : 'Billing Queue'}
+            </h1>
+          </div>
+          {embedded && (
+            <p className="text-[10px] text-[var(--content-quaternary)] mt-1 pl-3.5">
+              Open orders to bill · copy lines to Busy
+            </p>
           )}
         </div>
+        {totalCount > 0 && (
+          <span className="text-sm font-mono font-semibold text-[var(--content-secondary)] bg-[var(--bg-tertiary)] px-2.5 py-0.5 rounded-full shrink-0">
+            {totalCount}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={shellClass}>
+      {embedded && queueHeader}
+      <div className={innerClass}>
+        {!embedded && queueHeader}
 
         {/* My active orders */}
         {myActive.length > 0 && (

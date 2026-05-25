@@ -1,24 +1,33 @@
 import type { OrderItem } from '../../types';
+import { sortPickWalkOrder } from './pickWalkOrder';
+
+export {
+  sortPickWalkOrder,
+  orderItemBrandLabel,
+  buildPickWalkBrandSections,
+  buildDeckBrandPositionLabels,
+} from './pickWalkOrder';
+export type { PickWalkBrandSection, PickWalkRackStop } from './pickWalkOrder';
 
 export interface DeckPickItem {
   orderItem: OrderItem;
   uiState: string;
 }
 
-function compareRack(a: OrderItem, b: OrderItem): number {
-  if (!a.rack_no && !b.rack_no) return 0;
-  if (!a.rack_no) return 1;
-  if (!b.rack_no) return -1;
-  return a.rack_no.localeCompare(b.rack_no, undefined, { numeric: true });
-}
-
 function isDone(uiState: string): boolean {
   return uiState === 'picked' || uiState === 'flagged' || uiState === 'overridden';
 }
 
+function sortDeckItemsByWalk<T extends DeckPickItem>(list: T[]): T[] {
+  if (list.length <= 1) return [...list];
+  const sortedItems = sortPickWalkOrder(list.map((entry) => entry.orderItem));
+  const byId = new Map(list.map((entry) => [entry.orderItem.id, entry]));
+  return sortedItems.map((item) => byId.get(item.id)!);
+}
+
 /**
- * Build the swipe deck order: active non-skipped (rack order) → active skipped
- * (rack order) → done (rack order). Skipped lines stay pickable at the back;
+ * Build the swipe deck order: active non-skipped (brand walk order) → active skipped
+ * (brand walk order) → done (brand walk order). Skipped lines stay pickable at the back;
  * done lines remain visible for spatial memory.
  */
 export function buildDeckOrder<T extends DeckPickItem>(
@@ -32,14 +41,11 @@ export function buildDeckOrder<T extends DeckPickItem>(
     else active.push(item);
   }
 
-  const sortByRack = (list: T[]) =>
-    [...list].sort((a, b) => compareRack(a.orderItem, b.orderItem));
-
-  const activeSorted = sortByRack(active);
+  const activeSorted = sortDeckItemsByWalk(active);
   const nonSkipped = activeSorted.filter((i) => !skippedIds.has(i.orderItem.id));
   const skipped = activeSorted.filter((i) => skippedIds.has(i.orderItem.id));
 
-  return [...nonSkipped, ...skipped, ...sortByRack(done)];
+  return [...nonSkipped, ...skipped, ...sortDeckItemsByWalk(done)];
 }
 
 export function wrapIndex(index: number, length: number): number {

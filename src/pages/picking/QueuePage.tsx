@@ -4,7 +4,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Package,
   ArrowRight,
-  Warning,
   Bell,
   GearSix,
   Barcode,
@@ -25,6 +24,7 @@ import {
 } from '../../components/shared';
 import { BeingPickedCarousel } from '../../components/picking/BeingPickedCarousel';
 import { AvailableOrderRow } from '../../components/picking/AvailableOrderRow';
+import { IncompletePickBanner } from '../../components/picking/IncompletePickBanner';
 import {
   sortAvailablePickQueueOrders,
   sortBeingPickedOrders,
@@ -45,6 +45,8 @@ export default function QueuePage(): React.JSX.Element | null {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const claimOrderIdParam = searchParams.get('claimOrderId');
   const autoClaimOrderId = claimOrderIdParam ? Number.parseInt(claimOrderIdParam, 10) : null;
+  const focusOrderIdParam = searchParams.get('focusOrderId');
+  const focusOrderId = focusOrderIdParam ? Number.parseInt(focusOrderIdParam, 10) : null;
 
   const {
     available,
@@ -65,12 +67,16 @@ export default function QueuePage(): React.JSX.Element | null {
 
   const resumePick = useMemo(() => {
     if (myActive.length === 0) return null;
+    if (focusOrderId != null && Number.isInteger(focusOrderId)) {
+      const focused = myActive.find((order) => order.id === focusOrderId);
+      if (focused) return focused;
+    }
     return [...myActive].sort((a, b) => {
       const aTime = new Date(a.claim_info?.claimed_at ?? a.approved_at ?? a.created_at).getTime();
       const bTime = new Date(b.claim_info?.claimed_at ?? b.approved_at ?? b.created_at).getTime();
       return bTime - aTime;
     })[0];
-  }, [myActive]);
+  }, [focusOrderId, myActive]);
 
   /** Carousel: skip your own pick when the sticky resume banner is showing. */
   const carouselOrders = useMemo(
@@ -93,6 +99,9 @@ export default function QueuePage(): React.JSX.Element | null {
   const claimMutation = useMutation({
     mutationFn: async (orderId: number) => {
       if (!userId) throw new Error('Not logged in');
+      if (myActive.length > 0) {
+        throw new Error('OPEN_PICK');
+      }
       const { data, error } = await supabase.rpc('claim_order', {
         p_order_id: orderId,
         p_stage: 'picking',
@@ -114,6 +123,10 @@ export default function QueuePage(): React.JSX.Element | null {
     },
     onError: (err) => {
       const msg = err instanceof Error ? err.message : '';
+      if (msg === 'OPEN_PICK') {
+        toast.info('Finish your open pick before starting a new order.');
+        return;
+      }
       if (msg.startsWith('ALREADY_CLAIMED:')) {
         const pickerName = msg.replace('ALREADY_CLAIMED:', '');
         toast.error(`This order is already being picked by ${pickerName}. Please choose another.`);
@@ -238,27 +251,10 @@ export default function QueuePage(): React.JSX.Element | null {
       />
 
       {resumePick && (
-        <div className="sticky top-11 z-30 border-b border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-4 py-2">
-          <div className="flex items-center gap-2.5">
-            <Warning size={16} weight="fill" className="shrink-0 text-[var(--content-warning)]" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-bold text-[var(--content-primary)] leading-tight">
-                {resumePick.customer_name}
-              </p>
-              <p className="truncate text-[11px] text-[var(--content-secondary)]">
-                {resumePick.transport_name ?? 'No transport'}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => navigate(`/picking/pick/${resumePick.id}`)}
-              className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-[var(--bg-warning)] px-2.5 py-1.5 text-xs font-semibold text-[var(--content-primary)] active:scale-[0.98]"
-            >
-              Continue
-              <ArrowRight size={14} weight="bold" />
-            </button>
-          </div>
-        </div>
+        <IncompletePickBanner
+          order={resumePick}
+          onOpen={() => navigate(`/picking/pick/${resumePick.id}`)}
+        />
       )}
 
       <div className="space-y-4 p-4">
@@ -277,7 +273,11 @@ export default function QueuePage(): React.JSX.Element | null {
             <section>
               <QueueSectionHeader label="Available to pick" count={availableOrders.length} />
 
-              {availableOrders.length === 0 ? (
+              {resumePick ? (
+                <p className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
+                  Finish your open pick above before starting a new order.
+                </p>
+              ) : availableOrders.length === 0 ? (
                 queueIsEmpty ? (
                   <EmptyState
                     icon={Package}

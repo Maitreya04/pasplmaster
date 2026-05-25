@@ -224,6 +224,13 @@ export interface ScanResult {
     pickerUserId: number | null;
     source: 'manual' | 'scanner';
   };
+  /** Picker v10: MRP confirmed on physical label at pick time. */
+  confirmedMrp?: number | null;
+  /** True when confirmed MRP differs from latest stock_mrpwise band. */
+  mrpFlagged?: boolean;
+  /** Where confirmed MRP came from: history band, custom entry, or items fallback. */
+  mrpSource?: 'stock_mrpwise' | 'custom' | 'items_fallback' | null;
+  mrpHistoryCount?: number;
 }
 
 export interface OrderWithItems extends Order {
@@ -459,6 +466,27 @@ export interface BinPickerShelf {
   sku_busy_code: number;
   total_ea: number;
   layers: BinPickerShelfLayer[];
+}
+
+export interface StockMrpHistoryEntry {
+  mrp: number;
+  qty: number;
+  salesprice: number | null;
+  location: string | null;
+  location_code: string | null;
+  date: string | null;
+  updated_at: string | null;
+  is_latest: boolean;
+}
+
+export interface StockMrpHistoryResult {
+  success: boolean;
+  busy_code: number | null;
+  stock_location_code: string | null;
+  latest_mrp: number | null;
+  history: StockMrpHistoryEntry[];
+  reason?: string;
+  source: 'stock_mrpwise' | 'items_fallback' | 'empty';
 }
 
 export interface BinLayerPickEvent {

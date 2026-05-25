@@ -14,6 +14,8 @@ export interface BottomNavItem {
   activeWeight?: IconWeight;
   inactiveWeight?: IconWeight;
   preload?: () => Promise<unknown>;
+  /** Hidden from mobile bottom nav; shown in desktop sidebar only. */
+  desktopOnly?: boolean;
 }
 
 interface BottomNavProps {

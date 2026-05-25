@@ -35,10 +35,24 @@ export type OrderUpdateForSalesPayload = {
   billingCustomerUpdateId?: number;
 };
 
+export type PickCompleteReminderPayload = {
+  eventType: 'pick_complete_reminder';
+  kind: 'all_done' | 'stalled';
+  orderId: number;
+  orderNumber: string;
+  customerName: string;
+  priority: OrderPriority;
+  targetUserId: number;
+  linesDone: number;
+  linesTotal: number;
+  linesRemaining: number;
+};
+
 export type InternalNotificationPayload =
   | PickerReadyPayload
   | ItemFlaggedPayload
-  | OrderUpdateForSalesPayload;
+  | OrderUpdateForSalesPayload
+  | PickCompleteReminderPayload;
 
 /** Edge function JSON body (partial; varies by eventType). */
 export type InternalNotificationResult = {
@@ -69,5 +83,9 @@ export async function sendInternalNotification(
 }
 
 export async function sendPickerReadyNotification(payload: PickerReadyPayload) {
+  return sendInternalNotification(payload);
+}
+
+export async function sendPickCompleteReminder(payload: PickCompleteReminderPayload) {
   return sendInternalNotification(payload);
 }

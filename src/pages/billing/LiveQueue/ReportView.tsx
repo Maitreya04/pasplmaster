@@ -6,6 +6,7 @@ import type { OrderItem } from '../../../types';
 import type { ItemFlag } from '../../../hooks/useBillingFlow';
 
 interface ReportViewProps {
+  embedded?: boolean;
   orderName: string;
   orderNumber: string;
   salesperson: string | null;
@@ -66,6 +67,7 @@ function buildReportText(params: {
 }
 
 export function ReportView({
+  embedded = false,
   orderName,
   orderNumber,
   salesperson,
@@ -76,6 +78,14 @@ export function ReportView({
 }: ReportViewProps): ReactElement {
   const { copy, copiedId } = useCopyToClipboard();
   const hasFlags = Object.keys(flags).length > 0;
+
+  const shellClass = embedded
+    ? 'density-compact h-full min-h-0 bg-[var(--bg-primary)] flex flex-col items-center justify-center p-4 animate-slide-up overflow-y-auto'
+    : 'density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-6 animate-slide-up';
+
+  const flaggedShellClass = embedded
+    ? 'density-compact h-full min-h-0 bg-[var(--bg-primary)] flex flex-col items-center justify-center p-3 animate-slide-up overflow-y-auto'
+    : 'density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-4 lg:p-6 animate-slide-up';
 
   const reportText = useMemo(
     () => buildReportText({ orderNumber, orderName, salesperson, items, flags }),
@@ -105,7 +115,7 @@ export function ReportView({
   // Clean order — minimal success view
   if (!hasFlags) {
     return (
-      <div className="density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-6 animate-slide-up">
+      <div className={shellClass}>
         <div className="w-full max-w-sm text-center">
           <div className="w-16 h-16 bg-[var(--bg-positive-subtle)] rounded-full flex items-center justify-center mx-auto mb-5">
             <CheckCircle size={36} weight="fill" className="text-[var(--content-positive)]" />
@@ -136,7 +146,7 @@ export function ReportView({
 
   // Flagged order — full report
   return (
-    <div className="density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-4 lg:p-6 animate-slide-up">
+    <div className={flaggedShellClass}>
       <div className="w-full max-w-lg">
 
         {/* Header */}

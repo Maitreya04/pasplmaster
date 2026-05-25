@@ -9,6 +9,8 @@ interface BottomSheetProps {
   /** Header row with only the close button — put party/title context inside the scroll area to save vertical space. */
   closeOnly?: boolean;
   children: ReactNode;
+  /** Sticky region below scroll — use for primary CTAs on numpad / action sheets. */
+  footer?: ReactNode;
   sheetClassName?: string;
   contentClassName?: string;
   keyboardBehavior?: 'adjust' | 'static';
@@ -20,6 +22,7 @@ export function BottomSheet({
   title,
   closeOnly = false,
   children,
+  footer,
   sheetClassName = '',
   contentClassName = '',
   keyboardBehavior = 'adjust',
@@ -202,11 +205,19 @@ export function BottomSheet({
         )}
 
         <div
-          className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 ${contentClassName}`}
-          style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 20px)' }}
+          className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 ${footer ? 'pb-3' : 'pb-5'} ${contentClassName}`}
+          style={footer ? undefined : { paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 20px)' }}
         >
           {children}
         </div>
+
+        {footer ? (
+          <div
+            className="shrink-0 border-t border-[var(--border-faint)] px-5 pt-3 pb-[max(env(safe-area-inset-bottom,0px),16px)]"
+          >
+            {footer}
+          </div>
+        ) : null}
       </div>
     </div>
   );

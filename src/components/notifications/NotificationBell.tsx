@@ -43,7 +43,9 @@ function matchesRole(n: UserNotification, role: AppRole | null): boolean {
     if (dl?.startsWith('/sales')) return false;
     return dl == null || dl.startsWith('/billing');
   }
-  if (role === 'picking') return n.type === 'order_ready_to_pick';
+  if (role === 'picking') {
+    return n.type === 'order_ready_to_pick' || n.type === 'pick_complete_reminder';
+  }
   return false;
 }
 
@@ -52,11 +54,14 @@ function deepLinkFromPayload(n: UserNotification): string | null {
   if (typeof p.deep_link === 'string' && p.deep_link.startsWith('/')) {
     return p.deep_link;
   }
+  if (n.type === 'pick_complete_reminder' && n.order_id) {
+    return `/picking?focusOrderId=${n.order_id}`;
+  }
   if (n.type === 'order_ready_to_pick' && n.order_id) {
     return `/picking/pick/${n.order_id}`;
   }
   if (n.type === 'item_flagged_by_picker' && n.order_id) {
-    return '/sales/orders';
+    return `/billing/desk?orderId=${n.order_id}`;
   }
   if (n.type === 'order_update_for_sales') {
     return '/sales/orders';
@@ -65,7 +70,7 @@ function deepLinkFromPayload(n: UserNotification): string | null {
     return '/sales/pending-recovery';
   }
   if (n.type === 'pending_item_ready_for_billing' && n.order_id) {
-    return `/billing/review/${n.order_id}`;
+    return `/billing/desk?orderId=${n.order_id}`;
   }
   return null;
 }
@@ -119,6 +124,8 @@ function notificationTypeLabel(type: string): string {
   switch (type) {
     case 'order_ready_to_pick':
       return 'Ready to pick';
+    case 'pick_complete_reminder':
+      return 'Complete pick?';
     case 'item_flagged_by_picker':
       return 'Picker flag';
     case 'order_update_for_sales':

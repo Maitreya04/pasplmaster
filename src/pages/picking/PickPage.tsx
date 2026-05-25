@@ -25,7 +25,7 @@ import {
 import type { OrderItem, OrderItemState, ScanResult } from '../../types';
 import { PickCompleteScreen } from './PickCompleteScreen';
 import { type QueueSheetRow } from './QueueSheet';
-import { SwipeDeck } from '../../components/picking/SwipeDeck';
+import { SwipeDeck, type SwipeDeckDotStatus } from '../../components/picking/SwipeDeck';
 import { PickCard } from '../../components/picking/PickCard';
 import { JumpListSheet } from '../../components/picking/JumpListSheet';
 import { TransportChip } from '../../components/picking/TransportChip';
@@ -36,11 +36,20 @@ import {
 import { FlagReasonSheet, type FlagSubmitPayload } from '../../components/picking/FlagReasonSheet';
 import {
   buildDeckOrder,
+  buildDeckBrandPositionLabels,
+  buildPickWalkBrandSections,
   findDeckIndexByItemId,
   nextPickableIndex,
+  orderItemBrandLabel,
+  sortPickWalkOrder,
   wrapIndex,
 } from '../../lib/picking/deckOrder';
 import { pickQuantityTarget, pickableOrderItems } from '../../lib/cartSupply';
+import {
+  pickOutcomeDetail,
+  pickOutcomeHeadline,
+  resolvePickOutcomeKind,
+} from '../../lib/picking/pickLineOutcome';
 import { appHaptics } from '../../lib/haptics';
 import { sendInternalNotification } from '../../lib/pickerPush';
 import { LiveQrScanner, type LiveQrScannerResolved } from '../../components/shared/LiveQrScanner';
@@ -70,6 +79,16 @@ import {
   rackGateBinIdForPickItem,
   STAGING_BIN_DEFAULT,
 } from '../../lib/wms/binLayers';
+import { MrpHistorySheet } from '../../components/picker-v10/MrpHistorySheet';
+import { PickQtySheet } from '../../components/picking/PickQtySheet';
+import { useStockMrpHistory } from '../../hooks/useStockMrpHistory';
+import {
+  mergeMrpIntoScanResult,
+  readPickLineMrpMap,
+  writePickLineMrpMap,
+  type PickLineMrpState,
+} from '../../lib/picking/pickLineMrp';
+import type { StockLocationCode } from '../../types';
 
 type PickItemUiState =
   | 'pending'
@@ -98,9 +117,8 @@ const DUPLICATE_SCAN_WINDOW_MS = 500;
 const MAX_AUTO_SCAN_QTY = 12;
 
 // ─── Pick flow constants ───
-// 700ms green-dwell after a line completes — long enough for the picker to
-// register the win, short enough to keep warehouse pace.
-const CELEBRATE_DURATION_MS = 700;
+// Dwell after pick/flag before auto-advance — long enough to read, short enough for pace.
+const LINE_OUTCOME_DWELL_MS = 1500;
 // 5s undo window. Slips happen; mistakes get flagged. Five seconds is the
 // sweet spot we tested behaviourally — long enough to react, short enough
 // not to slow the next pick.
@@ -168,8 +186,11 @@ function writeCardIndex(orderId: number | null, index: number): void {
   }
 }
 
-interface CelebratingState {
+interface LineOutcomeState {
   itemId: number;
+  kind: 'picked' | 'partial' | 'flagged';
+  reason?: string | null;
+  pickedQty?: number;
   expiresAt: number;
 }
 
@@ -180,15 +201,6 @@ interface UndoSnapshot {
   previousScanResult: ScanResult | null;
   previousState: OrderItemState;
   expiresAt: number;
-}
-
-function sortByRack(items: OrderItem[]): OrderItem[] {
-  return [...items].sort((a, b) => {
-    if (!a.rack_no && !b.rack_no) return 0;
-    if (!a.rack_no) return 1;
-    if (!b.rack_no) return -1;
-    return a.rack_no.localeCompare(b.rack_no, undefined, { numeric: true });
-  });
 }
 
 function partitionItems(items: PickItemLocal[]): {
@@ -264,7 +276,7 @@ export default function PickPage(): React.JSX.Element | null {
   const [pendingPackConfirmation, setPendingPackConfirmation] =
     useState<PendingPackConfirmation | null>(null);
   const [manualQtyTargetItemId, setManualQtyTargetItemId] = useState<number | null>(null);
-  const [manualQtyInput, setManualQtyInput] = useState('1');
+  const [manualQtyInitial, setManualQtyInitial] = useState(1);
   const [engagedScanner, setEngagedScanner] = useState<{
     itemId: number;
     mode: 'rack' | 'item';
@@ -286,9 +298,8 @@ export default function PickPage(): React.JSX.Element | null {
   // skippedIds: items the picker chose to come back to. Sorted to the end of
   // the queue so the natural rack-order keeps leading the route.
   const [skippedIds, setSkippedIds] = useState<Set<number>>(new Set());
-  // celebrating: the just-completed item gets a 700ms green dwell before the
-  // next stop slides in. Norman: feedback must be visible enough to register.
-  const [celebrating, setCelebrating] = useState<CelebratingState | null>(null);
+  // lineOutcome: closure beat after pick or flag — green/amber card + explicit Next CTA.
+  const [lineOutcome, setLineOutcome] = useState<LineOutcomeState | null>(null);
   // undoSnapshot: 5s window to revert the last completion. Captures the prior
   // scan_result + state so we can roll back both DB and local UI cleanly.
   const [undoSnapshot, setUndoSnapshot] = useState<UndoSnapshot | null>(null);
@@ -316,6 +327,8 @@ export default function PickPage(): React.JSX.Element | null {
     };
   } | null>(null);
   const [fifoOverrideReason, setFifoOverrideReason] = useState('');
+  const [lineMrpMap, setLineMrpMap] = useState<Map<number, PickLineMrpState>>(() => new Map());
+  const [mrpSheetItemId, setMrpSheetItemId] = useState<number | null>(null);
 
   const orderItems = useMemo(
     () => (order?.items ? pickableOrderItems(order.items) : undefined),
@@ -330,7 +343,12 @@ export default function PickPage(): React.JSX.Element | null {
     setSkippedIds(readIdSet(SKIPPED_STORAGE_KEY, orderId));
     setBriefAcknowledged(readBriefAck(orderId));
     setCurrentCardIndex(readCardIndex(orderId));
+    setLineMrpMap(readPickLineMrpMap(orderId));
   }, [orderId]);
+
+  useEffect(() => {
+    writePickLineMrpMap(orderId, lineMrpMap);
+  }, [orderId, lineMrpMap]);
 
   useEffect(() => {
     writeIdSet(RACK_VERIFY_STORAGE_KEY, orderId, rackVerifiedIds);
@@ -347,15 +365,6 @@ export default function PickPage(): React.JSX.Element | null {
   useEffect(() => {
     writeCardIndex(orderId, currentCardIndex);
   }, [orderId, currentCardIndex]);
-
-  // Drive the celebrate window to clear itself; render falls back to the next
-  // stop the moment we clear, so the slide-in animation triggers naturally.
-  useEffect(() => {
-    if (!celebrating) return;
-    const remaining = Math.max(0, celebrating.expiresAt - Date.now());
-    const t = setTimeout(() => setCelebrating(null), remaining);
-    return () => clearTimeout(t);
-  }, [celebrating]);
 
   // Auto-dismiss the undo toast after its window.
   useEffect(() => {
@@ -384,7 +393,7 @@ export default function PickPage(): React.JSX.Element | null {
 
   const pickItems = useMemo(() => {
     if (!orderItems) return [];
-    const sorted = sortByRack(orderItems);
+    const sorted = sortPickWalkOrder(orderItems);
     return sorted.map((oi): PickItemLocal => {
       const local = localItems.get(oi.id);
       if (local) {
@@ -404,7 +413,7 @@ export default function PickPage(): React.JSX.Element | null {
 
   const { active } = useMemo(() => partitionItems(pickItems), [pickItems]);
 
-  // Re-order active so skipped items go to the end while preserving rack order
+  // Re-order active so skipped items go to the end while preserving brand walk order
   // within each group. Norman: "natural mapping" — the queue follows the walk,
   // skips peel off to the back like a postman re-attempting delivery.
   const orderedActive = useMemo(() => {
@@ -460,21 +469,15 @@ export default function PickPage(): React.JSX.Element | null {
     fifoOverrideSheet,
   ]);
 
-  // Group the trip-summary view's racks by rack_no so the brief reads as a route,
-  // not a list of items. Items without a rack go into a "—" group at the end.
-  const briefRacks = useMemo(() => {
-    if (!orderItems?.length) return [] as { rack: string | null; lines: number; pieces: number }[];
-    const sorted = sortByRack(orderItems);
-    const map = new Map<string, { rack: string | null; lines: number; pieces: number }>();
-    for (const item of sorted) {
-      const key = item.rack_no ?? '—';
-      const target = pickQuantityTarget(item);
-      const entry = map.get(key) ?? { rack: item.rack_no ?? null, lines: 0, pieces: 0 };
-      entry.lines += 1;
-      entry.pieces += target;
-      map.set(key, entry);
-    }
-    return [...map.values()];
+  const deckBrandLabels = useMemo(
+    () => buildDeckBrandPositionLabels(deckItems.map((d) => d.orderItem)),
+    [deckItems],
+  );
+
+  // Trip brief: brand blocks (Varroc → TVS → …) with rack stops inside each brand.
+  const briefBrandSections = useMemo(() => {
+    if (!orderItems?.length) return [];
+    return buildPickWalkBrandSections(orderItems, pickQuantityTarget);
   }, [orderItems]);
 
   const briefTotals = useMemo(() => {
@@ -486,7 +489,7 @@ export default function PickPage(): React.JSX.Element | null {
   // Build the QueueSheet view-model in one place.
   const queueSheetRows: QueueSheetRow[] = useMemo(() => {
     const rows: QueueSheetRow[] = [];
-    for (const pi of pickItems) {
+    for (const pi of deckItems) {
       const isCurrent = currentDeckItem?.orderItem.id === pi.orderItem.id;
       const status: QueueSheetRow['status'] = isCurrent
         ? 'now'
@@ -502,12 +505,13 @@ export default function PickPage(): React.JSX.Element | null {
         rackNo: pi.orderItem.rack_no,
         itemCode: pi.orderItem.item_alias ?? null,
         itemName: pi.orderItem.item_name,
+        brandLabel: orderItemBrandLabel(pi.orderItem),
         targetQty: pickQuantityTarget(pi.orderItem),
         status,
       });
     }
     return rows;
-  }, [pickItems, currentDeckItem, skippedIds]);
+  }, [deckItems, currentDeckItem, skippedIds]);
 
   const counts = useMemo(() => {
     let picked = 0;
@@ -604,19 +608,19 @@ export default function PickPage(): React.JSX.Element | null {
     toast.info('Skipped — will return at the end of the queue.');
   }, [toast]);
 
-  const scheduleAutoForward = useCallback(() => {
-    autoForwardCancelledRef.current = false;
-    window.setTimeout(() => {
-      if (autoForwardCancelledRef.current) return;
-      setCurrentCardIndex((idx) => {
-        const next = nextPickableIndex(deckItems, idx);
-        return next ?? idx;
-      });
-    }, CELEBRATE_DURATION_MS);
+  // Auto-advance after line outcome dwell; cleared early if picker taps Next.
+  const advanceToNextItem = useCallback(() => {
+    autoForwardCancelledRef.current = true;
+    setLineOutcome(null);
+    setCurrentCardIndex((idx) => {
+      const next = nextPickableIndex(deckItems, idx);
+      return next ?? idx;
+    });
   }, [deckItems]);
 
   const handleCardIndexChange = useCallback((index: number) => {
     autoForwardCancelledRef.current = true;
+    setLineOutcome(null);
     setCurrentCardIndex(index);
   }, []);
 
@@ -629,6 +633,29 @@ export default function PickPage(): React.JSX.Element | null {
     [deckItems, handleCardIndexChange],
   );
 
+  const beginLineOutcome = useCallback(
+    (outcome: Omit<LineOutcomeState, 'expiresAt'>) => {
+      autoForwardCancelledRef.current = false;
+      setLineOutcome({
+        ...outcome,
+        expiresAt: Date.now() + LINE_OUTCOME_DWELL_MS,
+      });
+    },
+    [],
+  );
+
+  // Drive the outcome dwell window — advanceToNextItem clears state and moves on.
+  useEffect(() => {
+    if (!lineOutcome) return;
+    const remaining = Math.max(0, lineOutcome.expiresAt - Date.now());
+    const t = window.setTimeout(() => {
+      if (!autoForwardCancelledRef.current) {
+        advanceToNextItem();
+      }
+    }, remaining);
+    return () => window.clearTimeout(t);
+  }, [lineOutcome, advanceToNextItem]);
+
   const openFlagSheet = useCallback((itemId: number) => {
     appHaptics.selection();
     setFlagTargetItemId(itemId);
@@ -637,21 +664,17 @@ export default function PickPage(): React.JSX.Element | null {
 
   // ─── Phase derivation ───
   // Single source of truth for what we render. Order matters: complete > brief
-  // > celebrating > awaiting_rack > verified.
+  // > line outcome > awaiting_rack > verified.
   type PickPhase =
     | { kind: 'brief' }
     | { kind: 'awaiting_rack'; itemId: number }
     | { kind: 'verified'; itemId: number }
-    | { kind: 'celebrating'; itemId: number }
+    | { kind: 'line_outcome'; itemId: number }
     | { kind: 'complete' };
 
   const phase: PickPhase = useMemo(() => {
     if (!currentTarget) return { kind: 'complete' };
-    // Show celebrating until the dwell expires, even when DB has already moved
-    // the item to done. This is what gives the picker the 700ms "I won" beat.
-    if (celebrating) return { kind: 'celebrating', itemId: celebrating.itemId };
-    // Brief shows once per session per order, only on a clean start. Mid-pick
-    // refreshes don't re-prompt because briefAcknowledged is in sessionStorage.
+    if (lineOutcome) return { kind: 'line_outcome', itemId: lineOutcome.itemId };
     if (!briefAcknowledged && counts.picked + counts.flagged === 0) {
       return { kind: 'brief' };
     }
@@ -659,7 +682,7 @@ export default function PickPage(): React.JSX.Element | null {
       return { kind: 'verified', itemId: currentTarget.orderItem.id };
     }
     return { kind: 'awaiting_rack', itemId: currentTarget.orderItem.id };
-  }, [currentTarget, celebrating, briefAcknowledged, counts.picked, counts.flagged, rackVerifiedIds]);
+  }, [currentTarget, lineOutcome, briefAcknowledged, counts.picked, counts.flagged, rackVerifiedIds]);
 
   const engagedScannerContext = useMemo(() => {
     if (!engagedScanner) return null;
@@ -705,6 +728,45 @@ export default function PickPage(): React.JSX.Element | null {
     queryFn: () => fetchBinPickerShelf(shelfBinId!, shelfBusy!),
     enabled: Boolean(shelfBinId && shelfBusy != null),
   });
+
+  const mrpFocusItem = useMemo(() => {
+    const focusId = mrpSheetItemId ?? currentDeckItem?.orderItem.id ?? null;
+    if (!focusId || !order?.items) return null;
+    return order.items.find((i) => i.id === focusId) ?? null;
+  }, [currentDeckItem?.orderItem.id, mrpSheetItemId, order?.items]);
+
+  const mrpFocusRackVerified =
+    mrpFocusItem != null &&
+    (rackVerifiedIds.has(mrpFocusItem.id) || mrpSheetItemId === mrpFocusItem.id);
+
+  const { data: mrpHistoryData, isLoading: mrpHistoryLoading } = useStockMrpHistory(
+    mrpFocusItem?.catalog_busy_code,
+    (mrpFocusItem?.stock_location_code as StockLocationCode | null) ?? null,
+    null,
+    Boolean(mrpFocusItem && mrpFocusRackVerified),
+  );
+
+  const updateLineMrp = useCallback((itemId: number, patch: Partial<PickLineMrpState>) => {
+    setLineMrpMap((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(itemId) ?? { confirmedMrp: null, customMrp: null };
+      next.set(itemId, { ...existing, ...patch });
+      return next;
+    });
+  }, []);
+
+  const openMrpSheet = useCallback((itemId: number) => {
+    setMrpSheetItemId(itemId);
+  }, []);
+
+  /** Primary CTA only — confirm a single prefilled MRP without opening the sheet. */
+  const confirmSingleMrp = useCallback(
+    (itemId: number, mrp: number) => {
+      updateLineMrp(itemId, { confirmedMrp: mrp, customMrp: null });
+      appHaptics.success();
+    },
+    [updateLineMrp],
+  );
 
   useEffect(() => {
     if (!currentTarget) {
@@ -900,9 +962,76 @@ export default function PickPage(): React.JSX.Element | null {
     );
     const remaining = Math.max(1, targetQty - picked);
     setManualQtyTargetItemId(orderItem.id);
-    setManualQtyInput(String(remaining));
+    setManualQtyInitial(remaining);
     setScannerHint(null);
   }, [localItems]);
+
+  const flagOutOfStock = useCallback(
+    (itemId: number) => {
+      appHaptics.impactMedium();
+      const orderItem = order?.items.find((oi) => oi.id === itemId);
+      if (!orderItem) return;
+      if (!rackVerifiedIds.has(itemId)) {
+        markRackVerified(itemId, 'override');
+      }
+      const scanResult = mergeMrpIntoScanResult(
+        {
+          scannedText: 'OUT_OF_STOCK',
+          confidence: 100,
+          isMatch: false,
+          matchedAgainst: orderItem.item_alias ?? String(orderItem.item_id),
+          matchStrategy: 'out_of_stock',
+          ocrExtracted: { partNumber: null, mrp: null },
+          method: 'manual',
+          timestamp: new Date().toISOString(),
+          reason: 'Picker marked out of stock at pick',
+          progress: {
+            pickedQty: 0,
+            remainingQty: pickQuantityTarget(orderItem),
+            targetQty: pickQuantityTarget(orderItem),
+          },
+        },
+        lineMrpMap.get(itemId),
+        itemId === mrpFocusItem?.id ? (mrpHistoryData?.latest_mrp ?? null) : null,
+        itemId === mrpFocusItem?.id ? (mrpHistoryData?.history.length ?? 0) : 0,
+        mrpHistoryData?.source === 'empty' ? null : (mrpHistoryData?.source ?? 'stock_mrpwise'),
+      );
+      itemTransitionMutation.mutate(
+        {
+          transition: {
+            kind: 'flagged',
+            itemId,
+            reason: 'Out of Stock',
+            notes: null,
+            boxPrice: null,
+            scanResult,
+          },
+          optimisticState: 'flagged',
+        },
+        {
+          onSuccess: () => {
+            toast.info('Flagged — out of stock');
+            beginLineOutcome({
+              itemId,
+              kind: 'flagged',
+              reason: 'Out of Stock',
+            });
+          },
+        },
+      );
+    },
+    [
+      itemTransitionMutation,
+      lineMrpMap,
+      markRackVerified,
+      mrpFocusItem?.id,
+      mrpHistoryData,
+      order?.items,
+      rackVerifiedIds,
+      beginLineOutcome,
+      toast,
+    ],
+  );
 
   const engageScanner = useCallback(
     (orderItem: OrderItem, mode: 'rack' | 'item') => {
@@ -917,7 +1046,7 @@ export default function PickPage(): React.JSX.Element | null {
     const snapshot = undoSnapshot;
     if (!snapshot) return;
     setUndoSnapshot(null);
-    setCelebrating(null);
+    setLineOutcome(null);
     autoForwardCancelledRef.current = true;
     try {
       const { error } = await supabase
@@ -1251,13 +1380,13 @@ export default function PickPage(): React.JSX.Element | null {
               previousState: 'pending',
               expiresAt: Date.now() + UNDO_DURATION_MS,
             });
-            setCelebrating({
+            beginLineOutcome({
               itemId: orderItem.id,
-              expiresAt: Date.now() + CELEBRATE_DURATION_MS,
+              kind: resolvePickOutcomeKind(targetQty, targetQty),
+              pickedQty: targetQty,
             });
-            scheduleAutoForward();
+            appHaptics.success();
           }
-          appHaptics.success();
           setScannerHint(
             nextRemaining === 0
               ? `Completed ${orderItem.item_name}.`
@@ -1275,7 +1404,7 @@ export default function PickPage(): React.JSX.Element | null {
       markRackVerified,
       packDefinitionByBusyCode,
       packDefinitionByItemId,
-      scheduleAutoForward,
+      beginLineOutcome,
       tryConsumeShelfStock,
       updateLocalItem,
       userId,
@@ -1354,15 +1483,21 @@ export default function PickPage(): React.JSX.Element | null {
           source: 'manual',
         },
       };
-      const progressedResult: ScanResult = {
-        ...manualScanResult,
-        suggestedQty: Math.floor(qtyToApply),
-        progress: {
-          pickedQty: nextPicked,
-          remainingQty: nextRemaining,
-          targetQty,
+      const progressedResult: ScanResult = mergeMrpIntoScanResult(
+        {
+          ...manualScanResult,
+          suggestedQty: Math.floor(qtyToApply),
+          progress: {
+            pickedQty: nextPicked,
+            remainingQty: nextRemaining,
+            targetQty,
+          },
         },
-      };
+        lineMrpMap.get(itemId),
+        itemId === mrpFocusItem?.id ? (mrpHistoryData?.latest_mrp ?? null) : null,
+        itemId === mrpFocusItem?.id ? (mrpHistoryData?.history.length ?? 0) : 0,
+        mrpHistoryData?.source === 'empty' ? null : (mrpHistoryData?.source ?? 'stock_mrpwise'),
+      );
       itemTransitionMutation.mutate({
         transition: {
           kind: 'scan_saved',
@@ -1391,11 +1526,11 @@ export default function PickPage(): React.JSX.Element | null {
           previousState,
           expiresAt: Date.now() + UNDO_DURATION_MS,
         });
-        setCelebrating({
+        beginLineOutcome({
           itemId,
-          expiresAt: Date.now() + CELEBRATE_DURATION_MS,
+          kind: resolvePickOutcomeKind(nextPicked, targetQty),
+          pickedQty: nextPicked,
         });
-        scheduleAutoForward();
         appHaptics.success();
       }
     },
@@ -1403,12 +1538,15 @@ export default function PickPage(): React.JSX.Element | null {
       itemTransitionMutation,
       localItems,
       order?.items,
-      scheduleAutoForward,
+      beginLineOutcome,
       toast,
       tryConsumeShelfStock,
       updateLocalItem,
       userId,
       userName,
+      lineMrpMap,
+      mrpFocusItem?.id,
+      mrpHistoryData,
     ],
   );
 
@@ -1485,16 +1623,17 @@ export default function PickPage(): React.JSX.Element | null {
           previousState: 'pending',
           expiresAt: Date.now() + UNDO_DURATION_MS,
         });
-        setCelebrating({
+        beginLineOutcome({
           itemId: sheet.orderItemId,
-          expiresAt: Date.now() + CELEBRATE_DURATION_MS,
+          kind: resolvePickOutcomeKind(pickQuantityTarget(orderItem), pickQuantityTarget(orderItem)),
+          pickedQty: pickQuantityTarget(orderItem),
         });
-        scheduleAutoForward();
       }
       appHaptics.success();
     }
   }, [
     applyPickedQty,
+    beginLineOutcome,
     fifoOverrideReason,
     fifoOverrideSheet,
     itemTransitionMutation,
@@ -1530,13 +1669,17 @@ export default function PickPage(): React.JSX.Element | null {
           onSuccess: () => {
             toast.info('Flag sent to billing');
             setFlagSheetOpen(false);
+            beginLineOutcome({
+              itemId: flagTargetItemId,
+              kind: 'flagged',
+              reason: payload.reason,
+            });
             setFlagTargetItemId(null);
-            scheduleAutoForward();
           },
         },
       );
     },
-    [flagTargetItemId, itemTransitionMutation, localItems, scheduleAutoForward, toast],
+    [beginLineOutcome, flagTargetItemId, itemTransitionMutation, localItems, toast],
   );
 
   if (!orderId) {
@@ -1623,14 +1766,42 @@ export default function PickPage(): React.JSX.Element | null {
     );
   }
 
+  const manualQtyOrderItem = useMemo(() => {
+    if (manualQtyTargetItemId == null || !order?.items) return null;
+    return order.items.find((oi) => oi.id === manualQtyTargetItemId) ?? null;
+  }, [manualQtyTargetItemId, order?.items]);
+
+  const manualQtyPicked = useMemo(() => {
+    if (!manualQtyOrderItem) return 0;
+    const target = pickQuantityTarget(manualQtyOrderItem);
+    return Math.min(
+      target,
+      getPickedQtyFromResult(
+        localItems.get(manualQtyOrderItem.id)?.scanResult ?? manualQtyOrderItem.scan_result,
+      ),
+    );
+  }, [localItems, manualQtyOrderItem]);
+
   const isBriefPhase = phase.kind === 'brief';
+
+  const deckDotStatus = useMemo((): SwipeDeckDotStatus[] => {
+    return deckItems.map((pi, index) => {
+      if (index === safeCardIndex) return 'active';
+      if (pi.uiState === 'flagged') return 'flagged';
+      if (pi.uiState === 'picked' || pi.uiState === 'overridden') return 'done';
+      return 'pending';
+    });
+  }, [deckItems, safeCardIndex]);
+
   const scannerPaused =
     flagSheetOpen ||
     queueSheetOpen ||
     completeSheetOpen ||
     manualQtyTargetItemId !== null ||
     pendingPackConfirmation !== null ||
-    fifoOverrideSheet !== null;
+    fifoOverrideSheet !== null ||
+    mrpSheetItemId !== null ||
+    lineOutcome !== null;
 
   return (
     <div className="min-h-screen pb-32">
@@ -1727,7 +1898,7 @@ export default function PickPage(): React.JSX.Element | null {
               <p className="mt-4 text-sm text-[var(--content-tertiary)]">
                 {formatLineCountLabel(briefTotals.lines, { short: true })}
                 {' · '}
-                {briefRacks.length} rack{briefRacks.length === 1 ? '' : 's'}
+                {briefBrandSections.length} brand{briefBrandSections.length === 1 ? '' : 's'}
                 {' · '}
                 {briefTotals.pieces} pcs total
               </p>
@@ -1738,27 +1909,36 @@ export default function PickPage(): React.JSX.Element | null {
 
             <div className="ds-card p-4">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mb-2">
-                Route — in pick order
+                Route — brand by brand
               </p>
-              <div className="space-y-1.5">
-                {briefRacks.map((r, idx) => (
-                  <div
-                    key={`${r.rack ?? 'norack'}-${idx}`}
-                    className="flex items-center gap-3 py-1.5 border-b border-[var(--border-faint)] last:border-0"
-                  >
-                    <span className="w-6 h-6 rounded-full bg-[var(--bg-tertiary)] flex items-center justify-center text-[10px] font-semibold text-[var(--content-tertiary)] shrink-0 tabular-nums">
-                      {idx + 1}
-                    </span>
-                    <MapPin size={14} weight="regular" className="text-[var(--content-tertiary)] shrink-0" />
-                    <span className="font-mono font-bold text-sm text-[var(--content-primary)] min-w-16">
-                      {r.rack ?? '—'}
-                    </span>
-                    <span className="text-xs text-[var(--content-tertiary)] flex-1">
-                      {r.lines} line{r.lines === 1 ? '' : 's'}
-                    </span>
-                    <span className="font-mono text-xs font-semibold text-[var(--content-secondary)] tabular-nums">
-                      {r.pieces} pcs
-                    </span>
+              <div className="space-y-4">
+                {briefBrandSections.map((section) => (
+                  <div key={section.brand}>
+                    <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                      <p className="text-sm font-bold text-[var(--content-primary)]">{section.brand}</p>
+                      <p className="text-[10px] font-medium text-[var(--content-tertiary)] tabular-nums">
+                        {section.lines} line{section.lines === 1 ? '' : 's'} · {section.pieces} pcs
+                      </p>
+                    </div>
+                    <div className="space-y-1 border-l-2 border-[var(--border-faint)] pl-3">
+                      {section.racks.map((r, idx) => (
+                        <div
+                          key={`${section.brand}-${r.rack ?? 'norack'}-${idx}`}
+                          className="flex items-center gap-2 py-0.5"
+                        >
+                          <MapPin size={12} weight="regular" className="text-[var(--content-tertiary)] shrink-0" />
+                          <span className="font-mono text-xs font-bold text-[var(--content-primary)] min-w-12">
+                            {r.rack ?? '—'}
+                          </span>
+                          <span className="text-[10px] text-[var(--content-tertiary)] flex-1">
+                            {r.lines} line{r.lines === 1 ? '' : 's'}
+                          </span>
+                          <span className="font-mono text-[10px] font-semibold text-[var(--content-secondary)] tabular-nums">
+                            {r.pieces} pcs
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1778,14 +1958,14 @@ export default function PickPage(): React.JSX.Element | null {
           </div>
         ) : deckItems.length > 0 ? (
           <div className="space-y-3">
-            <p className="text-center text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-              Swipe › next · ↑ queue
-            </p>
             <SwipeDeck
+              variant="carousel"
               currentIndex={safeCardIndex}
               itemCount={deckItems.length}
               onIndexChange={handleCardIndexChange}
               onSwipeUp={() => setQueueSheetOpen(true)}
+              dotStatus={deckDotStatus}
+              hint="Swipe › next line · ‹ previous · ↑ queue"
             >
               {deckItems.map((pi, index) => {
                 const targetQty = pickQuantityTarget(pi.orderItem);
@@ -1800,6 +1980,19 @@ export default function PickPage(): React.JSX.Element | null {
                   rackVerified &&
                   shelfQuery.data?.layers &&
                   currentDeckItem?.orderItem.id === pi.orderItem.id;
+                const cardOutcome =
+                  lineOutcome?.itemId === pi.orderItem.id ? lineOutcome : null;
+                const outcomeHeadline = cardOutcome
+                  ? pickOutcomeHeadline(
+                      cardOutcome.kind,
+                      cardOutcome.pickedQty ?? pickedQty,
+                      targetQty,
+                      cardOutcome.reason,
+                    )
+                  : undefined;
+                const outcomeDetail = cardOutcome
+                  ? pickOutcomeDetail(cardOutcome.kind, targetQty, cardOutcome.pickedQty ?? pickedQty)
+                  : undefined;
                 return (
                   <div key={pi.orderItem.id} className="h-full w-full shrink-0 px-0.5">
                     {mountedDeckIndices.has(index) ? (
@@ -1808,7 +2001,7 @@ export default function PickPage(): React.JSX.Element | null {
                       uiState={pi.uiState}
                       scanResult={pi.scanResult}
                       phase={
-                        celebrating?.itemId === pi.orderItem.id
+                        cardOutcome?.kind === 'picked' || cardOutcome?.kind === 'partial'
                           ? 'celebrating'
                           : pi.uiState === 'flagged'
                             ? 'flagged'
@@ -1817,13 +2010,16 @@ export default function PickPage(): React.JSX.Element | null {
                               : 'verified'
                       }
                       isCurrent={isCardCurrent}
-                      isCelebrating={celebrating?.itemId === pi.orderItem.id}
                       rackVerified={rackVerified}
                       pickedQty={pickedQty}
                       targetQty={targetQty}
-                      positionLabel={`Line ${index + 1} of ${deckItems.length}`}
+                      positionLabel={deckBrandLabels.get(pi.orderItem.id)}
                       flagReason={pi.orderItem.flag_reason}
                       scannerPaused={scannerPaused || !isCardCurrent}
+                      lineOutcome={cardOutcome?.kind ?? null}
+                      outcomeHeadline={outcomeHeadline}
+                      outcomeDetail={outcomeDetail}
+                      onAdvanceNext={isCardCurrent ? advanceToNextItem : undefined}
                       shelfLayers={showShelf ? shelfQuery.data?.layers ?? null : null}
                       shelfLoading={isCardCurrent && rackVerified && shelfQuery.isLoading}
                       preferredLayerId={
@@ -1831,6 +2027,11 @@ export default function PickPage(): React.JSX.Element | null {
                           ? preferredPickLayer.layerId
                           : null
                       }
+                      mrpHistory={
+                        isCardCurrent && rackVerified ? (mrpHistoryData?.history ?? []) : []
+                      }
+                      mrpHistoryLoading={isCardCurrent && rackVerified && mrpHistoryLoading}
+                      lineMrp={lineMrpMap.get(pi.orderItem.id)}
                       cameraEngaged={
                         engagedScanner?.itemId === pi.orderItem.id &&
                         !scannerPaused
@@ -1841,6 +2042,16 @@ export default function PickPage(): React.JSX.Element | null {
                         }
                       }}
                       onManualQty={() => openManualQty(pi.orderItem)}
+                      onEditMrp={() => openMrpSheet(pi.orderItem.id)}
+                      onConfirmMrp={() => {
+                        const history =
+                          isCardCurrent && rackVerified ? (mrpHistoryData?.history ?? []) : [];
+                        if (history.length === 1) {
+                          confirmSingleMrp(pi.orderItem.id, history[0]!.mrp);
+                          return;
+                        }
+                        openMrpSheet(pi.orderItem.id);
+                      }}
                       onFlag={() => openFlagSheet(pi.orderItem.id)}
                       onEngageScanner={() =>
                         engageScanner(
@@ -2109,7 +2320,7 @@ export default function PickPage(): React.JSX.Element | null {
                   if (!pending) return;
                   setPendingPackConfirmation(null);
                   setManualQtyTargetItemId(pending.orderItemId);
-                  setManualQtyInput(String(Math.max(1, pending.targetQty)));
+                  setManualQtyInitial(Math.max(1, pending.targetQty));
                 }}
                 className="flex-1 bg-[var(--bg-accent)] text-[var(--content-on-color)]"
               >
@@ -2120,49 +2331,60 @@ export default function PickPage(): React.JSX.Element | null {
         )}
       </BottomSheet>
 
-      <BottomSheet
+      <PickQtySheet
         isOpen={manualQtyTargetItemId !== null}
+        initialQty={manualQtyInitial}
+        targetQty={manualQtyOrderItem ? pickQuantityTarget(manualQtyOrderItem) : 0}
+        pickedQty={manualQtyPicked}
+        partCode={
+          manualQtyOrderItem?.catalog_alias1 ??
+          manualQtyOrderItem?.catalog_alias ??
+          manualQtyOrderItem?.item_alias ??
+          null
+        }
+        rackNo={manualQtyOrderItem?.rack_no ?? null}
+        onConfirm={(qty) => {
+          const itemId = manualQtyTargetItemId;
+          if (itemId == null) return;
+          if (!rackVerifiedIds.has(itemId)) {
+            markRackVerified(itemId, 'override');
+          }
+          void applyPickedQty(itemId, qty);
+          setManualQtyTargetItemId(null);
+        }}
+        onOutOfStock={() => {
+          const itemId = manualQtyTargetItemId;
+          if (itemId == null) return;
+          flagOutOfStock(itemId);
+          setManualQtyTargetItemId(null);
+        }}
         onClose={() => setManualQtyTargetItemId(null)}
-        title="Manual qty"
-      >
-        {manualQtyTargetItemId !== null && (
-          <div className="space-y-4">
-            <p className="text-sm text-[var(--content-secondary)]">
-              Enter how many pieces you picked for this line. No need to re-type the product code.
-            </p>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              step={1}
-              value={manualQtyInput}
-              onChange={(e) => setManualQtyInput(e.target.value)}
-              className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3 text-[var(--content-primary)]"
-              placeholder="Quantity"
-            />
-            <BigButton
-              variant="primary"
-              onClick={() => {
-                const parsed = Number(manualQtyInput);
-                if (!Number.isFinite(parsed) || parsed <= 0) {
-                  toast.error('Enter a valid quantity');
-                  return;
-                }
-                const itemId = manualQtyTargetItemId;
-                if (!rackVerifiedIds.has(itemId)) {
-                  markRackVerified(itemId, 'override');
-                }
-                void applyPickedQty(itemId, Math.floor(parsed));
-                setManualQtyTargetItemId(null);
-                setManualQtyInput('1');
-              }}
-              className="bg-[var(--bg-accent)] text-[var(--content-on-color)]"
-            >
-              Apply qty
-            </BigButton>
-          </div>
-        )}
-      </BottomSheet>
+      />
+
+      {mrpSheetItemId != null && mrpFocusItem && (
+        <MrpHistorySheet
+          isOpen
+          history={mrpHistoryData?.history ?? []}
+          confirmedMrp={lineMrpMap.get(mrpSheetItemId)?.confirmedMrp ?? null}
+          customMrp={lineMrpMap.get(mrpSheetItemId)?.customMrp ?? null}
+          partCode={
+            mrpFocusItem.catalog_alias1 ??
+            mrpFocusItem.catalog_alias ??
+            mrpFocusItem.item_alias ??
+            null
+          }
+          rackNo={mrpFocusItem.rack_no}
+          onSelectMrp={(mrp) => {
+            updateLineMrp(mrpSheetItemId, { confirmedMrp: mrp, customMrp: null });
+            setMrpSheetItemId(null);
+          }}
+          onSelectCustomMrp={(mrp) => {
+            updateLineMrp(mrpSheetItemId, { customMrp: mrp, confirmedMrp: null });
+            setMrpSheetItemId(null);
+          }}
+          onClose={() => setMrpSheetItemId(null)}
+        />
+      )}
 
       <JumpListSheet
         isOpen={queueSheetOpen}

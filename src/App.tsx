@@ -20,6 +20,7 @@ const HistoryPage = lazy(() => import('./pages/billing/HistoryPage'));
 const RejectedPage = lazy(() => import('./pages/billing/RejectedPage'));
 const PendingPage = lazy(() => import('./pages/billing/PendingPage'));
 const LiveQueuePage = lazy(() => import('./pages/billing/LiveQueuePage'));
+const BillingDeskPage = lazy(() => import('./pages/billing/BillingDeskPage'));
 const CompactQueuePage = lazy(() => import('./pages/billing/CompactQueuePage'));
 const BillingNewOrderLayout = lazy(() => import('./pages/billing/BillingNewOrderLayout'));
 
@@ -37,6 +38,7 @@ const ParetoLabelPrintPage = lazy(() => import('./pages/admin/ParetoLabelPrintPa
 const StockAuditLabelPrintPage = lazy(() => import('./pages/admin/StockAuditLabelPrintPage'));
 const CycleCountPage = lazy(() => import('./pages/admin/CycleCountPage'));
 const PickScanLabPage = lazy(() => import('./pages/admin/PickScanLabPage'));
+const PickerUxLabPage = lazy(() => import('./pages/admin/PickerUxLabPage'));
 const OcrOrderLabPage = lazy(() => import('./pages/admin/OcrOrderLabPage'));
 const SupplyDemandPage = lazy(() => import('./pages/admin/SupplyDemandPage'));
 const SupplyDemandSkuDetailPage = lazy(() => import('./pages/admin/SupplyDemandSkuDetailPage'));
@@ -133,6 +135,7 @@ export default function App(): React.JSX.Element | null {
         >
           <Route index element={<DashboardPage />} />
           <Route path="queue" element={<LiveQueuePage />} />
+          <Route path="desk" element={<BillingDeskPage />} />
           <Route path="needs-review" element={<NeedsReviewPage />} />
           <Route path="pending" element={<PendingPage />} />
           <Route path="rejected" element={<RejectedPage />} />
@@ -296,6 +299,16 @@ export default function App(): React.JSX.Element | null {
             <RequireRole>
               <RequireAdminUnlock>
                 <PickScanLabPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/picker-ux-lab"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <PickerUxLabPage />
               </RequireAdminUnlock>
             </RequireRole>
           }

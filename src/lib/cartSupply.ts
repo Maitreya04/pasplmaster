@@ -128,3 +128,54 @@ export function pickableOrderItems<T extends PickLineQty>(items: T[]): T[] {
 export function countPickableOrderLines(items: PickLineQty[]): number {
   return pickableOrderItems(items).length;
 }
+
+export type PickLineProgress = {
+  total: number;
+  picked: number;
+  flagged: number;
+  done: number;
+  remaining: number;
+};
+
+/** Pick progress counts only shippable warehouse lines (excludes PO-only). */
+export function computePickLineProgress(
+  items: Array<PickLineQty & { state?: string | null }>,
+): PickLineProgress {
+  const pickLines = pickableOrderItems(items);
+  const total = pickLines.length;
+  let picked = 0;
+  let flagged = 0;
+  for (const item of pickLines) {
+    if (item.state === 'picked' || item.state === 'overridden') picked += 1;
+    else if (item.state === 'flagged') flagged += 1;
+  }
+  const done = picked + flagged;
+  return { total, picked, flagged, done, remaining: Math.max(0, total - done) };
+}
+
+/**
+ * Warehouse pick skips PO-only lines — mark them picked at billing approve so they
+ * never appear in the pick queue or progress denominators.
+ */
+export function applyWarehousePickSkipForPoOnlyLine(
+  update: Record<string, unknown>,
+  line: PickLineQty,
+  opts: {
+    fulfillmentPath?: string | null;
+    currentState?: string | null;
+    skip?: boolean;
+  },
+): void {
+  if (opts.skip) return;
+  if (opts.fulfillmentPath !== 'warehouse_pick') return;
+  if (opts.currentState === 'flagged') return;
+  const target = pickQuantityTarget({
+    qty_requested: line.qty_requested,
+    qty_approved: update.qty_approved as number | undefined,
+    qty_shippable: update.qty_shippable as number | undefined,
+    qty_po: update.qty_po as number | undefined,
+  });
+  if (target === 0) {
+    update.state = 'picked';
+  }
+}

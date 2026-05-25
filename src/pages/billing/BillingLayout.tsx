@@ -7,6 +7,7 @@ import {
   Lightning,
   PlusCircle,
   Prohibit,
+  Desk,
 } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
@@ -22,6 +23,7 @@ const preloadPending = () => import('./PendingPage');
 const preloadHistory = () => import('./HistoryPage');
 const preloadRejected = () => import('./RejectedPage');
 const preloadLiveQueue = () => import('./LiveQueuePage');
+const preloadBillingDesk = () => import('./BillingDeskPage');
 const preloadNewOrder = () => import('./BillingNewOrderLayout');
 
 const NAV_ITEMS: BottomNavItem[] = [
@@ -31,6 +33,14 @@ const NAV_ITEMS: BottomNavItem[] = [
     label: 'Live Queue',
     path: '/billing/queue',
     preload: preloadLiveQueue,
+  },
+  {
+    icon: Desk,
+    label: 'Desk',
+    path: '/billing/desk',
+    match: (pathname: string) => pathname.startsWith('/billing/desk'),
+    preload: preloadBillingDesk,
+    desktopOnly: true,
   },
   {
     icon: PlusCircle,
@@ -73,8 +83,10 @@ export default function BillingLayout(): React.JSX.Element | null {
               <PushAlertsCompact label="Billing alerts" push={push} />
             </div>
           </div>
-          {NAV_ITEMS.map(({ icon: IconCmp, label, path }) => {
-            const active = location.pathname === path;
+          {NAV_ITEMS.map(({ icon: IconCmp, label, path, match }) => {
+            const active = match
+              ? match(location.pathname, location.search)
+              : location.pathname === path;
             return (
               <button
                 key={path}
@@ -108,7 +120,7 @@ export default function BillingLayout(): React.JSX.Element | null {
 
       {/* Bottom nav — mobile only */}
       <div className="lg:hidden">
-        <BottomNav items={NAV_ITEMS} />
+        <BottomNav items={NAV_ITEMS.filter((item) => !item.desktopOnly)} />
       </div>
       <DevRoleSwitcher />
     </div>

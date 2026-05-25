@@ -1,9 +1,14 @@
 import { memo } from 'react';
-import type { OrderItem, ScanResult } from '../../types';
+import type { OrderItem, ScanResult, StockMrpHistoryEntry } from '../../types';
 import type { ItemPackDefinition } from '../../lib/packLpn';
 import type { BinPickerShelfLayer } from '../../types';
 import { CardHero, type CardPhase } from './CardHero';
 import { PickCardCTAs } from './PickCardCTAs';
+import { PickLineResolvedDock, type PickLineOutcomeKind } from './PickLineResolvedDock';
+import { PickLineDoneHint } from './PickLineDoneHint';
+import { PickMetricRow } from './PickMetricRow';
+import { isPickLineMrpConfirmed } from '../../lib/picking/pickLineMrp';
+import type { PickLineMrpState } from '../../lib/picking/pickLineMrp';
 
 export interface PickCardProps {
   orderItem: OrderItem;
@@ -23,11 +28,23 @@ export interface PickCardProps {
   shelfLayers?: BinPickerShelfLayer[] | null;
   shelfLoading?: boolean;
   preferredLayerId?: number | null;
+  mrpHistory?: StockMrpHistoryEntry[];
+  mrpHistoryLoading?: boolean;
+  lineMrp?: PickLineMrpState;
   onRackTap?: () => void;
   onManualQty?: () => void;
+  /** Tap MRP cell / Edit — always opens history sheet. */
+  onEditMrp?: () => void;
+  /** Primary CTA when single MRP band needs confirm (no sheet). */
+  onConfirmMrp?: () => void;
   onFlag?: () => void;
   onEngageScanner?: () => void;
   onSelectLayer?: (layerId: number) => void;
+  /** Active closure beat — green for pick, amber for flag. */
+  lineOutcome?: PickLineOutcomeKind | null;
+  outcomeHeadline?: string;
+  outcomeDetail?: string;
+  onAdvanceNext?: () => void;
 }
 
 export const PickCard = memo(function PickCard({
@@ -45,13 +62,23 @@ export const PickCard = memo(function PickCard({
   shelfLayers,
   shelfLoading,
   preferredLayerId,
+  mrpHistory = [],
+  mrpHistoryLoading = false,
+  lineMrp,
   onRackTap,
   onManualQty,
+  onEditMrp,
+  onConfirmMrp,
   onFlag,
   onEngageScanner,
   onSelectLayer,
+  lineOutcome = null,
+  outcomeHeadline,
+  outcomeDetail,
+  onAdvanceNext,
 }: PickCardProps): React.JSX.Element {
   const isDone = uiState === 'picked' || uiState === 'flagged' || uiState === 'overridden';
+  const showingOutcome = isCurrent && lineOutcome != null;
   const isAwaitingRack = !rackVerified && !isDone;
   const isVerified = rackVerified && !isDone;
   const partNo =
@@ -60,24 +87,41 @@ export const PickCard = memo(function PickCard({
     orderItem.item_alias ??
     String(orderItem.item_id);
 
-  const cardPhase: CardPhase = isCelebrating
+  const cardPhase: CardPhase = showingOutcome && (lineOutcome === 'picked' || lineOutcome === 'partial')
     ? 'celebrating'
-    : uiState === 'flagged'
-      ? 'flagged'
-      : uiState === 'picked' || uiState === 'overridden'
-        ? 'picked'
-        : isAwaitingRack
-          ? 'awaiting_rack'
-          : 'verified';
+    : isCelebrating
+      ? 'celebrating'
+      : uiState === 'flagged'
+        ? 'flagged'
+        : uiState === 'picked' || uiState === 'overridden'
+          ? 'picked'
+          : isAwaitingRack
+            ? 'awaiting_rack'
+            : 'verified';
 
   const scanLabel = isAwaitingRack ? 'Scan bin' : 'Scan item';
   const scannerLive = isCurrent && !scannerPaused && cameraEngaged;
+  const remainingQty = Math.max(0, targetQty - pickedQty);
+
+  const mrpConfirmed = isPickLineMrpConfirmed(lineMrp);
+  const hasMrpBands = mrpHistory.length > 0;
+  const needsMrpConfirm = isVerified && hasMrpBands && !mrpConfirmed;
+  const singlePendingMrp =
+    needsMrpConfirm && mrpHistory.length === 1 ? mrpHistory[0]!.mrp : null;
+  /** Qty + MRP row appears as soon as rack is verified — qty must not depend on MRP data. */
+  const showMetricRow = isVerified;
 
   return (
     <div
-      className={`flex h-full flex-col overflow-hidden rounded-3xl border-[1.5px] bg-[var(--bg-secondary)] shadow-sm transition-opacity ${
-        isDone ? 'opacity-70 border-[var(--border-subtle)]' : 'border-[var(--border-subtle)]'
-      } ${isCelebrating ? 'animate-pick-celebrate ring-2 ring-[var(--border-positive)]' : ''}`}
+      className={`flex h-full flex-col overflow-hidden rounded-3xl border-[1.5px] shadow-sm transition-[background-color,border-color,opacity,box-shadow] duration-300 ${
+        showingOutcome && lineOutcome === 'picked'
+          ? 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] ring-2 ring-[var(--border-positive)]/25 animate-pick-celebrate'
+          : showingOutcome && (lineOutcome === 'partial' || lineOutcome === 'flagged')
+            ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] ring-2 ring-[var(--border-warning)]/20'
+            : isDone
+              ? 'border-[var(--border-subtle)] bg-[var(--bg-secondary)] opacity-70'
+              : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)]'
+      }`}
     >
       <div className="min-h-0 flex-1 overflow-y-auto">
         <CardHero
@@ -91,12 +135,28 @@ export const PickCard = memo(function PickCard({
           positionLabel={positionLabel}
           onRackTap={onRackTap}
           isFlagged={uiState === 'flagged'}
+          hideProgressMetrics={showMetricRow}
         />
+
+        {showMetricRow && !showingOutcome && (
+          <PickMetricRow
+            displayQty={remainingQty}
+            targetQty={targetQty}
+            pickedQty={pickedQty}
+            mrpHistory={mrpHistory}
+            mrpLoading={mrpHistoryLoading}
+            confirmedMrp={lineMrp?.confirmedMrp ?? null}
+            customMrp={lineMrp?.customMrp ?? null}
+            disabled={!isCurrent}
+            onEditQty={() => onManualQty?.()}
+            onEditMrp={() => onEditMrp?.()}
+          />
+        )}
 
         {isVerified && shelfLayers && shelfLayers.length > 0 && (
           <div className="px-4 pb-2">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-              Shelf batches
+              Shelf FIFO
             </p>
             <ul className="flex gap-1.5 overflow-x-auto pb-1">
               {shelfLayers.map((layer) => (
@@ -122,23 +182,43 @@ export const PickCard = memo(function PickCard({
         )}
       </div>
 
-      {isDone && (
-        <div className="shrink-0 border-t border-[var(--border-faint)] px-4 py-3 text-center">
-          <p className="text-sm text-[var(--content-tertiary)]">
-            {uiState === 'flagged' ? 'Sent to billing for review' : 'Line complete'}
-          </p>
-        </div>
-      )}
-
-      {!isDone && (
-        <PickCardCTAs
-          scanLabel={scanLabel}
-          cameraEngaged={scannerLive}
-          disabled={!isCurrent || scannerPaused}
-          onManualQty={() => onManualQty?.()}
-          onFlag={() => onFlag?.()}
-          onScan={() => onEngageScanner?.()}
+      {showingOutcome && lineOutcome && outcomeHeadline && onAdvanceNext ? (
+        <PickLineResolvedDock
+          kind={lineOutcome}
+          headline={outcomeHeadline}
+          detail={outcomeDetail}
+          onNext={onAdvanceNext}
         />
+      ) : isDone && isCurrent && onAdvanceNext ? (
+        <PickLineDoneHint
+          kind={uiState === 'flagged' ? 'flagged' : 'picked'}
+          onNext={onAdvanceNext}
+        />
+      ) : isDone ? (
+        <PickLineDoneHint kind={uiState === 'flagged' ? 'flagged' : 'picked'} />
+      ) : (
+        <>
+          {needsMrpConfirm && isCurrent && (
+            <p className="border-t border-[var(--border-faint)] bg-[var(--bg-warning-subtle)] px-4 py-2 text-center text-[11px] font-semibold text-[var(--content-warning-on-light)]">
+              Confirm MRP on the label before scanning
+            </p>
+          )}
+          <PickCardCTAs
+            scanLabel={scanLabel}
+            cameraEngaged={scannerLive}
+            disabled={!isCurrent || scannerPaused}
+            scanDisabled={needsMrpConfirm}
+            onManualQty={() => onManualQty?.()}
+            onFlag={() => onFlag?.()}
+            onScan={() => onEngageScanner?.()}
+            onConfirmMrp={needsMrpConfirm ? () => (onConfirmMrp ?? onEditMrp)?.() : undefined}
+            confirmMrpLabel={
+              singlePendingMrp != null
+                ? `Confirm ₹${Math.round(singlePendingMrp)} on label`
+                : undefined
+            }
+          />
+        </>
       )}
     </div>
   );

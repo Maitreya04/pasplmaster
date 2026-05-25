@@ -14,6 +14,8 @@ export interface CardHeroProps {
   positionLabel?: string;
   onRackTap?: () => void;
   isFlagged?: boolean;
+  /** When true, qty/progress moves to PickMetricRow below — keeps hero focused on rack + code. */
+  hideProgressMetrics?: boolean;
 }
 
 export function CardHero({
@@ -27,6 +29,7 @@ export function CardHero({
   positionLabel,
   onRackTap,
   isFlagged = false,
+  hideProgressMetrics = false,
 }: CardHeroProps): React.JSX.Element {
   const isAwaitingRack = phase === 'awaiting_rack';
   const isVerified = phase === 'verified' || phase === 'celebrating';
@@ -107,7 +110,7 @@ export function CardHero({
         <p className="text-xs text-[var(--content-negative)] mt-1 font-medium">{flagReason}</p>
       )}
 
-      {!isDone && (
+      {!isDone && !hideProgressMetrics && (
         <div className="mt-3 flex items-end justify-between gap-3">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
@@ -129,7 +132,7 @@ export function CardHero({
         </div>
       )}
 
-      {!isDone && targetQty > 0 && (
+      {!isDone && !hideProgressMetrics && targetQty > 0 && (
         <div className="mt-2">
           <ProgressBar
             segments={[
