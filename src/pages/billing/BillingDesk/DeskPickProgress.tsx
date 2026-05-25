@@ -1,6 +1,7 @@
 import type { PickLineProgress } from '../../../lib/cartSupply';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 import { DeskTooltip } from './DeskTooltip';
+import { deskType } from './deskTypography';
 
 interface DeskPickProgressProps {
   order: DeskOrderRow;
@@ -64,8 +65,8 @@ export function DeskPickProgress({
 
   return (
     <DeskTooltip label={label} side="bottom">
-      <div className="mt-1.5 space-y-0.5 cursor-default" aria-label={label}>
-        <div className="flex items-center justify-between gap-2 text-[9px] text-[var(--content-quaternary)]">
+      <div className="mt-2 space-y-1 cursor-default" aria-label={label}>
+        <div className={`flex items-center justify-between gap-2 ${deskType.progress}`}>
           <span className="truncate">
             {isLoading && order.deskStatus === 'picking'
               ? 'Loading pick progress…'
@@ -83,7 +84,7 @@ export function DeskPickProgress({
             <span className="tabular-nums shrink-0">{pct}%</span>
           )}
         </div>
-        <div className="h-1 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
+        <div className="h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
           <div
             className="h-full rounded-full transition-all duration-500"
             style={{

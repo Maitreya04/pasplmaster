@@ -802,6 +802,20 @@ table.ds-table td {
   color: var(--content-signal-out);
 }
 
+/* Billing desk — readable typescale aligned with Live Queue cards (text-xs / text-sm) */
+.desk-panel {
+  --ds-font-micro: 0.75rem;
+  --ds-font-label: 0.75rem;
+  --ds-font-caption: 0.8125rem;
+  --ds-font-body: 0.875rem;
+  --ds-font-prose: 0.8125rem;
+  --ds-font-lead: 1rem;
+  --ds-px: 0.75rem;
+  --ds-py: 0.5rem;
+  --ds-gap: 0.625rem;
+  --ds-row-h: 2.5rem;
+}
+
 .bg-embed-whatsapp-tint {
   background: var(--embed-whatsapp-tint);
 }

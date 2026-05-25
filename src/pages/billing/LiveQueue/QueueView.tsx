@@ -299,7 +299,7 @@ export function QueueView({
             </h1>
           </div>
           {embedded && (
-            <p className="text-[10px] text-[var(--content-quaternary)] mt-1 pl-3.5">
+            <p className="text-xs text-[var(--content-quaternary)] mt-1 pl-3.5">
               Open orders to bill · copy lines to Busy
             </p>
           )}

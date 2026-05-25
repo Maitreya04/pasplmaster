@@ -1,4 +1,5 @@
 import type { ReactElement, ReactNode } from 'react';
+import { deskType } from './deskTypography';
 
 interface DeskTooltipProps {
   label: string;
@@ -24,7 +25,7 @@ export function DeskTooltip({
       {children}
       <span
         role="tooltip"
-        className={`pointer-events-none absolute ${positionClass} z-30 w-max max-w-[220px] rounded-md border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-1 text-[10px] leading-snug text-[var(--content-secondary)] shadow-md opacity-0 scale-95 group-hover/dtip:opacity-100 group-hover/dtip:scale-100 group-focus-within/dtip:opacity-100 group-focus-within/dtip:scale-100 transition-all duration-150 delay-300 group-hover/dtip:delay-500`}
+        className={`pointer-events-none absolute ${positionClass} z-30 w-max max-w-[240px] rounded-md border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2.5 py-1.5 ${deskType.tooltip} text-[var(--content-secondary)] shadow-md opacity-0 scale-95 group-hover/dtip:opacity-100 group-hover/dtip:scale-100 group-focus-within/dtip:opacity-100 group-focus-within/dtip:scale-100 transition-all duration-150 delay-300 group-hover/dtip:delay-500`}
       >
         {label}
       </span>

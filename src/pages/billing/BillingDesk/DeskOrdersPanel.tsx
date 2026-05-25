@@ -15,6 +15,7 @@ import { DeskPickerToolbar } from './DeskPickerToolbar';
 import { DeskTooltip } from './DeskTooltip';
 import { DESK_TAB_TOOLTIPS } from './deskStatusHelp';
 import { filterDeskOrdersByPicker } from './deskPickerMatch';
+import { deskType } from './deskTypography';
 
 interface DeskOrdersPanelProps {
   allOrders: DeskOrderRow[];
@@ -84,7 +85,9 @@ export function DeskOrdersPanel({
 
   const emptyDescription = pickerFilter
     ? `${pickerFilter.firstName} has no orders in this view right now.`
-    : tab === 'picking'
+    : tab === 'stale'
+      ? 'Re-assign, notify, or complete picks that are stuck.'
+      : tab === 'picking'
       ? 'Approved orders waiting for a picker or an in-progress pick show here.'
       : tab === 'completed'
         ? 'Finished picks move here once the picker completes every line.'
@@ -92,11 +95,11 @@ export function DeskOrdersPanel({
 
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden bg-[var(--bg-secondary)]">
-      <header className="shrink-0 px-3 py-2.5 border-b border-[var(--border-faint)] bg-[var(--bg-secondary)]">
-        <div className="flex items-center justify-between gap-2">
+      <header className="shrink-0 px-3.5 py-3 border-b border-[var(--border-faint)] bg-[var(--bg-secondary)]">
+        <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <span className="text-[13px] font-medium text-[var(--content-primary)]">Orders</span>
-            <p className="text-[10px] text-[var(--content-quaternary)] mt-0.5 truncate">
+            <span className={deskType.panelTitle}>Orders</span>
+            <p className={`${deskType.panelSub} mt-0.5 truncate`}>
               Assign · edit bills · track by picker
             </p>
           </div>
@@ -114,15 +117,15 @@ export function DeskOrdersPanel({
                   <button
                     type="button"
                     onClick={() => setTab(t.id)}
-                    className={`text-[11px] px-2 py-1 rounded-md transition-colors inline-flex items-center gap-1 ${
+                    className={`${deskType.tab} px-2.5 py-1.5 rounded-md transition-colors inline-flex items-center gap-1.5 ${
                       active
-                        ? 'bg-[var(--bg-secondary)] text-[var(--content-primary)] font-medium shadow-sm'
+                        ? 'bg-[var(--bg-secondary)] text-[var(--content-primary)] font-semibold shadow-sm'
                         : 'text-[var(--content-quaternary)] hover:text-[var(--content-secondary)]'
                     }`}
                   >
                     {t.label}
                     {t.badge != null && t.badge > 0 && (
-                      <span className={`text-[9px] font-semibold px-1 rounded tabular-nums ${badgeTone}`}>
+                      <span className={`${deskType.tabBadge} px-1.5 py-0.5 rounded ${badgeTone}`}>
                         {t.badge}
                       </span>
                     )}
@@ -149,7 +152,7 @@ export function DeskOrdersPanel({
 
       <DeskFlagsSeparatorNote count={flaggedOrders.length} />
 
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-3 py-2 flex flex-col gap-1">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-3.5 py-2.5 flex flex-col gap-1.5">
         {isLoading ? (
           <Skeleton variant="card" count={4} />
         ) : filtered.length === 0 ? (
@@ -177,6 +180,7 @@ export function DeskOrdersPanel({
               onAssignToggle={() => {
                 setAssignTarget((prev) => (prev?.id === order.id ? null : order));
               }}
+              showStaleActions={tab === 'stale'}
               onEdit={() => onSelectOrder(order, false)}
             />
           ))

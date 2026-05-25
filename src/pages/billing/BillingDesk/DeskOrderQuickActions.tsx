@@ -7,6 +7,7 @@ import type { PickerLoadInfo } from '../../../hooks/usePickerLoad';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 import { DeskTooltip } from './DeskTooltip';
 import { findPickerByName } from './deskPickerAssign';
+import { deskBtn } from './deskTypography';
 
 interface DeskOrderQuickActionsProps {
   order: DeskOrderRow;
@@ -93,10 +94,10 @@ export function DeskOrderQuickActions({
           type="button"
           onClick={() => notifyMutation.mutate()}
           disabled={notifyMutation.isPending}
-          className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[var(--content-quaternary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--content-secondary)] transition-colors disabled:opacity-50 border border-transparent hover:border-[var(--border-faint)]"
+          className={`${deskBtn.icon} text-[var(--content-quaternary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--content-secondary)] disabled:opacity-50 border border-transparent hover:border-[var(--border-faint)]`}
           aria-label={`Notify picker for ${order.customer_name}`}
         >
-          <Bell size={14} weight={notifyMutation.isPending ? 'regular' : 'bold'} />
+          <Bell size={15} weight={notifyMutation.isPending ? 'regular' : 'bold'} />
         </button>
       </DeskTooltip>
     </div>

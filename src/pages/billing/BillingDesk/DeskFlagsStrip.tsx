@@ -1,6 +1,7 @@
 import { Flag, Package, Warning } from '@phosphor-icons/react';
 import { formatTimeAgo } from '../../../utils/formatters';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
+import { deskType } from './deskTypography';
 
 function flagTypeLabel(
   order: DeskOrderRow,
@@ -50,10 +51,10 @@ export function DeskFlagsStrip({ orders, onSelect }: DeskFlagsStripProps): React
       <div className="flex items-center justify-between px-3.5 py-1.5">
         <div className="flex items-center gap-1.5">
           <Flag size={12} weight="fill" className="text-[var(--content-warning-on-light)]" />
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--content-warning-on-light)]">
+          <span className={`${deskType.sectionLabel} text-[var(--content-warning-on-light)]`}>
             Picker flags — needs action
           </span>
-          <span className="text-[9px] font-semibold px-1.5 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] border border-[var(--border-warning)]">
+          <span className={`${deskType.pill} px-2 py-0.5 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] border border-[var(--border-warning)]`}>
             {orders.length}
           </span>
         </div>
@@ -82,7 +83,7 @@ export function DeskFlagsStrip({ orders, onSelect }: DeskFlagsStripProps): React
                 <Warning size={15} className="text-[var(--content-warning-on-light)] shrink-0" />
               )}
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-[var(--content-warning-on-light)]">
+                <p className={`${deskType.orderMeta} text-[var(--content-warning-on-light)]`}>
                   {order.order_number} · {formatTimeAgo(flagTimeSource(order))}
                   {stillPicking && (
                     <span className="ml-1 font-medium text-[var(--content-warning)]">
@@ -90,17 +91,17 @@ export function DeskFlagsStrip({ orders, onSelect }: DeskFlagsStripProps): React
                     </span>
                   )}
                 </p>
-                <p className="text-xs font-medium text-[var(--content-warning)] truncate">
+                <p className={`${deskType.orderTitle} text-[var(--content-warning)] truncate`}>
                   {flagDescription(order)}
                 </p>
                 {order.picker_name && (
-                  <p className="text-[10px] text-[var(--content-warning-on-light)]">
+                  <p className={`${deskType.orderDetail} text-[var(--content-warning-on-light)]`}>
                     Flagged by {order.picker_name}
                   </p>
                 )}
               </div>
               <span
-                className={`shrink-0 text-[9px] font-medium px-2 py-0.5 rounded-full ${
+                className={`shrink-0 ${deskType.pill} px-2 py-0.5 rounded-full ${
                   type.tone === 'red'
                     ? 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]'
                     : type.tone === 'blue'
@@ -121,7 +122,7 @@ export function DeskFlagsStrip({ orders, onSelect }: DeskFlagsStripProps): React
 export function DeskFlagsSeparatorNote({ count }: { count: number }): React.JSX.Element | null {
   if (count <= 0) return null;
   return (
-    <p className="mx-3.5 mt-1.5 mb-0 rounded-lg bg-[var(--bg-tertiary)] px-2.5 py-1.5 text-[10px] text-[var(--content-quaternary)]">
+    <p className={`mx-3.5 mt-1.5 mb-0 rounded-lg bg-[var(--bg-tertiary)] px-2.5 py-1.5 ${deskType.hint}`}>
       {count} flagged order{count === 1 ? '' : 's'} shown above · click any order below to edit
     </p>
   );

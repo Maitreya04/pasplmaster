@@ -3,6 +3,7 @@ import type { PickerLoadInfo } from '../../../hooks/usePickerLoad';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 import { DeskTooltip } from './DeskTooltip';
 import { computePickerDeskStats, type PickerDeskStats } from './deskPickerMatch';
+import { deskAvatar, deskType } from './deskTypography';
 
 interface DeskPickerToolbarProps {
   pickers: PickerLoadInfo[];
@@ -18,7 +19,7 @@ function statsLabel(stats: PickerDeskStats): string {
 
 function filterChipClass(selected: boolean): string {
   const base =
-    'shrink-0 flex flex-col items-center gap-1 rounded-lg px-2 py-2 min-w-[54px] border transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--role-primary)]';
+    'shrink-0 flex flex-col items-center gap-1 rounded-lg px-2.5 py-2 min-w-[60px] border transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--role-primary)]';
   if (selected) {
     return `${base} bg-[var(--bg-tertiary)] border-[var(--border-opaque)] shadow-sm`;
   }
@@ -42,17 +43,15 @@ export function DeskPickerToolbar({
 
   return (
     <div className="shrink-0 border-b border-[var(--border-faint)] bg-[var(--bg-secondary)]">
-      <div className="px-3 pt-2 pb-2.5">
+      <div className="px-3.5 pt-2.5 pb-3">
         <div className="flex items-center justify-between gap-2 mb-2">
-          <span className="text-[9px] font-medium uppercase tracking-wide text-[var(--content-quaternary)]">
-            Filter by picker
-          </span>
-          <span className="text-[9px] text-[var(--content-quaternary)] tabular-nums">
+          <span className={deskType.sectionLabel}>Filter by picker</span>
+          <span className={`${deskType.chipStat} normal-case tracking-normal`}>
             active · done
           </span>
         </div>
 
-        <div className="flex items-start gap-1.5 overflow-x-auto overscroll-x-contain py-0.5">
+        <div className="flex items-start gap-2 overflow-x-auto overscroll-x-contain py-1">
           <DeskTooltip label="Show every picker's orders" side="bottom">
             <button
               type="button"
@@ -60,7 +59,7 @@ export function DeskPickerToolbar({
               className={filterChipClass(selectedPickerId === null)}
             >
               <span
-                className={`flex h-7 w-7 items-center justify-center rounded-full text-[9px] font-semibold border ${
+                className={`${deskAvatar.all} ${
                   selectedPickerId === null
                     ? 'bg-[var(--bg-primary)] text-[var(--content-primary)] border-[var(--border-opaque)]'
                     : 'bg-[var(--bg-primary)] text-[var(--content-quaternary)] border-[var(--border-faint)]'
@@ -69,7 +68,7 @@ export function DeskPickerToolbar({
                 All
               </span>
               <span
-                className={`text-[10px] font-medium leading-none ${
+                className={`${deskType.chipName} ${
                   selectedPickerId === null
                     ? 'text-[var(--content-primary)]'
                     : 'text-[var(--content-quaternary)]'
@@ -77,9 +76,7 @@ export function DeskPickerToolbar({
               >
                 Everyone
               </span>
-              <span className="text-[9px] tabular-nums leading-none text-[var(--content-quaternary)] invisible">
-                0 · 0
-              </span>
+              <span className={`${deskType.chipStat} invisible`}>0 · 0</span>
             </button>
           </DeskTooltip>
 
@@ -105,13 +102,13 @@ export function DeskPickerToolbar({
                   className={filterChipClass(isSelected)}
                 >
                   <span
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-[9px] font-bold"
+                    className={deskAvatar.md}
                     style={{ background: color.bg, color: color.text }}
                   >
                     {picker.initials}
                   </span>
                   <span
-                    className={`max-w-[56px] truncate text-[10px] font-medium leading-none ${
+                    className={`${deskType.chipName} max-w-[64px] truncate ${
                       isSelected
                         ? 'text-[var(--content-primary)]'
                         : 'text-[var(--content-secondary)]'
@@ -119,7 +116,7 @@ export function DeskPickerToolbar({
                   >
                     {picker.firstName}
                   </span>
-                  <span className="text-[9px] tabular-nums leading-none text-[var(--content-quaternary)]">
+                  <span className={deskType.chipStat}>
                     {stats.activeCount} · {stats.completedToday}
                   </span>
                 </button>

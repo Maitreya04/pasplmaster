@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { UserPlus, X } from '@phosphor-icons/react';
 import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
 import type { PickLineProgress } from '../../../lib/cartSupply';
@@ -7,9 +7,15 @@ import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 import { DeskInlinePickerPick } from './DeskInlinePickerPick';
 import { DeskOrderQuickActions } from './DeskOrderQuickActions';
 import { DeskPickProgress } from './DeskPickProgress';
+import {
+  DeskStaleCompleteButton,
+  DeskStaleCompleteConfirm,
+} from './DeskStaleCompleteAction';
 import { DeskTooltip } from './DeskTooltip';
 import { DESK_STATUS_TOOLTIPS } from './deskStatusHelp';
 import { isPickerReassign, needsPickerAssignStrip } from './deskPickerAssign';
+import { canDeskStaleComplete } from './deskStaleComplete';
+import { deskBtn, deskType } from './deskTypography';
 
 const STATUS_PILL: Record<
   DeskOrderRow['deskStatus'],
@@ -60,6 +66,7 @@ interface DeskOrderRowCardProps {
   progressLoading?: boolean;
   isAssignExpanded?: boolean;
   onAssignToggle?: () => void;
+  showStaleActions?: boolean;
   onEdit: () => void;
 }
 
@@ -71,9 +78,11 @@ export function DeskOrderRowCard({
   progressLoading,
   isAssignExpanded = false,
   onAssignToggle,
+  showStaleActions = false,
   onEdit,
 }: DeskOrderRowCardProps): React.JSX.Element {
   const cardRef = useRef<HTMLDivElement>(null);
+  const [completeExpanded, setCompleteExpanded] = useState(false);
   const pill = STATUS_PILL[order.deskStatus];
   const timeSource = order.approved_at ?? order.picked_at ?? order.created_at;
   const showAssignAction = needsPickerAssignStrip(order);
@@ -85,46 +94,55 @@ export function DeskOrderRowCard({
     cardRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [isAssignExpanded]);
 
+  useEffect(() => {
+    if (!completeExpanded || !cardRef.current) return;
+    cardRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [completeExpanded]);
+
+  useEffect(() => {
+    if (isAssignExpanded) setCompleteExpanded(false);
+  }, [isAssignExpanded]);
+
   return (
     <div
       ref={cardRef}
       className={`
         rounded-lg border bg-[var(--bg-primary)] transition-colors overflow-hidden
         hover:border-[var(--border-opaque)] hover:shadow-sm
-        ${isAssignExpanded ? 'border-[var(--role-primary)]/40 shadow-sm' : 'border-[var(--border-subtle)]'}
-        ${needsAttention && !isAssignExpanded ? 'border-l-2 border-l-[var(--border-warning)]' : ''}
+        ${isAssignExpanded || completeExpanded ? 'border-[var(--role-primary)]/40 shadow-sm' : 'border-[var(--border-subtle)]'}
+        ${needsAttention && !isAssignExpanded && !completeExpanded ? 'border-l-2 border-l-[var(--border-warning)]' : ''}
       `}
     >
-      <div className="px-2.5 pt-2 pb-2">
-        <div className="flex items-start gap-2">
+      <div className="px-3 pt-2.5 pb-2.5">
+        <div className="flex items-start gap-2.5">
           <button
             type="button"
             onClick={onEdit}
             className="flex-1 min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--role-primary)] rounded-md -m-0.5 p-0.5"
             aria-label={`Edit order ${order.order_number} for ${order.customer_name}`}
           >
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-[10px] text-[var(--content-quaternary)] tabular-nums truncate">
+            <div className="flex items-center gap-2 min-w-0 flex-wrap">
+              <span className={`${deskType.orderMeta} truncate`}>
                 {order.order_number} · {formatTimeAgo(timeSource)}
               </span>
               <DeskTooltip label={DESK_STATUS_TOOLTIPS[order.deskStatus]} side="bottom">
                 <span
-                  className={`shrink-0 text-[9px] font-medium px-1.5 py-0.5 rounded-full cursor-default ${pill.className}`}
+                  className={`shrink-0 ${deskType.pill} px-2 py-0.5 rounded-full cursor-default ${pill.className}`}
                 >
                   {statusLabel(order)}
                 </span>
               </DeskTooltip>
             </div>
 
-            <p className="text-xs font-medium text-[var(--content-primary)] truncate mt-1">
+            <p className={`${deskType.orderTitle} truncate mt-1`}>
               {order.customer_name}
             </p>
 
-            <p className="text-[10px] text-[var(--content-quaternary)] mt-0.5 truncate">
+            <p className={`${deskType.orderDetail} mt-0.5 truncate`}>
               {order.item_count} items · {formatCurrency(order.total_value)}
             </p>
 
-            {!isAssignExpanded && (
+            {!isAssignExpanded && !completeExpanded && (
               <DeskPickProgress
                 order={order}
                 progress={pickProgress}
@@ -134,8 +152,18 @@ export function DeskOrderRowCard({
             )}
           </button>
 
-          <div className="flex flex-col items-end gap-1 shrink-0 pt-0.5">
-            {showAssignAction && onAssignToggle && (
+          <div className="flex flex-col items-end gap-1.5 shrink-0 pt-0.5">
+            {showStaleActions &&
+              canDeskStaleComplete(order) &&
+              !isAssignExpanded &&
+              !completeExpanded && (
+                <DeskStaleCompleteButton
+                  order={order}
+                  onClick={() => setCompleteExpanded(true)}
+                />
+              )}
+
+            {showAssignAction && onAssignToggle && !completeExpanded && (
               <DeskTooltip
                 label={isAssignExpanded ? 'Cancel' : reassign ? 'Re-assign picker' : 'Assign picker'}
                 side="bottom"
@@ -147,7 +175,7 @@ export function DeskOrderRowCard({
                     onAssignToggle();
                   }}
                   className={`
-                    inline-flex items-center gap-1 h-7 px-2 rounded-md text-[10px] font-medium transition-colors
+                    ${deskBtn.action} ${deskType.btn}
                     ${isAssignExpanded
                       ? 'text-[var(--content-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-subtle)]'
                       : 'text-[var(--content-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-subtle)] hover:border-[var(--border-opaque)] hover:text-[var(--content-primary)]'
@@ -156,12 +184,12 @@ export function DeskOrderRowCard({
                 >
                   {isAssignExpanded ? (
                     <>
-                      <X size={12} weight="bold" />
+                      <X size={14} weight="bold" />
                       Cancel
                     </>
                   ) : (
                     <>
-                      <UserPlus size={12} weight="bold" />
+                      <UserPlus size={14} weight="bold" />
                       {reassign ? 'Re-assign' : 'Assign'}
                     </>
                   )}
@@ -169,12 +197,19 @@ export function DeskOrderRowCard({
               </DeskTooltip>
             )}
 
-            {!isAssignExpanded && (
+            {!isAssignExpanded && !completeExpanded && (
               <DeskOrderQuickActions order={order} pickers={pickers} />
             )}
           </div>
         </div>
       </div>
+
+      {completeExpanded && showStaleActions && (
+        <DeskStaleCompleteConfirm
+          order={order}
+          onCancel={() => setCompleteExpanded(false)}
+        />
+      )}
 
       {isAssignExpanded && showAssignAction && onAssignToggle && (
         <DeskInlinePickerPick

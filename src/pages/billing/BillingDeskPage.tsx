@@ -55,8 +55,8 @@ export default function BillingDeskPage(): React.JSX.Element {
     <>
       <DeskMobileFallback />
 
-      <div className="hidden lg:flex flex-col h-[calc(100vh-0px)] min-h-[660px] p-4 lg:p-6 density-compact">
-        <div className="relative flex-1 min-h-0 rounded-xl border border-[var(--border-subtle)] overflow-hidden bg-[var(--bg-primary)]">
+      <div className="hidden lg:flex flex-col h-[calc(100vh-0px)] min-h-[660px] p-4 lg:p-6">
+        <div className="desk-panel relative flex-1 min-h-0 rounded-xl border border-[var(--border-subtle)] overflow-hidden bg-[var(--bg-primary)]">
           <DeskSplitPane
             left={<LiveQueueWorkspace embedded />}
             right={

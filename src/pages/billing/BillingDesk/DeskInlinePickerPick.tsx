@@ -9,6 +9,7 @@ import {
   sortPickersForAssign,
 } from './deskPickerAssign';
 import { useDeskPickerAssign } from './useDeskPickerAssign';
+import { deskAvatar, deskType } from './deskTypography';
 
 interface DeskInlinePickerPickProps {
   order: DeskOrderRow;
@@ -41,11 +42,11 @@ export function DeskInlinePickerPick({
 
   return (
     <div
-      className="border-t border-[var(--border-faint)] bg-[var(--bg-secondary)] px-2.5 py-2"
+      className="border-t border-[var(--border-faint)] bg-[var(--bg-secondary)] px-3 py-2.5"
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >
-      <p className="text-[9px] text-[var(--content-quaternary)] mb-2">
+      <p className={`${deskType.hint} mb-2.5`}>
         {reassign ? (
           <>
             Re-assign
@@ -61,7 +62,7 @@ export function DeskInlinePickerPick({
         )}
       </p>
 
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap gap-2">
         {sorted.map((picker) => {
           const color = pickerColors[picker.colorIndex]!;
           const isBusy = picker.isBusy && !reassign;
@@ -83,24 +84,24 @@ export function DeskInlinePickerPick({
                 onClick={() => selectPicker(picker)}
                 aria-label={loadHint(picker, reassign)}
                 className={`
-                  flex flex-col items-center gap-0.5 rounded-lg px-2 py-1.5 min-w-[48px]
+                  flex flex-col items-center gap-1 rounded-lg px-2.5 py-2 min-w-[52px]
                   transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--role-primary)]
                   ${isCurrent ? 'bg-[var(--bg-warning-subtle)] border border-[var(--border-warning)]' : 'border border-transparent hover:bg-[var(--bg-tertiary)] hover:border-[var(--border-faint)]'}
                   ${isBusy ? 'opacity-35 cursor-not-allowed' : 'active:scale-95'}
                 `}
               >
                 <span
-                  className="flex h-7 w-7 items-center justify-center rounded-full text-[9px] font-bold"
+                  className={deskAvatar.md}
                   style={{ background: color.bg, color: color.text }}
                 >
                   {isLoading ? (
-                    <CircleNotch size={13} className="animate-spin" aria-hidden />
+                    <CircleNotch size={14} className="animate-spin" aria-hidden />
                   ) : (
                     picker.initials
                   )}
                 </span>
                 <span
-                  className={`max-w-[52px] truncate text-[10px] font-medium leading-none ${
+                  className={`${deskType.chipName} max-w-[56px] truncate ${
                     isCurrent
                       ? 'text-[var(--content-warning-on-light)]'
                       : 'text-[var(--content-secondary)]'
@@ -108,7 +109,7 @@ export function DeskInlinePickerPick({
                 >
                   {picker.firstName}
                 </span>
-                <span className="text-[9px] tabular-nums leading-none text-[var(--content-quaternary)]">
+                <span className={deskType.chipStat}>
                   {picker.activeOrders > 0 ? `${picker.activeOrders} active` : 'free'}
                 </span>
               </button>

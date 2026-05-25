@@ -12,6 +12,6 @@ export const DESK_STATUS_TOOLTIPS: Record<DeskOrderRow['deskStatus'], string> = 
 export const DESK_TAB_TOOLTIPS = {
   all: 'All post-bill orders for today',
   picking: 'Assign pickers · edit bills · track in-progress picks',
-  stale: 'Assigned but no heartbeat — may need a nudge',
+  stale: 'Stuck picks — re-assign, notify, or mark complete',
   completed: 'Pick finished — check table or dispatch',
 } as const;
