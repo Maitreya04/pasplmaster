@@ -30,5 +30,5 @@ export function pickOutcomeDetail(kind: PickLineOutcomeKind, targetQty: number, 
     const short = Math.max(0, targetQty - pickedQty);
     return `${short} short — billing will see the partial qty`;
   }
-  return 'Line complete — ready for the next rack';
+  return 'Tap Confirm & next when you are ready for the next rack';
 }

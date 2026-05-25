@@ -1,30 +1,51 @@
-import { ArrowRight } from '@phosphor-icons/react';
+import { PickLineAdvanceCTA } from './PickLineAdvanceCTA';
+import type { NextPickLinePreview } from '../../lib/picking/deckOrder';
 
-/** Shown when revisiting an already-done line (no active outcome dwell). */
+/** Shown when revisiting an already-done line — same confirm-and-next affordance as fresh picks. */
 export function PickLineDoneHint({
   kind,
+  pickedQty,
+  targetQty,
+  nextPreview,
   onNext,
 }: {
   kind: 'picked' | 'flagged';
+  pickedQty?: number;
+  targetQty?: number;
+  nextPreview: NextPickLinePreview | null;
   onNext?: () => void;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
+  if (!onNext) return null;
+
   const isPicked = kind === 'picked';
+  const complete =
+    isPicked &&
+    targetQty != null &&
+    targetQty > 0 &&
+    pickedQty != null &&
+    pickedQty >= targetQty;
+
+  const title = isPicked
+    ? complete
+      ? `${pickedQty ?? targetQty} pcs picked ✓`
+      : 'Line complete'
+    : 'Sent to billing for review';
+
+  const detail = isPicked
+    ? complete
+      ? 'Tap below to go to the next rack'
+      : pickedQty != null && targetQty != null
+        ? `${pickedQty}/${targetQty} pcs on this line`
+        : 'Tap below to continue picking'
+    : 'Billing will review this line';
 
   return (
-    <div className="shrink-0 border-t border-[var(--border-faint)] px-4 py-3 text-center">
-      <p className="text-sm font-semibold text-[var(--content-tertiary)]">
-        {isPicked ? 'Line complete' : 'Sent to billing for review'}
-      </p>
-      {onNext ? (
-        <button
-          type="button"
-          onClick={onNext}
-          className="mt-2 inline-flex items-center gap-1 text-sm font-bold text-[var(--content-accent)] pick-pressable"
-        >
-          Next item
-          <ArrowRight size={16} weight="bold" />
-        </button>
-      ) : null}
-    </div>
+    <PickLineAdvanceCTA
+      tone={isPicked ? 'success' : 'warning'}
+      title={title}
+      detail={detail}
+      nextPreview={nextPreview}
+      onConfirmNext={onNext}
+    />
   );
 }

@@ -73,3 +73,35 @@ export function findDeckIndexByItemId<T extends DeckPickItem>(
   const idx = deck.findIndex((d) => d.orderItem.id === itemId);
   return idx >= 0 ? idx : 0;
 }
+
+export function orderItemPickCode(item: OrderItem): string {
+  return (
+    item.catalog_alias1 ??
+    item.catalog_alias ??
+    item.item_alias ??
+    String(item.item_id)
+  );
+}
+
+export interface NextPickLinePreview {
+  code: string;
+  rackNo: string | null;
+  itemName: string;
+  deckIndex: number;
+}
+
+/** Human-readable target for the confirm-and-advance CTA. */
+export function nextPickLinePreview<T extends DeckPickItem>(
+  deck: T[],
+  fromIndex: number,
+): NextPickLinePreview | null {
+  const deckIndex = nextPickableIndex(deck, fromIndex);
+  if (deckIndex == null) return null;
+  const entry = deck[deckIndex]!;
+  return {
+    code: orderItemPickCode(entry.orderItem),
+    rackNo: entry.orderItem.rack_no,
+    itemName: entry.orderItem.item_name,
+    deckIndex,
+  };
+}

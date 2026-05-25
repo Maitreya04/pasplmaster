@@ -5,6 +5,7 @@ import type { BinPickerShelfLayer } from '../../types';
 import { CardHero, type CardPhase } from './CardHero';
 import { PickCardCTAs } from './PickCardCTAs';
 import { PickLineResolvedDock, type PickLineOutcomeKind } from './PickLineResolvedDock';
+import type { NextPickLinePreview } from '../../lib/picking/deckOrder';
 import { PickLineDoneHint } from './PickLineDoneHint';
 import { PickMetricRow } from './PickMetricRow';
 import { isPickLineMrpConfirmed } from '../../lib/picking/pickLineMrp';
@@ -45,6 +46,8 @@ export interface PickCardProps {
   outcomeHeadline?: string;
   outcomeDetail?: string;
   onAdvanceNext?: () => void;
+  /** Target line after confirm — shown on the advance button */
+  nextLinePreview?: NextPickLinePreview | null;
 }
 
 export const PickCard = memo(function PickCard({
@@ -76,6 +79,7 @@ export const PickCard = memo(function PickCard({
   outcomeHeadline,
   outcomeDetail,
   onAdvanceNext,
+  nextLinePreview = null,
 }: PickCardProps): React.JSX.Element {
   const isDone = uiState === 'picked' || uiState === 'flagged' || uiState === 'overridden';
   const showingOutcome = isCurrent && lineOutcome != null;
@@ -187,15 +191,17 @@ export const PickCard = memo(function PickCard({
           kind={lineOutcome}
           headline={outcomeHeadline}
           detail={outcomeDetail}
+          nextPreview={nextLinePreview}
           onNext={onAdvanceNext}
         />
       ) : isDone && isCurrent && onAdvanceNext ? (
         <PickLineDoneHint
           kind={uiState === 'flagged' ? 'flagged' : 'picked'}
+          pickedQty={pickedQty}
+          targetQty={targetQty}
+          nextPreview={nextLinePreview}
           onNext={onAdvanceNext}
         />
-      ) : isDone ? (
-        <PickLineDoneHint kind={uiState === 'flagged' ? 'flagged' : 'picked'} />
       ) : (
         <>
           {needsMrpConfirm && isCurrent && (

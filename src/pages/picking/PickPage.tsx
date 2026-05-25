@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -30,6 +30,10 @@ import {
   PickLineStatusPanel,
   type PickLineStatusRow,
 } from '../../components/picking/PickLineStatusPanel';
+import {
+  resolvePickLineStatus,
+  resolveQueueSheetLineStatus,
+} from '../../lib/picking/pickLineStatus';
 import { JumpListSheet } from '../../components/picking/JumpListSheet';
 import { TransportChip } from '../../components/picking/TransportChip';
 import {
@@ -41,6 +45,7 @@ import {
   buildDeckOrder,
   buildPickWalkBrandSections,
   findDeckIndexByItemId,
+  nextPickLinePreview,
   nextPickableIndex,
   orderItemBrandLabel,
   sortPickWalkOrder,
@@ -119,8 +124,7 @@ const DUPLICATE_SCAN_WINDOW_MS = 500;
 const MAX_AUTO_SCAN_QTY = 12;
 
 // ─── Pick flow constants ───
-// Dwell after pick/flag before auto-advance — long enough to read, short enough for pace.
-const LINE_OUTCOME_DWELL_MS = 1500;
+// Line outcome stays until picker taps Confirm & next (no silent auto-advance).
 // 5s undo window. Slips happen; mistakes get flagged. Five seconds is the
 // sweet spot we tested behaviourally — long enough to react, short enough
 // not to slow the next pick.
@@ -193,7 +197,6 @@ interface LineOutcomeState {
   kind: 'picked' | 'partial' | 'flagged';
   reason?: string | null;
   pickedQty?: number;
-  expiresAt: number;
 }
 
 interface UndoSnapshot {
@@ -319,7 +322,6 @@ export default function PickPage(): React.JSX.Element | null {
   const [flagSheetOpen, setFlagSheetOpen] = useState(false);
   const [flagTargetItemId, setFlagTargetItemId] = useState<number | null>(null);
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
-  const autoForwardCancelledRef = useRef(false);
   const [preferredPickLayer, setPreferredPickLayer] = useState<{
     orderItemId: number;
     layerId: number;
@@ -497,15 +499,20 @@ export default function PickPage(): React.JSX.Element | null {
     const rows: QueueSheetRow[] = [];
     for (const pi of deckItems) {
       const isCurrent = currentDeckItem?.orderItem.id === pi.orderItem.id;
-      const status: QueueSheetRow['status'] = isCurrent
-        ? 'now'
-        : pi.uiState === 'picked' || pi.uiState === 'overridden'
-          ? 'picked'
-          : pi.uiState === 'flagged'
-            ? 'flagged'
-            : skippedIds.has(pi.orderItem.id)
-              ? 'skipped'
-              : 'next';
+      const targetQty = pickQuantityTarget(pi.orderItem);
+      const pickedQty = Math.min(
+        targetQty,
+        getPickedQtyFromResult(pi.scanResult),
+      );
+      const status = resolveQueueSheetLineStatus({
+        isCurrent,
+        uiState: pi.uiState,
+        pickedQty,
+        targetQty,
+        isSkipped: skippedIds.has(pi.orderItem.id),
+        lineClosure:
+          lineOutcome?.itemId === pi.orderItem.id ? lineOutcome.kind : null,
+      });
       rows.push({
         itemId: pi.orderItem.id,
         rackNo: pi.orderItem.rack_no,
@@ -516,12 +523,12 @@ export default function PickPage(): React.JSX.Element | null {
           null,
         itemName: pi.orderItem.item_name,
         brandLabel: orderItemBrandLabel(pi.orderItem),
-        targetQty: pickQuantityTarget(pi.orderItem),
+        targetQty,
         status,
       });
     }
     return rows;
-  }, [deckItems, currentDeckItem, skippedIds]);
+  }, [deckItems, currentDeckItem, lineOutcome, skippedIds]);
 
   const counts = useMemo(() => {
     let picked = 0;
@@ -618,9 +625,13 @@ export default function PickPage(): React.JSX.Element | null {
     toast.info('Skipped — will return at the end of the queue.');
   }, [toast]);
 
-  // Auto-advance after line outcome dwell; cleared early if picker taps Next.
+  const advanceNextPreview = useMemo(
+    () => nextPickLinePreview(deckItems, safeCardIndex),
+    [deckItems, safeCardIndex],
+  );
+
   const advanceToNextItem = useCallback(() => {
-    autoForwardCancelledRef.current = true;
+    appHaptics.impactMedium();
     setLineOutcome(null);
     setCurrentCardIndex((idx) => {
       const next = nextPickableIndex(deckItems, idx);
@@ -629,7 +640,6 @@ export default function PickPage(): React.JSX.Element | null {
   }, [deckItems]);
 
   const handleCardIndexChange = useCallback((index: number) => {
-    autoForwardCancelledRef.current = true;
     setLineOutcome(null);
     setCurrentCardIndex(index);
   }, []);
@@ -644,28 +654,9 @@ export default function PickPage(): React.JSX.Element | null {
     [deckItems, handleCardIndexChange],
   );
 
-  const beginLineOutcome = useCallback(
-    (outcome: Omit<LineOutcomeState, 'expiresAt'>) => {
-      autoForwardCancelledRef.current = false;
-      setLineOutcome({
-        ...outcome,
-        expiresAt: Date.now() + LINE_OUTCOME_DWELL_MS,
-      });
-    },
-    [],
-  );
-
-  // Drive the outcome dwell window — advanceToNextItem clears state and moves on.
-  useEffect(() => {
-    if (!lineOutcome) return;
-    const remaining = Math.max(0, lineOutcome.expiresAt - Date.now());
-    const t = window.setTimeout(() => {
-      if (!autoForwardCancelledRef.current) {
-        advanceToNextItem();
-      }
-    }, remaining);
-    return () => window.clearTimeout(t);
-  }, [lineOutcome, advanceToNextItem]);
+  const beginLineOutcome = useCallback((outcome: LineOutcomeState) => {
+    setLineOutcome(outcome);
+  }, []);
 
   const openFlagSheet = useCallback((itemId: number) => {
     appHaptics.selection();
@@ -1059,7 +1050,6 @@ export default function PickPage(): React.JSX.Element | null {
     if (!snapshot) return;
     setUndoSnapshot(null);
     setLineOutcome(null);
-    autoForwardCancelledRef.current = true;
     try {
       const { error } = await supabase
         .from('order_items')
@@ -1732,15 +1722,15 @@ export default function PickPage(): React.JSX.Element | null {
       const isCurrent = currentDeckItem?.orderItem.id === pi.orderItem.id;
       const targetQty = pickQuantityTarget(pi.orderItem);
       const pickedQty = Math.min(targetQty, getPickedQtyFromResult(pi.scanResult));
-      const isPicked = pi.uiState === 'picked' || pi.uiState === 'overridden';
-      const isFlagged = pi.uiState === 'flagged';
-      const isSkipped = skippedIds.has(pi.orderItem.id);
-      let status: PickLineStatusRow['status'] = 'pending';
-      if (isCurrent) status = 'now';
-      else if (isFlagged) status = 'flagged';
-      else if (isPicked) status = 'picked';
-      else if (pickedQty > 0 && pickedQty < targetQty) status = 'partial';
-      else if (isSkipped) status = 'skipped';
+      const status = resolvePickLineStatus({
+        isCurrent,
+        uiState: pi.uiState,
+        pickedQty,
+        targetQty,
+        isSkipped: skippedIds.has(pi.orderItem.id),
+        lineClosure:
+          lineOutcome?.itemId === pi.orderItem.id ? lineOutcome.kind : null,
+      });
 
       return {
         itemId: pi.orderItem.id,
@@ -1758,7 +1748,7 @@ export default function PickPage(): React.JSX.Element | null {
         brandLabel: orderItemBrandLabel(pi.orderItem),
       };
     });
-  }, [currentDeckItem?.orderItem.id, deckItems, skippedIds]);
+  }, [currentDeckItem?.orderItem.id, deckItems, lineOutcome, skippedIds]);
 
   const pickProgressPct =
     counts.total > 0 ? ((counts.picked + counts.flagged) / counts.total) * 100 : 0;
@@ -2073,6 +2063,7 @@ export default function PickPage(): React.JSX.Element | null {
                       outcomeHeadline={outcomeHeadline}
                       outcomeDetail={outcomeDetail}
                       onAdvanceNext={isCardCurrent ? advanceToNextItem : undefined}
+                      nextLinePreview={isCardCurrent ? advanceNextPreview : null}
                       shelfLayers={showShelf ? shelfQuery.data?.layers ?? null : null}
                       shelfLoading={isCardCurrent && rackVerified && shelfQuery.isLoading}
                       preferredLayerId={
@@ -2133,6 +2124,7 @@ export default function PickPage(): React.JSX.Element | null {
 
             <PickLineStatusPanel
               rows={pickStatusRows}
+              currentItemId={currentDeckItem?.orderItem.id ?? null}
               pickedCount={counts.picked}
               flaggedCount={counts.flagged}
               remainingCount={counts.remaining}

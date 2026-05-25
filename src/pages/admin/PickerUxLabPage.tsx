@@ -17,7 +17,12 @@ import {
   pickOutcomeHeadline,
   resolvePickOutcomeKind,
 } from '../../lib/picking/pickLineOutcome';
-import { orderItemBrandLabel, wrapIndex } from '../../lib/picking/deckOrder';
+import {
+  nextPickLinePreview,
+  nextPickableIndex,
+  orderItemBrandLabel,
+  wrapIndex,
+} from '../../lib/picking/deckOrder';
 import { appHaptics } from '../../lib/haptics';
 import type { OrderItem, StockLocationCode } from '../../types';
 import { Skeleton } from '../../components/shared';
@@ -137,11 +142,29 @@ export default function PickerUxLabPage(): React.JSX.Element {
     setQtySheetOpen(false);
   }, []);
 
+  const labDeck = useMemo(
+    () =>
+      items.map((item) => ({
+        orderItem: item,
+        uiState: (lineStates[item.id] ?? defaultLabLineState()).uiState,
+      })),
+    [items, lineStates],
+  );
+
+  const labAdvancePreview = useMemo(
+    () => nextPickLinePreview(labDeck, safeIndex),
+    [labDeck, safeIndex],
+  );
+
   const advanceFromOutcome = useCallback((): void => {
-    if (items.length <= 1) return;
-    setCardIndex((idx) => wrapIndex(idx + 1, items.length));
-    appHaptics.selection();
-  }, [items.length]);
+    const current = items[safeIndex];
+    if (current) {
+      patchLine(current.id, { lineOutcome: null });
+    }
+    const next = nextPickableIndex(labDeck, safeIndex);
+    setCardIndex(next ?? safeIndex);
+    appHaptics.impactMedium();
+  }, [items, labDeck, patchLine, safeIndex]);
 
   const closeLineWithQty = useCallback(
     (itemId: number, qty: number, lineTarget: number) => {
@@ -301,8 +324,14 @@ export default function PickerUxLabPage(): React.JSX.Element {
                     outcomeHeadline={isCurrent ? outcomeHeadline : undefined}
                     outcomeDetail={isCurrent ? outcomeDetail : undefined}
                     onAdvanceNext={
-                      isCurrent && st.lineOutcome ? advanceFromOutcome : undefined
+                      isCurrent &&
+                      (st.lineOutcome != null ||
+                        st.uiState === 'picked' ||
+                        st.uiState === 'flagged')
+                        ? advanceFromOutcome
+                        : undefined
                     }
+                    nextLinePreview={isCurrent ? labAdvancePreview : null}
                     onRackTap={() => patchLine(item.id, { rackVerified: true })}
                     onManualQty={() => {
                       setCardIndex(index);
