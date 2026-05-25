@@ -9,6 +9,7 @@ function getTodayStartIso(): string {
 }
 
 export interface PickerDailyStats {
+  ordersAssigned: number;
   ordersCompleted: number;
   linesCompleted: number;
 }
@@ -21,18 +22,28 @@ export function usePickerDailyStats() {
     enabled: Boolean(userName?.trim()),
     queryFn: async (): Promise<PickerDailyStats> => {
       const todayStart = getTodayStartIso();
-      const { data, error } = await supabase
-        .from('orders')
-        .select('id, pick_line_count, item_count, completed_at')
-        .eq('picker_name', userName!)
-        .in('workflow_status', ['completed', 'flagged'])
-        .gte('completed_at', todayStart);
+      const pickerName = userName!;
 
-      if (error) throw error;
+      const [assignedRes, completedRes] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('id')
+          .eq('picker_name', pickerName)
+          .gte('approved_at', todayStart),
+        supabase
+          .from('orders')
+          .select('id, pick_line_count, item_count, completed_at')
+          .eq('picker_name', pickerName)
+          .in('workflow_status', ['completed', 'flagged'])
+          .gte('completed_at', todayStart),
+      ]);
 
-      const rows = data ?? [];
+      if (assignedRes.error) throw assignedRes.error;
+      if (completedRes.error) throw completedRes.error;
+
+      const completedRows = completedRes.data ?? [];
       let linesCompleted = 0;
-      for (const row of rows) {
+      for (const row of completedRows) {
         const lineCount =
           typeof row.pick_line_count === 'number'
             ? row.pick_line_count
@@ -43,7 +54,8 @@ export function usePickerDailyStats() {
       }
 
       return {
-        ordersCompleted: rows.length,
+        ordersAssigned: assignedRes.data?.length ?? 0,
+        ordersCompleted: completedRows.length,
         linesCompleted,
       };
     },

@@ -23,7 +23,7 @@ const NAV_ITEMS: BottomNavItem[] = [
   },
   {
     icon: UsersThree,
-    label: 'Active',
+    label: 'Team',
     path: '/picking/active',
     navKey: 'picking-active',
     match: (pathname) => pathname === '/picking/active',

@@ -3,6 +3,8 @@ interface QueueSectionHeaderProps {
   count: number;
   description?: string;
   className?: string;
+  /** Keep the section title visible when count is 0 (e.g. empty assignment list). */
+  showWhenEmpty?: boolean;
 }
 
 export function QueueSectionHeader({
@@ -10,8 +12,9 @@ export function QueueSectionHeader({
   count,
   description,
   className = '',
+  showWhenEmpty = false,
 }: QueueSectionHeaderProps): React.JSX.Element | null {
-  if (count === 0) return null;
+  if (count === 0 && !showWhenEmpty) return null;
 
   return (
     <div className={`pb-2 ${className}`}>

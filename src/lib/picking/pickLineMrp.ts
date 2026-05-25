@@ -1,4 +1,5 @@
-import type { ScanResult } from '../../types';
+import type { OrderItem, ScanResult } from '../../types';
+import { primaryBusyCodeForOrderItem } from '../wms/binLayers';
 
 export interface PickLineMrpState {
   confirmedMrp: number | null;
@@ -12,6 +13,26 @@ export function pickLineMrpFinal(state: PickLineMrpState | undefined): number | 
 
 export function isPickLineMrpConfirmed(state: PickLineMrpState | undefined): boolean {
   return pickLineMrpFinal(state) != null;
+}
+
+/** Busy code + catalog fallback for stock_mrpwise / items MRP lookup. */
+export function pickLineMrpLookup(orderItem: OrderItem): {
+  busyCode: number | null;
+  itemsMrpFallback: number | null;
+} {
+  const fromCandidates = primaryBusyCodeForOrderItem(orderItem);
+  const fromCatalog =
+    orderItem.catalog_busy_code != null ? Number(orderItem.catalog_busy_code) : null;
+  const busyCode =
+    fromCandidates ??
+    (fromCatalog != null && Number.isFinite(fromCatalog) && fromCatalog > 0 ? fromCatalog : null);
+  const itemsMrpFallback =
+    orderItem.price_system != null && orderItem.price_system > 0
+      ? orderItem.price_system
+      : orderItem.price_quoted != null && orderItem.price_quoted > 0
+        ? orderItem.price_quoted
+        : null;
+  return { busyCode, itemsMrpFallback };
 }
 
 export function isPickLineMrpFlagged(

@@ -1,4 +1,12 @@
-import { ArrowUp, CheckCircle, Circle, Flag, MapPin, Minus } from '@phosphor-icons/react';
+import {
+  ArrowRight,
+  ArrowUp,
+  CheckCircle,
+  Circle,
+  Flag,
+  MapPin,
+  Minus,
+} from '@phosphor-icons/react';
 
 export type PickLineStatusKind = 'now' | 'pending' | 'partial' | 'picked' | 'flagged' | 'skipped';
 
@@ -12,6 +20,10 @@ export interface PickLineStatusRow {
   status: PickLineStatusKind;
   flagReason?: string | null;
   brandLabel?: string | null;
+  /** Gate 1 — picker confirmed physical rack (scan or tap). */
+  rackVerified?: boolean;
+  /** Picked/flagged on card — waiting for "Next line" tap on the deck. */
+  awaitingAdvance?: boolean;
 }
 
 interface PickLineStatusPanelProps {
@@ -84,6 +96,18 @@ function statusLabel(status: PickLineStatusKind): string {
     default:
       return 'Not started';
   }
+}
+
+function lineActionHint(row: PickLineStatusRow): string | null {
+  if (row.awaitingAdvance) return 'Tap card · Next line';
+  if (row.status === 'now') {
+    if (!row.rackVerified) return 'Step 1 · At rack';
+    if (row.pickedQty > 0 && row.pickedQty < row.targetQty) return 'Step 2 · Picking';
+    return 'Step 2 · Pick qty';
+  }
+  if (row.status === 'partial') return 'Step 2 · Finish qty';
+  if (row.status === 'pending' || row.status === 'skipped') return 'Tap to jump';
+  return null;
 }
 
 function qtyDisplay(row: PickLineStatusRow): { text: string; className: string } {
@@ -268,7 +292,9 @@ function StatusRow({
   const isNow = row.status === 'now';
   const isPicked = row.status === 'picked';
   const isPartial = row.status === 'partial';
+  const awaitingAdvance = row.awaitingAdvance === true;
   const qty = qtyDisplay(row);
+  const actionHint = lineActionHint(row);
   const partialPct =
     isPartial && row.targetQty > 0
       ? Math.round((row.pickedQty / row.targetQty) * 100)
@@ -279,22 +305,24 @@ function StatusRow({
       <button
         type="button"
         onClick={() => onJump(row.itemId)}
-        className={`flex w-full min-h-12 flex-col gap-1 px-3 py-2.5 text-left pick-pressable transition-colors ${
-          isNow
-            ? 'bg-[var(--bg-accent-subtle)]'
-            : isPicked
-              ? 'bg-[var(--bg-positive-subtle)]/40'
-              : 'hover:bg-[var(--bg-tertiary)] active:bg-[var(--bg-tertiary)]'
+        className={`flex w-full min-h-[52px] flex-col gap-1 px-3 py-2.5 text-left pick-pressable transition-colors ${
+          awaitingAdvance
+            ? 'bg-[var(--bg-positive-subtle)] ring-1 ring-inset ring-[var(--border-positive)]'
+            : isNow
+              ? 'bg-[var(--bg-accent-subtle)] ring-1 ring-inset ring-[var(--role-primary)]/30'
+              : isPicked
+                ? 'bg-[var(--bg-positive-subtle)]/40'
+                : 'hover:bg-[var(--bg-tertiary)] active:bg-[var(--bg-tertiary)]'
         }`}
-        aria-label={`${statusLabel(row.status)}: ${row.code}, rack ${row.rackNo ?? 'unknown'}. Tap to jump.`}
+        aria-label={`${statusLabel(row.status)}: ${row.code}, rack ${row.rackNo ?? 'unknown'}. ${actionHint ?? 'Tap to jump'}.`}
       >
         <div className="flex items-center gap-2.5">
-          <StatusIcon status={row.status} />
+          <StatusIcon status={awaitingAdvance ? 'picked' : row.status} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <p
                 className={`truncate font-mono text-xs font-bold ${
-                  isPicked
+                  isPicked || awaitingAdvance
                     ? 'text-[var(--content-positive)]'
                     : 'text-[var(--content-primary)]'
                 }`}
@@ -306,15 +334,43 @@ function StatusRow({
                   On card
                 </span>
               )}
+              {awaitingAdvance && (
+                <span className="shrink-0 rounded-full bg-[var(--bg-positive)] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-white">
+                  Next
+                </span>
+              )}
             </div>
             <p className="truncate text-[10px] text-[var(--content-tertiary)]">
               {row.brandLabel ? `${row.brandLabel} · ` : ''}
               Rack {row.rackNo ?? '—'}
               {row.status === 'flagged' && row.flagReason ? ` · ${row.flagReason}` : ''}
             </p>
+            {actionHint ? (
+              <p
+                className={`mt-0.5 text-[10px] font-semibold ${
+                  awaitingAdvance
+                    ? 'text-[var(--content-positive)]'
+                    : isNow
+                      ? 'text-[var(--role-primary)]'
+                      : 'text-[var(--content-quaternary)]'
+                }`}
+              >
+                {actionHint}
+              </p>
+            ) : null}
           </div>
-          <div className="shrink-0 text-right">
+          <div className="flex shrink-0 flex-col items-end gap-1">
             <span className={qty.className}>{qty.text}</span>
+            <ArrowRight
+              size={14}
+              weight="bold"
+              className={
+                isNow || awaitingAdvance
+                  ? 'text-[var(--role-primary)]'
+                  : 'text-[var(--content-quaternary)]'
+              }
+              aria-hidden
+            />
           </div>
         </div>
         {isPartial && row.targetQty > 0 && (
@@ -329,6 +385,20 @@ function StatusRow({
             <div
               className="h-full rounded-full bg-[var(--bg-warning)] transition-[width] duration-200"
               style={{ width: `${partialPct}%` }}
+            />
+          </div>
+        )}
+        {isNow && row.rackVerified && row.targetQty > 0 && row.pickedQty > 0 && row.pickedQty < row.targetQty && (
+          <div
+            className="ml-9 h-1 overflow-hidden rounded-full bg-[var(--bg-tertiary)]"
+            role="progressbar"
+            aria-valuenow={row.pickedQty}
+            aria-valuemin={0}
+            aria-valuemax={row.targetQty}
+          >
+            <div
+              className="h-full rounded-full bg-[var(--role-primary)] transition-[width] duration-200"
+              style={{ width: `${partialPct || Math.max(4, Math.round((row.pickedQty / row.targetQty) * 100))}%` }}
             />
           </div>
         )}

@@ -163,7 +163,11 @@ function categorizePickQueueOrder(
 ): PickQueueBucket {
   const claim = order.claim_info;
 
-  if (claim?.is_stale && order.workflow_status === 'picking') return 'stale';
+  // Stale in-progress picks stay on the assignee's queue; others go to the pool.
+  if (claim?.is_stale && order.workflow_status === 'picking') {
+    if (order.is_mine) return 'myActive';
+    return 'stale';
+  }
   if (claim && order.is_mine) return 'myActive';
   if (claim && !order.is_mine) return 'otherActive';
 
@@ -172,7 +176,11 @@ function categorizePickQueueOrder(
     if (userName != null && order.picker_name === userName) return 'myActive';
     return 'otherActive';
   }
-  if (order.workflow_status === 'approved') return 'available';
+  if (order.workflow_status === 'approved') {
+    if (userName != null && order.picker_name === userName) return 'myActive';
+    if (order.picker_name) return 'otherActive';
+    return 'available';
+  }
 
   return 'otherActive';
 }

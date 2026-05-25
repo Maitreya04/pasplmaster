@@ -204,12 +204,8 @@ export const PickCard = memo(function PickCard({
         />
       ) : (
         <>
-          {needsMrpConfirm && isCurrent && (
-            <p className="border-t border-[var(--border-faint)] bg-[var(--bg-warning-subtle)] px-3 py-1.5 text-center text-[10px] font-semibold leading-snug text-[var(--content-warning-on-light)] sm:px-4 sm:py-2 sm:text-[11px]">
-              Confirm MRP on the label before scanning
-            </p>
-          )}
           <PickCardCTAs
+            phase={isAwaitingRack ? 'rack' : 'pick'}
             scanLabel={scanLabel}
             cameraEngaged={scannerLive}
             disabled={!isCurrent || scannerPaused}
@@ -217,6 +213,7 @@ export const PickCard = memo(function PickCard({
             onManualQty={() => onManualQty?.()}
             onFlag={() => onFlag?.()}
             onScan={() => onEngageScanner?.()}
+            onConfirmRack={isAwaitingRack ? () => onRackTap?.() : undefined}
             onConfirmMrp={needsMrpConfirm ? () => (onConfirmMrp ?? onEditMrp)?.() : undefined}
             confirmMrpLabel={
               singlePendingMrp != null

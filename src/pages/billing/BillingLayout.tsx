@@ -71,7 +71,7 @@ export default function BillingLayout(): React.JSX.Element | null {
 
   return (
     <div className="role-billing min-h-screen bg-[var(--bg-primary)] relative">
-      <div className="flex">
+      <div className="flex min-h-screen">
         {/* Sidebar — visible on lg+ */}
         <aside className="hidden lg:flex flex-col w-56 min-h-screen border-r border-[var(--border-opaque)] bg-[var(--bg-secondary)] py-6 px-3 shrink-0">
           <div className="flex items-center justify-between gap-2 px-3 mb-4">
@@ -105,14 +105,14 @@ export default function BillingLayout(): React.JSX.Element | null {
         </aside>
 
         {/* Content */}
-        <main className="flex-1 pb-[6.5rem] lg:pb-0 flex flex-col min-w-0">
+        <main className="flex-1 flex flex-col min-w-0 min-h-0 pb-[6.5rem] lg:pb-0">
           {!location.pathname.startsWith('/billing/new-order') && (
             <div className="lg:hidden sticky top-0 z-30 flex items-center justify-end gap-2 px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-sm">
               <NotificationBell userId={userId} role={role} />
               <PushAlertsCompact label="Billing alerts" push={push} />
             </div>
           )}
-          <div className="flex-1 min-h-0">
+          <div className="flex-1 min-h-0 flex flex-col">
             <Outlet />
           </div>
         </main>

@@ -12,6 +12,7 @@ export function AssignedOrderRow({
   onOpen,
 }: AssignedOrderRowProps): React.JSX.Element {
   const isUrgent = order.priority === 'urgent';
+  const isStale = Boolean(order.claim_info?.is_stale);
 
   return (
     <button
@@ -36,8 +37,15 @@ export function AssignedOrderRow({
 
       <PickQueuePartyBlock order={order} />
 
-      <span className="absolute bottom-3 right-3 rounded-full bg-[var(--bg-accent-subtle)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--content-accent)]">
-        Assigned
+      <span className="absolute bottom-3 right-3 flex flex-wrap justify-end gap-1">
+        {isStale && (
+          <span className="rounded-full border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--content-warning)]">
+            Stale
+          </span>
+        )}
+        <span className="rounded-full bg-[var(--bg-accent-subtle)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--content-accent)]">
+          Assigned
+        </span>
       </span>
     </button>
   );

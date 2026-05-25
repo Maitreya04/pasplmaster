@@ -11,9 +11,9 @@ import {
   FilterChip,
 } from '../../components/shared';
 import { ActivePickRow, useActivePickBoardOrders } from '../../components/picking/ActivePickRow';
-import { isInProgressPick, isMyAssignedPending } from '../../lib/picking/pickLifecycle';
+import { isInProgressPick, isMyAssignedPending, isPickStarted } from '../../lib/picking/pickLifecycle';
 
-type ActiveFilter = 'all' | 'mine' | 'stale';
+type ActiveFilter = 'all' | 'mine' | 'in_progress' | 'stale';
 
 export default function ActivePicksPage(): React.JSX.Element | null {
   const navigate = useNavigate();
@@ -30,6 +30,9 @@ export default function ActivePicksPage(): React.JSX.Element | null {
   const filteredOrders = useMemo(() => {
     if (filter === 'mine') {
       return boardOrders.filter((order) => order.is_mine);
+    }
+    if (filter === 'in_progress') {
+      return boardOrders.filter((order) => isPickStarted(order.workflow_status));
     }
     if (filter === 'stale') {
       return boardOrders.filter(
@@ -55,18 +58,24 @@ export default function ActivePicksPage(): React.JSX.Element | null {
     }
   };
 
+  const inProgressCount = boardOrders.filter((o) => isPickStarted(o.workflow_status)).length;
+  const staleCount = boardOrders.filter(
+    (o) => o.claim_info?.is_stale && o.workflow_status === 'picking',
+  ).length;
+
   return (
     <div className="min-h-screen">
       <PageHeader title="Active picks" />
 
       <div className="space-y-4 p-4">
         <p className="text-sm text-[var(--content-secondary)]">
-          Live view of who is picking which order — check here if there is any confusion.
+          Everyone on the floor can see who is on which order. Teammates&apos; rows are
+          read-only — only your assignments open from here.
         </p>
 
         <div className="flex flex-wrap gap-2">
           <FilterChip
-            label="All"
+            label="Everyone"
             selected={filter === 'all'}
             onClick={() => setFilter('all')}
             count={boardOrders.length}
@@ -78,14 +87,16 @@ export default function ActivePicksPage(): React.JSX.Element | null {
             count={boardOrders.filter((o) => o.is_mine).length}
           />
           <FilterChip
+            label="Picking"
+            selected={filter === 'in_progress'}
+            onClick={() => setFilter('in_progress')}
+            count={inProgressCount}
+          />
+          <FilterChip
             label="Stale"
             selected={filter === 'stale'}
             onClick={() => setFilter('stale')}
-            count={
-              boardOrders.filter(
-                (o) => o.claim_info?.is_stale && o.workflow_status === 'picking',
-              ).length
-            }
+            count={staleCount}
           />
         </div>
 
@@ -97,11 +108,14 @@ export default function ActivePicksPage(): React.JSX.Element | null {
           <EmptyState
             icon={UsersThree}
             title="No active picks"
-            description="Assigned and in-progress orders will show up here in real time."
+            description="Assigned and in-progress orders show up here in real time."
           />
         ) : (
           <section className="space-y-2">
-            <QueueSectionHeader label="In progress" count={filteredOrders.length} />
+            <QueueSectionHeader
+              label={filter === 'mine' ? 'Your orders' : 'Team board'}
+              count={filteredOrders.length}
+            />
             {filteredOrders.map((order) => (
               <ActivePickRow
                 key={order.id}

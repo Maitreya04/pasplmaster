@@ -84,9 +84,9 @@ export function PickLineAdvanceCTA({
   onConfirmNext,
 }: PickLineAdvanceCTAProps): React.JSX.Element {
   const styles = toneStyles(tone);
-  const confirmLabel = nextPreview ? 'Confirm & next line' : 'Confirm · Finish pick';
+  const confirmLabel = nextPreview ? 'Next line' : 'Finish pick';
   const previewLine = nextPreview
-    ? `Next: ${nextPreview.code} · Rack ${nextPreview.rackNo ?? '—'}`
+    ? `${nextPreview.code} · Rack ${nextPreview.rackNo ?? '—'}`
     : 'All lines handled — open finish sheet below';
 
   return (
@@ -119,7 +119,7 @@ export function PickLineAdvanceCTA({
       </button>
 
       <p className="mt-2.5 text-center text-[10px] font-medium text-[var(--content-tertiary)]">
-        Tap to confirm this line · Swipe › to browse · ↑ queue to jump
+        Step 3 · Line verified — tap to move on · Swipe › browse · ↑ queue
       </p>
     </div>
   );

@@ -54,3 +54,15 @@ export function activePickStatusLabel(status: ActivePickStatus): string {
 export function isInProgressPick(order: OrderWithClaimInfo): boolean {
   return isPickStarted(order.workflow_status) && order.is_mine;
 }
+
+/** No assigned orders waiting to start or resume — safe to show the unassigned pool. */
+export function isMyAssignedWorkCleared(
+  orders: OrderWithClaimInfo[],
+  userName: string | null,
+): boolean {
+  return !orders.some(
+    (order) =>
+      order.is_mine &&
+      (isInProgressPick(order) || isMyAssignedPending(order, userName)),
+  );
+}

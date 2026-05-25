@@ -5,7 +5,6 @@ import {
   CheckCircle,
   CaretLeft,
   Warning,
-  MapPin,
   ArrowRight,
   ArrowCounterClockwise,
 } from '@phosphor-icons/react';
@@ -43,7 +42,6 @@ import {
 import { FlagReasonSheet, type FlagSubmitPayload } from '../../components/picking/FlagReasonSheet';
 import {
   buildDeckOrder,
-  buildPickWalkBrandSections,
   findDeckIndexByItemId,
   nextPickLinePreview,
   nextPickableIndex,
@@ -93,6 +91,7 @@ import {
   mergeMrpIntoScanResult,
   readPickLineMrpMap,
   writePickLineMrpMap,
+  pickLineMrpLookup,
   type PickLineMrpState,
 } from '../../lib/picking/pickLineMrp';
 import type { StockLocationCode } from '../../types';
@@ -130,10 +129,8 @@ const MAX_AUTO_SCAN_QTY = 12;
 // not to slow the next pick.
 const UNDO_DURATION_MS = 5000;
 const CARD_INDEX_STORAGE_KEY = 'paspl.pick.cardIndex.v1';
-
 const RACK_VERIFY_STORAGE_KEY = 'paspl.pick.rackVerified.v1';
 const SKIPPED_STORAGE_KEY = 'paspl.pick.skipped.v1';
-const BRIEF_ACK_STORAGE_KEY = 'paspl.pick.briefAck.v1';
 
 function readIdSet(storageKey: string, orderId: number | null): Set<number> {
   if (!orderId || typeof window === 'undefined') return new Set();
@@ -154,20 +151,6 @@ function writeIdSet(storageKey: string, orderId: number | null, ids: Set<number>
     window.sessionStorage.setItem(`${storageKey}:${orderId}`, JSON.stringify([...ids]));
   } catch {
     // Quota / private mode — best-effort persistence.
-  }
-}
-
-function readBriefAck(orderId: number | null): boolean {
-  if (!orderId || typeof window === 'undefined') return false;
-  return window.sessionStorage.getItem(`${BRIEF_ACK_STORAGE_KEY}:${orderId}`) === '1';
-}
-
-function writeBriefAck(orderId: number | null, ack: boolean): void {
-  if (!orderId || typeof window === 'undefined') return;
-  if (ack) {
-    window.sessionStorage.setItem(`${BRIEF_ACK_STORAGE_KEY}:${orderId}`, '1');
-  } else {
-    window.sessionStorage.removeItem(`${BRIEF_ACK_STORAGE_KEY}:${orderId}`);
   }
 }
 
@@ -302,11 +285,6 @@ export default function PickPage(): React.JSX.Element | null {
   } | null>(null);
 
   // ─── Phase machine state ───
-  // briefAcknowledged: has the picker dismissed the pre-start "trip summary"?
-  // Persisted per-order so a refresh mid-pick doesn't re-prompt.
-  const [briefAcknowledged, setBriefAcknowledged] = useState(false);
-  // rackVerifiedIds: items whose rack the picker has confirmed (scanned QR or
-  // long-press override). This is the gate-1 "I'm physically here" signal.
   const [rackVerifiedIds, setRackVerifiedIds] = useState<Set<number>>(new Set());
   // skippedIds: items the picker chose to come back to. Sorted to the end of
   // the queue so the natural rack-order keeps leading the route.
@@ -349,12 +327,11 @@ export default function PickPage(): React.JSX.Element | null {
   );
 
   // Hydrate per-order state from sessionStorage so a refresh doesn't force the
-  // picker to re-scan racks or re-acknowledge the brief mid-flow.
+  // picker to re-scan racks mid-flow.
   useEffect(() => {
     if (!orderId) return;
     setRackVerifiedIds(readIdSet(RACK_VERIFY_STORAGE_KEY, orderId));
     setSkippedIds(readIdSet(SKIPPED_STORAGE_KEY, orderId));
-    setBriefAcknowledged(readBriefAck(orderId));
     setCurrentCardIndex(readCardIndex(orderId));
     setLineMrpMap(readPickLineMrpMap(orderId));
   }, [orderId]);
@@ -370,10 +347,6 @@ export default function PickPage(): React.JSX.Element | null {
   useEffect(() => {
     writeIdSet(SKIPPED_STORAGE_KEY, orderId, skippedIds);
   }, [orderId, skippedIds]);
-
-  useEffect(() => {
-    writeBriefAck(orderId, briefAcknowledged);
-  }, [orderId, briefAcknowledged]);
 
   useEffect(() => {
     writeCardIndex(orderId, currentCardIndex);
@@ -482,17 +455,7 @@ export default function PickPage(): React.JSX.Element | null {
     fifoOverrideSheet,
   ]);
 
-  // Trip brief: brand blocks (Varroc → TVS → …) with rack stops inside each brand.
-  const briefBrandSections = useMemo(() => {
-    if (!orderItems?.length) return [];
-    return buildPickWalkBrandSections(orderItems, pickQuantityTarget);
-  }, [orderItems]);
-
-  const briefTotals = useMemo(() => {
-    const lines = orderItems?.length ?? 0;
-    const pieces = orderItems?.reduce((sum, oi) => sum + pickQuantityTarget(oi), 0) ?? 0;
-    return { lines, pieces };
-  }, [orderItems]);
+  // Trip brief lives on PickPreviewPage — once picking starts, go straight to the deck.
 
   // Build the QueueSheet view-model in one place.
   const queueSheetRows: QueueSheetRow[] = useMemo(() => {
@@ -664,28 +627,6 @@ export default function PickPage(): React.JSX.Element | null {
     setFlagSheetOpen(true);
   }, []);
 
-  // ─── Phase derivation ───
-  // Single source of truth for what we render. Order matters: complete > brief
-  // > line outcome > awaiting_rack > verified.
-  type PickPhase =
-    | { kind: 'brief' }
-    | { kind: 'awaiting_rack'; itemId: number }
-    | { kind: 'verified'; itemId: number }
-    | { kind: 'line_outcome'; itemId: number }
-    | { kind: 'complete' };
-
-  const phase: PickPhase = useMemo(() => {
-    if (!currentTarget) return { kind: 'complete' };
-    if (lineOutcome) return { kind: 'line_outcome', itemId: lineOutcome.itemId };
-    if (!briefAcknowledged && counts.picked + counts.flagged === 0) {
-      return { kind: 'brief' };
-    }
-    if (rackVerifiedIds.has(currentTarget.orderItem.id)) {
-      return { kind: 'verified', itemId: currentTarget.orderItem.id };
-    }
-    return { kind: 'awaiting_rack', itemId: currentTarget.orderItem.id };
-  }, [currentTarget, lineOutcome, briefAcknowledged, counts.picked, counts.flagged, rackVerifiedIds]);
-
   const engagedScannerContext = useMemo(() => {
     if (!engagedScanner) return null;
     const deckItem = deckItems.find((pi) => pi.orderItem.id === engagedScanner.itemId);
@@ -737,14 +678,19 @@ export default function PickPage(): React.JSX.Element | null {
     return order.items.find((i) => i.id === focusId) ?? null;
   }, [currentDeckItem?.orderItem.id, mrpSheetItemId, order?.items]);
 
+  const mrpFocusLookup = useMemo(
+    () => (mrpFocusItem ? pickLineMrpLookup(mrpFocusItem) : null),
+    [mrpFocusItem],
+  );
+
   const mrpFocusRackVerified =
     mrpFocusItem != null &&
     (rackVerifiedIds.has(mrpFocusItem.id) || mrpSheetItemId === mrpFocusItem.id);
 
   const { data: mrpHistoryData, isLoading: mrpHistoryLoading } = useStockMrpHistory(
-    mrpFocusItem?.catalog_busy_code,
+    mrpFocusLookup?.busyCode,
     (mrpFocusItem?.stock_location_code as StockLocationCode | null) ?? null,
-    null,
+    mrpFocusLookup?.itemsMrpFallback ?? null,
     Boolean(mrpFocusItem && mrpFocusRackVerified),
   );
 
@@ -1703,7 +1649,6 @@ export default function PickPage(): React.JSX.Element | null {
     );
   }, [localItems, manualQtyOrderItem]);
 
-  const isBriefPhase = phase.kind === 'brief';
 
   const deckDotStatus = useMemo((): SwipeDeckDotStatus[] => {
     return deckItems.map((pi, index) => {
@@ -1746,9 +1691,15 @@ export default function PickPage(): React.JSX.Element | null {
         status,
         flagReason: pi.orderItem.flag_reason,
         brandLabel: orderItemBrandLabel(pi.orderItem),
+        rackVerified: rackVerifiedIds.has(pi.orderItem.id),
+        awaitingAdvance:
+          lineOutcome?.itemId === pi.orderItem.id &&
+          (lineOutcome.kind === 'picked' ||
+            lineOutcome.kind === 'partial' ||
+            lineOutcome.kind === 'flagged'),
       };
     });
-  }, [currentDeckItem?.orderItem.id, deckItems, lineOutcome, skippedIds]);
+  }, [currentDeckItem?.orderItem.id, deckItems, lineOutcome, rackVerifiedIds, skippedIds]);
 
   const pickProgressPct =
     counts.total > 0 ? ((counts.picked + counts.flagged) / counts.total) * 100 : 0;
@@ -1906,97 +1857,7 @@ export default function PickPage(): React.JSX.Element | null {
       </header>
 
       <div className="mx-auto w-full max-w-lg px-1.5 pt-2 space-y-3 sm:px-2">
-        {isBriefPhase ? (
-          /* ─── Order Brief: trip summary before walking the route ─── */
-          <div className="space-y-4 animate-pick-stop-enter">
-            <div className="ds-card p-5">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-                Ready to pick
-              </p>
-              <h2 className="text-2xl font-bold text-[var(--content-primary)] mt-1 leading-tight">
-                {order.customer_name}
-              </h2>
-              {order.customer_city && (
-                <p className="mt-1 text-sm text-[var(--content-secondary)]">
-                  {order.customer_city}
-                </p>
-              )}
-              {formatBilledLabel(order.approved_at, order.created_at) && (
-                <p className="mt-2 text-sm font-medium text-[var(--content-secondary)]">
-                  {formatBilledLabel(order.approved_at, order.created_at)}
-                </p>
-              )}
-              <div className="mt-3">
-                {order.transport_name ? (
-                  <TransportChip name={order.transport_name} size="md" />
-                ) : (
-                  <p className="text-sm text-[var(--content-warning)] font-semibold">
-                    No transport set — confirm with billing before dispatch
-                  </p>
-                )}
-              </div>
-              <p className="mt-4 text-sm text-[var(--content-tertiary)]">
-                {formatLineCountLabel(briefTotals.lines, { short: true })}
-                {' · '}
-                {briefBrandSections.length} brand{briefBrandSections.length === 1 ? '' : 's'}
-                {' · '}
-                {briefTotals.pieces} pcs total
-              </p>
-              <p className="mt-1 font-mono text-xs text-[var(--content-quaternary)]">
-                {order.order_number}
-              </p>
-            </div>
-
-            <div className="ds-card p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] mb-2">
-                Route — brand by brand
-              </p>
-              <div className="space-y-4">
-                {briefBrandSections.map((section) => (
-                  <div key={section.brand}>
-                    <div className="mb-1.5 flex items-baseline justify-between gap-2">
-                      <p className="text-sm font-bold text-[var(--content-primary)]">{section.brand}</p>
-                      <p className="text-[10px] font-medium text-[var(--content-tertiary)] tabular-nums">
-                        {section.lines} line{section.lines === 1 ? '' : 's'} · {section.pieces} pcs
-                      </p>
-                    </div>
-                    <div className="space-y-1 border-l-2 border-[var(--border-faint)] pl-3">
-                      {section.racks.map((r, idx) => (
-                        <div
-                          key={`${section.brand}-${r.rack ?? 'norack'}-${idx}`}
-                          className="flex items-center gap-2 py-0.5"
-                        >
-                          <MapPin size={12} weight="regular" className="text-[var(--content-tertiary)] shrink-0" />
-                          <span className="font-mono text-xs font-bold text-[var(--content-primary)] min-w-12">
-                            {r.rack ?? '—'}
-                          </span>
-                          <span className="text-[10px] text-[var(--content-tertiary)] flex-1">
-                            {r.lines} line{r.lines === 1 ? '' : 's'}
-                          </span>
-                          <span className="font-mono text-[10px] font-semibold text-[var(--content-secondary)] tabular-nums">
-                            {r.pieces} pcs
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <BigButton
-              variant="primary"
-              onClick={() => {
-                appHaptics.impactMedium();
-                setBriefAcknowledged(true);
-              }}
-              className="bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)]"
-            >
-              <ArrowRight size={20} weight="bold" />
-              Start picking
-            </BigButton>
-          </div>
-        ) : deckItems.length > 0 ? (
+        {deckItems.length > 0 ? (
           <div className="space-y-3">
             <PickSwipeDeck
               currentIndex={safeCardIndex}
@@ -2406,6 +2267,7 @@ export default function PickPage(): React.JSX.Element | null {
         <MrpHistorySheet
           isOpen
           history={mrpHistoryData?.history ?? []}
+          isLoading={mrpHistoryLoading}
           confirmedMrp={lineMrpMap.get(mrpSheetItemId)?.confirmedMrp ?? null}
           customMrp={lineMrpMap.get(mrpSheetItemId)?.customMrp ?? null}
           partCode={

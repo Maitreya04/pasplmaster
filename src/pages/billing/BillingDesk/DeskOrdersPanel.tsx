@@ -156,17 +156,19 @@ export function DeskOrdersPanel({
         {isLoading ? (
           <Skeleton variant="card" count={4} />
         ) : filtered.length === 0 ? (
-          <EmptyState
-            icon={Tray}
-            title={
-              pickerFilter
-                ? `No orders for ${pickerFilter.firstName}`
-                : tab === 'completed'
-                  ? 'No completed picks yet'
-                  : 'No orders in this view'
-            }
-            description={emptyDescription}
-          />
+          <div className="flex flex-1 min-h-[12rem] items-center justify-center">
+            <EmptyState
+              icon={Tray}
+              title={
+                pickerFilter
+                  ? `No orders for ${pickerFilter.firstName}`
+                  : tab === 'completed'
+                    ? 'No completed picks yet'
+                    : 'No orders in this view'
+              }
+              description={emptyDescription}
+            />
+          </div>
         ) : (
           filtered.map((order) => (
             <DeskOrderRowCard

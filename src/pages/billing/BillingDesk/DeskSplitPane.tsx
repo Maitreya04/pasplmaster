@@ -65,9 +65,9 @@ export function DeskSplitPane({ left, right }: DeskSplitPaneProps): React.JSX.El
   const leftPct = `${Math.round(ratio * 1000) / 10}%`;
 
   return (
-    <div ref={containerRef} className="relative flex flex-1 min-h-0">
+    <div ref={containerRef} className="relative flex flex-1 min-h-0 h-full w-full">
       <div
-        className="min-h-0 overflow-hidden shrink-0"
+        className="flex h-full min-h-0 flex-col overflow-hidden shrink-0"
         style={{ width: leftPct }}
       >
         {left}
@@ -85,7 +85,7 @@ export function DeskSplitPane({ left, right }: DeskSplitPaneProps): React.JSX.El
           setDragging(true);
         }}
         onDoubleClick={() => persistRatio(DEFAULT_RATIO)}
-        className={`group/handle relative z-[1] w-1.5 shrink-0 cursor-col-resize touch-none ${
+        className={`group/handle relative z-[1] h-full w-1.5 shrink-0 self-stretch cursor-col-resize touch-none ${
           dragging ? 'bg-[var(--role-primary-subtle)]' : 'bg-[var(--border-subtle)] hover:bg-[var(--border-opaque)]'
         } transition-colors`}
       >
@@ -98,7 +98,9 @@ export function DeskSplitPane({ left, right }: DeskSplitPaneProps): React.JSX.El
         </div>
       </div>
 
-      <div className="flex-1 min-w-0 min-h-0 flex flex-col">{right}</div>
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-secondary)]">
+        {right}
+      </div>
     </div>
   );
 }

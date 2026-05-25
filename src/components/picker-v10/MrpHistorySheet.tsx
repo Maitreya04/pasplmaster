@@ -8,6 +8,7 @@ import { appHaptics } from '../../lib/haptics';
 export interface MrpHistorySheetProps {
   isOpen: boolean;
   history: StockMrpHistoryEntry[];
+  isLoading?: boolean;
   confirmedMrp: number | null;
   customMrp: number | null;
   partCode?: string | null;
@@ -20,6 +21,7 @@ export interface MrpHistorySheetProps {
 export function MrpHistorySheet({
   isOpen,
   history,
+  isLoading = false,
   confirmedMrp,
   customMrp,
   partCode = null,
@@ -140,6 +142,18 @@ export function MrpHistorySheet({
           </div>
 
           <div className="mb-3 flex flex-col gap-1.5 sm:mb-3 sm:gap-2">
+            {isLoading && history.length === 0 ? (
+              <p className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-6 text-center text-sm text-[var(--content-tertiary)]">
+                Loading MRP from stock…
+              </p>
+            ) : null}
+
+            {!isLoading && history.length === 0 ? (
+              <p className="rounded-xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-4 py-3 text-sm text-[var(--content-warning-on-light)]">
+                No MRP in stock_mrpwise for this SKU — confirm what is printed on the label below.
+              </p>
+            ) : null}
+
             {history.map((h, i) => {
               const isLatest = i === 0 || h.is_latest;
               const isSelected = confirmedMrp === h.mrp && customMrp == null;
