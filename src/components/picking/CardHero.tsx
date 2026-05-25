@@ -37,7 +37,7 @@ export function CardHero({
   const remainingQty = Math.max(0, targetQty - pickedQty);
 
   return (
-    <div className="relative flex flex-col min-h-0 px-4 pt-3 pb-2">
+    <div className="relative flex min-h-0 flex-col px-3 pt-2.5 pb-2 sm:px-4 sm:pt-3">
       {isFlagged && (
         <div className="absolute left-3 top-2 z-10 rounded-md bg-[var(--bg-negative)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
           Flagged
@@ -66,7 +66,7 @@ export function CardHero({
         type="button"
         onClick={onRackTap}
         disabled={isDone}
-        className={`w-full text-left rounded-2xl p-3 mb-2 pick-pressable transition-colors ${
+        className={`mb-2 w-full rounded-2xl p-2.5 text-left pick-pressable transition-colors sm:p-3 ${
           isAwaitingRack
             ? 'bg-[var(--bg-tertiary)] border-2 border-dashed border-[var(--border-opaque)]'
             : isVerified
@@ -92,7 +92,7 @@ export function CardHero({
             <Check size={14} weight="bold" className="text-[var(--content-positive)] ml-auto" />
           )}
         </div>
-        <p className="font-mono font-bold text-[56px] sm:text-[64px] leading-none mt-1 text-[var(--content-primary)]">
+        <p className="pick-hero-rack mt-1 font-mono font-bold text-[var(--content-primary)]">
           {rackNo ?? '—'}
         </p>
         {isAwaitingRack && (
@@ -102,28 +102,26 @@ export function CardHero({
         )}
       </button>
 
-      <p className="font-mono font-bold text-[40px] sm:text-[48px] leading-none text-[var(--content-primary)] break-all">
-        {partNo}
-      </p>
-      <p className="text-sm text-[var(--content-secondary)] mt-1 line-clamp-2">{itemName}</p>
+      <p className="pick-hero-code font-mono font-bold text-[var(--content-primary)]">{partNo}</p>
+      <p className="mt-1 line-clamp-2 text-sm text-[var(--content-secondary)]">{itemName}</p>
       {flagReason && isFlagged && (
         <p className="text-xs text-[var(--content-negative)] mt-1 font-medium">{flagReason}</p>
       )}
 
       {!isDone && !hideProgressMetrics && (
-        <div className="mt-3 flex items-end justify-between gap-3">
-          <div>
+        <div className="mt-3 flex items-end justify-between gap-2 sm:gap-3">
+          <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
               {isVerified ? 'Remaining' : 'To pick'}
             </p>
             <div className="flex items-baseline gap-1 tabular-nums">
-              <span className="font-mono font-bold text-[32px] leading-none text-[var(--content-primary)]">
+              <span className="pick-metric-value font-mono font-bold text-[var(--content-primary)]">
                 {isVerified ? remainingQty : targetQty}
               </span>
-              <span className="text-sm text-[var(--content-tertiary)]">pcs</span>
+              <span className="text-xs text-[var(--content-tertiary)] sm:text-sm">pcs</span>
             </div>
           </div>
-          <div className="rounded-full bg-[var(--bg-tertiary)] px-3 py-1.5 font-mono text-lg font-bold tabular-nums text-[var(--content-primary)]">
+          <div className="shrink-0 rounded-full bg-[var(--bg-tertiary)] px-2.5 py-1 font-mono text-sm font-bold tabular-nums text-[var(--content-primary)] sm:px-3 sm:py-1.5 sm:text-lg">
             {pickedQty}
             <span className="text-[var(--content-tertiary)] font-normal"> / </span>
             {targetQty}

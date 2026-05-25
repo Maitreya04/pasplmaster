@@ -234,7 +234,7 @@ export default function PickerUxLabPage(): React.JSX.Element {
   }
 
   return (
-    <div className="role-picking min-h-screen bg-[var(--bg-primary)]">
+    <div className="role-picking flex min-h-[100dvh] flex-col bg-[var(--bg-primary)]">
       <LabHeader
         onBack={() => navigate('/admin')}
         subtitle={
@@ -244,7 +244,7 @@ export default function PickerUxLabPage(): React.JSX.Element {
         }
       />
 
-      <div className="mx-auto max-w-lg px-2 pb-6 pt-2">
+      <div className="mx-auto flex min-h-0 w-full max-w-lg flex-1 flex-col px-1.5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-1.5 sm:px-2 sm:pt-2">
         <PickSwipeDeck
           currentIndex={safeIndex}
           itemCount={items.length}

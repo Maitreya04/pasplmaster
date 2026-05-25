@@ -364,6 +364,62 @@ select {
   transform: scale(0.97);
 }
 
+/* Picker layout — fluid type + touch targets that survive 320px / short viewports */
+.pick-hero-rack {
+  font-size: clamp(2.25rem, 10vw, 3.75rem);
+  line-height: 1;
+}
+
+.pick-hero-code {
+  font-size: clamp(1.625rem, 7.5vw, 2.75rem);
+  line-height: 1;
+  word-break: break-word;
+}
+
+.pick-metric-value {
+  font-size: clamp(1.125rem, 5vw, 1.5rem);
+  line-height: 1;
+}
+
+.pick-sheet-display {
+  font-size: clamp(1.75rem, 9vw, 3rem);
+  line-height: 1;
+}
+
+.pick-sheet-mrp-value {
+  font-size: clamp(1.5rem, 7vw, 1.875rem);
+  line-height: 1;
+}
+
+.pick-numpad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(0.375rem, 1.5vw, 0.5rem);
+}
+
+.pick-numpad-key {
+  min-height: 44px;
+  padding-block: clamp(0.5rem, 2.2vw, 0.875rem);
+  font-size: clamp(1rem, 4.2vw, 1.125rem);
+  touch-action: manipulation;
+}
+
+.pick-deck-height {
+  height: clamp(280px, 52dvh, 560px);
+  height: clamp(280px, 52vh, 560px);
+}
+
+@media (max-height: 640px) {
+  .pick-sheet-compact .pick-numpad-key {
+    min-height: 40px;
+    padding-block: 0.375rem;
+  }
+
+  .pick-sheet-compact .pick-sheet-display {
+    font-size: clamp(1.5rem, 8vw, 2.25rem);
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════
    DESIGN SYSTEM UTILITIES
    ═══════════════════════════════════════════════════════════════ */

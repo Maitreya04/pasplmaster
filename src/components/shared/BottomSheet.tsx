@@ -170,7 +170,7 @@ export function BottomSheet({
 
       <div
         ref={sheetRef}
-        className={`relative z-10 w-full max-h-[85vh] bg-[var(--bg-secondary)]/95 backdrop-blur-xl rounded-t-2xl flex flex-col shadow-2xl ring-1 ring-white/10 animate-slide-up ${sheetClassName}`}
+        className={`relative z-10 flex w-full max-h-[min(85dvh,85vh)] min-h-0 flex-col overflow-hidden bg-[var(--bg-secondary)]/95 backdrop-blur-xl rounded-t-2xl shadow-2xl ring-1 ring-white/10 animate-slide-up ${sheetClassName}`}
       >
         <div
           className="flex justify-center mt-3 mb-2"
@@ -183,13 +183,13 @@ export function BottomSheet({
 
         {showHeader && (
           <div
-            className={`flex items-start gap-2 px-5 pb-3 ${hasTitle ? 'justify-between' : 'justify-end'}`}
+            className={`flex shrink-0 items-start gap-2 px-4 pb-2 sm:px-5 sm:pb-3 ${hasTitle ? 'justify-between' : 'justify-end'}`}
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
           >
             {hasTitle ? (
-              <h2 className="text-lg font-semibold text-[var(--content-primary)] min-w-0 pr-2">{title}</h2>
+              <h2 className="min-w-0 pr-2 text-base font-semibold leading-snug text-[var(--content-primary)] sm:text-lg">{title}</h2>
             ) : (
               <span className="sr-only">Order details</span>
             )}
@@ -205,7 +205,7 @@ export function BottomSheet({
         )}
 
         <div
-          className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 ${footer ? 'pb-3' : 'pb-5'} ${contentClassName}`}
+          className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-5 ${footer ? 'pb-2 sm:pb-3' : 'pb-5'} ${contentClassName}`}
           style={footer ? undefined : { paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 20px)' }}
         >
           {children}
@@ -213,7 +213,7 @@ export function BottomSheet({
 
         {footer ? (
           <div
-            className="shrink-0 border-t border-[var(--border-faint)] px-5 pt-3 pb-[max(env(safe-area-inset-bottom,0px),16px)]"
+            className="shrink-0 border-t border-[var(--border-faint)] px-4 pt-2.5 pb-[max(env(safe-area-inset-bottom,0px),12px)] sm:px-5 sm:pt-3 sm:pb-[max(env(safe-area-inset-bottom,0px),16px)]"
           >
             {footer}
           </div>

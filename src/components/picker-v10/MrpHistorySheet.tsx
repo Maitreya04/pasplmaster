@@ -79,7 +79,8 @@ export function MrpHistorySheet({
       title="MRP on label"
       closeOnly
       keyboardBehavior="static"
-      sheetClassName="max-h-[92vh]"
+      sheetClassName="max-h-[min(92dvh,92vh)] pick-sheet-compact"
+      contentClassName="pick-sheet-compact"
       footer={
         mode === 'list' && singleMrp && confirmedMrp !== singleMrp.mrp ? (
           <NumpadConfirmButton
@@ -138,7 +139,7 @@ export function MrpHistorySheet({
             </p>
           </div>
 
-          <div className="mb-3 flex flex-col gap-2">
+          <div className="mb-3 flex flex-col gap-1.5 sm:mb-3 sm:gap-2">
             {history.map((h, i) => {
               const isLatest = i === 0 || h.is_latest;
               const isSelected = confirmedMrp === h.mrp && customMrp == null;
@@ -147,22 +148,22 @@ export function MrpHistorySheet({
                   key={`${h.mrp}-${i}`}
                   type="button"
                   onClick={() => selectMrp(h.mrp)}
-                  className={`flex w-full items-center justify-between rounded-xl border-[1.5px] px-4 py-3 pick-pressable ${
+                  className={`flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border-[1.5px] px-3 py-2.5 pick-pressable sm:px-4 sm:py-3 ${
                     isSelected
                       ? 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)]'
                       : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)]'
                   }`}
                 >
-                  <div className="text-left">
+                  <div className="min-w-0 text-left">
                     <div
-                      className={`font-mono text-3xl font-extrabold tracking-tight ${
+                      className={`pick-sheet-mrp-value font-mono font-extrabold tracking-tight ${
                         isSelected ? 'text-[var(--content-positive)]' : 'text-[var(--content-primary)]'
                       }`}
                     >
                       ₹{Math.round(h.mrp)}
                     </div>
                     <p
-                      className={`mt-0.5 text-[10px] font-medium ${
+                      className={`mt-0.5 line-clamp-2 text-[10px] font-medium leading-snug ${
                         isSelected ? 'text-[var(--content-positive)]' : 'text-[var(--content-tertiary)]'
                       }`}
                     >

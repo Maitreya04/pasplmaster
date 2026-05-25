@@ -16,7 +16,7 @@ export function PickSheetContext({
 
   return (
     <div
-      className={`mb-4 flex items-center gap-2 rounded-xl border border-[var(--border-faint)] bg-[var(--bg-tertiary)] px-3 py-2.5 ${className}`}
+      className={`mb-3 flex min-w-0 items-center gap-2 rounded-xl border border-[var(--border-faint)] bg-[var(--bg-tertiary)] px-2.5 py-2 sm:mb-4 sm:px-3 sm:py-2.5 ${className}`}
     >
       {rackNo ? (
         <span className="shrink-0 rounded-md bg-[var(--bg-inverse-primary)] px-2 py-0.5 font-mono text-xs font-bold text-white">

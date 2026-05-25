@@ -24,13 +24,13 @@ export function PickLineResolvedDock({
 
   return (
     <div
-      className={`border-t px-4 py-4 ${
+      className={`shrink-0 border-t px-3 py-3 sm:px-4 sm:py-4 ${
         isFullPick
           ? 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)]'
           : 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]'
       }`}
     >
-      <div className="mb-3 flex items-start gap-3">
+      <div className="mb-2.5 flex items-start gap-2.5 sm:mb-3 sm:gap-3">
         {isFullPick ? (
           <CheckCircle
             size={28}
@@ -52,7 +52,7 @@ export function PickLineResolvedDock({
         )}
         <div className="min-w-0 flex-1">
           <p
-            className={`text-base font-extrabold leading-tight ${
+            className={`text-sm font-extrabold leading-snug break-words sm:text-base ${
               isFullPick ? 'text-[var(--content-positive)]' : 'text-[var(--content-warning-on-light)]'
             }`}
           >
@@ -67,7 +67,7 @@ export function PickLineResolvedDock({
       <button
         type="button"
         onClick={onNext}
-        className={`flex w-full min-h-[52px] items-center justify-center gap-2 rounded-2xl text-base font-extrabold text-white pick-pressable ${
+        className={`flex w-full min-h-[48px] items-center justify-center gap-2 rounded-2xl text-sm font-extrabold text-white pick-pressable sm:min-h-[52px] sm:text-base ${
           isFullPick ? 'bg-[var(--bg-positive)]' : 'bg-[var(--bg-inverse-primary)]'
         }`}
       >

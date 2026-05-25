@@ -377,9 +377,8 @@ export function SwipeDeck({
     <div className="space-y-2">
       <div
         ref={containerRef}
-        className={`relative overflow-hidden select-none touch-pan-y ${isCarousel ? 'px-0.5' : ''}`}
+        className={`relative overflow-hidden select-none touch-pan-y ${isCarousel ? 'px-0.5' : ''} pick-deck-height`}
         style={{
-          height: isCarousel ? 'min(64vh, 560px)' : 'min(62vh, 540px)',
           touchAction: 'pan-y pinch-zoom',
           contain: 'strict',
         }}

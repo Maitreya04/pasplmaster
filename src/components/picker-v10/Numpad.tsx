@@ -21,22 +21,22 @@ export function Numpad({
 
   return (
     <>
-      <div className="mb-3.5 text-right">
+      <div className="mb-2 text-right sm:mb-3">
         <div
-          className={`font-mono text-5xl font-extrabold leading-none tracking-tight ${
+          className={`pick-sheet-display font-mono font-extrabold tracking-tight ${
             isAmber ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-accent)]'
           }`}
         >
           {display || '0'}
         </div>
       </div>
-      <div className={`grid grid-cols-3 gap-2 ${hideConfirm ? '' : 'mb-3'}`}>
+      <div className={`pick-numpad-grid ${hideConfirm ? '' : 'mb-3'}`}>
         {keys.map((k) => (
           <button
             key={String(k)}
             type="button"
             onClick={() => onKey(String(k))}
-            className={`rounded-xl border py-3.5 font-mono text-lg font-extrabold pick-pressable ${
+            className={`pick-numpad-key rounded-xl border font-mono font-extrabold pick-pressable ${
               k === '⌫'
                 ? isAmber
                   ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]'
@@ -83,7 +83,7 @@ export function NumpadConfirmButton({
       type="button"
       disabled={disabled}
       onClick={onConfirm}
-      className={`w-full rounded-xl py-4 text-base font-extrabold text-white pick-pressable disabled:opacity-40 ${
+      className={`w-full min-h-[48px] rounded-xl px-2 py-3.5 text-sm font-extrabold leading-snug text-white pick-pressable disabled:opacity-40 sm:min-h-[52px] sm:py-4 sm:text-base ${
         isAmber ? 'bg-[var(--bg-warning)]' : 'bg-[var(--bg-inverse-primary)]'
       }`}
     >

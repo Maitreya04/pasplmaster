@@ -28,26 +28,26 @@ export function PickCardCTAs({
 }: PickCardCTAsProps): React.JSX.Element {
   if (onConfirmMrp) {
     return (
-      <div className="border-t border-[var(--border-faint)] bg-[var(--bg-secondary)] p-3">
+      <div className="border-t border-[var(--border-faint)] bg-[var(--bg-secondary)] p-2.5 sm:p-3">
         <button
           type="button"
           disabled={disabled}
           onClick={onConfirmMrp}
-          className="flex w-full min-h-[52px] items-center justify-between rounded-2xl border-[1.5px] border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-4 pick-pressable disabled:opacity-40"
+          className="flex w-full min-h-[48px] items-center justify-between gap-2 rounded-2xl border-[1.5px] border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 pick-pressable disabled:opacity-40 sm:min-h-[52px] sm:px-4"
         >
-          <div className="text-left">
-            <p className="text-sm font-extrabold text-[var(--content-warning-on-light)]">
+          <div className="min-w-0 flex-1 text-left">
+            <p className="text-sm font-extrabold leading-snug text-[var(--content-warning-on-light)] break-words">
               {confirmMrpLabel ?? 'Confirm MRP on label'}
             </p>
             {!confirmMrpLabel ? (
-              <p className="text-[11px] text-[var(--content-warning-on-light)]/80">
+              <p className="text-[10px] leading-snug text-[var(--content-warning-on-light)]/80 sm:text-[11px]">
                 Tap to match the price on the physical label
               </p>
             ) : null}
           </div>
-          <span className="text-lg text-[var(--content-warning-on-light)]">›</span>
+          <span className="shrink-0 text-lg text-[var(--content-warning-on-light)]">›</span>
         </button>
-        <div className="mt-2 grid grid-cols-2 gap-2">
+        <div className="mt-2 grid grid-cols-2 gap-1.5 sm:gap-2">
           <button
             type="button"
             disabled={disabled}
@@ -71,7 +71,7 @@ export function PickCardCTAs({
 
   return (
     <div
-      className="grid grid-cols-3 gap-2 border-t border-[var(--border-faint)] bg-[var(--bg-secondary)] p-3"
+      className="grid grid-cols-3 gap-1.5 border-t border-[var(--border-faint)] bg-[var(--bg-secondary)] p-2.5 sm:gap-2 sm:p-3"
       role="toolbar"
       aria-label="Pick actions"
     >
@@ -79,26 +79,26 @@ export function PickCardCTAs({
         type="button"
         disabled={disabled}
         onClick={onManualQty}
-        className="flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl bg-[var(--bg-tertiary)] px-2 text-[var(--content-secondary)] pick-pressable disabled:opacity-40"
+        className="flex min-h-[48px] flex-col items-center justify-center gap-0.5 rounded-2xl bg-[var(--bg-tertiary)] px-1 text-[var(--content-secondary)] pick-pressable disabled:opacity-40 sm:min-h-[52px] sm:gap-1 sm:px-2"
       >
         <Hash size={20} weight="bold" />
-        <span className="text-[11px] font-semibold leading-tight">Manual qty</span>
+        <span className="text-[10px] font-semibold leading-tight sm:text-[11px]">Manual qty</span>
       </button>
       <button
         type="button"
         disabled={disabled}
         onClick={onFlag}
-        className="flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl bg-[var(--bg-warning-subtle)] px-2 text-[var(--content-warning-on-light)] pick-pressable disabled:opacity-40"
+        className="flex min-h-[48px] flex-col items-center justify-center gap-0.5 rounded-2xl bg-[var(--bg-warning-subtle)] px-1 text-[var(--content-warning-on-light)] pick-pressable disabled:opacity-40 sm:min-h-[52px] sm:gap-1 sm:px-2"
       >
         <Flag size={20} weight="fill" />
-        <span className="text-[11px] font-semibold leading-tight">Flag item</span>
+        <span className="text-[10px] font-semibold leading-tight sm:text-[11px]">Flag item</span>
       </button>
       <button
         type="button"
         disabled={disabled || scanDisabled}
         onClick={onScan}
         aria-pressed={cameraEngaged}
-        className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-2xl px-2 font-semibold pick-pressable disabled:opacity-40 ${
+        className={`flex min-h-[48px] flex-col items-center justify-center gap-0.5 rounded-2xl px-1 font-semibold pick-pressable disabled:opacity-40 sm:min-h-[52px] sm:gap-1 sm:px-2 ${
           cameraEngaged
             ? 'bg-[var(--bg-positive)] text-[var(--content-on-color)] ring-2 ring-[var(--border-positive)]'
             : scanDisabled
@@ -107,7 +107,7 @@ export function PickCardCTAs({
         }`}
       >
         <Camera size={20} weight="bold" />
-        <span className="text-[11px] font-semibold leading-tight">{scanLabel}</span>
+        <span className="text-[10px] font-semibold leading-tight sm:text-[11px]">{scanLabel}</span>
       </button>
     </div>
   );

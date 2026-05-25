@@ -36,22 +36,22 @@ export function PickMetricRow({
   const isPartialQty = pickedQty > 0 && pickedQty < targetQty;
 
   return (
-    <div className="mx-4 mb-2 overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
-      <div className="flex">
+    <div className="mx-3 mb-2 overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] sm:mx-4">
+      <div className="flex min-w-0">
         <button
           type="button"
           disabled={disabled}
           onClick={onEditQty}
-          className={`relative flex-1 border-r border-[var(--border-faint)] px-4 py-3 text-left pick-pressable disabled:opacity-50 ${
+          className={`relative min-w-0 flex-1 border-r border-[var(--border-faint)] px-2.5 py-2.5 text-left pick-pressable disabled:opacity-50 sm:px-4 sm:py-3 ${
             isPartialQty ? 'bg-[var(--bg-warning-subtle)]' : ''
           }`}
         >
           <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
             Pick qty
           </p>
-          <div className="mt-1 flex items-baseline gap-1">
+          <div className="mt-1 flex min-w-0 items-baseline gap-1">
             <span
-              className={`font-mono text-2xl font-extrabold leading-none tracking-tight ${
+              className={`pick-metric-value font-mono font-extrabold tracking-tight ${
                 isPartialQty
                   ? 'text-[var(--content-warning-on-light)]'
                   : 'text-[var(--content-primary)]'
@@ -59,10 +59,10 @@ export function PickMetricRow({
             >
               {displayQty}
             </span>
-            <span className="text-xs text-[var(--content-tertiary)]">pcs</span>
+            <span className="shrink-0 text-xs text-[var(--content-tertiary)]">pcs</span>
           </div>
           <p
-            className={`mt-0.5 text-[9px] font-medium ${
+            className={`mt-0.5 line-clamp-2 text-[9px] font-medium leading-snug ${
               isPartialQty ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-tertiary)]'
             }`}
           >
@@ -77,7 +77,7 @@ export function PickMetricRow({
           type="button"
           disabled={disabled || mrpLoading}
           onClick={onEditMrp}
-          className="relative flex-1 px-4 py-3 text-left pick-pressable disabled:opacity-50"
+          className="relative min-w-0 flex-1 px-2.5 py-2.5 text-left pick-pressable disabled:opacity-50 sm:px-4 sm:py-3"
         >
           <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
             MRP on label
@@ -88,7 +88,7 @@ export function PickMetricRow({
           ) : finalMrp != null ? (
             <>
               <p
-                className={`mt-1 font-mono text-2xl font-extrabold leading-none tracking-tight ${
+                className={`pick-metric-value mt-1 font-mono font-extrabold tracking-tight ${
                   mrpFlagged ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-positive)]'
                 }`}
               >
@@ -107,13 +107,13 @@ export function PickMetricRow({
               <p className="mt-1.5 text-xs font-bold text-[var(--content-warning-on-light)]">
                 Multiple found
               </p>
-              <p className="text-[10px] leading-snug text-[var(--content-tertiary)]">
+              <p className="text-[10px] leading-snug text-[var(--content-tertiary)] line-clamp-2 break-words">
                 {mrpHistory.map((h) => `₹${Math.round(h.mrp)}`).join(' · ')}
               </p>
             </>
           ) : latestMrp != null ? (
             <>
-              <p className="mt-1 font-mono text-2xl font-extrabold leading-none tracking-tight text-[var(--content-warning-on-light)]">
+              <p className="pick-metric-value mt-1 font-mono font-extrabold tracking-tight text-[var(--content-warning-on-light)]">
                 ₹{Math.round(latestMrp)}
               </p>
               <p className="text-[9px] font-medium text-[var(--content-warning-on-light)]">tap to confirm</p>
@@ -140,15 +140,15 @@ export function PickMetricRow({
 
       {finalMrp != null && (
         <div
-          className={`mx-3 mb-3 flex items-center gap-2 rounded-lg border px-2.5 py-2 ${
+          className={`mx-2.5 mb-2.5 flex min-w-0 items-center gap-2 rounded-lg border px-2 py-1.5 sm:mx-3 sm:mb-3 sm:px-2.5 sm:py-2 ${
             mrpFlagged
               ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]'
               : 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)]'
           }`}
         >
-          <span className="text-xs">{mrpFlagged ? '⚠' : '✓'}</span>
+          <span className="shrink-0 text-xs">{mrpFlagged ? '⚠' : '✓'}</span>
           <p
-            className={`flex-1 text-[11px] font-semibold leading-snug ${
+            className={`min-w-0 flex-1 text-[10px] font-semibold leading-snug sm:text-[11px] ${
               mrpFlagged ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-positive)]'
             }`}
           >

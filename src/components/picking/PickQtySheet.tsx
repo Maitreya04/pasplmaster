@@ -67,7 +67,8 @@ export function PickQtySheet({
       title="Pick quantity"
       closeOnly
       keyboardBehavior="static"
-      sheetClassName="max-h-[92vh]"
+      sheetClassName="max-h-[min(92dvh,92vh)] pick-sheet-compact"
+      contentClassName="pick-sheet-compact"
       footer={
         oosStep === 'idle' ? (
           <NumpadConfirmButton
