@@ -102,18 +102,6 @@ function statusLabel(status: PickLineStatusKind): string {
   }
 }
 
-function lineActionHint(row: PickLineStatusRow): string | null {
-  if (row.awaitingAdvance) return 'Tap card · Next line';
-  if (row.status === 'now') {
-    if (!row.rackVerified) return 'Verify rack';
-    if (row.pickedQty > 0 && row.pickedQty < row.targetQty) return 'Picking…';
-    return 'Enter qty';
-  }
-  if (row.status === 'partial') return 'Finish qty';
-  if (row.status === 'pending' || row.status === 'skipped') return 'Tap to jump';
-  return null;
-}
-
 function qtyDisplay(row: PickLineStatusRow): { text: string; className: string } {
   if (row.status === 'flagged') {
     return { text: 'Flag', className: 'text-[10px] font-bold uppercase tracking-wide text-[var(--content-negative)]' };
@@ -153,8 +141,8 @@ function qtyDisplay(row: PickLineStatusRow): { text: string; className: string }
 }
 
 /**
- * Always-visible pick status below the deck — ticks, flags, and tap-to-jump.
- * Swipe up on the deck (or the handle) opens the full queue sheet.
+ * Minimal pick status strip below the deck — shows progress, pull up for full queue.
+ * Collapsed by default to maximize card space (Krug: don't steal real estate).
  */
 export function PickLineStatusPanel({
   rows,
@@ -172,11 +160,13 @@ export function PickLineStatusPanel({
 }: PickLineStatusPanelProps): React.JSX.Element {
   const drag = Math.min(1, Math.max(0, dragProgress));
   const liftPx = Math.round(drag * 22);
-  const baseListRem = defaultExpanded ? Math.min(22, 6 + rows.length * 2.25) : 9;
-  const listMaxRem = baseListRem + drag * 8;
+  // Collapsed: show minimal 1-line summary. Expanded: show list.
+  const baseListRem = defaultExpanded ? Math.min(16, 4 + rows.length * 1.8) : 0;
+  const listMaxRem = baseListRem + drag * 12;
   const doneRows = rows.filter((r) => r.status === 'picked' || r.status === 'flagged');
   const activeRows = rows.filter((r) => r.status !== 'picked' && r.status !== 'flagged');
   const openingQueue = drag > 0.35;
+  const showList = defaultExpanded || drag > 0.1;
 
   const handleDragRef = useRef<{ startY: number; dragging: boolean; dragged: boolean }>({
     startY: 0,
@@ -282,67 +272,69 @@ export function PickLineStatusPanel({
           </span>
         </button>
 
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border-faint)] px-3 py-2.5">
-          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-positive-subtle)] px-2 py-0.5 text-[10px] font-bold tabular-nums text-[var(--content-positive)]">
-            <CheckCircle size={12} weight="fill" />
-            {pickedCount} picked
+        {/* Compact summary row — always visible */}
+        <div className="flex items-center gap-2 px-3 py-2">
+          <span className="inline-flex items-center gap-1 text-[11px] font-bold tabular-nums text-[var(--content-positive)]">
+            <CheckCircle size={14} weight="fill" />
+            {pickedCount}
           </span>
           {flaggedCount > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-negative-subtle)] px-2 py-0.5 text-[10px] font-bold tabular-nums text-[var(--content-negative)]">
-              <Flag size={12} weight="fill" />
-              {flaggedCount} flagged
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold tabular-nums text-[var(--content-negative)]">
+              <Flag size={14} weight="fill" />
+              {flaggedCount}
             </span>
           )}
-          {remainingCount > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-semibold tabular-nums text-[var(--content-secondary)]">
-              <Circle size={10} weight="regular" />
-              {remainingCount} left
-            </span>
-          )}
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold tabular-nums text-[var(--content-secondary)]">
+            <Circle size={10} weight="regular" />
+            {remainingCount} left
+          </span>
           <span className="ml-auto text-[10px] font-medium tabular-nums text-[var(--content-quaternary)]">
             {totalCount} lines
           </span>
         </div>
 
-        <ul
-          className="pick-status-list overflow-y-auto overscroll-contain transition-[max-height] duration-150 ease-out"
-          style={{ maxHeight: `min(${listMaxRem}rem, 28dvh)` }}
-        >
-          {doneRows.length > 0 && (
-            <>
-              <li className="sticky top-0 z-[1] bg-[var(--bg-secondary)] px-3 py-1.5">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-[var(--content-positive)]">
-                  Done — picked or flagged
-                </p>
-              </li>
-              {doneRows.map((row) => (
-                <StatusRow
-                  key={row.itemId}
-                  row={row}
-                  isViewing={currentItemId === row.itemId}
-                  onJump={onJump}
-                />
-              ))}
-            </>
-          )}
-          {activeRows.length > 0 && (
-            <>
-              <li className="sticky top-0 z-[1] bg-[var(--bg-secondary)] px-3 py-1.5">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-[var(--content-tertiary)]">
-                  {doneRows.length > 0 ? 'Still to pick' : 'All lines'}
-                </p>
-              </li>
-              {activeRows.map((row) => (
-                <StatusRow
-                  key={row.itemId}
-                  row={row}
-                  isViewing={currentItemId === row.itemId}
-                  onJump={onJump}
-                />
-              ))}
-            </>
-          )}
-        </ul>
+        {/* List — only when expanded or dragging */}
+        {showList && (
+          <ul
+            className="pick-status-list overflow-y-auto overscroll-contain border-t border-[var(--border-faint)] transition-[max-height] duration-150 ease-out"
+            style={{ maxHeight: `min(${listMaxRem}rem, 28dvh)` }}
+          >
+            {doneRows.length > 0 && (
+              <>
+                <li className="sticky top-0 z-[1] bg-[var(--bg-secondary)] px-3 py-1">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-[var(--content-positive)]">
+                    Done
+                  </p>
+                </li>
+                {doneRows.map((row) => (
+                  <StatusRow
+                    key={row.itemId}
+                    row={row}
+                    isViewing={currentItemId === row.itemId}
+                    onJump={onJump}
+                  />
+                ))}
+              </>
+            )}
+            {activeRows.length > 0 && (
+              <>
+                <li className="sticky top-0 z-[1] bg-[var(--bg-secondary)] px-3 py-1">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-[var(--content-tertiary)]">
+                    {doneRows.length > 0 ? 'To pick' : 'All lines'}
+                  </p>
+                </li>
+                {activeRows.map((row) => (
+                  <StatusRow
+                    key={row.itemId}
+                    row={row}
+                    isViewing={currentItemId === row.itemId}
+                    onJump={onJump}
+                  />
+                ))}
+              </>
+            )}
+          </ul>
+        )}
       </div>
     </div>
   );
@@ -359,117 +351,61 @@ function StatusRow({
 }): React.JSX.Element {
   const isNow = row.status === 'now';
   const isPicked = row.status === 'picked';
-  const isPartial = row.status === 'partial';
   const awaitingAdvance = row.awaitingAdvance === true;
   const qty = qtyDisplay(row);
-  const actionHint = lineActionHint(row);
-  const partialPct =
-    isPartial && row.targetQty > 0
-      ? Math.round((row.pickedQty / row.targetQty) * 100)
-      : 0;
 
   return (
     <li className="border-b border-[var(--border-faint)] last:border-b-0">
       <button
         type="button"
         onClick={() => onJump(row.itemId)}
-        className={`flex w-full min-h-[52px] flex-col gap-1 px-3 py-2.5 text-left pick-pressable transition-colors ${
+        className={`flex w-full min-h-[44px] items-center gap-2 px-3 py-2 text-left pick-pressable transition-colors ${
           awaitingAdvance
-            ? 'bg-[var(--bg-positive-subtle)] ring-1 ring-inset ring-[var(--border-positive)]'
+            ? 'bg-[var(--bg-positive-subtle)]'
             : isNow
-              ? 'bg-[var(--bg-accent-subtle)] ring-1 ring-inset ring-[var(--role-primary)]/30'
+              ? 'bg-[var(--bg-accent-subtle)]'
               : isPicked
-                ? 'bg-[var(--bg-positive-subtle)]/40'
-                : 'hover:bg-[var(--bg-tertiary)] active:bg-[var(--bg-tertiary)]'
+                ? 'bg-[var(--bg-positive-subtle)]/30'
+                : 'active:bg-[var(--bg-tertiary)]'
         }`}
-        aria-label={`${statusLabel(row.status)}: ${row.code}, rack ${row.rackNo ?? 'unknown'}. ${actionHint ?? 'Tap to jump'}.`}
+        aria-label={`${statusLabel(row.status)}: ${row.code}, rack ${row.rackNo ?? 'unknown'}.`}
       >
-        <div className="flex items-center gap-2.5">
-          <StatusIcon status={awaitingAdvance ? 'picked' : row.status} />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <p
-                className={`truncate font-mono text-xs font-bold ${
-                  isPicked || awaitingAdvance
-                    ? 'text-[var(--content-positive)]'
-                    : 'text-[var(--content-primary)]'
-                }`}
-              >
-                {row.code}
-              </p>
-              {isViewing && (
-                <span className="shrink-0 rounded bg-[var(--role-primary)] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[var(--content-on-color)]">
-                  On card
-                </span>
-              )}
-              {awaitingAdvance && (
-                <span className="shrink-0 rounded-full bg-[var(--bg-positive)] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-white">
-                  Next
-                </span>
-              )}
-            </div>
-            <p className="truncate text-[10px] text-[var(--content-tertiary)]">
-              {row.brandLabel ? `${row.brandLabel} · ` : ''}
-              Rack {row.rackNo ?? '—'}
-              {row.status === 'flagged' && row.flagReason ? ` · ${row.flagReason}` : ''}
+        <StatusIcon status={awaitingAdvance ? 'picked' : row.status} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <p
+              className={`truncate font-mono text-xs font-bold ${
+                isPicked || awaitingAdvance
+                  ? 'text-[var(--content-positive)]'
+                  : 'text-[var(--content-primary)]'
+              }`}
+            >
+              {row.code}
             </p>
-            {actionHint ? (
-              <p
-                className={`mt-0.5 text-[10px] font-semibold ${
-                  awaitingAdvance
-                    ? 'text-[var(--content-positive)]'
-                    : isNow
-                      ? 'text-[var(--role-primary)]'
-                      : 'text-[var(--content-quaternary)]'
-                }`}
-              >
-                {actionHint}
-              </p>
-            ) : null}
+            {isViewing && (
+              <span className="shrink-0 rounded bg-[var(--role-primary)] px-1 py-0.5 text-[7px] font-bold uppercase text-white">
+                Now
+              </span>
+            )}
           </div>
-          <div className="flex shrink-0 flex-col items-end gap-1">
-            <span className={qty.className}>{qty.text}</span>
-            <ArrowRight
-              size={14}
-              weight="bold"
-              className={
-                isNow || awaitingAdvance
-                  ? 'text-[var(--role-primary)]'
-                  : 'text-[var(--content-quaternary)]'
-              }
-              aria-hidden
-            />
-          </div>
+          <p className="truncate text-[9px] text-[var(--content-tertiary)]">
+            {row.rackNo ?? '—'}
+            {row.status === 'flagged' && row.flagReason ? ` · ${row.flagReason}` : ''}
+          </p>
         </div>
-        {isPartial && row.targetQty > 0 && (
-          <div
-            className="ml-9 h-1 overflow-hidden rounded-full bg-[var(--bg-tertiary)]"
-            role="progressbar"
-            aria-valuenow={row.pickedQty}
-            aria-valuemin={0}
-            aria-valuemax={row.targetQty}
-            aria-label={`${row.pickedQty} of ${row.targetQty} pieces picked`}
-          >
-            <div
-              className="h-full rounded-full bg-[var(--bg-warning)] transition-[width] duration-200"
-              style={{ width: `${partialPct}%` }}
-            />
-          </div>
-        )}
-        {isNow && row.rackVerified && row.targetQty > 0 && row.pickedQty > 0 && row.pickedQty < row.targetQty && (
-          <div
-            className="ml-9 h-1 overflow-hidden rounded-full bg-[var(--bg-tertiary)]"
-            role="progressbar"
-            aria-valuenow={row.pickedQty}
-            aria-valuemin={0}
-            aria-valuemax={row.targetQty}
-          >
-            <div
-              className="h-full rounded-full bg-[var(--role-primary)] transition-[width] duration-200"
-              style={{ width: `${partialPct || Math.max(4, Math.round((row.pickedQty / row.targetQty) * 100))}%` }}
-            />
-          </div>
-        )}
+        <div className="shrink-0 text-right">
+          <span className={qty.className}>{qty.text}</span>
+        </div>
+        <ArrowRight
+          size={12}
+          weight="bold"
+          className={
+            isNow || awaitingAdvance
+              ? 'text-[var(--role-primary)]'
+              : 'text-[var(--content-quaternary)]'
+          }
+          aria-hidden
+        />
       </button>
     </li>
   );

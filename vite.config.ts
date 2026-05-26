@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import legacy from '@vitejs/plugin-legacy';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -8,22 +7,50 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    legacy({
-      // Support a wide span of modern browsers, including older Safari / iOS Safari.
-      targets: ['defaults', 'safari >= 13'],
-      additionalLegacyPolyfills: ['regenerator-runtime/runtime'],
-      renderLegacyChunks: true,
-      modernPolyfills: true,
-    }),
+    // REMOVED: legacy plugin was adding 139KB of polyfills for Safari 13 (2019).
+    // Modern warehouse PWA devices (iOS 15+, Chrome 90+) don't need these.
+    // If legacy support is needed later, re-enable with narrower targets.
     VitePWA({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.ts',
       registerType: 'prompt',
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,woff2,woff,webmanifest}'],
-        globIgnores: ['**/models/**'],
-        maximumFileSizeToCacheInBytes: 8000000,
+        // Precache only critical assets for fast initial load.
+        // Route-specific chunks (admin, billing, etc.) load on-demand and get runtime-cached.
+        globPatterns: [
+          'index.html',
+          'manifest.json',
+          'icons/*.png',
+          // Core app chunks (hashed names vary per build)
+          'assets/index-*.js',
+          'assets/index-*.css',
+          'assets/router-*.js',
+          'assets/query-*.js',
+          'assets/supabase-*.js',
+          // Picking flow chunks
+          'assets/Picking*.js',
+          'assets/QueuePage-*.js',
+          'assets/PickPage-*.js',
+          'assets/PickPreview*.js',
+          'assets/ActivePicks*.js',
+          // Fonts (woff2 only - modern browsers)
+          '**/*.woff2',
+        ],
+        globIgnores: [
+          '**/models/**',
+          // Don't precache heavy admin/billing/sales pages
+          '**/Admin*.js',
+          '**/Billing*.js',
+          '**/Sales*.js',
+          '**/Upload*.js',
+          '**/Label*.js',
+          '**/Purchase*.js',
+          '**/Receiving*.js',
+          '**/pdf-*.js',
+          '**/purchasePoImporter-*.js',
+        ],
+        maximumFileSizeToCacheInBytes: 3000000,
       },
       devOptions: {
         enabled: false,
@@ -31,7 +58,8 @@ export default defineConfig({
     }),
   ],
   build: {
-    // Let @vitejs/plugin-legacy own modern vs legacy targets (avoids override warning).
+    // Target modern browsers - iOS 15+ (2021), Chrome 90+ (2021).
+    target: ['es2020', 'chrome90', 'safari15'],
     chunkSizeWarningLimit: 1500,
     reportCompressedSize: false,
     cssMinify: true,

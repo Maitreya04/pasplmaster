@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { precacheAndRoute } from 'workbox-precaching';
 import { registerRoute } from 'workbox-routing';
-import { CacheFirst } from 'workbox-strategies';
+import { CacheFirst, StaleWhileRevalidate } from 'workbox-strategies';
 import { ExpirationPlugin } from 'workbox-expiration';
 
 declare const self: ServiceWorkerGlobalScope & {
@@ -9,6 +9,34 @@ declare const self: ServiceWorkerGlobalScope & {
 };
 
 precacheAndRoute(self.__WB_MANIFEST);
+
+// Cache JS chunks not in precache (admin, billing, sales pages) on first use.
+registerRoute(
+  ({ url }) => url.pathname.startsWith('/assets/') && url.pathname.endsWith('.js'),
+  new StaleWhileRevalidate({
+    cacheName: 'paspl-js-runtime',
+    plugins: [
+      new ExpirationPlugin({
+        maxEntries: 100,
+        maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+      }),
+    ],
+  }),
+);
+
+// Cache CSS chunks on first use.
+registerRoute(
+  ({ url }) => url.pathname.startsWith('/assets/') && url.pathname.endsWith('.css'),
+  new StaleWhileRevalidate({
+    cacheName: 'paspl-css-runtime',
+    plugins: [
+      new ExpirationPlugin({
+        maxEntries: 50,
+        maxAgeSeconds: 60 * 60 * 24 * 30,
+      }),
+    ],
+  }),
+);
 
 registerRoute(
   ({ url }) => url.pathname.endsWith('.wasm'),

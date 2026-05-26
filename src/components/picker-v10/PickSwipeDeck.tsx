@@ -40,11 +40,6 @@ export function PickSwipeDeck({
       onSwipeUp={onSwipeUp}
       onSwipeUpDrag={onSwipeUpDrag}
       onSwipeUpDragEnd={onSwipeUpDragEnd}
-      hint={
-        onSwipeUp
-          ? '‹ › lines · ↑ queue'
-          : '‹ › switch lines'
-      }
     >
       {children}
     </SwipeDeck>

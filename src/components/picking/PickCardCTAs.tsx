@@ -91,41 +91,48 @@ export function PickCardCTAs({
         role="toolbar"
         aria-label="Verify rack location"
       >
-        <div className="space-y-2 p-2.5 sm:p-3">
+        <div className="p-2 sm:p-2.5">
+          {/* Primary: Scan bin */}
           <button
             type="button"
             disabled={disabled || scanDisabled}
             onClick={onScan}
             aria-pressed={cameraEngaged}
-            className={`flex w-full min-h-[52px] items-center justify-center gap-2.5 rounded-2xl px-4 font-extrabold pick-pressable disabled:opacity-40 sm:min-h-[56px] ${
+            className={`flex w-full min-h-[48px] items-center justify-center gap-2 rounded-2xl px-4 font-bold pick-pressable disabled:opacity-40 ${
               cameraEngaged
                 ? 'bg-[var(--bg-positive)] text-[var(--content-on-color)] ring-2 ring-[var(--border-positive)]'
                 : 'bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)] shadow-sm'
             }`}
           >
-            <Camera size={22} weight="bold" />
-            <span className="text-base sm:text-lg">{scanLabel}</span>
+            <Camera size={20} weight="bold" />
+            <span className="text-sm sm:text-base">{scanLabel}</span>
           </button>
-          {onConfirmRack ? (
+
+          {/* Secondary row: At rack + Flag — compact, side by side */}
+          <div className="mt-2 grid grid-cols-2 gap-1.5">
+            {onConfirmRack ? (
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={onConfirmRack}
+                className="flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl border border-dashed border-[var(--border-opaque)] bg-[var(--bg-tertiary)] text-xs font-semibold text-[var(--content-secondary)] pick-pressable disabled:opacity-40"
+              >
+                <MapPin size={16} weight="fill" className="text-[var(--content-tertiary)]" />
+                <span>At rack</span>
+              </button>
+            ) : (
+              <div />
+            )}
             <button
               type="button"
               disabled={disabled}
-              onClick={onConfirmRack}
-              className="flex w-full min-h-[44px] items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--border-opaque)] bg-[var(--bg-tertiary)] text-sm font-semibold text-[var(--content-secondary)] pick-pressable disabled:opacity-40"
+              onClick={onFlag}
+              className="flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl bg-[var(--bg-warning-subtle)] text-xs font-semibold text-[var(--content-warning-on-light)] pick-pressable disabled:opacity-40"
             >
-              <MapPin size={18} weight="fill" className="text-[var(--content-tertiary)]" />
-              At rack — no bin QR
+              <Flag size={16} weight="fill" />
+              <span>Flag</span>
             </button>
-          ) : null}
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={onFlag}
-            className="min-h-[44px] w-full rounded-xl bg-[var(--bg-warning-subtle)] text-xs font-semibold text-[var(--content-warning-on-light)] pick-pressable disabled:opacity-40"
-          >
-            <Flag size={16} weight="fill" className="mr-1.5 inline" />
-            Flag item
-          </button>
+          </div>
         </div>
       </div>
     );
