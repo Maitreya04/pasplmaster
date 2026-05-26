@@ -8,7 +8,17 @@ import { PickLineResolvedDock, type PickLineOutcomeKind } from './PickLineResolv
 import type { NextPickLinePreview } from '../../lib/picking/deckOrder';
 import { PickLineDoneHint } from './PickLineDoneHint';
 import { PickMetricRow } from './PickMetricRow';
-import { isPickLineMrpConfirmed } from '../../lib/picking/pickLineMrp';
+import { PickMrpSplitProgress } from './PickMrpSplitProgress';
+import {
+  getActiveSegment,
+  isPickLineMrpConfirmed,
+  isSplitInProgress,
+  isSplitMode,
+  pickLineSegmentsCommittedQty,
+  pickLineSplitRemaining,
+  shouldSuggestMrpSplit,
+  splitNeedsNextBatch,
+} from '../../lib/picking/pickLineMrp';
 import type { PickLineMrpState } from '../../lib/picking/pickLineMrp';
 
 export interface PickCardProps {
@@ -34,9 +44,7 @@ export interface PickCardProps {
   lineMrp?: PickLineMrpState;
   onRackTap?: () => void;
   onManualQty?: () => void;
-  /** Tap MRP cell / Edit — always opens history sheet. */
   onEditMrp?: () => void;
-  /** Primary CTA when single MRP band needs confirm (no sheet). */
   onConfirmMrp?: () => void;
   onMarkPicked?: () => void;
   markPickedLabel?: string;
@@ -44,13 +52,18 @@ export interface PickCardProps {
   onFlag?: () => void;
   onEngageScanner?: () => void;
   onSelectLayer?: (layerId: number) => void;
-  /** Active closure beat — green for pick, amber for flag. */
   lineOutcome?: PickLineOutcomeKind | null;
   outcomeHeadline?: string;
   outcomeDetail?: string;
   onAdvanceNext?: () => void;
-  /** Target line after confirm — shown on the advance button */
   nextLinePreview?: NextPickLinePreview | null;
+  onPickFirstBatch?: () => void;
+  onPickNextMrp?: () => void;
+  onAllSameMrp?: () => void;
+  onConfirmBatch?: () => void;
+  onFinishShort?: () => void;
+  onUndoLastSegment?: () => void;
+  activeBatchQty?: number;
 }
 
 export const PickCard = memo(function PickCard({
@@ -86,11 +99,28 @@ export const PickCard = memo(function PickCard({
   outcomeDetail,
   onAdvanceNext,
   nextLinePreview = null,
+  onPickFirstBatch,
+  onPickNextMrp,
+  onAllSameMrp,
+  onConfirmBatch,
+  onFinishShort,
+  onUndoLastSegment,
+  activeBatchQty = 0,
 }: PickCardProps): React.JSX.Element {
-  const isDone = uiState === 'picked' || uiState === 'flagged' || uiState === 'overridden';
+  const splitInProgress = isSplitInProgress(lineMrp, targetQty);
+  const splitActive = isSplitMode(lineMrp);
+  const splitRemaining = pickLineSplitRemaining(lineMrp, targetQty);
+  const splitCommitted = pickLineSegmentsCommittedQty(lineMrp);
+  const splitGoal = lineMrp?.originalTargetQty ?? targetQty;
+  const effectivePickedQty = splitActive ? splitCommitted : pickedQty;
+  const effectiveTargetQty = splitActive ? splitGoal : targetQty;
+
+  const isDoneBase = uiState === 'picked' || uiState === 'flagged' || uiState === 'overridden';
+  const isDone = isDoneBase && !splitInProgress;
   const showingOutcome = isCurrent && lineOutcome != null;
-  const isAwaitingRack = !rackVerified && !isDone;
-  const isVerified = rackVerified && !isDone;
+  const isAwaitingRack = !rackVerified && !isDone && !splitInProgress;
+  const isVerified = rackVerified && !isDone && !showingOutcome;
+
   const partNo =
     orderItem.catalog_alias1 ??
     orderItem.catalog_alias ??
@@ -103,7 +133,7 @@ export const PickCard = memo(function PickCard({
       ? 'celebrating'
       : uiState === 'flagged'
         ? 'flagged'
-        : uiState === 'picked' || uiState === 'overridden'
+        : isDone
           ? 'picked'
           : isAwaitingRack
             ? 'awaiting_rack'
@@ -111,18 +141,33 @@ export const PickCard = memo(function PickCard({
 
   const scanLabel = isAwaitingRack ? 'Scan bin' : 'Scan item';
   const scannerLive = isCurrent && !scannerPaused && cameraEngaged;
-  const remainingQty = Math.max(0, targetQty - pickedQty);
+  const remainingQty = splitActive ? splitRemaining : Math.max(0, targetQty - pickedQty);
 
+  const suggestSplit =
+    isVerified && shouldSuggestMrpSplit(mrpHistory.length, targetQty) && !splitActive;
   const mrpConfirmed = isPickLineMrpConfirmed(lineMrp);
   const hasMrpBands = mrpHistory.length > 0;
-  const needsMrpConfirm = isVerified && hasMrpBands && !mrpConfirmed;
-  const mrpGateOk = !hasMrpBands || mrpConfirmed;
-  const qtyGateOk = pickedQty > 0;
+  const needsMrpConfirm =
+    isVerified && hasMrpBands && !mrpConfirmed && !suggestSplit && !splitActive;
+  const mrpGateOk = splitActive ? mrpConfirmed : !hasMrpBands || mrpConfirmed;
+  const qtyGateOk = splitActive ? activeBatchQty > 0 : effectivePickedQty > 0;
   const markPickedReady = isVerified && mrpGateOk && qtyGateOk && !isDone && !showingOutcome;
   const singlePendingMrp =
     needsMrpConfirm && mrpHistory.length === 1 ? mrpHistory[0]!.mrp : null;
-  /** Qty + MRP row appears as soon as rack is verified — qty must not depend on MRP data. */
-  const showMetricRow = isVerified;
+  const showMetricRow = isVerified || splitInProgress;
+
+  const splitNeedsFirst =
+    suggestSplit || (splitActive && splitNeedsNextBatch(lineMrp, targetQty) && !getActiveSegment(lineMrp));
+  const splitNeedsNext =
+    splitActive && splitNeedsNextBatch(lineMrp, targetQty) && !splitNeedsFirst;
+  const splitHasActiveBatch =
+    splitActive && getActiveSegment(lineMrp) != null && !splitNeedsNext && !splitNeedsFirst;
+
+  const activeSegment = getActiveSegment(lineMrp);
+  const confirmBatchLabel =
+    activeSegment && activeBatchQty > 0
+      ? `Confirm batch · ${activeBatchQty} pcs @ ₹${Math.round(activeSegment.mrp)}`
+      : 'Confirm batch';
 
   return (
     <div
@@ -141,8 +186,8 @@ export const PickCard = memo(function PickCard({
           rackNo={orderItem.rack_no}
           partNo={partNo}
           itemName={orderItem.item_name}
-          pickedQty={pickedQty}
-          targetQty={targetQty}
+          pickedQty={effectivePickedQty}
+          targetQty={effectiveTargetQty}
           phase={cardPhase}
           flagReason={flagReason}
           positionLabel={positionLabel}
@@ -151,19 +196,39 @@ export const PickCard = memo(function PickCard({
           hideProgressMetrics={showMetricRow}
         />
 
+        {splitActive && lineMrp && !showingOutcome ? (
+          <PickMrpSplitProgress
+            lineMrp={lineMrp}
+            targetQty={targetQty}
+            onUndoLastSegment={onUndoLastSegment}
+          />
+        ) : null}
+
+        {suggestSplit && !showingOutcome ? (
+          <div className="mx-3 mb-2 rounded-xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2 sm:mx-4">
+            <p className="text-[11px] font-semibold text-[var(--content-warning-on-light)]">
+              {mrpHistory.length} MRPs in stock · pick batch by batch
+            </p>
+            <p className="mt-0.5 text-[10px] text-[var(--content-warning-on-light)]/80">
+              Pick one MRP batch at a time. Billing will get separate lines.
+            </p>
+          </div>
+        ) : null}
+
         {showMetricRow && !showingOutcome && (
           <PickMetricRow
             displayQty={remainingQty}
-            targetQty={targetQty}
-            pickedQty={pickedQty}
+            targetQty={effectiveTargetQty}
+            pickedQty={effectivePickedQty}
             mrpHistory={mrpHistory}
             mrpLoading={mrpHistoryLoading}
             confirmedMrp={lineMrp?.confirmedMrp ?? null}
             customMrp={lineMrp?.customMrp ?? null}
+            lineMrp={lineMrp}
             disabled={!isCurrent}
             onEditQty={() => onManualQty?.()}
             onEditMrp={() => onEditMrp?.()}
-            onUndoPick={pickedQty > 0 && !showingOutcome ? onUndoLinePick : undefined}
+            onUndoPick={effectivePickedQty > 0 && !showingOutcome ? onUndoLinePick : undefined}
           />
         )}
 
@@ -207,34 +272,45 @@ export const PickCard = memo(function PickCard({
       ) : isDone && isCurrent && onAdvanceNext ? (
         <PickLineDoneHint
           kind={uiState === 'flagged' ? 'flagged' : 'picked'}
-          pickedQty={pickedQty}
-          targetQty={targetQty}
+          pickedQty={effectivePickedQty}
+          targetQty={effectiveTargetQty}
           nextPreview={nextLinePreview}
           onNext={onAdvanceNext}
         />
       ) : (
-        <>
-          <PickCardCTAs
-            phase={isAwaitingRack ? 'rack' : 'pick'}
-            scanLabel={scanLabel}
-            cameraEngaged={scannerLive}
-            disabled={!isCurrent || scannerPaused}
-            scanDisabled={needsMrpConfirm}
-            onManualQty={() => onManualQty?.()}
-            onFlag={() => onFlag?.()}
-            onScan={() => onEngageScanner?.()}
-            onConfirmRack={isAwaitingRack ? () => onRackTap?.() : undefined}
-            onConfirmMrp={needsMrpConfirm ? () => (onConfirmMrp ?? onEditMrp)?.() : undefined}
-            confirmMrpLabel={
-              singlePendingMrp != null
-                ? `Confirm ₹${Math.round(singlePendingMrp)} on label`
+        <PickCardCTAs
+          phase={isAwaitingRack ? 'rack' : 'pick'}
+          scanLabel={scanLabel}
+          cameraEngaged={scannerLive}
+          disabled={!isCurrent || scannerPaused}
+          scanDisabled={needsMrpConfirm || splitNeedsFirst || splitNeedsNext}
+          onManualQty={() => onManualQty?.()}
+          onFlag={() => onFlag?.()}
+          onScan={() => onEngageScanner?.()}
+          onConfirmRack={isAwaitingRack ? () => onRackTap?.() : undefined}
+          onConfirmMrp={needsMrpConfirm ? () => (onConfirmMrp ?? onEditMrp)?.() : undefined}
+          confirmMrpLabel={
+            singlePendingMrp != null
+              ? `Confirm ₹${Math.round(singlePendingMrp)} on label`
+              : splitHasActiveBatch
+                ? `Confirm MRP · ₹${Math.round(activeSegment!.mrp)}`
                 : undefined
-            }
-            onMarkPicked={isVerified && !isDone ? onMarkPicked : undefined}
-            canMarkPicked={markPickedReady}
-            markPickedLabel={markPickedLabel}
-          />
-        </>
+          }
+          onMarkPicked={isVerified && !isDone && !splitActive ? onMarkPicked : undefined}
+          canMarkPicked={markPickedReady}
+          markPickedLabel={markPickedLabel}
+          splitMode={splitActive || suggestSplit}
+          splitRemaining={splitRemaining}
+          splitNeedsFirstBatch={splitNeedsFirst}
+          splitNeedsNextBatch={splitNeedsNext}
+          splitActiveBatchReady={splitHasActiveBatch}
+          onPickFirstBatch={onPickFirstBatch}
+          onPickNextMrp={onPickNextMrp}
+          onAllSameMrp={onAllSameMrp}
+          onConfirmBatch={splitHasActiveBatch ? onConfirmBatch : undefined}
+          confirmBatchLabel={confirmBatchLabel}
+          onFinishShort={splitNeedsNext ? onFinishShort : undefined}
+        />
       )}
     </div>
   );

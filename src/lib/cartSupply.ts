@@ -121,8 +121,11 @@ export function isPickableOrderLine(oi: PickLineQty): boolean {
   return pickQuantityTarget(oi) > 0;
 }
 
-export function pickableOrderItems<T extends PickLineQty>(items: T[]): T[] {
-  return items.filter(isPickableOrderLine);
+type PickLineWithSplit = PickLineQty & { split_from_id?: number | null };
+
+/** Exclude MRP-split sibling rows — they are created already-picked during split flow. */
+export function pickableOrderItems<T extends PickLineWithSplit>(items: T[]): T[] {
+  return items.filter(isPickableOrderLine).filter((i) => i.split_from_id == null);
 }
 
 export function countPickableOrderLines(items: PickLineQty[]): number {

@@ -13,6 +13,9 @@ export interface PickQtySheetProps {
   pickedQty: number;
   partCode?: string | null;
   rackNo?: string | null;
+  /** When picking a split MRP batch. */
+  segmentMrp?: number | null;
+  lineRemaining?: number;
   onConfirm: (qty: number) => void;
   onOutOfStock: () => void;
   onClose: () => void;
@@ -28,6 +31,8 @@ export function PickQtySheet({
   pickedQty,
   partCode = null,
   rackNo = null,
+  segmentMrp = null,
+  lineRemaining,
   onConfirm,
   onOutOfStock,
   onClose,
@@ -35,7 +40,7 @@ export function PickQtySheet({
   const [buf, setBuf] = useState('');
   const [oosStep, setOosStep] = useState<'idle' | 'confirm'>('idle');
 
-  const remaining = Math.max(0, targetQty - pickedQty);
+  const remaining = lineRemaining ?? Math.max(0, targetQty - pickedQty);
 
   useEffect(() => {
     if (isOpen) {
@@ -64,7 +69,7 @@ export function PickQtySheet({
     <BottomSheet
       isOpen={isOpen}
       onClose={handleClose}
-      title="Pick quantity"
+      title={segmentMrp != null ? `How many at ₹${Math.round(segmentMrp)}?` : 'Pick quantity'}
       closeOnly
       keyboardBehavior="static"
       sheetClassName="max-h-[min(92dvh,92vh)] pick-sheet-compact"
@@ -82,9 +87,11 @@ export function PickQtySheet({
       <PickSheetContext partCode={partCode} rackNo={rackNo} />
 
       <p className="mb-3 text-xs text-[var(--content-tertiary)]">
-        {pickedQty > 0
-          ? `${pickedQty} already picked · ${remaining} left · ${targetQty} on order`
-          : `${targetQty} pcs on this line`}
+        {segmentMrp != null
+          ? `${remaining} left on this line · enter qty for this MRP batch`
+          : pickedQty > 0
+            ? `${pickedQty} already picked · ${remaining} left · ${targetQty} on order`
+            : `${targetQty} pcs on this line`}
       </p>
 
       {oosStep === 'idle' ? (
@@ -138,7 +145,7 @@ export function PickQtySheet({
 
           {overRemaining ? (
             <p className="mb-2 text-center text-xs font-semibold text-[var(--content-warning-on-light)]">
-              More than {remaining} left — partial pick?
+              Only {remaining} left on line
             </p>
           ) : null}
 

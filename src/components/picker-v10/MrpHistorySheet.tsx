@@ -13,6 +13,8 @@ export interface MrpHistorySheetProps {
   customMrp: number | null;
   partCode?: string | null;
   rackNo?: string | null;
+  /** When true, selection starts an active batch instead of setting line MRP. */
+  selectBatchMode?: boolean;
   onSelectMrp: (mrp: number) => void;
   onSelectCustomMrp: (mrp: number) => void;
   onClose: () => void;
@@ -26,6 +28,7 @@ export function MrpHistorySheet({
   customMrp,
   partCode = null,
   rackNo = null,
+  selectBatchMode = false,
   onSelectMrp,
   onSelectCustomMrp,
   onClose,
@@ -78,7 +81,7 @@ export function MrpHistorySheet({
     <BottomSheet
       isOpen={isOpen}
       onClose={handleClose}
-      title="MRP on label"
+      title={selectBatchMode ? 'MRP for this batch' : 'MRP on label'}
       closeOnly
       keyboardBehavior="static"
       sheetClassName="max-h-[min(92dvh,92vh)] pick-sheet-compact"
@@ -130,14 +133,18 @@ export function MrpHistorySheet({
         <>
           <div className="mb-4">
             <p className="text-base font-extrabold text-[var(--content-primary)]">
-              What MRP does the label show?
+              {selectBatchMode
+                ? 'Which MRP is on this batch?'
+                : 'What MRP does the label show?'}
             </p>
             <p className="mt-1 text-xs text-[var(--content-tertiary)]">
-              {isMulti
-                ? `${history.length} MRP records found — tap the one on the label`
-                : singleMrp
-                  ? 'One record found — confirm it matches the label'
-                  : 'Confirm the MRP printed on the label'}
+              {selectBatchMode
+                ? 'Tap the MRP printed on the pieces you are picking now'
+                : isMulti
+                  ? `${history.length} MRP records found — tap the one on the label`
+                  : singleMrp
+                    ? 'One record found — confirm it matches the label'
+                    : 'Confirm the MRP printed on the label'}
             </p>
           </div>
 

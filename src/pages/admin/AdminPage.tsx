@@ -249,7 +249,7 @@ export default function AdminPage(): React.JSX.Element | null {
             <div className="text-left">
               <p className="font-semibold text-[var(--content-primary)]">Picker UX Lab (v10)</p>
               <p className="text-sm text-[var(--content-tertiary)]">
-                Same PickCard as production — MRP from stock_mrpwise, tap qty/MRP to edit
+                Production pick flow sandbox — iterate UX without writing to live orders
               </p>
             </div>
           </button>

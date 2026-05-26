@@ -132,6 +132,10 @@ export interface OrderItem {
   flag_notes: string | null;
   flag_box_price: number | null;
   scan_result: ScanResult | null;
+  /** Set when this row was split from another during MRP pick. */
+  split_from_id?: number | null;
+  /** Label MRP confirmed by picker at pick time. */
+  confirmed_mrp?: number | null;
 }
 
 export type PendingItemStatus = 'pending' | 'resolved' | 'cancelled';
@@ -231,6 +235,9 @@ export interface ScanResult {
   /** Where confirmed MRP came from: history band, custom entry, or items fallback. */
   mrpSource?: 'stock_mrpwise' | 'custom' | 'items_fallback' | null;
   mrpHistoryCount?: number;
+  /** Per-MRP batch picks when line was split at pick time. */
+  mrpSegments?: Array<{ mrp: number; qty: number; orderItemId: number }>;
+  splitFromId?: number;
 }
 
 export interface OrderWithItems extends Order {

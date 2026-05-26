@@ -89,3 +89,16 @@ export const PICK_TRANSITION_BACKEND_MODE = resolveBackendMode();
 
 export const defaultPickItemTransitionAdapter: PickItemTransitionAdapter =
   new SupabasePickItemTransitionAdapter();
+
+/** Lab / UX sandbox — local UI only, never writes order_items. */
+export const sandboxPickItemTransitionAdapter: PickItemTransitionAdapter = {
+  async applyTransition(): Promise<PickTransitionResult> {
+    return {
+      success: true,
+      qtyAdded: 0,
+      remainingQty: null,
+      lineComplete: false,
+      requiresBreakConfirmation: false,
+    };
+  },
+};

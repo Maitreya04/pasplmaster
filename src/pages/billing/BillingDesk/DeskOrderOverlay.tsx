@@ -19,6 +19,11 @@ import { shouldNotifyPickers } from '../../../lib/billing/fulfillmentPath';
 import { canBroadcastReadyToPick } from '../../../lib/billing/pickerNotifyPolicy';
 import { sendPickerReadyNotification } from '../../../lib/pickerPush';
 import { formatCurrencyRaw, orderItemDisplayName } from '../../../utils/formatters';
+import {
+  groupOrderItemsForDisplay,
+  orderItemConfirmedMrp,
+  orderItemSplitBatchCount,
+} from '../../../lib/billing/orderItemSplitGroups';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 import type { OrderItem } from '../../../types';
 import { CHANGE_REASON_OPTIONS, type ChangeReason, type OverlayLineEdit } from './types';
@@ -130,6 +135,98 @@ function DeskOrderOverlayEditor({
       shouldNotifyPickers(orderDetail.fulfillment_path ?? 'warehouse_pick'),
     [orderDetail.fulfillment_path, orderDetail.workflow_status],
   );
+
+  const itemGroups = useMemo(() => groupOrderItemsForDisplay(items), [items]);
+
+  const renderLineRow = (item: OrderItem, opts?: { indent?: boolean; splitHint?: string }) => {
+    const edit = edits[item.id];
+    if (!edit || edit.removed) return null;
+    const isFlaggedRow = item.state === 'flagged';
+    const labelMrp = orderItemConfirmedMrp(item);
+    return (
+      <div
+        key={item.id}
+        className={`grid grid-cols-[1fr_50px_78px_38px] gap-0 px-2.5 py-2 border-t border-[var(--border-faint)] items-center ${
+          isFlaggedRow
+            ? 'bg-[var(--bg-warning-subtle)] border-l-2 border-l-[var(--border-warning)]'
+            : opts?.indent
+              ? 'bg-[var(--bg-secondary)]/60 pl-4'
+              : ''
+        }`}
+      >
+        <div className="min-w-0 pr-1">
+          <p className="text-xs text-[var(--content-primary)] truncate">
+            {opts?.indent ? '↳ ' : ''}
+            {orderItemDisplayName(item)}
+          </p>
+          {opts?.splitHint ? (
+            <span className="mt-0.5 block text-[9px] text-[var(--content-quaternary)]">{opts.splitHint}</span>
+          ) : null}
+          {labelMrp != null ? (
+            <span className="mt-0.5 block text-[9px] font-medium text-[var(--content-secondary)]">
+              Label MRP ₹{Math.round(labelMrp)}
+            </span>
+          ) : null}
+          {isFlaggedRow && (
+            <span className="inline-block mt-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] border border-[var(--border-warning)]">
+              Flagged
+            </span>
+          )}
+        </div>
+        <span className="text-xs text-[var(--content-quaternary)] tabular-nums">
+          {item.qty_requested}
+        </span>
+        <input
+          type="number"
+          inputMode="decimal"
+          value={edit.priceQuoted}
+          onChange={(e) =>
+            updatePrice(item.id, parseFloat(e.target.value.replace(/,/g, '')) || 0)
+          }
+          className={`w-[68px] h-7 px-1.5 text-xs rounded-md border tabular-nums ${
+            edit.priceTouched
+              ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]'
+              : 'border-[var(--border-subtle)] bg-[var(--bg-tertiary)]'
+          }`}
+        />
+        <div className="flex flex-col items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => {
+              if (pendingRemoveId === item.id) {
+                setEdits((prev) => ({
+                  ...prev,
+                  [item.id]: { ...prev[item.id]!, removed: true },
+                }));
+                setPendingRemoveId(null);
+              } else {
+                setPendingRemoveId(item.id);
+              }
+            }}
+            className="text-[var(--content-quaternary)] hover:text-[var(--content-negative)]"
+            aria-label="Remove line"
+          >
+            <Trash size={13} />
+          </button>
+          {pendingRemoveId === item.id && (
+            <button
+              type="button"
+              onClick={() => {
+                setEdits((prev) => ({
+                  ...prev,
+                  [item.id]: { ...prev[item.id]!, removed: true },
+                }));
+                setPendingRemoveId(null);
+              }}
+              className="text-[9px] text-[var(--content-negative)]"
+            >
+              Remove?
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const updatePrice = useCallback((itemId: number, price: number) => {
     setEdits((prev) => ({
@@ -349,83 +446,17 @@ function DeskOrderOverlayEditor({
                 <span>MRP</span>
                 <span />
               </div>
-              {items.map((item) => {
-                    const edit = edits[item.id];
-                    if (!edit || edit.removed) return null;
-                    const isFlaggedRow = item.state === 'flagged';
-                    return (
-                      <div
-                        key={item.id}
-                        className={`grid grid-cols-[1fr_50px_78px_38px] gap-0 px-2.5 py-2 border-t border-[var(--border-faint)] items-center ${
-                          isFlaggedRow
-                            ? 'bg-[var(--bg-warning-subtle)] border-l-2 border-l-[var(--border-warning)]'
-                            : ''
-                        }`}
-                      >
-                        <div className="min-w-0 pr-1">
-                          <p className="text-xs text-[var(--content-primary)] truncate">
-                            {orderItemDisplayName(item)}
-                          </p>
-                          {isFlaggedRow && (
-                            <span className="inline-block mt-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] border border-[var(--border-warning)]">
-                              Flagged
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-xs text-[var(--content-quaternary)] tabular-nums">
-                          {item.qty_requested}
-                        </span>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          value={edit.priceQuoted}
-                          onChange={(e) =>
-                            updatePrice(item.id, parseFloat(e.target.value.replace(/,/g, '')) || 0)
-                          }
-                          className={`w-[68px] h-7 px-1.5 text-xs rounded-md border tabular-nums ${
-                            edit.priceTouched
-                              ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]'
-                              : 'border-[var(--border-subtle)] bg-[var(--bg-tertiary)]'
-                          }`}
-                        />
-                        <div className="flex flex-col items-center gap-0.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (pendingRemoveId === item.id) {
-                                setEdits((prev) => ({
-                                  ...prev,
-                                  [item.id]: { ...prev[item.id]!, removed: true },
-                                }));
-                                setPendingRemoveId(null);
-                              } else {
-                                setPendingRemoveId(item.id);
-                              }
-                            }}
-                            className="text-[var(--content-quaternary)] hover:text-[var(--content-negative)]"
-                            aria-label="Remove line"
-                          >
-                            <Trash size={13} />
-                          </button>
-                          {pendingRemoveId === item.id && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEdits((prev) => ({
-                                  ...prev,
-                                  [item.id]: { ...prev[item.id]!, removed: true },
-                                }));
-                                setPendingRemoveId(null);
-                              }}
-                              className="text-[9px] text-[var(--content-negative)]"
-                            >
-                              Remove?
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+              {itemGroups.map((group) => {
+                const batchCount = orderItemSplitBatchCount(group.root, group.siblings);
+                const splitHint =
+                  batchCount > 1 ? `${batchCount} MRP batches from pick` : undefined;
+                return (
+                  <div key={group.key}>
+                    {renderLineRow(group.root, { splitHint })}
+                    {group.siblings.map((sibling) => renderLineRow(sibling, { indent: true }))}
+                  </div>
+                );
+              })}
                 </div>
               </div>
 

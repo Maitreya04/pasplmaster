@@ -1,4 +1,10 @@
 import type { StockMrpHistoryEntry } from '../../types';
+import type { PickLineMrpState } from '../../lib/picking/pickLineMrp';
+import {
+  getActiveSegmentMrp,
+  isSplitMode,
+  pickLineSegmentsCommittedQty,
+} from '../../lib/picking/pickLineMrp';
 
 export interface PickMetricRowProps {
   /** Pieces left to pick on this line. */
@@ -9,6 +15,7 @@ export interface PickMetricRowProps {
   mrpLoading?: boolean;
   confirmedMrp: number | null;
   customMrp: number | null;
+  lineMrp?: PickLineMrpState;
   disabled?: boolean;
   onEditQty: () => void;
   onEditMrp: () => void;
@@ -27,16 +34,21 @@ export function PickMetricRow({
   mrpLoading = false,
   confirmedMrp,
   customMrp,
+  lineMrp,
   disabled = false,
   onEditQty,
   onEditMrp,
   onUndoPick,
 }: PickMetricRowProps): React.JSX.Element {
+  const splitActive = isSplitMode(lineMrp);
+  const activeMrp = splitActive ? getActiveSegmentMrp(lineMrp) : null;
   const latestMrp = mrpHistory[0]?.mrp ?? null;
-  const finalMrp = customMrp ?? confirmedMrp;
+  const finalMrp = splitActive ? activeMrp : (customMrp ?? confirmedMrp);
   const mrpFlagged = finalMrp != null && latestMrp != null && finalMrp !== latestMrp;
   const isMultiMrp = mrpHistory.length > 1;
   const isPartialQty = pickedQty > 0 && pickedQty < targetQty;
+  const splitCommitted = splitActive ? pickLineSegmentsCommittedQty(lineMrp) : 0;
+  const splitGoal = lineMrp?.originalTargetQty ?? targetQty;
 
   return (
     <div className="mx-3 mb-2 overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] sm:mx-4">
@@ -50,7 +62,7 @@ export function PickMetricRow({
           }`}
         >
           <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-            Pick qty
+            {splitActive ? 'Left on line' : 'Pick qty'}
           </p>
           <div className="mt-1 flex min-w-0 items-baseline gap-1">
             <span
@@ -69,9 +81,13 @@ export function PickMetricRow({
               isPartialQty ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-tertiary)]'
             }`}
           >
-            {pickedQty > 0 ? `${pickedQty} picked · ` : ''}
-            {targetQty} target
-            {isPartialQty ? ` · ${targetQty - pickedQty} short` : ''}
+            {splitActive
+              ? `${splitCommitted} picked · ${splitGoal} target`
+              : pickedQty > 0
+                ? `${pickedQty} picked · `
+                : ''}
+            {!splitActive && `${targetQty} target`}
+            {isPartialQty && !splitActive ? ` · ${targetQty - pickedQty} short` : ''}
           </p>
           <span className="absolute right-2.5 top-2.5 text-[10px] text-[var(--border-opaque)]">✎</span>
         </button>
@@ -83,7 +99,7 @@ export function PickMetricRow({
           className="relative min-w-0 flex-1 px-2.5 py-2.5 text-left pick-pressable disabled:opacity-50 sm:px-4 sm:py-3"
         >
           <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-            MRP on label
+            {splitActive ? 'Batch MRP' : 'MRP on label'}
           </p>
 
           {mrpLoading ? (
@@ -102,7 +118,20 @@ export function PickMetricRow({
                   mrpFlagged ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-positive)]'
                 }`}
               >
-                {mrpFlagged ? `differs · system ₹${Math.round(latestMrp ?? 0)}` : 'confirmed ✓'}
+                {splitActive
+                  ? 'active batch'
+                  : mrpFlagged
+                    ? `differs · system ₹${Math.round(latestMrp ?? 0)}`
+                    : 'confirmed ✓'}
+              </p>
+            </>
+          ) : splitActive ? (
+            <>
+              <p className="mt-1.5 text-xs font-bold text-[var(--content-warning-on-light)]">
+                Tap to pick batch
+              </p>
+              <p className="text-[10px] leading-snug text-[var(--content-tertiary)]">
+                Choose MRP for this batch
               </p>
             </>
           ) : isMultiMrp ? (
@@ -141,7 +170,7 @@ export function PickMetricRow({
         </button>
       </div>
 
-      {finalMrp != null && (
+      {finalMrp != null && !splitActive && (
         <div
           className={`mx-2.5 mb-2.5 flex min-w-0 items-center gap-2 rounded-lg border px-2 py-1.5 sm:mx-3 sm:mb-3 sm:px-2.5 sm:py-2 ${
             mrpFlagged
@@ -174,7 +203,7 @@ export function PickMetricRow({
         </div>
       )}
 
-      {pickedQty > 0 && onUndoPick && finalMrp == null && (
+      {pickedQty > 0 && onUndoPick && finalMrp == null && !splitActive && (
         <div className="mx-2.5 mb-2.5 flex justify-end sm:mx-3 sm:mb-3">
           <button
             type="button"

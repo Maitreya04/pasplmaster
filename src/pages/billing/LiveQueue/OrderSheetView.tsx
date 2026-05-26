@@ -29,6 +29,7 @@ import {
   orderItemDisplayName,
   orderItemProductCode,
 } from '../../../utils/formatters';
+import { orderItemConfirmedMrp } from '../../../lib/billing/orderItemSplitGroups';
 
 /** UI labels for billing (Windows-first). Finish still works with Cmd+Enter on Mac. */
 const SHORTCUT_COPY_ALL = 'Alt+C';
@@ -784,6 +785,9 @@ export function OrderSheetView({
                   else if (isEdited) stripeColor = 'var(--border-accent)';
                   else if (hasSpecialRate) stripeColor = 'var(--border-warning)';
 
+                  const labelMrp = orderItemConfirmedMrp(item);
+                  const isSplitSibling = item.split_from_id != null;
+
                   return (
                     <tr
                       key={item.id}
@@ -816,6 +820,7 @@ export function OrderSheetView({
                               flag ? 'text-[var(--content-secondary)]' : 'text-[var(--content-primary)]'
                             }`}
                           >
+                            {isSplitSibling ? '↳ ' : ''}
                             {orderItemDisplayName(item)}
                           </p>
                           {isNew && (
@@ -839,6 +844,12 @@ export function OrderSheetView({
                             </span>
                           </div>
                         )}
+                        {labelMrp != null ? (
+                          <p className="mt-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
+                            Label MRP ₹{Math.round(labelMrp)}
+                            {isSplitSibling ? ' · split batch' : ''}
+                          </p>
+                        ) : null}
                       </td>
 
                       <td className="hidden sm:table-cell align-top min-w-0 w-[10.5rem] max-w-[10.5rem] lg:w-[13rem] lg:max-w-[13rem]">
