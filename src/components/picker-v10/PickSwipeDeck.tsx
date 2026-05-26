@@ -30,6 +30,7 @@ export function PickSwipeDeck({
   children,
 }: PickSwipeDeckProps): React.JSX.Element {
   return (
+    <div className="flex h-full min-h-0 flex-col">
     <SwipeDeck
       variant="carousel"
       currentIndex={currentIndex}
@@ -41,11 +42,12 @@ export function PickSwipeDeck({
       onSwipeUpDragEnd={onSwipeUpDragEnd}
       hint={
         onSwipeUp
-          ? 'Swipe › next line · ‹ previous · ↑ queue'
-          : 'Swipe › next line · ‹ previous'
+          ? '‹ › lines · ↑ queue'
+          : '‹ › switch lines'
       }
     >
       {children}
     </SwipeDeck>
+    </div>
   );
 }

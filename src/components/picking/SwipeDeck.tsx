@@ -12,10 +12,10 @@ const SWIPE_THRESHOLD_RATIO = 0.11;
 const SWIPE_THRESHOLD_MIN_PX = 32;
 const VELOCITY_THRESHOLD = 0.22;
 const VELOCITY_DISTANCE_MIN_PX = 14;
-const VERTICAL_DOMINANCE = 1.35;
-const VERTICAL_MIN_PX = 10;
-const VERTICAL_OPEN_PX = 36;
-const VERTICAL_DRAG_MAX_PX = 72;
+const VERTICAL_DOMINANCE = 1.15;
+const VERTICAL_MIN_PX = 8;
+const VERTICAL_OPEN_PX = 28;
+const VERTICAL_DRAG_MAX_PX = 80;
 const GESTURE_LOCK_PX = 5;
 const DRAG_OVERSCROLL_RATIO = 1.05;
 const SNAP_MS = 220;
@@ -295,6 +295,7 @@ export function SwipeDeck({
 
       if (gestureRef.current === 'vertical') {
         emitDragProgress(deltaY);
+        event.preventDefault();
         return;
       }
 
@@ -362,6 +363,7 @@ export function SwipeDeck({
 
       if (gestureRef.current === 'vertical') {
         emitDragProgress(deltaY);
+        event.preventDefault();
         return;
       }
 
@@ -429,23 +431,26 @@ export function SwipeDeck({
   };
 
   return (
-    <div className="space-y-2">
+    <div className="flex h-full min-h-0 flex-col gap-1.5">
       <div
         ref={containerRef}
-        className={`relative overflow-hidden select-none touch-pan-y ${isCarousel ? 'px-0.5' : ''} pick-deck-height`}
+        className={`relative min-h-0 flex-1 overflow-hidden select-none ${isCarousel ? 'px-0.5' : ''} pick-deck-height`}
         style={{
-          touchAction: 'pan-y pinch-zoom',
+          touchAction: onSwipeUp ? 'pan-x pinch-zoom' : 'pan-y pinch-zoom',
           ['--swipe-up-progress' as string]: '0',
         }}
       >
-        <div
-          className="pick-deck-swipe-hint pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-end justify-center pb-2"
-          aria-hidden
-        >
-          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)]/90 px-2.5 py-1 text-[10px] font-semibold text-[var(--content-secondary)] shadow-sm backdrop-blur-sm">
-            ↑ Queue
-          </span>
-        </div>
+        {onSwipeUp ? (
+          <div
+            className="pick-deck-pull-zone absolute inset-x-0 bottom-0 z-20 flex items-end justify-center pb-1.5 pt-6"
+            aria-hidden
+          >
+            <span className="pick-deck-swipe-hint inline-flex items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/95 px-3 py-1 text-[10px] font-semibold text-[var(--content-secondary)] shadow-sm backdrop-blur-sm">
+              ↑ Queue
+            </span>
+          </div>
+        ) : null}
+        <div className="pick-deck-lift h-full min-h-0">
         <div
           ref={trackRef}
           className="flex h-full"
@@ -480,11 +485,12 @@ export function SwipeDeck({
             );
           })}
         </div>
+        </div>
       </div>
       {itemCount > 1 && (
-        <div className="space-y-1.5">
+        <div className="shrink-0 space-y-1">
           <div
-            className={`flex max-w-full gap-2 overflow-x-auto py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
+            className={`flex max-w-full gap-1.5 overflow-x-auto py-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
               isCarousel ? 'justify-center px-4' : 'justify-start px-3'
             }`}
             role="tablist"

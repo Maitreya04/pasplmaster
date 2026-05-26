@@ -409,9 +409,27 @@ select {
   height: clamp(260px, min(48vh, 52vh), 520px);
 }
 
+.pick-page-main .pick-deck-height {
+  flex: 1 1 0;
+  min-height: clamp(200px, 36dvh, 480px);
+  height: auto;
+}
+
+.pick-deck-lift {
+  transition: transform 100ms ease-out;
+  transform: translateY(calc(var(--swipe-up-progress, 0) * -12px));
+}
+
+.pick-deck-pull-zone {
+  touch-action: none;
+  background: linear-gradient(to top, color-mix(in srgb, var(--bg-secondary) 88%, transparent), transparent 72%);
+  pointer-events: none;
+}
+
 .pick-deck-swipe-hint {
-  opacity: calc(var(--swipe-up-progress, 0) * 1);
-  transform: translateY(calc((1 - var(--swipe-up-progress, 0)) * 8px));
+  opacity: calc(0.5 + var(--swipe-up-progress, 0) * 0.5);
+  transform: translateY(calc(var(--swipe-up-progress, 0) * -8px))
+    scale(calc(1 + var(--swipe-up-progress, 0) * 0.08));
   transition: opacity 80ms ease-out, transform 80ms ease-out;
 }
 
@@ -426,8 +444,20 @@ select {
     height: clamp(220px, 44vh, 420px);
   }
 
+  .pick-page-main .pick-deck-height {
+    min-height: clamp(180px, 32dvh, 360px);
+  }
+
+  .pick-hero-rack {
+    font-size: clamp(1.75rem, 9vw, 3rem);
+  }
+
+  .pick-hero-code {
+    font-size: clamp(1.375rem, 6.5vw, 2.25rem);
+  }
+
   .pick-status-list {
-    max-height: min(9rem, 24dvh) !important;
+    max-height: min(8rem, 22dvh) !important;
   }
 }
 

@@ -23,14 +23,6 @@ export interface PickCardCTAsProps {
   markPickedLabel?: string;
 }
 
-function StepHint({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return (
-    <p className="border-b border-[var(--border-faint)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)] sm:px-4">
-      {children}
-    </p>
-  );
-}
-
 export function PickCardCTAs({
   phase,
   scanLabel,
@@ -50,7 +42,6 @@ export function PickCardCTAs({
   if (onConfirmMrp) {
     return (
       <div className="border-t border-[var(--border-faint)] bg-[var(--bg-secondary)]">
-        <StepHint>Step 2 · Confirm MRP on label</StepHint>
         <div className="p-2.5 sm:p-3">
           <button
             type="button"
@@ -100,7 +91,6 @@ export function PickCardCTAs({
         role="toolbar"
         aria-label="Verify rack location"
       >
-        <StepHint>Step 1 · Verify rack · then you can pick</StepHint>
         <div className="space-y-2 p-2.5 sm:p-3">
           <button
             type="button"
@@ -127,25 +117,15 @@ export function PickCardCTAs({
               At rack — no bin QR
             </button>
           ) : null}
-          <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={onFlag}
-              className="min-h-[44px] rounded-xl bg-[var(--bg-warning-subtle)] text-xs font-semibold text-[var(--content-warning-on-light)] pick-pressable disabled:opacity-40"
-            >
-              <Flag size={16} weight="fill" className="mx-auto mb-0.5" />
-              Flag item
-            </button>
-            <button
-              type="button"
-              disabled
-              className="min-h-[44px] rounded-xl bg-[var(--bg-tertiary)] text-xs font-semibold text-[var(--content-quaternary)] opacity-50"
-              aria-disabled
-            >
-              Pick unlocks after rack
-            </button>
-          </div>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onFlag}
+            className="min-h-[44px] w-full rounded-xl bg-[var(--bg-warning-subtle)] text-xs font-semibold text-[var(--content-warning-on-light)] pick-pressable disabled:opacity-40"
+          >
+            <Flag size={16} weight="fill" className="mr-1.5 inline" />
+            Flag item
+          </button>
         </div>
       </div>
     );
@@ -159,9 +139,6 @@ export function PickCardCTAs({
       role="toolbar"
       aria-label="Pick item"
     >
-      <StepHint>
-        {canMarkPicked ? 'Step 3 · Mark picked to move on' : 'Step 2 · Scan item or enter qty'}
-      </StepHint>
       <div className="space-y-2 p-2.5 sm:p-3">
         {showMarkPicked ? (
           <button

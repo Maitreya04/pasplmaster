@@ -1,12 +1,12 @@
 import {
   ArrowRight,
-  ArrowUp,
   CheckCircle,
   Circle,
   Flag,
   MapPin,
   Minus,
 } from '@phosphor-icons/react';
+import { useCallback, useRef } from 'react';
 
 export type PickLineStatusKind = 'now' | 'pending' | 'partial' | 'picked' | 'flagged' | 'skipped';
 
@@ -34,12 +34,14 @@ interface PickLineStatusPanelProps {
   flaggedCount: number;
   remainingCount: number;
   totalCount: number;
-  /** 0–1 lift from swipe-up drag on the deck */
+  /** 0–1 lift from swipe-up drag on the deck or handle */
   dragProgress?: number;
   /** Show the full line list expanded (not a short peek). */
   defaultExpanded?: boolean;
   onJump: (itemId: number) => void;
   onOpenQueue: () => void;
+  onQueueDrag?: (progress: number) => void;
+  onQueueDragEnd?: () => void;
 }
 
 function StatusIcon({ status }: { status: PickLineStatusKind }): React.JSX.Element {
@@ -103,11 +105,11 @@ function statusLabel(status: PickLineStatusKind): string {
 function lineActionHint(row: PickLineStatusRow): string | null {
   if (row.awaitingAdvance) return 'Tap card · Next line';
   if (row.status === 'now') {
-    if (!row.rackVerified) return 'Step 1 · At rack';
-    if (row.pickedQty > 0 && row.pickedQty < row.targetQty) return 'Step 2 · Picking';
-    return 'Step 2 · Pick qty';
+    if (!row.rackVerified) return 'Verify rack';
+    if (row.pickedQty > 0 && row.pickedQty < row.targetQty) return 'Picking…';
+    return 'Enter qty';
   }
-  if (row.status === 'partial') return 'Step 2 · Finish qty';
+  if (row.status === 'partial') return 'Finish qty';
   if (row.status === 'pending' || row.status === 'skipped') return 'Tap to jump';
   return null;
 }
@@ -165,18 +167,79 @@ export function PickLineStatusPanel({
   defaultExpanded = false,
   onJump,
   onOpenQueue,
+  onQueueDrag,
+  onQueueDragEnd,
 }: PickLineStatusPanelProps): React.JSX.Element {
   const drag = Math.min(1, Math.max(0, dragProgress));
   const liftPx = Math.round(drag * 22);
-  const baseListRem = defaultExpanded ? Math.min(28, 8 + rows.length * 2.75) : 11;
-  const listMaxRem = baseListRem + drag * 10;
+  const baseListRem = defaultExpanded ? Math.min(22, 6 + rows.length * 2.25) : 9;
+  const listMaxRem = baseListRem + drag * 8;
   const doneRows = rows.filter((r) => r.status === 'picked' || r.status === 'flagged');
   const activeRows = rows.filter((r) => r.status !== 'picked' && r.status !== 'flagged');
   const openingQueue = drag > 0.35;
 
+  const handleDragRef = useRef<{ startY: number; dragging: boolean; dragged: boolean }>({
+    startY: 0,
+    dragging: false,
+    dragged: false,
+  });
+  const VERTICAL_OPEN_PX = 28;
+  const VERTICAL_DRAG_MAX_PX = 80;
+
+  const finishHandleDrag = useCallback(
+    (clientY: number) => {
+      if (!handleDragRef.current.dragging) return;
+      const deltaY = clientY - handleDragRef.current.startY;
+      handleDragRef.current.dragging = false;
+      onQueueDragEnd?.();
+      if (deltaY < -VERTICAL_OPEN_PX) {
+        handleDragRef.current.dragged = true;
+        onOpenQueue();
+      }
+    },
+    [onOpenQueue, onQueueDragEnd],
+  );
+
+  const handlePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      handleDragRef.current = { startY: event.clientY, dragging: true, dragged: false };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [],
+  );
+
+  const handlePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (!handleDragRef.current.dragging) return;
+      const deltaY = event.clientY - handleDragRef.current.startY;
+      if (Math.abs(deltaY) > 6) {
+        handleDragRef.current.dragged = true;
+      }
+      if (deltaY >= 0) {
+        onQueueDrag?.(0);
+        return;
+      }
+      onQueueDrag?.(Math.min(1, Math.abs(deltaY) / VERTICAL_DRAG_MAX_PX));
+      event.preventDefault();
+    },
+    [onQueueDrag],
+  );
+
+  const handlePointerUp = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      finishHandleDrag(event.clientY);
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        /* noop */
+      }
+    },
+    [finishHandleDrag],
+  );
+
   return (
     <div
-      className="pick-status-panel space-y-2 transition-transform duration-150 ease-out"
+      className="pick-status-panel shrink-0 space-y-2 transition-transform duration-150 ease-out"
       style={{ transform: liftPx > 0 ? `translateY(-${liftPx}px)` : undefined }}
     >
       <div
@@ -188,11 +251,22 @@ export function PickLineStatusPanel({
       >
         <button
           type="button"
-          onClick={onOpenQueue}
-          className="group flex w-full flex-col items-center border-b border-[var(--border-faint)] px-3 py-2.5 pick-pressable"
+          onClick={() => {
+            if (handleDragRef.current.dragged) {
+              handleDragRef.current.dragged = false;
+              return;
+            }
+            onOpenQueue();
+          }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          className="group flex w-full touch-none flex-col items-center border-b border-[var(--border-faint)] px-3 py-2 pick-pressable"
+          style={{ touchAction: 'none' }}
           aria-label="Open full pick queue. Swipe up on the card above."
         >
-          <span className="mb-1.5 block h-1.5 w-12 rounded-full bg-[var(--border-opaque)] transition-all duration-200 group-active:w-14 group-active:bg-[var(--role-primary)]" />
+          <span className="mb-1 block h-1 w-10 rounded-full bg-[var(--border-opaque)] transition-all duration-200 group-active:w-12 group-active:bg-[var(--role-primary)]" />
           <span
             className={`text-[10px] font-semibold transition-colors duration-150 ${
               openingQueue
@@ -201,10 +275,10 @@ export function PickLineStatusPanel({
             }`}
           >
             {openingQueue
-              ? 'Release to open full queue'
+              ? 'Release for full queue'
               : defaultExpanded
-                ? 'Pull for full queue sheet · list below'
-                : 'Swipe up on card or pull here · full queue'}
+                ? 'Pull up for full queue'
+                : 'Pull up · full queue'}
           </span>
         </button>
 
@@ -232,7 +306,7 @@ export function PickLineStatusPanel({
 
         <ul
           className="pick-status-list overflow-y-auto overscroll-contain transition-[max-height] duration-150 ease-out"
-          style={{ maxHeight: `min(${listMaxRem}rem, 36dvh)` }}
+          style={{ maxHeight: `min(${listMaxRem}rem, 28dvh)` }}
         >
           {doneRows.length > 0 && (
             <>
@@ -270,20 +344,6 @@ export function PickLineStatusPanel({
           )}
         </ul>
       </div>
-
-      <button
-        type="button"
-        onClick={onOpenQueue}
-        className="group flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3 pick-pressable text-sm font-semibold text-[var(--content-secondary)] transition-colors active:border-[var(--role-primary)] active:bg-[var(--bg-accent-subtle)] active:text-[var(--role-primary)]"
-        aria-label="Open full pick queue"
-      >
-        <ArrowUp
-          size={18}
-          weight="bold"
-          className="transition-transform duration-200 group-active:-translate-y-0.5"
-        />
-        Open full queue
-      </button>
     </div>
   );
 }

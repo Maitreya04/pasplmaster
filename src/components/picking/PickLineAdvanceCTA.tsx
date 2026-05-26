@@ -118,8 +118,8 @@ export function PickLineAdvanceCTA({
         </span>
       </button>
 
-      <p className="mt-2.5 text-center text-[10px] font-medium text-[var(--content-tertiary)]">
-        Step 3 · Line verified — tap to move on · Swipe › browse · ↑ queue
+      <p className="mt-2 text-center text-[10px] font-medium text-[var(--content-tertiary)]">
+        Swipe › browse lines · Pull ↑ for queue
       </p>
     </div>
   );

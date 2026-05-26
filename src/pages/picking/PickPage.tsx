@@ -1848,8 +1848,8 @@ export default function PickPage(): React.JSX.Element | null {
     lineOutcome !== null;
 
   return (
-    <div className="role-picking min-h-[100dvh] bg-[var(--bg-primary)] pb-32">
-      <header className="sticky top-0 z-40 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-md">
+    <div className="role-picking pick-page-shell flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden bg-[var(--bg-primary)]">
+      <header className="z-40 shrink-0 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-md">
         <div className="flex items-start gap-2 px-3 py-3 sm:px-4">
           <button
             onClick={() => navigate('/picking')}
@@ -1905,9 +1905,10 @@ export default function PickPage(): React.JSX.Element | null {
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-lg px-1.5 pt-2 space-y-3 sm:px-2">
+      <div className="pick-page-main mx-auto flex min-h-0 w-full max-w-lg flex-1 flex-col overflow-hidden px-1.5 pt-2 sm:px-2">
         {deckItems.length > 0 ? (
-          <div className="space-y-3">
+          <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+            <div className="flex h-full min-h-0 flex-1 flex-col">
             <PickSwipeDeck
               currentIndex={safeCardIndex}
               itemCount={deckItems.length}
@@ -2038,9 +2039,10 @@ export default function PickPage(): React.JSX.Element | null {
                 );
               })}
             </PickSwipeDeck>
+            </div>
 
             {scannerHint && (
-              <p className="text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] rounded-lg px-3 py-2">
+              <p className="shrink-0 text-xs text-[var(--content-secondary)] bg-[var(--bg-tertiary)] rounded-lg px-3 py-1.5">
                 {scannerHint}
               </p>
             )}
@@ -2059,6 +2061,8 @@ export default function PickPage(): React.JSX.Element | null {
                 appHaptics.selection();
                 setQueueSheetOpen(true);
               }}
+              onQueueDrag={setQueueDragProgress}
+              onQueueDragEnd={() => setQueueDragProgress(0)}
             />
           </div>
         ) : (
