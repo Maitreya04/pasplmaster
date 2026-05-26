@@ -112,7 +112,7 @@ export default function BillingLayout(): React.JSX.Element | null {
               <PushAlertsCompact label="Billing alerts" push={push} />
             </div>
           )}
-          <div className="flex-1 min-h-0 flex flex-col">
+          <div className="flex-1 min-h-0 flex flex-col overflow-y-auto overscroll-y-contain">
             <Outlet />
           </div>
         </main>
