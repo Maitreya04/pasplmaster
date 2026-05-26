@@ -447,7 +447,7 @@ function DeskOrderOverlayEditor({
                 <span />
               </div>
               {itemGroups.map((group) => {
-                const batchCount = orderItemSplitBatchCount(group.root, group.siblings);
+                const batchCount = orderItemSplitBatchCount(group.siblings);
                 const splitHint =
                   batchCount > 1 ? `${batchCount} MRP batches from pick` : undefined;
                 return (

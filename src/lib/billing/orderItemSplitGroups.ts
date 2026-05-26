@@ -40,6 +40,6 @@ export function orderItemConfirmedMrp(item: OrderItem): number | null {
   return null;
 }
 
-export function orderItemSplitBatchCount(item: OrderItem, siblings: OrderItem[]): number {
+export function orderItemSplitBatchCount(siblings: OrderItem[]): number {
   return 1 + siblings.length;
 }
