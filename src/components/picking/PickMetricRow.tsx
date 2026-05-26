@@ -12,6 +12,8 @@ export interface PickMetricRowProps {
   disabled?: boolean;
   onEditQty: () => void;
   onEditMrp: () => void;
+  /** Reset qty progress on this line (wrong pick / wrong qty). */
+  onUndoPick?: () => void;
 }
 
 /**
@@ -28,6 +30,7 @@ export function PickMetricRow({
   disabled = false,
   onEditQty,
   onEditMrp,
+  onUndoPick,
 }: PickMetricRowProps): React.JSX.Element {
   const latestMrp = mrpHistory[0]?.mrp ?? null;
   const finalMrp = customMrp ?? confirmedMrp;
@@ -157,7 +160,28 @@ export function PickMetricRow({
               : `MRP ₹${Math.round(finalMrp)} confirmed on label`}
           </p>
           <button type="button" onClick={onEditMrp} className="shrink-0 text-[10px] font-semibold opacity-80 pick-pressable">
-            Edit
+            Change MRP
+          </button>
+          {onUndoPick ? (
+            <button
+              type="button"
+              onClick={onUndoPick}
+              className="shrink-0 text-[10px] font-semibold text-[var(--content-secondary)] pick-pressable"
+            >
+              Undo pick
+            </button>
+          ) : null}
+        </div>
+      )}
+
+      {pickedQty > 0 && onUndoPick && finalMrp == null && (
+        <div className="mx-2.5 mb-2.5 flex justify-end sm:mx-3 sm:mb-3">
+          <button
+            type="button"
+            onClick={onUndoPick}
+            className="text-[10px] font-semibold text-[var(--content-secondary)] pick-pressable"
+          >
+            Undo qty · start over
           </button>
         </div>
       )}

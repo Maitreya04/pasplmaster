@@ -38,6 +38,9 @@ export interface PickCardProps {
   onEditMrp?: () => void;
   /** Primary CTA when single MRP band needs confirm (no sheet). */
   onConfirmMrp?: () => void;
+  onMarkPicked?: () => void;
+  markPickedLabel?: string;
+  onUndoLinePick?: () => void;
   onFlag?: () => void;
   onEngageScanner?: () => void;
   onSelectLayer?: (layerId: number) => void;
@@ -72,6 +75,9 @@ export const PickCard = memo(function PickCard({
   onManualQty,
   onEditMrp,
   onConfirmMrp,
+  onMarkPicked,
+  markPickedLabel,
+  onUndoLinePick,
   onFlag,
   onEngageScanner,
   onSelectLayer,
@@ -110,6 +116,9 @@ export const PickCard = memo(function PickCard({
   const mrpConfirmed = isPickLineMrpConfirmed(lineMrp);
   const hasMrpBands = mrpHistory.length > 0;
   const needsMrpConfirm = isVerified && hasMrpBands && !mrpConfirmed;
+  const mrpGateOk = !hasMrpBands || mrpConfirmed;
+  const qtyGateOk = pickedQty > 0;
+  const markPickedReady = isVerified && mrpGateOk && qtyGateOk && !isDone && !showingOutcome;
   const singlePendingMrp =
     needsMrpConfirm && mrpHistory.length === 1 ? mrpHistory[0]!.mrp : null;
   /** Qty + MRP row appears as soon as rack is verified — qty must not depend on MRP data. */
@@ -154,6 +163,7 @@ export const PickCard = memo(function PickCard({
             disabled={!isCurrent}
             onEditQty={() => onManualQty?.()}
             onEditMrp={() => onEditMrp?.()}
+            onUndoPick={pickedQty > 0 && !showingOutcome ? onUndoLinePick : undefined}
           />
         )}
 
@@ -220,6 +230,9 @@ export const PickCard = memo(function PickCard({
                 ? `Confirm ₹${Math.round(singlePendingMrp)} on label`
                 : undefined
             }
+            onMarkPicked={isVerified && !isDone ? onMarkPicked : undefined}
+            canMarkPicked={markPickedReady}
+            markPickedLabel={markPickedLabel}
           />
         </>
       )}

@@ -11,16 +11,27 @@ import {
   FilterChip,
 } from '../../components/shared';
 import { ActivePickRow, useActivePickBoardOrders } from '../../components/picking/ActivePickRow';
-import { isInProgressPick, isMyAssignedPending, isPickStarted } from '../../lib/picking/pickLifecycle';
+import { AvailableOrderRow } from '../../components/picking/AvailableOrderRow';
+import { sortAvailablePickQueueOrders } from '../../lib/pickQueueTransport';
+import {
+  isInProgressPick,
+  isMyAssignedPending,
+  isMyAssignedWorkCleared,
+  isPickStarted,
+} from '../../lib/picking/pickLifecycle';
 
 type ActiveFilter = 'all' | 'mine' | 'in_progress' | 'stale';
+
+function hasPickableLines(order: { pick_line_count?: number; item_count: number }): boolean {
+  if (order.pick_line_count != null) return order.pick_line_count > 0;
+  return order.item_count > 0;
+}
 
 export default function ActivePicksPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const { userName } = useAuth();
   const [filter, setFilter] = useState<ActiveFilter>('all');
-
-  const { myActive, otherActive, isLoading } = useClaimableOrders({
+  const { available, myActive, otherActive, stale, isLoading } = useClaimableOrders({
     stage: 'picking',
     workflowStatus: ['approved', 'picking'],
   });
@@ -47,6 +58,29 @@ export default function ActivePicksPage(): React.JSX.Element | null {
     [myActive],
   );
 
+  const inProgressPicks = useMemo(
+    () => myActive.filter(isInProgressPick),
+    [myActive],
+  );
+
+  const assignedWorkCleared = useMemo(
+    () => isMyAssignedWorkCleared(myActive, userName),
+    [myActive, userName],
+  );
+
+  const unassignedOrders = useMemo(
+    () => sortAvailablePickQueueOrders(available.filter(hasPickableLines)),
+    [available],
+  );
+
+  const stalePoolOrders = useMemo(
+    () => sortAvailablePickQueueOrders(stale.filter(hasPickableLines)),
+    [stale],
+  );
+
+  const poolVisible = assignedWorkCleared;
+  const poolHasOrders = unassignedOrders.length > 0 || stalePoolOrders.length > 0;
+
   const handleOpen = (orderId: number, order: (typeof boardOrders)[number]) => {
     if (!myOrderIds.has(orderId)) return;
     if (isInProgressPick(order)) {
@@ -58,19 +92,24 @@ export default function ActivePicksPage(): React.JSX.Element | null {
     }
   };
 
+  const handlePoolOpen = (orderId: number) => {
+    if (inProgressPicks.length > 0) return;
+    navigate(`/picking/preview/${orderId}?source=pool`);
+  };
+
   const inProgressCount = boardOrders.filter((o) => isPickStarted(o.workflow_status)).length;
   const staleCount = boardOrders.filter(
     (o) => o.claim_info?.is_stale && o.workflow_status === 'picking',
   ).length;
 
   return (
-    <div className="min-h-screen">
-      <PageHeader title="Active picks" />
+    <div className="min-h-screen pb-8">
+      <PageHeader title="Team" />
 
       <div className="space-y-4 p-4">
         <p className="text-sm text-[var(--content-secondary)]">
-          Everyone on the floor can see who is on which order. Teammates&apos; rows are
-          read-only — only your assignments open from here.
+          Who is picking which order right now. Your rows open the pick deck; teammates are
+          read-only.
         </p>
 
         <div className="flex flex-wrap gap-2">
@@ -113,7 +152,7 @@ export default function ActivePicksPage(): React.JSX.Element | null {
         ) : (
           <section className="space-y-2">
             <QueueSectionHeader
-              label={filter === 'mine' ? 'Your orders' : 'Team board'}
+              label={filter === 'mine' ? 'Your picks' : 'Active picks — team'}
               count={filteredOrders.length}
             />
             {filteredOrders.map((order) => (
@@ -130,7 +169,55 @@ export default function ActivePicksPage(): React.JSX.Element | null {
             ))}
           </section>
         )}
+
+        <section>
+          <QueueSectionHeader
+            label="Unassigned pool"
+            count={unassignedOrders.length + stalePoolOrders.length}
+            showWhenEmpty
+            description="Claim only when billing has not assigned anyone"
+            className={!poolVisible ? 'opacity-70' : undefined}
+          />
+          {!poolVisible ? (
+            <p className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
+              {inProgressPicks.length > 0
+                ? 'Finish your open pick before claiming from the pool.'
+                : 'Start or complete your queue assignments first — then unassigned orders appear here.'}
+            </p>
+          ) : !poolHasOrders ? (
+            <p className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
+              Pool is empty — new approved orders will show up here.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {unassignedOrders.map((order) => (
+                <AvailableOrderRow
+                  key={order.id}
+                  order={order}
+                  onOpen={() => handlePoolOpen(order.id)}
+                  disabled={inProgressPicks.length > 0}
+                />
+              ))}
+              {stalePoolOrders.length > 0 && (
+                <>
+                  <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-[var(--content-tertiary)]">
+                    Abandoned picks (stale)
+                  </p>
+                  {stalePoolOrders.map((order) => (
+                    <AvailableOrderRow
+                      key={order.id}
+                      order={order}
+                      onOpen={() => handlePoolOpen(order.id)}
+                      disabled={inProgressPicks.length > 0}
+                    />
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </section>
       </div>
+
     </div>
   );
 }

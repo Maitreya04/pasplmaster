@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, UserCircle, Package } from '@phosphor-icons/react';
@@ -19,6 +19,10 @@ import { rackRangeFromPreview } from '../../lib/picking/pickQueueDisplay';
 import { isInProgressPick, isPickStarted } from '../../lib/picking/pickLifecycle';
 import { startPicking, startPickingErrorMessage } from '../../lib/picking/startPicking';
 
+/**
+ * Trip brief shown once before starting a new pick. In-progress orders skip this
+ * and go straight to the pick deck.
+ */
 export default function PickPreviewPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -29,12 +33,25 @@ export default function PickPreviewPage(): React.JSX.Element | null {
   const orderId = id ? parseInt(id, 10) : null;
   const source = searchParams.get('source');
   const [poolConfirmOpen, setPoolConfirmOpen] = useState(false);
+  const skippedPreviewRef = useRef(false);
 
   const { data: order, isLoading, error } = useOrderDetail(orderId);
   const { myActive } = useClaimableOrders({
     stage: 'picking',
     workflowStatus: ['approved', 'picking'],
   });
+
+  const alreadyStarted = order != null && isPickStarted(order.workflow_status);
+
+  // Resume path — never show the trip brief twice for the same order.
+  useEffect(() => {
+    if (!orderId || !Number.isFinite(orderId) || orderId <= 0) return;
+    if (isLoading || skippedPreviewRef.current) return;
+    if (order && alreadyStarted) {
+      skippedPreviewRef.current = true;
+      navigate(`/picking/pick/${orderId}`, { replace: true });
+    }
+  }, [alreadyStarted, isLoading, navigate, order, orderId]);
 
   const rows = useMemo(() => {
     if (!order?.items?.length) return [];
@@ -91,12 +108,7 @@ export default function PickPreviewPage(): React.JSX.Element | null {
     return order.workflow_status === 'approved' && !order.picker_name && !isAssignedToMe;
   }, [isAssignedToMe, order]);
 
-  const alreadyStarted = order != null && isPickStarted(order.workflow_status);
-
   const contextMessage = useMemo(() => {
-    if (alreadyStarted && isAssignedToMe) {
-      return 'Pick in progress — continue where you left off.';
-    }
     if (isAssignedToMe || source === 'assigned') {
       return 'Assigned by billing — review the full pick list, then tap Start when ready.';
     }
@@ -107,15 +119,11 @@ export default function PickPreviewPage(): React.JSX.Element | null {
       return `Assigned to ${order.picker_name}.`;
     }
     return 'Review the pick list before you start.';
-  }, [alreadyStarted, isAssignedToMe, isPoolOrder, order?.picker_name, source, userName]);
+  }, [isAssignedToMe, isPoolOrder, order?.picker_name, source, userName]);
 
   const startMutation = useMutation({
     mutationFn: async () => {
       if (!orderId || !userId) throw new Error('Not signed in');
-
-      if (alreadyStarted) {
-        return { navigated: true as const };
-      }
 
       let claimId: number | undefined;
 
@@ -177,11 +185,6 @@ export default function PickPreviewPage(): React.JSX.Element | null {
     startMutation.mutate();
   }, [isPoolOrder, openInProgressPick, poolConfirmOpen, startMutation, toast]);
 
-  const handleContinue = useCallback(() => {
-    if (!orderId) return;
-    navigate(`/picking/pick/${orderId}`);
-  }, [navigate, orderId]);
-
   if (orderId === null || !Number.isFinite(orderId) || orderId <= 0) {
     return (
       <div className="min-h-screen p-4">
@@ -191,8 +194,18 @@ export default function PickPreviewPage(): React.JSX.Element | null {
     );
   }
 
+  if (isLoading || alreadyStarted) {
+    return (
+      <div className="min-h-screen p-4">
+        <PageHeader title={order ? `Preview · ${order.order_number}` : 'Pick preview'} />
+        <div className="mt-6 space-y-3">
+          <Skeleton variant="card" count={3} />
+        </div>
+      </div>
+    );
+  }
+
   const startBlocked = Boolean(openInProgressPick);
-  const primaryLabel = alreadyStarted ? 'Continue picking' : 'Start picking';
 
   return (
     <div className="min-h-screen pb-32">
@@ -211,7 +224,7 @@ export default function PickPreviewPage(): React.JSX.Element | null {
             />
             <div className="min-w-0 space-y-1">
               <p className="text-sm text-[var(--content-secondary)]">{contextMessage}</p>
-              {isAssignedToMe && !alreadyStarted && (
+              {isAssignedToMe && (
                 <span className="inline-flex rounded-full bg-[var(--bg-accent-subtle)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--content-accent)]">
                   Assigned to you
                 </span>
@@ -238,19 +251,13 @@ export default function PickPreviewPage(): React.JSX.Element | null {
           </Card>
         )}
 
-        {isLoading && (
-          <div className="space-y-3">
-            <Skeleton variant="card" count={5} />
-          </div>
-        )}
-
         {error && (
           <p className="text-sm text-[var(--content-negative)]">
             Could not load this order. You may not have access, or it was removed.
           </p>
         )}
 
-        {!isLoading && order && (
+        {order && (
           <>
             <div className="sticky top-11 z-20 -mx-4 px-4 py-2 bg-[var(--bg-primary)]/95 backdrop-blur-sm border-b border-[var(--border-subtle)]">
               <div className="flex flex-wrap items-center gap-2">
@@ -339,11 +346,11 @@ export default function PickPreviewPage(): React.JSX.Element | null {
       <div className="fixed bottom-20 inset-x-0 z-40 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <div className="mx-auto flex max-w-lg flex-col gap-2">
           <BigButton
-            onClick={alreadyStarted ? handleContinue : handleStartClick}
+            onClick={handleStartClick}
             disabled={startBlocked || startMutation.isPending || rows.length === 0}
             loading={startMutation.isPending}
           >
-            {primaryLabel}
+            Start picking
           </BigButton>
           <button
             type="button"

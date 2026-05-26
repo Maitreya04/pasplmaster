@@ -1,4 +1,4 @@
-import { Camera, Flag, Hash, MapPin } from '@phosphor-icons/react';
+import { Camera, CheckCircle, Flag, Hash, MapPin } from '@phosphor-icons/react';
 
 export type PickCardCtaPhase = 'rack' | 'pick';
 
@@ -17,6 +17,10 @@ export interface PickCardCTAsProps {
   /** Shown as primary CTA when MRP confirmation is pending. */
   onConfirmMrp?: () => void;
   confirmMrpLabel?: string;
+  /** Step 3 — enabled after rack + MRP + qty are verified. */
+  onMarkPicked?: () => void;
+  canMarkPicked?: boolean;
+  markPickedLabel?: string;
 }
 
 function StepHint({ children }: { children: React.ReactNode }): React.JSX.Element {
@@ -39,6 +43,9 @@ export function PickCardCTAs({
   onConfirmRack,
   onConfirmMrp,
   confirmMrpLabel,
+  onMarkPicked,
+  canMarkPicked = false,
+  markPickedLabel = 'Mark picked',
 }: PickCardCTAsProps): React.JSX.Element {
   if (onConfirmMrp) {
     return (
@@ -70,7 +77,7 @@ export function PickCardCTAs({
               onClick={onManualQty}
               className="min-h-[44px] rounded-xl bg-[var(--bg-tertiary)] text-xs font-semibold text-[var(--content-secondary)] pick-pressable disabled:opacity-40"
             >
-              Edit qty
+              Enter qty
             </button>
             <button
               type="button"
@@ -144,30 +151,55 @@ export function PickCardCTAs({
     );
   }
 
+  const showMarkPicked = onMarkPicked != null;
+
   return (
     <div
       className="border-t border-[var(--border-faint)] bg-[var(--bg-secondary)]"
       role="toolbar"
       aria-label="Pick item"
     >
-      <StepHint>Step 2 · Scan item or enter qty</StepHint>
+      <StepHint>
+        {canMarkPicked ? 'Step 3 · Mark picked to move on' : 'Step 2 · Scan item or enter qty'}
+      </StepHint>
       <div className="space-y-2 p-2.5 sm:p-3">
+        {showMarkPicked ? (
+          <button
+            type="button"
+            disabled={disabled || !canMarkPicked}
+            onClick={onMarkPicked}
+            className={`flex w-full min-h-[52px] items-center justify-center gap-2.5 rounded-2xl px-4 font-extrabold pick-pressable sm:min-h-[56px] ${
+              canMarkPicked
+                ? 'bg-[var(--bg-positive)] text-[var(--content-on-color)] shadow-sm'
+                : 'bg-[var(--bg-tertiary)] text-[var(--content-quaternary)] opacity-60'
+            }`}
+          >
+            <CheckCircle size={22} weight="fill" />
+            <span className="text-base sm:text-lg">{markPickedLabel}</span>
+          </button>
+        ) : null}
+
         <button
           type="button"
           disabled={disabled || scanDisabled}
           onClick={onScan}
           aria-pressed={cameraEngaged}
-          className={`flex w-full min-h-[52px] items-center justify-center gap-2.5 rounded-2xl px-4 font-extrabold pick-pressable disabled:opacity-40 sm:min-h-[56px] ${
+          className={`flex w-full min-h-[48px] items-center justify-center gap-2.5 rounded-2xl px-4 font-bold pick-pressable disabled:opacity-40 ${
+            showMarkPicked ? 'border border-[var(--border-subtle)]' : ''
+          } ${
             cameraEngaged
               ? 'bg-[var(--bg-positive)] text-[var(--content-on-color)] ring-2 ring-[var(--border-positive)]'
               : scanDisabled
                 ? 'bg-[var(--bg-tertiary)] text-[var(--content-tertiary)]'
-                : 'bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)] shadow-sm'
+                : showMarkPicked
+                  ? 'bg-[var(--bg-secondary)] text-[var(--content-primary)]'
+                  : 'bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)] shadow-sm min-h-[52px] sm:min-h-[56px] font-extrabold'
           }`}
         >
-          <Camera size={22} weight="bold" />
-          <span className="text-base sm:text-lg">{scanLabel}</span>
+          <Camera size={20} weight="bold" />
+          <span className={showMarkPicked ? 'text-sm' : 'text-base sm:text-lg'}>{scanLabel}</span>
         </button>
+
         <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
           <button
             type="button"
@@ -188,6 +220,12 @@ export function PickCardCTAs({
             <span className="text-[10px] font-semibold leading-tight sm:text-[11px]">Flag item</span>
           </button>
         </div>
+
+        {showMarkPicked && !canMarkPicked ? (
+          <p className="text-center text-[10px] font-medium text-[var(--content-tertiary)]">
+            Confirm MRP and enter qty (manual or scan) to unlock Mark picked
+          </p>
+        ) : null}
       </div>
     </div>
   );

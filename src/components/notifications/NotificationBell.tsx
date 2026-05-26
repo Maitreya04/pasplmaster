@@ -55,7 +55,7 @@ function deepLinkFromPayload(n: UserNotification): string | null {
     return p.deep_link;
   }
   if (n.type === 'pick_complete_reminder' && n.order_id) {
-    return `/picking?focusOrderId=${n.order_id}`;
+    return `/picking/pick/${n.order_id}`;
   }
   if (n.type === 'order_ready_to_pick' && n.order_id) {
     const dl = payloadDeepLink(n);

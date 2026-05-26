@@ -6,7 +6,6 @@ import {
   Bell,
   GearSix,
   Barcode,
-  UsersThree,
 } from '@phosphor-icons/react';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
 import { usePickerPushNotifications } from '../../hooks/usePickerPushNotifications';
@@ -22,27 +21,14 @@ import {
   QueueSectionHeader,
   InitialsAvatar,
 } from '../../components/shared';
-import { AvailableOrderRow } from '../../components/picking/AvailableOrderRow';
 import { AssignedOrderRow } from '../../components/picking/AssignedOrderRow';
-import {
-  ActivePickRow,
-  useActivePickBoardOrders,
-} from '../../components/picking/ActivePickRow';
-import { IncompletePickBanner } from '../../components/picking/IncompletePickBanner';
 import { PickerDailyStatsStrip } from '../../components/picking/PickerDailyStatsStrip';
-import { sortAvailablePickQueueOrders } from '../../lib/pickQueueTransport';
-import {
-  isInProgressPick,
-  isMyAssignedPending,
-  isMyAssignedWorkCleared,
-} from '../../lib/picking/pickLifecycle';
+import { isMyAssignedPending } from '../../lib/picking/pickLifecycle';
 
 function hasPickableLines(order: { pick_line_count?: number; item_count: number }): boolean {
   if (order.pick_line_count != null) return order.pick_line_count > 0;
   return order.item_count > 0;
 }
-
-const TEAM_PICKS_PREVIEW = 4;
 
 export default function QueuePage(): React.JSX.Element | null {
   const navigate = useNavigate();
@@ -50,13 +36,10 @@ export default function QueuePage(): React.JSX.Element | null {
   const toast = useToast();
   const { role, userId, userName } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
-
-  const focusOrderIdParam = searchParams.get('focusOrderId');
-  const focusOrderId = focusOrderIdParam ? Number.parseInt(focusOrderIdParam, 10) : null;
   const claimOrderIdParam = searchParams.get('claimOrderId');
   const legacyClaimOrderId = claimOrderIdParam ? Number.parseInt(claimOrderIdParam, 10) : null;
 
-  // Old push notifications used ?claimOrderId= — send to preview instead of auto-claiming.
+  // Legacy push links — open trip brief for pool claim.
   useEffect(() => {
     if (!claimOrderIdParam) return;
     if (!Number.isInteger(legacyClaimOrderId) || (legacyClaimOrderId ?? 0) <= 0) {
@@ -66,13 +49,7 @@ export default function QueuePage(): React.JSX.Element | null {
     navigate(`/picking/preview/${legacyClaimOrderId}?source=pool`, { replace: true });
   }, [claimOrderIdParam, legacyClaimOrderId, navigate]);
 
-  const {
-    available,
-    myActive,
-    otherActive,
-    stale,
-    isLoading,
-  } = useClaimableOrders({
+  const { myActive, isLoading } = useClaimableOrders({
     stage: 'picking',
     workflowStatus: ['approved', 'picking'],
   });
@@ -80,79 +57,22 @@ export default function QueuePage(): React.JSX.Element | null {
   const dailyStats = usePickerDailyStats();
   const pushAlerts = usePickerPushNotifications({ role, userId, userName });
 
-  const inProgressPicks = useMemo(
-    () => myActive.filter(isInProgressPick),
-    [myActive],
-  );
-
-  const myOrders = useMemo(
+  /** Assigned orders waiting to start — in-progress picks live on the Team tab. */
+  const assignedOrders = useMemo(
     () =>
       [...myActive]
         .filter(hasPickableLines)
-        .sort((a, b) => {
-          const aStarted = isInProgressPick(a) ? 0 : 1;
-          const bStarted = isInProgressPick(b) ? 0 : 1;
-          if (aStarted !== bStarted) return aStarted - bStarted;
-          const aStale = a.claim_info?.is_stale ? 1 : 0;
-          const bStale = b.claim_info?.is_stale ? 1 : 0;
-          if (aStale !== bStale) return aStale - bStale;
-          return (
+        .filter((order) => isMyAssignedPending(order, userName))
+        .sort(
+          (a, b) =>
             new Date(b.approved_at ?? b.created_at).getTime() -
-            new Date(a.approved_at ?? a.created_at).getTime()
-          );
-        }),
-    [myActive],
-  );
-
-  const assignedPending = useMemo(
-    () => myOrders.filter((order) => isMyAssignedPending(order, userName)),
-    [myOrders, userName],
-  );
-
-  const assignedWorkCleared = useMemo(
-    () => isMyAssignedWorkCleared(myActive, userName),
+            new Date(a.approved_at ?? a.created_at).getTime(),
+        ),
     [myActive, userName],
   );
 
-  const resumePick = useMemo(() => {
-    if (inProgressPicks.length === 0) return null;
-    if (focusOrderId != null && Number.isInteger(focusOrderId)) {
-      const focused = inProgressPicks.find((order) => order.id === focusOrderId);
-      if (focused) return focused;
-    }
-    return [...inProgressPicks].sort((a, b) => {
-      const aTime = new Date(a.claim_info?.claimed_at ?? a.approved_at ?? a.created_at).getTime();
-      const bTime = new Date(b.claim_info?.claimed_at ?? b.approved_at ?? b.created_at).getTime();
-      return bTime - aTime;
-    })[0];
-  }, [focusOrderId, inProgressPicks]);
-
-  const unassignedOrders = useMemo(
-    () => sortAvailablePickQueueOrders(available.filter(hasPickableLines)),
-    [available],
-  );
-
-  const stalePoolOrders = useMemo(
-    () => sortAvailablePickQueueOrders(stale.filter(hasPickableLines)),
-    [stale],
-  );
-
-  const teamPicks = useActivePickBoardOrders(myActive, otherActive);
-  const teamPicksOthers = useMemo(
-    () => teamPicks.filter((order) => !order.is_mine),
-    [teamPicks],
-  );
-
-  const openPreview = (orderId: number, source: 'assigned' | 'pool') => {
-    navigate(`/picking/preview/${orderId}?source=${source}`);
-  };
-
-  const openMyOrder = (order: (typeof myOrders)[0]) => {
-    if (isInProgressPick(order)) {
-      navigate(`/picking/pick/${order.id}`);
-      return;
-    }
-    openPreview(order.id, 'assigned');
+  const openAssignedPreview = (orderId: number) => {
+    navigate(`/picking/preview/${orderId}?source=assigned`);
   };
 
   const handleEnableAlerts = async () => {
@@ -174,15 +94,7 @@ export default function QueuePage(): React.JSX.Element | null {
     }
   };
 
-  const poolVisible = assignedWorkCleared;
-  const poolHasOrders = unassignedOrders.length > 0 || stalePoolOrders.length > 0;
-
-  const queueIsEmpty =
-    !isLoading &&
-    myOrders.length === 0 &&
-    !resumePick &&
-    teamPicks.length === 0 &&
-    (!poolVisible || !poolHasOrders);
+  const queueIsEmpty = !isLoading && assignedOrders.length === 0;
 
   return (
     <div className="min-h-screen">
@@ -227,187 +139,51 @@ export default function QueuePage(): React.JSX.Element | null {
 
       <PickerDailyStatsStrip stats={dailyStats.data} isLoading={dailyStats.isLoading} />
 
-      {resumePick && (
-        <IncompletePickBanner
-          order={resumePick}
-          onOpen={() => navigate(`/picking/pick/${resumePick.id}`)}
-        />
-      )}
-
       <div className="space-y-4 p-4">
         {isLoading ? (
           <div className="space-y-3">
             <Skeleton variant="card" count={3} />
           </div>
         ) : (
-          <>
-            <section>
-              <QueueSectionHeader
-                label="Your assignments"
-                count={myOrders.length}
-                showWhenEmpty
-                description={
-                  myOrders.length === 0
-                    ? 'Billing-assigned orders appear here — including stale picks until you finish or billing reassigns'
-                    : assignedPending.length > 0 && inProgressPicks.length > 0
-                      ? `${assignedPending.length} waiting to start · ${inProgressPicks.length} in progress`
-                      : assignedPending.length > 0
-                        ? 'Review the list, then tap Start when ready'
-                        : inProgressPicks.some((o) => o.claim_info?.is_stale)
-                          ? 'Stale picks stay here — tap to resume or ask billing'
-                          : 'Continue your active picks'
-                }
-              />
-              {myOrders.length === 0 ? (
+          <section>
+            <QueueSectionHeader
+              label="Your assignments"
+              count={assignedOrders.length}
+              showWhenEmpty
+              description={
+                assignedOrders.length === 0
+                  ? 'Billing-assigned orders appear here. Resume in-progress picks from the Team tab.'
+                  : 'Tap an order to review the pick list, then start picking'
+              }
+            />
+            {assignedOrders.length === 0 ? (
+              queueIsEmpty ? (
+                <EmptyState
+                  icon={Package}
+                  title="No assignments"
+                  description="New billing assignments show up here. Active picks and the unassigned pool are on Team."
+                  action={{
+                    label: 'Open Team',
+                    onClick: () => navigate('/picking/active'),
+                  }}
+                />
+              ) : (
                 <p className="rounded-2xl border border-dashed border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
-                  No orders assigned to you right now.
+                  No orders assigned to you right now. Check the Team tab for picks in progress.
                 </p>
-              ) : (
-                <div className="space-y-2">
-                  {myOrders.map((order) =>
-                    isInProgressPick(order) ? (
-                      <ActivePickRow
-                        key={order.id}
-                        order={order}
-                        isMine
-                        onOpen={() => openMyOrder(order)}
-                      />
-                    ) : (
-                      <AssignedOrderRow
-                        key={order.id}
-                        order={order}
-                        onOpen={() => openMyOrder(order)}
-                      />
-                    ),
-                  )}
-                </div>
-              )}
-            </section>
-
-            <section>
-              <div className="flex items-start justify-between gap-3">
-                <QueueSectionHeader
-                  label="Active picks — team"
-                  count={teamPicks.length}
-                  showWhenEmpty
-                  description="Who is picking which order right now"
-                  className="flex-1 min-w-0"
-                />
-                {teamPicks.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => navigate('/picking/active')}
-                    className="shrink-0 mt-1 min-h-9 rounded-xl px-3 text-xs font-semibold text-[var(--content-accent)] hover:bg-[var(--bg-accent-subtle)]"
-                  >
-                    View all
-                  </button>
-                )}
-              </div>
-
-              {teamPicks.length === 0 ? (
-                <p className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
-                  No one is picking an order yet.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {teamPicks.slice(0, TEAM_PICKS_PREVIEW).map((order) => (
-                    <ActivePickRow
-                      key={order.id}
-                      order={order}
-                      isMine={order.is_mine}
-                      onOpen={
-                        order.is_mine && (isInProgressPick(order) || isMyAssignedPending(order, userName))
-                          ? () => openMyOrder(order)
-                          : undefined
-                      }
-                    />
-                  ))}
-                  {teamPicks.length > TEAM_PICKS_PREVIEW && (
-                    <button
-                      type="button"
-                      onClick={() => navigate('/picking/active')}
-                      className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] py-3 text-sm font-semibold text-[var(--content-accent)]"
-                    >
-                      <UsersThree size={18} weight="duotone" />
-                      {teamPicks.length - TEAM_PICKS_PREVIEW} more on Active tab
-                    </button>
-                  )}
-                  {teamPicksOthers.length > 0 && teamPicks.length <= TEAM_PICKS_PREVIEW && (
-                    <p className="text-xs text-[var(--content-tertiary)] px-1">
-                      {teamPicksOthers.length} order
-                      {teamPicksOthers.length === 1 ? '' : 's'} picked by teammates — read-only here.
-                    </p>
-                  )}
-                </div>
-              )}
-            </section>
-
-            {poolVisible ? (
-              <section>
-                <QueueSectionHeader
-                  label="Unassigned pool"
-                  count={unassignedOrders.length + stalePoolOrders.length}
-                  description="Claim only when billing has not assigned anyone"
-                />
-
-                {!poolHasOrders ? (
-                  queueIsEmpty ? (
-                    <EmptyState
-                      icon={Package}
-                      title="All clear"
-                      description="No assigned work and nothing waiting in the pool"
-                    />
-                  ) : (
-                    <p className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
-                      Pool is empty — new approved orders will show up here.
-                    </p>
-                  )
-                ) : (
-                  <div className="space-y-2">
-                    {unassignedOrders.map((order) => (
-                      <AvailableOrderRow
-                        key={order.id}
-                        order={order}
-                        onOpen={() => openPreview(order.id, 'pool')}
-                        disabled={inProgressPicks.length > 0}
-                      />
-                    ))}
-                    {stalePoolOrders.length > 0 && (
-                      <>
-                        <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-[var(--content-tertiary)]">
-                          Abandoned picks (stale)
-                        </p>
-                        {stalePoolOrders.map((order) => (
-                          <AvailableOrderRow
-                            key={order.id}
-                            order={order}
-                            onOpen={() => openPreview(order.id, 'pool')}
-                            disabled={inProgressPicks.length > 0}
-                          />
-                        ))}
-                      </>
-                    )}
-                  </div>
-                )}
-              </section>
+              )
             ) : (
-              <section>
-                <QueueSectionHeader
-                  label="Unassigned pool"
-                  count={unassignedOrders.length + stalePoolOrders.length}
-                  showWhenEmpty
-                  className="opacity-70"
-                />
-                <p className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
-                  {resumePick
-                    ? 'Finish your open pick in Your assignments before claiming from the pool.'
-                    : myOrders.length > 0
-                      ? `Finish your ${myOrders.length} assigned order${myOrders.length === 1 ? '' : 's'} first — then ${unassignedOrders.length + stalePoolOrders.length} unassigned will appear here.`
-                      : 'Start or complete your assigned orders first.'}
-                </p>
-              </section>
+              <div className="space-y-2">
+                {assignedOrders.map((order) => (
+                  <AssignedOrderRow
+                    key={order.id}
+                    order={order}
+                    onOpen={() => openAssignedPreview(order.id)}
+                  />
+                ))}
+              </div>
             )}
-          </>
+          </section>
         )}
 
         <button

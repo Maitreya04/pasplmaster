@@ -244,11 +244,11 @@ export default function PickPage(): React.JSX.Element | null {
   const orderId = id ? parseInt(id, 10) : null;
   const { data: order, isLoading, error } = useOrderDetail(orderId);
 
-  // Assigned but not started — send picker through preview + Start gate.
+  // Not started yet — trip brief is shown once on preview, not on resume.
   useEffect(() => {
     if (!orderId || !order) return;
     if (order.workflow_status === 'approved') {
-      navigate(`/picking/preview/${orderId}`, { replace: true });
+      navigate(`/picking/preview/${orderId}?source=assigned`, { replace: true });
     }
   }, [navigate, order, orderId]);
 
@@ -294,7 +294,7 @@ export default function PickPage(): React.JSX.Element | null {
   // undoSnapshot: 5s window to revert the last completion. Captures the prior
   // scan_result + state so we can roll back both DB and local UI cleanly.
   const [undoSnapshot, setUndoSnapshot] = useState<UndoSnapshot | null>(null);
-  const [queueSheetOpen, setQueueSheetOpen] = useState(false);
+  const [queueSheetOpen, setQueueSheetOpen] = useState(true);
   const [queueDragProgress, setQueueDragProgress] = useState(0);
   const [completeSheetOpen, setCompleteSheetOpen] = useState(false);
   const [flagSheetOpen, setFlagSheetOpen] = useState(false);
@@ -991,6 +991,33 @@ export default function PickPage(): React.JSX.Element | null {
     [],
   );
 
+  const revertLinePick = useCallback(
+    async (itemId: number) => {
+      const orderItem = order?.items.find((oi) => oi.id === itemId);
+      if (!orderItem) return;
+      setLineOutcome(null);
+      setUndoSnapshot(null);
+      try {
+        const { error } = await supabase
+          .from('order_items')
+          .update({
+            state: 'pending',
+            scan_result: null,
+          })
+          .eq('id', itemId);
+        if (error) throw error;
+        updateLocalItem(itemId, { uiState: 'pending', scanResult: null });
+        updateLineMrp(itemId, { confirmedMrp: null, customMrp: null });
+        queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+        appHaptics.impactLight();
+        toast.info('Line reset — verify MRP and qty again.');
+      } catch {
+        toast.error('Could not reset this line. Refresh and try again.');
+      }
+    },
+    [order?.items, orderId, queryClient, toast, updateLineMrp, updateLocalItem],
+  );
+
   const revertLastPick = useCallback(async () => {
     const snapshot = undoSnapshot;
     if (!snapshot) return;
@@ -1498,6 +1525,28 @@ export default function PickPage(): React.JSX.Element | null {
     ],
   );
 
+  const handleMarkPicked = useCallback(
+    (orderItem: OrderItem) => {
+      const itemId = orderItem.id;
+      if (!rackVerifiedIds.has(itemId)) {
+        markRackVerified(itemId, 'override');
+      }
+      const targetQty = pickQuantityTarget(orderItem);
+      const local = localItems.get(itemId);
+      const pickedQty = Math.min(
+        targetQty,
+        getPickedQtyFromResult(local?.scanResult ?? orderItem.scan_result),
+      );
+      const remaining = Math.max(0, targetQty - pickedQty);
+      if (remaining <= 0) {
+        toast.info('Qty already complete for this line.');
+        return;
+      }
+      void applyPickedQty(itemId, remaining);
+    },
+    [applyPickedQty, localItems, markRackVerified, rackVerifiedIds, toast],
+  );
+
   const completeQueueItem = useCallback(
     (itemId: number) => {
       const orderItem = order?.items.find((oi) => oi.id === itemId);
@@ -1957,6 +2006,19 @@ export default function PickPage(): React.JSX.Element | null {
                         }
                         openMrpSheet(pi.orderItem.id);
                       }}
+                      onMarkPicked={
+                        isCardCurrent ? () => handleMarkPicked(pi.orderItem) : undefined
+                      }
+                      markPickedLabel={
+                        isCardCurrent && targetQty > pickedQty
+                          ? `Mark picked · ${targetQty - pickedQty} pcs`
+                          : 'Mark picked'
+                      }
+                      onUndoLinePick={
+                        isCardCurrent && pickedQty > 0
+                          ? () => revertLinePick(pi.orderItem.id)
+                          : undefined
+                      }
                       onFlag={() => openFlagSheet(pi.orderItem.id)}
                       onEngageScanner={() =>
                         engageScanner(
@@ -1991,6 +2053,7 @@ export default function PickPage(): React.JSX.Element | null {
               remainingCount={counts.remaining}
               totalCount={counts.total}
               dragProgress={queueDragProgress}
+              defaultExpanded
               onJump={jumpToItem}
               onOpenQueue={() => {
                 appHaptics.selection();

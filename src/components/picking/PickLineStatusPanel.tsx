@@ -36,6 +36,8 @@ interface PickLineStatusPanelProps {
   totalCount: number;
   /** 0–1 lift from swipe-up drag on the deck */
   dragProgress?: number;
+  /** Show the full line list expanded (not a short peek). */
+  defaultExpanded?: boolean;
   onJump: (itemId: number) => void;
   onOpenQueue: () => void;
 }
@@ -160,12 +162,14 @@ export function PickLineStatusPanel({
   remainingCount,
   totalCount,
   dragProgress = 0,
+  defaultExpanded = false,
   onJump,
   onOpenQueue,
 }: PickLineStatusPanelProps): React.JSX.Element {
   const drag = Math.min(1, Math.max(0, dragProgress));
   const liftPx = Math.round(drag * 22);
-  const listMaxRem = 11 + drag * 10;
+  const baseListRem = defaultExpanded ? Math.min(28, 8 + rows.length * 2.75) : 11;
+  const listMaxRem = baseListRem + drag * 10;
   const doneRows = rows.filter((r) => r.status === 'picked' || r.status === 'flagged');
   const activeRows = rows.filter((r) => r.status !== 'picked' && r.status !== 'flagged');
   const openingQueue = drag > 0.35;
@@ -196,7 +200,11 @@ export function PickLineStatusPanel({
                 : 'text-[var(--content-tertiary)] group-active:text-[var(--role-primary)]'
             }`}
           >
-            {openingQueue ? 'Release to open full queue' : 'Swipe up on card or pull here · full queue'}
+            {openingQueue
+              ? 'Release to open full queue'
+              : defaultExpanded
+                ? 'Pull for full queue sheet · list below'
+                : 'Swipe up on card or pull here · full queue'}
           </span>
         </button>
 
