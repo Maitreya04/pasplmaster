@@ -24,8 +24,10 @@ export function activePickStatus(
   order: OrderWithClaimInfo,
   progressRatio: number,
 ): ActivePickStatus {
-  if (order.claim_info?.is_stale && isPickStarted(order.workflow_status)) {
-    return 'stale';
+  if (isPickStarted(order.workflow_status)) {
+    if (!order.claim_info || order.claim_info.is_stale) {
+      return 'stale';
+    }
   }
   if (!isPickStarted(order.workflow_status)) {
     return 'not_started';
@@ -54,22 +56,37 @@ export function isInProgressPick(order: OrderWithClaimInfo): boolean {
   return isPickStarted(order.workflow_status) && order.is_mine;
 }
 
-function isAssignedToMe(order: OrderWithClaimInfo, userName: string | null): boolean {
+/** Billing-assigned or claimed pick that belongs to this picker. */
+export function isAssignedToMe(
+  order: OrderWithClaimInfo,
+  userName: string | null,
+): boolean {
   if (order.is_mine) return true;
   return userName != null && order.picker_name === userName;
 }
 
 /**
- * In-progress pick assigned to this picker with an expired claim heartbeat.
+ * In-progress pick assigned to this picker — active session or stale / lapsed claim.
  * Shown on the Queue tab so pickers can resume without hunting on Team.
+ */
+export function isMyInProgressPick(
+  order: OrderWithClaimInfo,
+  userName: string | null,
+): boolean {
+  if (!isPickStarted(order.workflow_status)) return false;
+  return isAssignedToMe(order, userName);
+}
+
+/**
+ * Stale or lapsed in-progress pick assigned to this picker.
+ * @deprecated Prefer {@link isMyInProgressPick} — kept for call sites that only want stale rows.
  */
 export function isMyStaleAssignedPick(
   order: OrderWithClaimInfo,
   userName: string | null,
 ): boolean {
-  if (!isPickStarted(order.workflow_status)) return false;
-  if (!order.claim_info?.is_stale) return false;
-  return isAssignedToMe(order, userName);
+  if (!isMyInProgressPick(order, userName)) return false;
+  return !order.claim_info || order.claim_info.is_stale;
 }
 
 /** No assigned orders waiting to start or resume — safe to show the unassigned pool. */
@@ -79,7 +96,6 @@ export function isMyAssignedWorkCleared(
 ): boolean {
   return !orders.some(
     (order) =>
-      order.is_mine &&
-      (isInProgressPick(order) || isMyAssignedPending(order, userName)),
+      isMyInProgressPick(order, userName) || isMyAssignedPending(order, userName),
   );
 }

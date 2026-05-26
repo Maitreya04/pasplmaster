@@ -24,7 +24,7 @@ import {
 import { ActivePickRow } from '../../components/picking/ActivePickRow';
 import { AssignedOrderRow } from '../../components/picking/AssignedOrderRow';
 import { PickerDailyStatsStrip } from '../../components/picking/PickerDailyStatsStrip';
-import { isMyAssignedPending, isMyStaleAssignedPick } from '../../lib/picking/pickLifecycle';
+import { isMyAssignedPending, isMyInProgressPick } from '../../lib/picking/pickLifecycle';
 
 function hasPickableLines(order: { pick_line_count?: number; item_count: number }): boolean {
   if (order.pick_line_count != null) return order.pick_line_count > 0;
@@ -50,7 +50,7 @@ export default function QueuePage(): React.JSX.Element | null {
     navigate(`/picking/preview/${legacyClaimOrderId}?source=pool`, { replace: true });
   }, [claimOrderIdParam, legacyClaimOrderId, navigate]);
 
-  const { myActive, isLoading } = useClaimableOrders({
+  const { myActive, stale, isLoading } = useClaimableOrders({
     stage: 'picking',
     workflowStatus: ['approved', 'picking'],
   });
@@ -58,21 +58,34 @@ export default function QueuePage(): React.JSX.Element | null {
   const dailyStats = usePickerDailyStats();
   const pushAlerts = usePickerPushNotifications({ role, userId, userName });
 
-  /** Stale in-progress picks assigned to you — resume straight on the pick deck. */
-  const staleResumeOrders = useMemo(
+  /** In-progress picks assigned to you — includes stale / lapsed sessions. */
+  const resumeOrders = useMemo(() => {
+    const seen = new Set<number>();
+    const merged: typeof myActive = [];
+    for (const order of [...myActive, ...stale]) {
+      if (seen.has(order.id)) continue;
+      if (!hasPickableLines(order)) continue;
+      if (!isMyInProgressPick(order, userName)) continue;
+      seen.add(order.id);
+      merged.push(order);
+    }
+    return merged.sort((a, b) => {
+      const aStale = !a.claim_info || a.claim_info.is_stale ? 0 : 1;
+      const bStale = !b.claim_info || b.claim_info.is_stale ? 0 : 1;
+      if (aStale !== bStale) return aStale - bStale;
+      if (a.priority === 'urgent' && b.priority !== 'urgent') return -1;
+      if (a.priority !== 'urgent' && b.priority === 'urgent') return 1;
+      return (
+        new Date(b.claim_info?.last_heartbeat_at ?? b.approved_at ?? b.created_at).getTime() -
+        new Date(a.claim_info?.last_heartbeat_at ?? a.approved_at ?? a.created_at).getTime()
+      );
+    });
+  }, [myActive, stale, userName]);
+
+  const staleResumeCount = useMemo(
     () =>
-      [...myActive]
-        .filter(hasPickableLines)
-        .filter((order) => isMyStaleAssignedPick(order, userName))
-        .sort((a, b) => {
-          if (a.priority === 'urgent' && b.priority !== 'urgent') return -1;
-          if (a.priority !== 'urgent' && b.priority === 'urgent') return 1;
-          return (
-            new Date(b.claim_info?.last_heartbeat_at ?? b.approved_at ?? b.created_at).getTime() -
-            new Date(a.claim_info?.last_heartbeat_at ?? a.approved_at ?? a.created_at).getTime()
-          );
-        }),
-    [myActive, userName],
+      resumeOrders.filter((order) => !order.claim_info || order.claim_info.is_stale).length,
+    [resumeOrders],
   );
 
   /** Assigned orders waiting to start (approved, not yet picking). */
@@ -93,7 +106,7 @@ export default function QueuePage(): React.JSX.Element | null {
     navigate(`/picking/preview/${orderId}?source=assigned`);
   };
 
-  const openStalePick = (orderId: number) => {
+  const openResumePick = (orderId: number) => {
     navigate(`/picking/pick/${orderId}`);
   };
 
@@ -116,7 +129,7 @@ export default function QueuePage(): React.JSX.Element | null {
     }
   };
 
-  const queueWorkCount = assignedOrders.length + staleResumeOrders.length;
+  const queueWorkCount = assignedOrders.length + resumeOrders.length;
   const queueIsEmpty = !isLoading && queueWorkCount === 0;
 
   return (
@@ -169,20 +182,24 @@ export default function QueuePage(): React.JSX.Element | null {
           </div>
         ) : (
           <section className="space-y-4">
-            {staleResumeOrders.length > 0 && (
+            {resumeOrders.length > 0 && (
               <div className="space-y-2">
                 <QueueSectionHeader
-                  label="Resume stale pick"
-                  count={staleResumeOrders.length}
-                  description="Session timed out — tap to continue where you left off"
+                  label="Continue picking"
+                  count={resumeOrders.length}
+                  description={
+                    staleResumeCount > 0
+                      ? `${staleResumeCount} stale — tap to resume where you left off`
+                      : 'Tap to open the pick deck and finish these lines'
+                  }
                 />
                 <div className="space-y-2">
-                  {staleResumeOrders.map((order) => (
+                  {resumeOrders.map((order) => (
                     <ActivePickRow
                       key={order.id}
                       order={order}
                       isMine
-                      onOpen={() => openStalePick(order.id)}
+                      onOpen={() => openResumePick(order.id)}
                     />
                   ))}
                 </div>
@@ -196,7 +213,7 @@ export default function QueuePage(): React.JSX.Element | null {
                 showWhenEmpty
                 description={
                   assignedOrders.length === 0
-                    ? staleResumeOrders.length > 0
+                    ? resumeOrders.length > 0
                       ? 'New billing assignments appear here when ready to start'
                       : 'Billing-assigned orders appear here when ready to start'
                     : 'Tap an order to review the pick list, then start picking'
@@ -213,7 +230,7 @@ export default function QueuePage(): React.JSX.Element | null {
                       onClick: () => navigate('/picking/active'),
                     }}
                   />
-                ) : staleResumeOrders.length > 0 ? null : (
+                ) : resumeOrders.length > 0 ? null : (
                   <p className="rounded-2xl border border-dashed border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
                     No new assignments right now. Active picks are on the Team tab.
                   </p>

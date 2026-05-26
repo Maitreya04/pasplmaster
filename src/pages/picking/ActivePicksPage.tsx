@@ -14,9 +14,10 @@ import { ActivePickRow, useActivePickBoardOrders } from '../../components/pickin
 import { AvailableOrderRow } from '../../components/picking/AvailableOrderRow';
 import { sortAvailablePickQueueOrders } from '../../lib/pickQueueTransport';
 import {
-  isInProgressPick,
+  isAssignedToMe,
   isMyAssignedPending,
   isMyAssignedWorkCleared,
+  isMyInProgressPick,
   isPickStarted,
 } from '../../lib/picking/pickLifecycle';
 
@@ -59,8 +60,8 @@ export default function ActivePicksPage(): React.JSX.Element | null {
   );
 
   const inProgressPicks = useMemo(
-    () => myActive.filter(isInProgressPick),
-    [myActive],
+    () => myActive.filter((order) => isMyInProgressPick(order, userName)),
+    [myActive, userName],
   );
 
   const assignedWorkCleared = useMemo(
@@ -82,8 +83,8 @@ export default function ActivePicksPage(): React.JSX.Element | null {
   const poolHasOrders = unassignedOrders.length > 0 || stalePoolOrders.length > 0;
 
   const handleOpen = (orderId: number, order: (typeof boardOrders)[number]) => {
-    if (!myOrderIds.has(orderId)) return;
-    if (isInProgressPick(order)) {
+    if (!isAssignedToMe(order, userName)) return;
+    if (isMyInProgressPick(order, userName)) {
       navigate(`/picking/pick/${orderId}`);
       return;
     }
@@ -161,7 +162,7 @@ export default function ActivePicksPage(): React.JSX.Element | null {
                 order={order}
                 isMine={myOrderIds.has(order.id)}
                 onOpen={
-                  myOrderIds.has(order.id)
+                  isAssignedToMe(order, userName)
                     ? () => handleOpen(order.id, order)
                     : undefined
                 }
