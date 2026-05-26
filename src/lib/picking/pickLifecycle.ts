@@ -15,8 +15,7 @@ export function isMyAssignedPending(
   userName: string | null,
 ): boolean {
   if (!isAssignedPendingStart(order)) return false;
-  if (order.is_mine) return true;
-  return userName != null && order.picker_name === userName;
+  return isAssignedToMe(order, userName);
 }
 
 export type ActivePickStatus = 'not_started' | 'picking' | 'almost_done' | 'stale';
@@ -53,6 +52,24 @@ export function activePickStatusLabel(status: ActivePickStatus): string {
 /** In-progress pick the picker should resume (started but not complete). */
 export function isInProgressPick(order: OrderWithClaimInfo): boolean {
   return isPickStarted(order.workflow_status) && order.is_mine;
+}
+
+function isAssignedToMe(order: OrderWithClaimInfo, userName: string | null): boolean {
+  if (order.is_mine) return true;
+  return userName != null && order.picker_name === userName;
+}
+
+/**
+ * In-progress pick assigned to this picker with an expired claim heartbeat.
+ * Shown on the Queue tab so pickers can resume without hunting on Team.
+ */
+export function isMyStaleAssignedPick(
+  order: OrderWithClaimInfo,
+  userName: string | null,
+): boolean {
+  if (!isPickStarted(order.workflow_status)) return false;
+  if (!order.claim_info?.is_stale) return false;
+  return isAssignedToMe(order, userName);
 }
 
 /** No assigned orders waiting to start or resume — safe to show the unassigned pool. */

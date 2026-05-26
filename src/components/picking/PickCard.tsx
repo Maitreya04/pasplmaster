@@ -136,7 +136,7 @@ export const PickCard = memo(function PickCard({
               : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)]'
       }`}
     >
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <CardHero
           rackNo={orderItem.rack_no}
           partNo={partNo}

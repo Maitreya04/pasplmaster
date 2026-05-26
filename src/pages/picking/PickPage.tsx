@@ -2047,23 +2047,24 @@ export default function PickPage(): React.JSX.Element | null {
               </p>
             )}
 
-            <PickLineStatusPanel
-              rows={pickStatusRows}
-              currentItemId={currentDeckItem?.orderItem.id ?? null}
-              pickedCount={counts.picked}
-              flaggedCount={counts.flagged}
-              remainingCount={counts.remaining}
-              totalCount={counts.total}
-              dragProgress={queueDragProgress}
-              defaultExpanded
-              onJump={jumpToItem}
-              onOpenQueue={() => {
-                appHaptics.selection();
-                setQueueSheetOpen(true);
-              }}
-              onQueueDrag={setQueueDragProgress}
-              onQueueDragEnd={() => setQueueDragProgress(0)}
-            />
+            {!queueSheetOpen && (
+              <PickLineStatusPanel
+                rows={pickStatusRows}
+                currentItemId={currentDeckItem?.orderItem.id ?? null}
+                pickedCount={counts.picked}
+                flaggedCount={counts.flagged}
+                remainingCount={counts.remaining}
+                totalCount={counts.total}
+                dragProgress={queueDragProgress}
+                onJump={jumpToItem}
+                onOpenQueue={() => {
+                  appHaptics.selection();
+                  setQueueSheetOpen(true);
+                }}
+                onQueueDrag={setQueueDragProgress}
+                onQueueDragEnd={() => setQueueDragProgress(0)}
+              />
+            )}
           </div>
         ) : (
           <div className="ds-card p-6 text-center">

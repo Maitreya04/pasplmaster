@@ -29,6 +29,8 @@ interface SwipeDeckProps {
   onIndexChange: (index: number) => void;
   /** Swipe up on the deck (e.g. open queue). Downward swipes are never intercepted — PWA pull-to-refresh stays available. */
   onSwipeUp?: () => void;
+  /** Floating pull hint over the deck bottom — off by default; use the status strip handle instead. */
+  showQueueHint?: boolean;
   /** 0–1 while dragging up — use to lift the status panel below the deck. */
   onSwipeUpDrag?: (progress: number) => void;
   /** Called when a vertical swipe gesture ends (progress resets to 0). */
@@ -50,6 +52,7 @@ export function SwipeDeck({
   itemCount,
   onIndexChange,
   onSwipeUp,
+  showQueueHint = false,
   onSwipeUpDrag,
   onSwipeUpDragEnd,
   variant = 'default',
@@ -440,7 +443,7 @@ export function SwipeDeck({
           ['--swipe-up-progress' as string]: '0',
         }}
       >
-        {onSwipeUp ? (
+        {onSwipeUp && showQueueHint ? (
           <div
             className="pick-deck-pull-zone absolute inset-x-0 bottom-0 z-20 flex items-end justify-center pb-1.5 pt-6"
             aria-hidden

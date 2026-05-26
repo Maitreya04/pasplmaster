@@ -165,6 +165,7 @@ export function PickLineStatusPanel({
   const listMaxRem = baseListRem + drag * 12;
   const doneRows = rows.filter((r) => r.status === 'picked' || r.status === 'flagged');
   const activeRows = rows.filter((r) => r.status !== 'picked' && r.status !== 'flagged');
+  const currentRow = rows.find((r) => r.itemId === currentItemId) ?? activeRows[0] ?? null;
   const openingQueue = drag > 0.35;
   const showList = defaultExpanded || drag > 0.1;
 
@@ -266,9 +267,7 @@ export function PickLineStatusPanel({
           >
             {openingQueue
               ? 'Release for full queue'
-              : defaultExpanded
-                ? 'Pull up for full queue'
-                : 'Pull up · full queue'}
+              : 'Swipe up for pick queue'}
           </span>
         </button>
 
@@ -292,6 +291,26 @@ export function PickLineStatusPanel({
             {totalCount} lines
           </span>
         </div>
+
+        {!showList && currentRow && (
+          <button
+            type="button"
+            onClick={() => onJump(currentRow.itemId)}
+            className="flex w-full min-h-[44px] items-center gap-2 border-t border-[var(--border-faint)] px-3 py-2 text-left pick-pressable active:bg-[var(--bg-tertiary)]"
+            aria-label={`Current line: ${currentRow.code}, rack ${currentRow.rackNo ?? 'unknown'}`}
+          >
+            <span className="shrink-0 font-mono text-sm font-extrabold tabular-nums text-[var(--role-primary)]">
+              {currentRow.rackNo ?? '—'}
+            </span>
+            <p className="min-w-0 flex-1 truncate font-mono text-xs font-bold text-[var(--content-primary)]">
+              {currentRow.code}
+            </p>
+            <span className="shrink-0 font-mono text-[11px] font-semibold tabular-nums text-[var(--content-secondary)]">
+              {currentRow.targetQty} pcs
+            </span>
+            <ArrowRight size={12} weight="bold" className="shrink-0 text-[var(--content-quaternary)]" />
+          </button>
+        )}
 
         {/* List — only when expanded or dragging */}
         {showList && (

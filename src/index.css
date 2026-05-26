@@ -411,7 +411,7 @@ select {
 
 .pick-page-main .pick-deck-height {
   flex: 1 1 0;
-  min-height: clamp(200px, 36dvh, 480px);
+  min-height: clamp(220px, 40dvh, 520px);
   height: auto;
 }
 
@@ -445,7 +445,7 @@ select {
   }
 
   .pick-page-main .pick-deck-height {
-    min-height: clamp(180px, 32dvh, 360px);
+    min-height: clamp(200px, 36dvh, 400px);
   }
 
   .pick-hero-rack {

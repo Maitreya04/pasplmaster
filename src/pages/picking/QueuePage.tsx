@@ -21,9 +21,10 @@ import {
   QueueSectionHeader,
   InitialsAvatar,
 } from '../../components/shared';
+import { ActivePickRow } from '../../components/picking/ActivePickRow';
 import { AssignedOrderRow } from '../../components/picking/AssignedOrderRow';
 import { PickerDailyStatsStrip } from '../../components/picking/PickerDailyStatsStrip';
-import { isMyAssignedPending } from '../../lib/picking/pickLifecycle';
+import { isMyAssignedPending, isMyStaleAssignedPick } from '../../lib/picking/pickLifecycle';
 
 function hasPickableLines(order: { pick_line_count?: number; item_count: number }): boolean {
   if (order.pick_line_count != null) return order.pick_line_count > 0;
@@ -57,7 +58,24 @@ export default function QueuePage(): React.JSX.Element | null {
   const dailyStats = usePickerDailyStats();
   const pushAlerts = usePickerPushNotifications({ role, userId, userName });
 
-  /** Assigned orders waiting to start — in-progress picks live on the Team tab. */
+  /** Stale in-progress picks assigned to you — resume straight on the pick deck. */
+  const staleResumeOrders = useMemo(
+    () =>
+      [...myActive]
+        .filter(hasPickableLines)
+        .filter((order) => isMyStaleAssignedPick(order, userName))
+        .sort((a, b) => {
+          if (a.priority === 'urgent' && b.priority !== 'urgent') return -1;
+          if (a.priority !== 'urgent' && b.priority === 'urgent') return 1;
+          return (
+            new Date(b.claim_info?.last_heartbeat_at ?? b.approved_at ?? b.created_at).getTime() -
+            new Date(a.claim_info?.last_heartbeat_at ?? a.approved_at ?? a.created_at).getTime()
+          );
+        }),
+    [myActive, userName],
+  );
+
+  /** Assigned orders waiting to start (approved, not yet picking). */
   const assignedOrders = useMemo(
     () =>
       [...myActive]
@@ -73,6 +91,10 @@ export default function QueuePage(): React.JSX.Element | null {
 
   const openAssignedPreview = (orderId: number) => {
     navigate(`/picking/preview/${orderId}?source=assigned`);
+  };
+
+  const openStalePick = (orderId: number) => {
+    navigate(`/picking/pick/${orderId}`);
   };
 
   const handleEnableAlerts = async () => {
@@ -94,7 +116,8 @@ export default function QueuePage(): React.JSX.Element | null {
     }
   };
 
-  const queueIsEmpty = !isLoading && assignedOrders.length === 0;
+  const queueWorkCount = assignedOrders.length + staleResumeOrders.length;
+  const queueIsEmpty = !isLoading && queueWorkCount === 0;
 
   return (
     <div className="min-h-screen">
@@ -145,44 +168,68 @@ export default function QueuePage(): React.JSX.Element | null {
             <Skeleton variant="card" count={3} />
           </div>
         ) : (
-          <section>
-            <QueueSectionHeader
-              label="Your assignments"
-              count={assignedOrders.length}
-              showWhenEmpty
-              description={
-                assignedOrders.length === 0
-                  ? 'Billing-assigned orders appear here. Resume in-progress picks from the Team tab.'
-                  : 'Tap an order to review the pick list, then start picking'
-              }
-            />
-            {assignedOrders.length === 0 ? (
-              queueIsEmpty ? (
-                <EmptyState
-                  icon={Package}
-                  title="No assignments"
-                  description="New billing assignments show up here. Active picks and the unassigned pool are on Team."
-                  action={{
-                    label: 'Open Team',
-                    onClick: () => navigate('/picking/active'),
-                  }}
-                />
-              ) : (
-                <p className="rounded-2xl border border-dashed border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
-                  No orders assigned to you right now. Check the Team tab for picks in progress.
-                </p>
-              )
-            ) : (
+          <section className="space-y-4">
+            {staleResumeOrders.length > 0 && (
               <div className="space-y-2">
-                {assignedOrders.map((order) => (
-                  <AssignedOrderRow
-                    key={order.id}
-                    order={order}
-                    onOpen={() => openAssignedPreview(order.id)}
-                  />
-                ))}
+                <QueueSectionHeader
+                  label="Resume stale pick"
+                  count={staleResumeOrders.length}
+                  description="Session timed out — tap to continue where you left off"
+                />
+                <div className="space-y-2">
+                  {staleResumeOrders.map((order) => (
+                    <ActivePickRow
+                      key={order.id}
+                      order={order}
+                      isMine
+                      onOpen={() => openStalePick(order.id)}
+                    />
+                  ))}
+                </div>
               </div>
             )}
+
+            <div className="space-y-2">
+              <QueueSectionHeader
+                label="Your assignments"
+                count={assignedOrders.length}
+                showWhenEmpty
+                description={
+                  assignedOrders.length === 0
+                    ? staleResumeOrders.length > 0
+                      ? 'New billing assignments appear here when ready to start'
+                      : 'Billing-assigned orders appear here when ready to start'
+                    : 'Tap an order to review the pick list, then start picking'
+                }
+              />
+              {assignedOrders.length === 0 ? (
+                queueIsEmpty ? (
+                  <EmptyState
+                    icon={Package}
+                    title="No assignments"
+                    description="New billing assignments show up here. Live picks and the unassigned pool are on Team."
+                    action={{
+                      label: 'Open Team',
+                      onClick: () => navigate('/picking/active'),
+                    }}
+                  />
+                ) : staleResumeOrders.length > 0 ? null : (
+                  <p className="rounded-2xl border border-dashed border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
+                    No new assignments right now. Active picks are on the Team tab.
+                  </p>
+                )
+              ) : (
+                <div className="space-y-2">
+                  {assignedOrders.map((order) => (
+                    <AssignedOrderRow
+                      key={order.id}
+                      order={order}
+                      onOpen={() => openAssignedPreview(order.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
         )}
 
