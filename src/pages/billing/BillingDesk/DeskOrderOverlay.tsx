@@ -203,14 +203,26 @@ function DeskOrderOverlayEditor({
           fulfillmentPath: 'warehouse_pick',
         });
       } else if (resolvingFlags) {
-        await completeBillingWithClaim({
-          orderId: orderDetail.id,
-          claimId: null,
-          userId,
-          claim,
-          isResolvingFlags: true,
-          fulfillmentPath: 'direct_bill',
-        });
+        if (orderDetail.workflow_status === 'picking') {
+          // Picker still active — clear line flags only; pick continues.
+          await supabase
+            .from('orders')
+            .update({ reviewer_name: reviewer })
+            .eq('id', orderDetail.id);
+        } else if (orderDetail.workflow_status === 'flagged') {
+          // Post-pick flag resolution — complete without a billing claim (desk path).
+          await supabase
+            .from('orders')
+            .update({
+              reviewer_name: reviewer,
+              workflow_status: 'completed',
+              priority: 'normal',
+              approved_at: orderDetail.approved_at ?? nowIso,
+              completed_at: nowIso,
+              fulfillment_path: 'direct_bill',
+            })
+            .eq('id', orderDetail.id);
+        }
       } else {
         await supabase
           .from('orders')
@@ -225,8 +237,9 @@ function DeskOrderOverlayEditor({
       setStep('saved');
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['desk-picker-flags'] });
       queryClient.invalidateQueries({ queryKey: ['order', order.id] });
-      toast.success('Bill saved ✓');
+      toast.success(flaggedMode ? 'Flag resolved ✓' : 'Bill saved ✓');
     },
     onError: (err: unknown) => {
       toast.error(err instanceof Error ? err.message : 'Failed to save bill');
@@ -295,7 +308,7 @@ function DeskOrderOverlayEditor({
               }`}
             >
               {flaggedMode
-                ? `Flagged by ${order.picker_name ?? 'picker'} · ${order.order_number}`
+                ? `Review flagged lines · adjust MRP · resolve & save`
                 : 'Edit MRP · Save & Bill · Notify picker'}
             </p>
           </div>
@@ -457,12 +470,12 @@ function DeskOrderOverlayEditor({
               {step !== 'idle' ? (
                 <>
                   <Check size={16} weight="bold" />
-                  Bill saved ✓
+                  {flaggedMode ? 'Flag resolved ✓' : 'Bill saved ✓'}
                 </>
               ) : (
                 <>
                   <Receipt size={16} weight="bold" />
-                  Save & Bill
+                  {flaggedMode ? 'Resolve flag & save' : 'Save & Bill'}
                 </>
               )}
             </button>

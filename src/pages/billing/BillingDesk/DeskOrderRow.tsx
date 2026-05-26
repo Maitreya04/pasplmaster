@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { UserPlus, X } from '@phosphor-icons/react';
+import { ClipboardText, UserPlus, X } from '@phosphor-icons/react';
 import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
 import type { PickLineProgress } from '../../../lib/cartSupply';
 import type { PickerLoadInfo } from '../../../hooks/usePickerLoad';
@@ -67,6 +67,7 @@ interface DeskOrderRowCardProps {
   isAssignExpanded?: boolean;
   onAssignToggle?: () => void;
   showStaleActions?: boolean;
+  showVerifyAction?: boolean;
   onEdit: () => void;
 }
 
@@ -79,6 +80,7 @@ export function DeskOrderRowCard({
   isAssignExpanded = false,
   onAssignToggle,
   showStaleActions = false,
+  showVerifyAction = false,
   onEdit,
 }: DeskOrderRowCardProps): React.JSX.Element {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -193,6 +195,22 @@ export function DeskOrderRowCard({
                       {reassign ? 'Re-assign' : 'Assign'}
                     </>
                   )}
+                </button>
+              </DeskTooltip>
+            )}
+
+            {showVerifyAction && !isAssignExpanded && !completeExpanded && (
+              <DeskTooltip label="Review bill and line prices" side="bottom">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit();
+                  }}
+                  className={`${deskBtn.action} ${deskType.btn} text-[var(--content-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-subtle)] hover:border-[var(--border-opaque)] hover:text-[var(--content-primary)]`}
+                >
+                  <ClipboardText size={14} weight="bold" />
+                  Verify
                 </button>
               </DeskTooltip>
             )}

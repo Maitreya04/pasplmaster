@@ -11,6 +11,7 @@ interface DeskPickerToolbarProps {
   allOrders: DeskOrderRow[];
   selectedPickerId: number | null;
   onSelectPicker: (pickerId: number | null) => void;
+  compact?: boolean;
 }
 
 function statsLabel(stats: PickerDeskStats): string {
@@ -32,6 +33,7 @@ export function DeskPickerToolbar({
   allOrders,
   selectedPickerId,
   onSelectPicker,
+  compact = false,
 }: DeskPickerToolbarProps): React.JSX.Element {
   const statsByPicker = useMemo(() => {
     const map = new Map<number, PickerDeskStats>();
@@ -43,15 +45,17 @@ export function DeskPickerToolbar({
 
   return (
     <div className="shrink-0 border-b border-[var(--border-faint)] bg-[var(--bg-secondary)]">
-      <div className="px-3.5 pt-2.5 pb-3">
-        <div className="flex items-center justify-between gap-2 mb-2">
-          <span className={deskType.sectionLabel}>Filter by picker</span>
-          <span className={`${deskType.chipStat} normal-case tracking-normal`}>
-            active · done
-          </span>
-        </div>
+      <div className={`px-3.5 ${compact ? 'pt-1.5 pb-2' : 'pt-2.5 pb-3'}`}>
+        {!compact && (
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <span className={deskType.sectionLabel}>Filter by picker</span>
+            <span className={`${deskType.chipStat} normal-case tracking-normal`}>
+              active · done
+            </span>
+          </div>
+        )}
 
-        <div className="flex items-start gap-2 overflow-x-auto overscroll-x-contain py-1">
+        <div className={`flex items-start gap-2 overflow-x-auto overscroll-x-contain ${compact ? 'py-0.5' : 'py-1'}`}>
           <DeskTooltip label="Show every picker's orders" side="bottom">
             <button
               type="button"

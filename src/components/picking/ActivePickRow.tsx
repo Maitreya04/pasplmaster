@@ -3,6 +3,7 @@ import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 import { InitialsAvatar, StatusBadge } from '../shared';
 import { TransportChip } from './TransportChip';
 import {
+  formatBilledTime,
   formatLineCountLabel,
   pickProgressFromPreview,
 } from '../../lib/picking/pickQueueDisplay';
@@ -34,6 +35,7 @@ export function ActivePickRow({
   const pickerName = order.claim_info?.claimed_by_name ?? order.picker_name ?? 'Unknown';
   const lineCount = pickerLineCount(order);
   const started = isPickStarted(order.workflow_status);
+  const billed = formatBilledTime(order.approved_at, order.created_at);
 
   const statusTone =
     status === 'stale'
@@ -71,6 +73,11 @@ export function ActivePickRow({
               {statusLabel}
             </span>
           </div>
+          {billed && (
+            <p className="text-[11px] tabular-nums text-[var(--content-tertiary)]">
+              Billed {billed}
+            </p>
+          )}
           <p className="mt-0.5 truncate text-sm text-[var(--content-secondary)]">
             {order.customer_name}
           </p>

@@ -70,10 +70,10 @@ export default function BillingLayout(): React.JSX.Element | null {
   const push = useRolePushNotifications({ role, userId, userName });
 
   return (
-    <div className="role-billing min-h-screen bg-[var(--bg-primary)] relative">
-      <div className="flex min-h-screen">
+    <div className="role-billing min-h-screen lg:h-[100dvh] lg:overflow-hidden bg-[var(--bg-primary)] relative">
+      <div className="flex min-h-screen lg:h-full lg:min-h-0">
         {/* Sidebar — visible on lg+ */}
-        <aside className="hidden lg:flex flex-col w-56 min-h-screen border-r border-[var(--border-opaque)] bg-[var(--bg-secondary)] py-6 px-3 shrink-0">
+        <aside className="hidden lg:flex flex-col w-56 h-full min-h-0 border-r border-[var(--border-opaque)] bg-[var(--bg-secondary)] py-6 px-3 shrink-0 overflow-y-auto">
           <div className="flex items-center justify-between gap-2 px-3 mb-4">
             <p className="text-xs font-semibold text-[var(--content-quaternary)] uppercase tracking-wider">
               Billing
@@ -105,7 +105,7 @@ export default function BillingLayout(): React.JSX.Element | null {
         </aside>
 
         {/* Content */}
-        <main className="flex-1 flex flex-col min-w-0 min-h-0 pb-[6.5rem] lg:pb-0">
+        <main className="flex-1 flex flex-col min-w-0 min-h-0 lg:h-full lg:overflow-hidden pb-[6.5rem] lg:pb-0">
           {!location.pathname.startsWith('/billing/new-order') && (
             <div className="lg:hidden sticky top-0 z-30 flex items-center justify-end gap-2 px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-sm">
               <NotificationBell userId={userId} role={role} />

@@ -99,7 +99,9 @@ export function DeskSplitPane({ left, right }: DeskSplitPaneProps): React.JSX.El
       </div>
 
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-secondary)]">
-        {right}
+        <div className="h-full min-h-0 flex flex-col overflow-hidden">
+          {right}
+        </div>
       </div>
     </div>
   );

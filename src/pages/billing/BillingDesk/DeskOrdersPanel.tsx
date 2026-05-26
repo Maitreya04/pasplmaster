@@ -9,7 +9,7 @@ import {
   type DeskOrderRow,
   type DeskOrderTab,
 } from '../../../hooks/useBillingDeskOrders';
-import { DeskFlagsSeparatorNote, DeskFlagsStrip } from './DeskFlagsStrip';
+import { DeskFlagsStrip } from './DeskFlagsStrip';
 import { DeskOrderRowCard } from './DeskOrderRow';
 import { DeskPickerToolbar } from './DeskPickerToolbar';
 import { DeskTooltip } from './DeskTooltip';
@@ -94,14 +94,16 @@ export function DeskOrdersPanel({
         : 'Billed orders appear here once they leave the live queue.';
 
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-hidden bg-[var(--bg-secondary)]">
-      <header className="shrink-0 px-3.5 py-3 border-b border-[var(--border-faint)] bg-[var(--bg-secondary)]">
-        <div className="flex items-center justify-between gap-3">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg-secondary)]">
+      <header className="shrink-0 px-3.5 py-2.5 border-b border-[var(--border-faint)] bg-[var(--bg-secondary)]">
+        <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <span className={deskType.panelTitle}>Orders</span>
-            <p className={`${deskType.panelSub} mt-0.5 truncate`}>
-              Assign · edit bills · track by picker
-            </p>
+            {flaggedOrders.length > 0 && (
+              <p className={`${deskType.panelSub} mt-0.5 text-[var(--content-warning-on-light)]`}>
+                {flaggedOrders.length} flag{flaggedOrders.length === 1 ? '' : 's'} need action
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-0.5 shrink-0 p-0.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-faint)]">
             {tabs.map((t) => {
@@ -117,7 +119,7 @@ export function DeskOrdersPanel({
                   <button
                     type="button"
                     onClick={() => setTab(t.id)}
-                    className={`${deskType.tab} px-2.5 py-1.5 rounded-md transition-colors inline-flex items-center gap-1.5 ${
+                    className={`${deskType.tab} px-2 py-1 rounded-md transition-colors inline-flex items-center gap-1 ${
                       active
                         ? 'bg-[var(--bg-secondary)] text-[var(--content-primary)] font-semibold shadow-sm'
                         : 'text-[var(--content-quaternary)] hover:text-[var(--content-secondary)]'
@@ -138,6 +140,7 @@ export function DeskOrdersPanel({
       </header>
 
       <DeskPickerToolbar
+        compact={flaggedOrders.length > 0}
         pickers={pickers}
         pickerColors={pickerColors}
         allOrders={allOrders}
@@ -145,48 +148,49 @@ export function DeskOrdersPanel({
         onSelectPicker={setPickerFilterId}
       />
 
-      <DeskFlagsStrip
-        orders={flaggedOrders}
-        onSelect={(order) => onSelectOrder(order, true)}
-      />
+      <div className="flex-1 basis-0 min-h-0 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable] pb-12">
+        <DeskFlagsStrip
+          orders={flaggedOrders}
+          onReview={(order) => onSelectOrder(order, true)}
+        />
 
-      <DeskFlagsSeparatorNote count={flaggedOrders.length} />
-
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-3.5 py-2.5 flex flex-col gap-1.5">
-        {isLoading ? (
-          <Skeleton variant="card" count={4} />
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-1 min-h-[12rem] items-center justify-center">
-            <EmptyState
-              icon={Tray}
-              title={
-                pickerFilter
-                  ? `No orders for ${pickerFilter.firstName}`
-                  : tab === 'completed'
-                    ? 'No completed picks yet'
-                    : 'No orders in this view'
-              }
-              description={emptyDescription}
-            />
-          </div>
-        ) : (
-          filtered.map((order) => (
-            <DeskOrderRowCard
-              key={order.id}
-              order={order}
-              pickers={pickers}
-              pickerColors={pickerColors}
-              pickProgress={pickProgressMap?.get(order.id)}
-              progressLoading={progressLoading}
-              isAssignExpanded={assignTarget?.id === order.id}
-              onAssignToggle={() => {
-                setAssignTarget((prev) => (prev?.id === order.id ? null : order));
-              }}
-              showStaleActions={tab === 'stale'}
-              onEdit={() => onSelectOrder(order, false)}
-            />
-          ))
-        )}
+        <div className="px-3.5 py-2.5 flex flex-col gap-1.5">
+          {isLoading ? (
+            <Skeleton variant="card" count={4} />
+          ) : filtered.length === 0 ? (
+            <div className="flex min-h-[10rem] items-center justify-center">
+              <EmptyState
+                icon={Tray}
+                title={
+                  pickerFilter
+                    ? `No orders for ${pickerFilter.firstName}`
+                    : tab === 'completed'
+                      ? 'No completed picks yet'
+                      : 'No orders in this view'
+                }
+                description={emptyDescription}
+              />
+            </div>
+          ) : (
+            filtered.map((order) => (
+              <DeskOrderRowCard
+                key={order.id}
+                order={order}
+                pickers={pickers}
+                pickerColors={pickerColors}
+                pickProgress={pickProgressMap?.get(order.id)}
+                progressLoading={progressLoading}
+                isAssignExpanded={assignTarget?.id === order.id}
+                onAssignToggle={() => {
+                  setAssignTarget((prev) => (prev?.id === order.id ? null : order));
+                }}
+                showStaleActions={tab === 'stale'}
+                showVerifyAction={tab === 'completed' || order.deskStatus === 'checking'}
+                onEdit={() => onSelectOrder(order, false)}
+              />
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
