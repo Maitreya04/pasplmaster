@@ -11,6 +11,7 @@ const ROLE_HOME: Record<RoleKey, string> = {
   billing: '/billing',
   picking: '/picking',
   admin: '/admin',
+  partner: '/partner/supply',
 };
 
 const ROLE_LABEL: Record<RoleKey, string> = {
@@ -18,6 +19,7 @@ const ROLE_LABEL: Record<RoleKey, string> = {
   billing: 'Billing',
   picking: 'Picking',
   admin: 'Admin',
+  partner: 'Partner',
 };
 
 export function DevRoleSwitcher(): React.JSX.Element | null {

@@ -6,7 +6,7 @@ import { appHaptics } from '../../lib/haptics';
 import { useUserNotifications } from '../../hooks/useUserNotifications';
 import type { UserNotification } from '../../types';
 
-type AppRole = 'sales' | 'billing' | 'picking' | 'admin';
+type AppRole = 'sales' | 'billing' | 'picking' | 'admin' | 'partner';
 
 function roleFromPath(pathname: string): AppRole | null {
   if (pathname.startsWith('/billing')) return 'billing';

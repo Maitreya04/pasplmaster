@@ -60,12 +60,16 @@ const PurchaseNewPoPage = lazy(() => import('./pages/purchase/PurchaseNewPoPage'
 const PurchasePoDetailPage = lazy(() => import('./pages/purchase/PurchasePoDetailPage'));
 const PurchaseInvoiceReviewPage = lazy(() => import('./pages/purchase/PurchaseInvoiceReviewPage'));
 const PurchaseInvoiceNewPage = lazy(() => import('./pages/purchase/PurchaseInvoiceNewPage'));
+const PartnerLayout = lazy(() => import('./pages/partner/PartnerLayout'));
+const PartnerSupplyPage = lazy(() => import('./pages/partner/PartnerSupplyPage'));
+const PartnerSupplySkuDetailPage = lazy(() => import('./pages/partner/PartnerSupplySkuDetailPage'));
 
 const ROLE_HOME: Record<string, string> = {
   sales: '/sales',
   billing: '/billing/queue',
   picking: '/picking',
   admin: '/admin',
+  partner: '/partner/supply',
 };
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -92,6 +96,12 @@ function RootRedirect() {
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (role && ROLE_HOME[role]) return <Navigate to={ROLE_HOME[role]} replace />;
   return <Navigate to="/select-role" replace />;
+}
+
+function RequirePartnerRole({ children }: { children: React.ReactNode }) {
+  const { role } = useAuth();
+  if (role !== 'partner') return <Navigate to="/select-role" replace />;
+  return <>{children}</>;
 }
 
 export default function App(): React.JSX.Element | null {
@@ -423,6 +433,21 @@ export default function App(): React.JSX.Element | null {
             </RequireRole>
           }
         />
+
+        {/* Partner (OEM company rep) */}
+        <Route
+          path="/partner"
+          element={
+            <RequireRole>
+              <RequirePartnerRole>
+                <PartnerLayout />
+              </RequirePartnerRole>
+            </RequireRole>
+          }
+        >
+          <Route path="supply" element={<PartnerSupplyPage />} />
+          <Route path="supply/sku/:itemId" element={<PartnerSupplySkuDetailPage />} />
+        </Route>
 
         {/* Catch-all */}
         <Route path="*" element={<Navigate to="/" replace />} />

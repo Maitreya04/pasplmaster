@@ -12,7 +12,7 @@ import {
 } from '../lib/push';
 import type { PushCapabilityState, PushSubscriptionRecord } from '../types';
 
-export type AppRole = 'sales' | 'billing' | 'picking' | 'admin';
+export type AppRole = 'sales' | 'billing' | 'picking' | 'admin' | 'partner';
 
 interface UseRolePushNotificationsOptions {
   role: AppRole | null;
@@ -44,7 +44,7 @@ export function useRolePushNotifications({
 
   const syncSubscription = useCallback(
     async (subscription: PushSubscription | null): Promise<boolean> => {
-      if (!subscription || !role || role === 'admin' || !userId || !userName) {
+      if (!subscription || !role || role === 'admin' || role === 'partner' || !userId || !userName) {
         return false;
       }
 
@@ -52,7 +52,7 @@ export function useRolePushNotifications({
       const payload: Omit<PushSubscriptionRecord, 'id' | 'created_at' | 'updated_at'> = {
         user_id: userId,
         user_name: userName,
-        role,
+        role: role as Exclude<typeof role, 'partner'>,
         device_id: getPushDeviceId(),
         endpoint: keys.endpoint,
         p256dh: keys.p256dh,

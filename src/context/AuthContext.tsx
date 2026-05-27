@@ -10,17 +10,18 @@ import { supabase } from '../lib/supabase/client';
 import { clearCartDraft } from '../lib/cartDraftStorage';
 import { warmPickQueueRoute } from '../lib/picking/warmPickQueue';
 
-type Role = 'sales' | 'billing' | 'picking' | 'admin' | null;
+type Role = 'sales' | 'billing' | 'picking' | 'admin' | 'partner' | null;
 
 interface AuthContextValue {
   isAuthenticated: boolean;
   role: Role;
   userName: string | null;
   userId: number | null;
+  partnerCompanyId: number | null;
   adminUnlocked: boolean;
   login: (code: string) => Promise<boolean>;
   unlockAdmin: (code: string) => boolean;
-  selectRole: (role: NonNullable<Role>, name?: string) => void;
+  selectRole: (role: NonNullable<Role>, name?: string, partnerCompanyId?: number) => void;
   logout: () => void;
   switchRole: () => void;
 }
@@ -32,6 +33,7 @@ const LS_KEYS = {
   role: 'paspl_role',
   userName: 'paspl_userName',
   userId: 'paspl_userId',
+  partnerCompanyId: 'paspl_partnerCompanyId',
   adminUnlocked: 'paspl_admin_unlocked',
 } as const;
 
@@ -94,11 +96,13 @@ const ADMIN_PASSCODE = '0807';
 
 function loadFromStorage() {
   const userIdStr = safeLocalStorageGet(LS_KEYS.userId);
+  const partnerIdStr = safeLocalStorageGet(LS_KEYS.partnerCompanyId);
   return {
     isAuthenticated: safeLocalStorageGet(LS_KEYS.authenticated) === 'true',
     role: (safeLocalStorageGet(LS_KEYS.role) as Role) || null,
     userName: safeLocalStorageGet(LS_KEYS.userName),
     userId: userIdStr ? parseInt(userIdStr, 10) : null,
+    partnerCompanyId: partnerIdStr ? parseInt(partnerIdStr, 10) : null,
     adminUnlocked: safeSessionStorageGet(LS_KEYS.adminUnlocked) === 'true',
   };
 }
@@ -108,11 +112,14 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   const [role, setRole] = useState<Role>(() => loadFromStorage().role);
   const [userName, setUserName] = useState<string | null>(() => loadFromStorage().userName);
   const [userId, setUserId] = useState<number | null>(() => loadFromStorage().userId);
+  const [partnerCompanyId, setPartnerCompanyId] = useState<number | null>(
+    () => loadFromStorage().partnerCompanyId,
+  );
   const [adminUnlocked, setAdminUnlocked] = useState(() => loadFromStorage().adminUnlocked);
 
   // Backfill userId when name + role exist but id was missing (e.g. older exact-match lookup failed).
   useEffect(() => {
-    if (!userName || !role || role === 'admin' || userId !== null) return;
+    if (!userName || !role || role === 'admin' || role === 'partner' || userId !== null) return;
     let cancelled = false;
     void supabase
       .from('users')
@@ -165,56 +172,77 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     return false;
   }, []);
 
-  const selectRole = useCallback((newRole: NonNullable<Role>, name?: string) => {
-    const resolvedName = name || null;
-    setRole(newRole);
-    setUserName(resolvedName);
-    safeLocalStorageSet(LS_KEYS.role, newRole);
-    if (resolvedName) {
-      safeLocalStorageSet(LS_KEYS.userName, resolvedName);
-    } else {
-      safeLocalStorageRemove(LS_KEYS.userName);
-    }
+  const selectRole = useCallback(
+    (newRole: NonNullable<Role>, name?: string, companyId?: number) => {
+      const resolvedName = name || null;
+      setRole(newRole);
+      setUserName(resolvedName);
+      safeLocalStorageSet(LS_KEYS.role, newRole);
+      if (resolvedName) {
+        safeLocalStorageSet(LS_KEYS.userName, resolvedName);
+      } else {
+        safeLocalStorageRemove(LS_KEYS.userName);
+      }
 
-    // Resolve userId from users table (case-insensitive name match; scoped by role)
-    if (resolvedName) {
-      supabase
-        .from('users')
-        .select('id, full_name')
-        .eq('role', newRole)
-        .eq('is_active', true)
-        .then(({ data: rows, error }) => {
-          if (error) {
-            console.error('users lookup', error);
-            setUserId(null);
-            safeLocalStorageRemove(LS_KEYS.userId);
-            return;
-          }
-          const needle = resolvedName.trim().toLowerCase();
-          const match = (rows ?? []).find((u) => u.full_name.trim().toLowerCase() === needle);
-          const id = match?.id ?? null;
-          setUserId(id);
-          if (id !== null) {
-            safeLocalStorageSet(LS_KEYS.userId, String(id));
-          } else {
-            safeLocalStorageRemove(LS_KEYS.userId);
-          }
-        });
-    } else {
-      setUserId(null);
-      safeLocalStorageRemove(LS_KEYS.userId);
-    }
-  }, []);
+      if (newRole === 'partner') {
+        const id = companyId ?? null;
+        setPartnerCompanyId(id);
+        setUserId(null);
+        safeLocalStorageRemove(LS_KEYS.userId);
+        if (id !== null) {
+          safeLocalStorageSet(LS_KEYS.partnerCompanyId, String(id));
+        } else {
+          safeLocalStorageRemove(LS_KEYS.partnerCompanyId);
+        }
+        return;
+      }
+
+      setPartnerCompanyId(null);
+      safeLocalStorageRemove(LS_KEYS.partnerCompanyId);
+
+      // Resolve userId from users table (case-insensitive name match; scoped by role)
+      if (resolvedName) {
+        supabase
+          .from('users')
+          .select('id, full_name')
+          .eq('role', newRole)
+          .eq('is_active', true)
+          .then(({ data: rows, error }) => {
+            if (error) {
+              console.error('users lookup', error);
+              setUserId(null);
+              safeLocalStorageRemove(LS_KEYS.userId);
+              return;
+            }
+            const needle = resolvedName.trim().toLowerCase();
+            const match = (rows ?? []).find((u) => u.full_name.trim().toLowerCase() === needle);
+            const id = match?.id ?? null;
+            setUserId(id);
+            if (id !== null) {
+              safeLocalStorageSet(LS_KEYS.userId, String(id));
+            } else {
+              safeLocalStorageRemove(LS_KEYS.userId);
+            }
+          });
+      } else {
+        setUserId(null);
+        safeLocalStorageRemove(LS_KEYS.userId);
+      }
+    },
+    [],
+  );
 
   const switchRole = useCallback(() => {
     setRole(null);
     setUserName(null);
     setUserId(null);
+    setPartnerCompanyId(null);
     setAdminUnlocked(false);
     safeSessionStorageRemove(LS_KEYS.adminUnlocked);
     safeLocalStorageRemove(LS_KEYS.role);
     safeLocalStorageRemove(LS_KEYS.userName);
     safeLocalStorageRemove(LS_KEYS.userId);
+    safeLocalStorageRemove(LS_KEYS.partnerCompanyId);
   }, []);
 
   const logout = useCallback(() => {
@@ -228,11 +256,13 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     setRole(null);
     setUserName(null);
     setUserId(null);
+    setPartnerCompanyId(null);
     setAdminUnlocked(false);
     safeLocalStorageRemove(LS_KEYS.authenticated);
     safeLocalStorageRemove(LS_KEYS.role);
     safeLocalStorageRemove(LS_KEYS.userName);
     safeLocalStorageRemove(LS_KEYS.userId);
+    safeLocalStorageRemove(LS_KEYS.partnerCompanyId);
     safeSessionStorageRemove(LS_KEYS.adminUnlocked);
   }, []);
 
@@ -243,6 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
         role,
         userName,
         userId,
+        partnerCompanyId,
         adminUnlocked,
         login,
         unlockAdmin,

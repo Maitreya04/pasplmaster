@@ -1,12 +1,13 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart, ClipboardText, Package } from '@phosphor-icons/react';
+import { ShoppingCart, ClipboardText, Package, Factory } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import { BottomSheet } from '../components/shared';
 import { useTeamUsers } from '../hooks/useTeamUsers';
+import { usePartnerCompanies } from '../hooks/usePartnerCompanies';
 import { warmPickQueueRoute } from '../lib/picking/warmPickQueue';
 
-type SheetMode = 'sales' | 'billing' | 'picking' | null;
+type SheetMode = 'sales' | 'billing' | 'picking' | 'partner' | null;
 
 import { SALES_NAMES, PICKER_NAMES, BILLING_NAMES } from '../utils/constants';
 
@@ -39,6 +40,15 @@ const ROLES = [
     iconBgClass: 'bg-amber-100',
     iconColorClass: 'text-amber-600',
   },
+  {
+    key: 'partner' as const,
+    icon: Factory,
+    label: 'Company Rep',
+    desc: 'View pending demand for your brand',
+    bgClass: 'bg-teal-50',
+    iconBgClass: 'bg-teal-100',
+    iconColorClass: 'text-teal-700',
+  },
 ] as const;
 
 export default function RoleSelectPage(): React.JSX.Element | null {
@@ -50,6 +60,7 @@ export default function RoleSelectPage(): React.JSX.Element | null {
   const { data: salesUsers } = useTeamUsers('sales');
   const { data: billingUsers } = useTeamUsers('billing');
   const { data: pickingUsers } = useTeamUsers('picking');
+  const { data: partnerCompanies = [] } = usePartnerCompanies();
 
   const salesNames = useMemo(
     () => salesUsers?.map(u => u.full_name) ?? SALES_NAMES,
@@ -83,6 +94,12 @@ export default function RoleSelectPage(): React.JSX.Element | null {
     navigate('/picking');
   }
 
+  function handlePartnerSelect(companyId: number, displayName: string) {
+    selectRole('partner', displayName, companyId);
+    setSheetMode(null);
+    navigate('/partner/supply');
+  }
+
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col px-6 py-8 relative overflow-hidden">
       {/* Ambient glowing background orbs */}
@@ -106,6 +123,8 @@ export default function RoleSelectPage(): React.JSX.Element | null {
               } else if (key === 'picking') {
                 warmPickQueueRoute(null);
                 setSheetMode('picking');
+              } else if (key === 'partner') {
+                setSheetMode('partner');
               } else {
                 setSheetMode('sales');
               }
@@ -178,6 +197,25 @@ export default function RoleSelectPage(): React.JSX.Element | null {
               {name}
             </button>
           ))}
+        </div>
+      </BottomSheet>
+
+      {/* Partner company picker */}
+      <BottomSheet isOpen={sheetMode === 'partner'} onClose={() => setSheetMode(null)} title="Select your company">
+        <div className="space-y-1">
+          {partnerCompanies.length === 0 ? (
+            <p className="px-4 py-3 text-sm text-[var(--content-tertiary)]">No partner companies configured.</p>
+          ) : (
+            partnerCompanies.map((company) => (
+              <button
+                key={company.id}
+                onClick={() => handlePartnerSelect(company.id, company.display_name)}
+                className="w-full text-left px-4 py-3 rounded-xl text-[var(--content-primary)] hover:bg-[var(--bg-tertiary)] active:bg-[var(--bg-tertiary)] transition-colors duration-150 text-base"
+              >
+                {company.display_name}
+              </button>
+            ))
+          )}
         </div>
       </BottomSheet>
     </div>

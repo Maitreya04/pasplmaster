@@ -173,6 +173,10 @@ export interface PendingItem {
   resolved_at: string | null;
   resolved_by: string | null;
   stock_location_code?: StockLocationCode | null;
+  /** Pick/billing issue for warehouse audit queue. */
+  issue_category?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
 }
 
 export interface ScanSignal {
@@ -256,9 +260,18 @@ export interface CartItem {
 
 export interface AuthState {
   isAuthenticated: boolean;
-  role: 'sales' | 'billing' | 'picking' | 'admin' | null;
+  role: 'sales' | 'billing' | 'picking' | 'admin' | 'partner' | null;
   userName: string | null;
   userId: number | null;
+  partnerCompanyId: number | null;
+}
+
+export interface PartnerCompany {
+  id: number;
+  display_name: string;
+  brand_keys: string[];
+  is_active: boolean;
+  created_at: string;
 }
 
 // ─── Work Claims System Types ───────────────────────────────

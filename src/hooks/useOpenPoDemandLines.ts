@@ -9,7 +9,12 @@ import {
   type PendingPoDemandRow,
   type PoLossSource,
 } from '../lib/purchase/openPoDemand';
+import { matchesPartnerBrand } from '../lib/purchase/partnerBrandMatch';
 import type { PendingItem, StockLocationCode } from '../types';
+
+export type UseOpenPoDemandLinesOptions = {
+  brandKeys?: string[];
+};
 
 export {
   OPEN_PO_WORKFLOW_STATUSES,
@@ -229,9 +234,12 @@ async function fetchOrderItemPrices(orderIds: number[]): Promise<Map<string, Ord
   );
 }
 
-export function useOpenPoDemandLines() {
+export function useOpenPoDemandLines(options?: UseOpenPoDemandLinesOptions) {
+  const brandKeys = options?.brandKeys;
+  const brandKeyLabel = brandKeys?.length ? brandKeys.join(',') : 'all';
+
   return useQuery({
-    queryKey: ['open-po-demand-lines'],
+    queryKey: ['open-po-demand-lines', brandKeyLabel],
     queryFn: async () => {
       const orderLines = await fetchOpenOrderItemLines();
 
@@ -289,7 +297,9 @@ export function useOpenPoDemandLines() {
         priceByKey = prices;
       }
 
-      return mergeOpenPoDemandLines(orderLines, pendingRows, priceByKey);
+      const merged = mergeOpenPoDemandLines(orderLines, pendingRows, priceByKey);
+      if (!brandKeys?.length) return merged;
+      return merged.filter((line) => matchesPartnerBrand(line, brandKeys));
     },
     staleTime: 15_000,
   });

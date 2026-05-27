@@ -216,6 +216,13 @@
   --role-content: var(--gray-8);
 }
 
+.role-partner {
+  --role-primary: var(--teal-7, #0d9488);
+  --role-primary-subtle: color-mix(in srgb, var(--teal-7, #0d9488) 12%, transparent);
+  --role-content: var(--teal-9, #134e4a);
+  --bg-row-selected: color-mix(in srgb, var(--teal-7, #0d9488) 10%, transparent);
+}
+
 body {
   font-family: "Geist Sans", sans-serif;
 }
