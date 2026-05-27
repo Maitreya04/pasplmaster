@@ -6,6 +6,7 @@ import {
   deskStaleCompleteConfirmBody,
   deskStaleCompleteConfirmTitle,
   deskStaleCompleteLabel,
+  deskStaleCompleteTooltip,
   getDeskStaleCompleteKind,
 } from './deskStaleComplete';
 import { useDeskStaleComplete } from './useDeskStaleComplete';
@@ -23,17 +24,10 @@ export function DeskStaleCompleteButton({
   const kind = getDeskStaleCompleteKind(order);
   if (!kind || !canDeskStaleComplete(order)) return null;
 
-  const label = deskStaleCompleteLabel(kind);
+  const label = deskStaleCompleteLabel(kind, order);
 
   return (
-    <DeskTooltip
-      label={
-        kind === 'skip_pick'
-          ? 'Bill directly — skip warehouse picking'
-          : 'Mark pick complete — picker session is stale'
-      }
-      side="bottom"
-    >
+    <DeskTooltip label={deskStaleCompleteTooltip(kind, order)} side="bottom">
       <button
         type="button"
         onClick={(e) => {
@@ -81,7 +75,7 @@ export function DeskStaleCompleteConfirm({
       onKeyDown={(e) => e.stopPropagation()}
     >
       <p className={`${deskType.orderTitle} text-[var(--content-primary)]`}>
-        {deskStaleCompleteConfirmTitle(kind)}
+        {deskStaleCompleteConfirmTitle(kind, order)}
       </p>
       <p className={`${deskType.hint} mt-1`}>
         {deskStaleCompleteConfirmBody(order, kind)}

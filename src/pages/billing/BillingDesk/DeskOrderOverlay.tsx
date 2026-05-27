@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bell,
   Check,
   FileText,
   Flag,
   Receipt,
-  Trash,
   X,
 } from '@phosphor-icons/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -15,18 +14,31 @@ import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
 import { supabase } from '../../../lib/supabase/client';
 import { completeBillingWithClaim } from '../../../lib/billing/completeBilling';
+import { ensurePendingItem } from '../../../lib/billing/ensurePendingItem';
+import {
+  deskLineFlagKind,
+  deskLineIssueCategory,
+  formatDeskFlagSummarySubtitle,
+  summarizeDeskFlags,
+} from '../../../lib/billing/deskLineFlagKind';
 import { shouldNotifyPickers } from '../../../lib/billing/fulfillmentPath';
 import { canBroadcastReadyToPick } from '../../../lib/billing/pickerNotifyPolicy';
+import { pickQuantityTarget } from '../../../lib/cartSupply';
 import { sendPickerReadyNotification } from '../../../lib/pickerPush';
-import { formatCurrencyRaw, orderItemDisplayName } from '../../../utils/formatters';
+import { formatCurrencyRaw } from '../../../utils/formatters';
 import {
   groupOrderItemsForDisplay,
-  orderItemConfirmedMrp,
   orderItemSplitBatchCount,
 } from '../../../lib/billing/orderItemSplitGroups';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 import type { OrderItem } from '../../../types';
-import { CHANGE_REASON_OPTIONS, type ChangeReason, type OverlayLineEdit } from './types';
+import { DeskFlaggedLineRow, DeskFlaggedSectionHeader, DeskNormalLineRow } from './DeskFlaggedLineRow';
+import {
+  CHANGE_REASON_OPTIONS,
+  type ChangeReason,
+  type OverlayLineEdit,
+  type OverlayLineResolution,
+} from './types';
 
 interface DeskOrderOverlayProps {
   order: DeskOrderRow;
@@ -41,9 +53,14 @@ function initEdits(items: OrderItem[]): Record<number, OverlayLineEdit> {
       priceQuoted: item.price_quoted ?? item.price_system ?? 0,
       removed: false,
       priceTouched: false,
+      resolution: null,
     };
   }
   return edits;
+}
+
+function isFlaggedUnresolved(item: OrderItem, edit: OverlayLineEdit | undefined): boolean {
+  return item.state === 'flagged' && edit != null && edit.resolution == null && !edit.removed;
 }
 
 export function DeskOrderOverlay({
@@ -101,13 +118,33 @@ function DeskOrderOverlayEditor({
   const items = orderDetail.items;
   const [edits, setEdits] = useState(() => initEdits(items));
   const [reason, setReason] = useState<ChangeReason>('no_changes');
+  const [reasonTouched, setReasonTouched] = useState(false);
   const [pendingRemoveId, setPendingRemoveId] = useState<number | null>(null);
   const [step, setStep] = useState<'idle' | 'saved' | 'notified'>('idle');
+  const [undoRemoveId, setUndoRemoveId] = useState<number | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [resolvedSectionOpen, setResolvedSectionOpen] = useState(true);
 
   useEffect(() => {
     if (order.workflow_status !== 'submitted' || isClaimedByMe) return;
     void claim();
   }, [order.workflow_status, isClaimedByMe, claim]);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    };
+  }, []);
+
+  const flaggedItems = useMemo(
+    () => items.filter((i) => i.state === 'flagged'),
+    [items],
+  );
+
+  const flagSummary = useMemo(
+    () => summarizeDeskFlags(flaggedItems.map((i) => i.flag_reason)),
+    [flaggedItems],
+  );
 
   const visibleItems = useMemo(
     () => items.filter((i) => !edits[i.id]?.removed),
@@ -124,10 +161,31 @@ function DeskOrderOverlayEditor({
     [visibleItems, edits],
   );
 
-  const primaryFlagItem = useMemo(
-    () => items.find((i) => i.state === 'flagged'),
+  const unresolvedFlagged = useMemo(
+    () => flaggedItems.filter((i) => isFlaggedUnresolved(i, edits[i.id])),
+    [flaggedItems, edits],
+  );
+
+  const resolvedFlagged = useMemo(
+    () =>
+      flaggedItems.filter((i) => {
+        const edit = edits[i.id];
+        return edit != null && edit.resolution != null;
+      }),
+    [flaggedItems, edits],
+  );
+
+  const nonFlaggedItems = useMemo(
+    () => items.filter((i) => i.state !== 'flagged'),
     [items],
   );
+
+  const resolvingFlags =
+    orderDetail.workflow_status === 'flagged' ||
+    (flaggedMode && flaggedItems.length > 0);
+
+  const allFlagsResolved = unresolvedFlagged.length === 0;
+  const saveBlocked = resolvingFlags && !allFlagsResolved;
 
   const notifyPickerAllowed = useMemo(
     () =>
@@ -136,122 +194,172 @@ function DeskOrderOverlayEditor({
     [orderDetail.fulfillment_path, orderDetail.workflow_status],
   );
 
-  const itemGroups = useMemo(() => groupOrderItemsForDisplay(items), [items]);
+  const flaggedItemGroups = useMemo(
+    () => groupOrderItemsForDisplay(flaggedItems),
+    [flaggedItems],
+  );
+  const normalItemGroups = useMemo(
+    () => groupOrderItemsForDisplay(nonFlaggedItems),
+    [nonFlaggedItems],
+  );
 
-  const renderLineRow = (item: OrderItem, opts?: { indent?: boolean; splitHint?: string }) => {
-    const edit = edits[item.id];
-    if (!edit || edit.removed) return null;
-    const isFlaggedRow = item.state === 'flagged';
-    const labelMrp = orderItemConfirmedMrp(item);
-    return (
-      <div
-        key={item.id}
-        className={`grid grid-cols-[1fr_50px_78px_38px] gap-0 px-2.5 py-2 border-t border-[var(--border-faint)] items-center ${
-          isFlaggedRow
-            ? 'bg-[var(--bg-warning-subtle)] border-l-2 border-l-[var(--border-warning)]'
-            : opts?.indent
-              ? 'bg-[var(--bg-secondary)]/60 pl-4'
-              : ''
-        }`}
-      >
-        <div className="min-w-0 pr-1">
-          <p className="text-xs text-[var(--content-primary)] truncate">
-            {opts?.indent ? '↳ ' : ''}
-            {orderItemDisplayName(item)}
-          </p>
-          {opts?.splitHint ? (
-            <span className="mt-0.5 block text-[9px] text-[var(--content-quaternary)]">{opts.splitHint}</span>
-          ) : null}
-          {labelMrp != null ? (
-            <span className="mt-0.5 block text-[9px] font-medium text-[var(--content-secondary)]">
-              Label MRP ₹{Math.round(labelMrp)}
-            </span>
-          ) : null}
-          {isFlaggedRow && (
-            <span className="inline-block mt-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] border border-[var(--border-warning)]">
-              Flagged
-            </span>
-          )}
-        </div>
-        <span className="text-xs text-[var(--content-quaternary)] tabular-nums">
-          {item.qty_requested}
-        </span>
-        <input
-          type="number"
-          inputMode="decimal"
-          value={edit.priceQuoted}
-          onChange={(e) =>
-            updatePrice(item.id, parseFloat(e.target.value.replace(/,/g, '')) || 0)
-          }
-          className={`w-[68px] h-7 px-1.5 text-xs rounded-md border tabular-nums ${
-            edit.priceTouched
-              ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]'
-              : 'border-[var(--border-subtle)] bg-[var(--bg-tertiary)]'
-          }`}
-        />
-        <div className="flex flex-col items-center gap-0.5">
-          <button
-            type="button"
-            onClick={() => {
-              if (pendingRemoveId === item.id) {
-                setEdits((prev) => ({
-                  ...prev,
-                  [item.id]: { ...prev[item.id]!, removed: true },
-                }));
-                setPendingRemoveId(null);
-              } else {
-                setPendingRemoveId(item.id);
-              }
-            }}
-            className="text-[var(--content-quaternary)] hover:text-[var(--content-negative)]"
-            aria-label="Remove line"
-          >
-            <Trash size={13} />
-          </button>
-          {pendingRemoveId === item.id && (
-            <button
-              type="button"
-              onClick={() => {
-                setEdits((prev) => ({
-                  ...prev,
-                  [item.id]: { ...prev[item.id]!, removed: true },
-                }));
-                setPendingRemoveId(null);
-              }}
-              className="text-[9px] text-[var(--content-negative)]"
-            >
-              Remove?
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  };
+  const applyReasonFromResolution = useCallback((resolution: OverlayLineResolution) => {
+    if (reasonTouched) return;
+    if (resolution === 'removed') setReason('out_of_stock');
+    else if (resolution === 'accept_price') setReason('old_stock_rate');
+    else if (resolution === 'keep_quoted' || resolution === 'manual_override') {
+      setReason('data_correction');
+    }
+  }, [reasonTouched]);
 
-  const updatePrice = useCallback((itemId: number, price: number) => {
-    setEdits((prev) => ({
-      ...prev,
-      [itemId]: {
-        ...prev[itemId]!,
-        priceQuoted: Math.max(0, price),
+  const patchEdit = useCallback(
+    (itemId: number, patch: Partial<OverlayLineEdit>) => {
+      setEdits((prev) => ({
+        ...prev,
+        [itemId]: { ...prev[itemId]!, ...patch },
+      }));
+    },
+    [],
+  );
+
+  const updatePrice = useCallback(
+    (itemId: number, price: number, item: OrderItem) => {
+      const quoted = item.price_quoted ?? item.price_system ?? 0;
+      const nextPrice = Math.max(0, price);
+      const resolution: OverlayLineResolution | null =
+        item.state === 'flagged'
+          ? nextPrice === quoted
+            ? 'keep_quoted'
+            : 'manual_override'
+          : null;
+      patchEdit(itemId, {
+        priceQuoted: nextPrice,
         priceTouched: true,
-      },
-    }));
-  }, []);
+        resolution: item.state === 'flagged' ? resolution : null,
+      });
+      if (resolution === 'manual_override') applyReasonFromResolution('manual_override');
+      else if (resolution === 'keep_quoted') applyReasonFromResolution('keep_quoted');
+    },
+    [patchEdit, applyReasonFromResolution],
+  );
+
+  const acceptBoxPrice = useCallback(
+    (item: OrderItem) => {
+      const box =
+        typeof item.flag_box_price === 'number' && !Number.isNaN(item.flag_box_price)
+          ? item.flag_box_price
+          : null;
+      if (box == null) return;
+      patchEdit(item.id, {
+        priceQuoted: box,
+        priceTouched: true,
+        resolution: 'accept_price',
+      });
+      applyReasonFromResolution('accept_price');
+    },
+    [patchEdit, applyReasonFromResolution],
+  );
+
+  const keepQuoted = useCallback(
+    (item: OrderItem) => {
+      const edit = edits[item.id];
+      const quoted = item.price_quoted ?? item.price_system ?? 0;
+      const price = edit?.priceTouched ? edit.priceQuoted : quoted;
+      const resolution: OverlayLineResolution =
+        edit?.priceTouched && price !== quoted ? 'manual_override' : 'keep_quoted';
+      patchEdit(item.id, {
+        priceQuoted: price,
+        priceTouched: edit?.priceTouched ?? false,
+        resolution,
+      });
+      applyReasonFromResolution(resolution);
+    },
+    [edits, patchEdit, applyReasonFromResolution],
+  );
+
+  const removeFlaggedLine = useCallback(
+    (item: OrderItem) => {
+      patchEdit(item.id, {
+        removed: true,
+        resolution: 'removed',
+      });
+      applyReasonFromResolution('removed');
+      setUndoRemoveId(item.id);
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = setTimeout(() => setUndoRemoveId(null), 5000);
+    },
+    [patchEdit, applyReasonFromResolution],
+  );
+
+  const undoRemove = useCallback((itemId: number) => {
+    patchEdit(itemId, {
+      removed: false,
+      resolution: null,
+    });
+    setUndoRemoveId(null);
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+  }, [patchEdit]);
+
+  const acceptAllBoxPrices = useCallback(() => {
+    for (const item of unresolvedFlagged) {
+      if (item.flag_reason !== 'Price Mismatch') continue;
+      acceptBoxPrice(item);
+    }
+  }, [unresolvedFlagged, acceptBoxPrice]);
+
+  const removeAllOos = useCallback(() => {
+    for (const item of unresolvedFlagged) {
+      if (deskLineFlagKind(item.flag_reason) === 'oos') {
+        removeFlaggedLine(item);
+      }
+    }
+  }, [unresolvedFlagged, removeFlaggedLine]);
+
+  const unresolvedPriceCount = unresolvedFlagged.filter(
+    (i) => i.flag_reason === 'Price Mismatch',
+  ).length;
+  const unresolvedOosCount = unresolvedFlagged.filter(
+    (i) => deskLineFlagKind(i.flag_reason) === 'oos',
+  ).length;
+
+  const showReasonDropdown =
+    !resolvingFlags ||
+    reasonTouched ||
+    nonFlaggedItems.some((i) => edits[i.id]?.priceTouched || edits[i.id]?.removed);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!orderDetail || !userId) throw new Error('Order not loaded');
+      if (saveBlocked) {
+        throw new Error(`Resolve ${unresolvedFlagged.length} flagged line(s) first`);
+      }
 
       const reviewer = userName ?? 'Billing';
       const nowIso = new Date().toISOString();
-      const resolvingFlags =
-        orderDetail.workflow_status === 'flagged' ||
-        (flaggedMode && items.some((i) => i.state === 'flagged'));
 
       for (const item of items) {
         const edit = edits[item.id];
-        if (!edit || edit.removed) {
+        if (!edit) continue;
+
+        if (edit.removed) {
+          if (item.state === 'flagged') {
+            const qtyPending = pickQuantityTarget(item);
+            const issueCategory = deskLineIssueCategory(item.flag_reason);
+            await ensurePendingItem({
+              orderId: orderDetail.id,
+              orderNumber: orderDetail.order_number,
+              customerId: orderDetail.customer_id,
+              customerName: orderDetail.customer_name,
+              itemId: item.item_id,
+              itemName: item.item_name,
+              qtyPending,
+              createdBy: reviewer,
+              note: item.flag_reason
+                ? `Billing desk confirmed — ${item.flag_reason}`
+                : 'Billing desk confirmed removal',
+              issueCategory,
+            });
+          }
           await supabase.from('order_items').delete().eq('id', item.id);
           continue;
         }
@@ -301,13 +409,11 @@ function DeskOrderOverlayEditor({
         });
       } else if (resolvingFlags) {
         if (orderDetail.workflow_status === 'picking') {
-          // Picker still active — clear line flags only; pick continues.
           await supabase
             .from('orders')
             .update({ reviewer_name: reviewer })
             .eq('id', orderDetail.id);
         } else if (orderDetail.workflow_status === 'flagged') {
-          // Post-pick flag resolution — complete without a billing claim (desk path).
           await supabase
             .from('orders')
             .update({
@@ -336,7 +442,15 @@ function DeskOrderOverlayEditor({
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       queryClient.invalidateQueries({ queryKey: ['desk-picker-flags'] });
       queryClient.invalidateQueries({ queryKey: ['order', order.id] });
-      toast.success(flaggedMode ? 'Flag resolved ✓' : 'Bill saved ✓');
+      queryClient.invalidateQueries({ queryKey: ['pending-items'] });
+      const resolvedCount = resolvedFlagged.length;
+      toast.success(
+        resolvingFlags && resolvedCount > 0
+          ? `${resolvedCount} line${resolvedCount === 1 ? '' : 's'} resolved · order updated`
+          : flaggedMode
+            ? 'Flag resolved ✓'
+            : 'Bill saved ✓',
+      );
     },
     onError: (err: unknown) => {
       toast.error(err instanceof Error ? err.message : 'Failed to save bill');
@@ -368,7 +482,36 @@ function DeskOrderOverlayEditor({
     },
   });
 
-  const headerFlagTitle = primaryFlagItem?.flag_reason ?? 'Item needs review';
+  const headerTitle = resolvingFlags
+    ? flagSummary.total === 1
+      ? '1 item needs review'
+      : `${flagSummary.total} items need review`
+    : order.order_number;
+
+  const headerSubtitle = resolvingFlags
+    ? formatDeskFlagSummarySubtitle(flagSummary) || 'Resolve each flagged line'
+    : 'Edit MRP · Save & Bill · Notify picker';
+
+  const renderFlaggedGroup = (groupItems: OrderItem[], opts?: { indent?: boolean; splitHint?: string }) =>
+    groupItems.map((item) => {
+      const edit = edits[item.id];
+      if (!edit) return null;
+      return (
+        <DeskFlaggedLineRow
+          key={item.id}
+          item={item}
+          edit={edit}
+          indent={opts?.indent}
+          splitHint={opts?.splitHint}
+          onAcceptPrice={() => acceptBoxPrice(item)}
+          onKeepQuoted={() => keepQuoted(item)}
+          onRemove={() => removeFlaggedLine(item)}
+          onUndoRemove={() => undoRemove(item.id)}
+          onPriceChange={(price) => updatePrice(item.id, price, item)}
+          showUndoRemove={undoRemoveId === item.id}
+        />
+      );
+    });
 
   return (
     <div
@@ -378,66 +521,169 @@ function DeskOrderOverlayEditor({
       aria-modal="true"
       aria-labelledby="desk-overlay-title"
     >
-        <header
-          className={`shrink-0 flex items-start gap-2.5 px-4 py-3 ${
-            flaggedMode
-              ? 'bg-[var(--bg-warning-subtle)]'
-              : 'bg-[var(--bg-tertiary)]'
-          }`}
+      <header
+        className={`shrink-0 flex items-start gap-2.5 px-4 py-3 ${
+          flaggedMode ? 'bg-[var(--bg-warning-subtle)]' : 'bg-[var(--bg-tertiary)]'
+        }`}
+      >
+        {flaggedMode ? (
+          <Flag size={18} weight="fill" className="text-[var(--content-warning-on-light)] shrink-0 mt-0.5" />
+        ) : (
+          <FileText size={18} className="text-[var(--content-quaternary)] shrink-0 mt-0.5" />
+        )}
+        <div className="flex-1 min-w-0">
+          <h2
+            id="desk-overlay-title"
+            className={`text-[13px] font-medium ${
+              flaggedMode ? 'text-[var(--content-warning)]' : 'text-[var(--content-primary)]'
+            }`}
+          >
+            {headerTitle}
+          </h2>
+          <p
+            className={`text-[11px] mt-0.5 ${
+              flaggedMode ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-quaternary)]'
+            }`}
+          >
+            {headerSubtitle}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="p-1 rounded-md text-[var(--content-quaternary)] hover:bg-[var(--bg-secondary)]"
+          aria-label="Close"
         >
-          {flaggedMode ? (
-            <Flag size={18} weight="fill" className="text-[var(--content-warning-on-light)] shrink-0 mt-0.5" />
-          ) : (
-            <FileText size={18} className="text-[var(--content-quaternary)] shrink-0 mt-0.5" />
-          )}
-          <div className="flex-1 min-w-0">
-            <h2
-              id="desk-overlay-title"
-              className={`text-[13px] font-medium ${
-                flaggedMode ? 'text-[var(--content-warning)]' : 'text-[var(--content-primary)]'
-              }`}
-            >
-              {flaggedMode ? headerFlagTitle : order.order_number}
-            </h2>
-            <p
-              className={`text-[11px] mt-0.5 ${
-                flaggedMode ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-quaternary)]'
-              }`}
-            >
-              {flaggedMode
-                ? `Review flagged lines · adjust MRP · resolve & save`
-                : 'Edit MRP · Save & Bill · Notify picker'}
+          <X size={16} />
+        </button>
+      </header>
+
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+        <div className="rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 flex justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-[var(--content-primary)] truncate">
+              {orderDetail.customer_name}
+            </p>
+            <p className="text-[10px] text-[var(--content-quaternary)] mt-0.5">
+              {orderDetail.picker_name ? `Picker: ${orderDetail.picker_name}` : 'No picker yet'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1 rounded-md text-[var(--content-quaternary)] hover:bg-[var(--bg-secondary)]"
-            aria-label="Close"
-          >
-            <X size={16} />
-          </button>
-        </header>
-
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
-          <div className="rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 flex justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-xs font-medium text-[var(--content-primary)] truncate">
-                {orderDetail.customer_name}
-              </p>
-              <p className="text-[10px] text-[var(--content-quaternary)] mt-0.5">
-                {orderDetail.picker_name ? `Picker: ${orderDetail.picker_name}` : 'No picker yet'}
-              </p>
-            </div>
-            <div className="text-right shrink-0">
-              <p className="text-[15px] font-medium tabular-nums">{formatCurrencyRaw(total)}</p>
-              <p className="text-[10px] text-[var(--content-quaternary)]">{visibleItems.length} items</p>
-            </div>
+          <div className="text-right shrink-0">
+            <p className="text-[15px] font-medium tabular-nums">{formatCurrencyRaw(total)}</p>
+            <p className="text-[10px] text-[var(--content-quaternary)]">{visibleItems.length} items</p>
           </div>
+        </div>
 
+        {resolvingFlags && (
+          <>
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--content-quaternary)]">
+                    Flagged lines
+                  </p>
+                  <p className="text-[9px] text-[var(--content-quaternary)] mt-0.5">
+                    Remove or accept inline · adds to pending queue
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                  {unresolvedPriceCount >= 2 && (
+                    <button
+                      type="button"
+                      onClick={acceptAllBoxPrices}
+                      className="h-6 px-2 rounded-md text-[9px] font-semibold bg-[var(--bg-positive)] text-white hover:opacity-95"
+                    >
+                      Accept all ({unresolvedPriceCount})
+                    </button>
+                  )}
+                  {unresolvedOosCount >= 2 && (
+                    <button
+                      type="button"
+                      onClick={removeAllOos}
+                      className="h-6 px-2 rounded-md text-[9px] font-medium border border-[var(--border-negative)] text-[var(--content-negative)] hover:bg-[var(--bg-negative-subtle)]"
+                    >
+                      Remove all ({unresolvedOosCount})
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-lg border border-[var(--border-subtle)] overflow-hidden">
+                <DeskFlaggedSectionHeader />
+                {unresolvedFlagged.length === 0 ? (
+                  <p className="px-3 py-2 text-[11px] text-[var(--content-positive)] border-t border-[var(--border-faint)]">
+                    All flagged lines resolved
+                  </p>
+                ) : (
+                  flaggedItemGroups.map((group) => {
+                    const batchCount = orderItemSplitBatchCount(group.siblings);
+                    const splitHint =
+                      batchCount > 1 ? `${batchCount} MRP batches from pick` : undefined;
+                    const unresolvedInGroup = [group.root, ...group.siblings].filter((i) =>
+                      isFlaggedUnresolved(i, edits[i.id]),
+                    );
+                    if (unresolvedInGroup.length === 0) return null;
+                    return (
+                      <div key={group.key}>
+                        {isFlaggedUnresolved(group.root, edits[group.root.id])
+                          ? renderFlaggedGroup([group.root], { splitHint })[0]
+                          : null}
+                        {group.siblings
+                          .filter((s) => isFlaggedUnresolved(s, edits[s.id]))
+                          .flatMap((sibling) =>
+                            renderFlaggedGroup([sibling], { indent: true }) ?? [],
+                          )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {resolvedFlagged.length > 0 && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setResolvedSectionOpen((v) => !v)}
+                  className="text-[10px] font-semibold uppercase tracking-wide text-[var(--content-quaternary)] mb-1.5 hover:text-[var(--content-secondary)]"
+                >
+                  Resolved ({resolvedFlagged.length}) {resolvedSectionOpen ? '▾' : '▸'}
+                </button>
+                {resolvedSectionOpen && (
+                  <div className="rounded-lg border border-[var(--border-subtle)] overflow-hidden opacity-90">
+                    <DeskFlaggedSectionHeader />
+                    {flaggedItemGroups.map((group) => {
+                      const batchCount = orderItemSplitBatchCount(group.siblings);
+                      const splitHint =
+                        batchCount > 1 ? `${batchCount} MRP batches from pick` : undefined;
+                      const resolvedInGroup = [group.root, ...group.siblings].filter((i) => {
+                        const edit = edits[i.id];
+                        return edit?.resolution != null;
+                      });
+                      if (resolvedInGroup.length === 0) return null;
+                      return (
+                        <div key={`resolved-${group.key}`}>
+                          {edits[group.root.id]?.resolution != null
+                            ? renderFlaggedGroup([group.root], { splitHint })[0]
+                            : null}
+                          {group.siblings
+                            .filter((s) => edits[s.id]?.resolution != null)
+                            .flatMap((sibling) =>
+                              renderFlaggedGroup([sibling], { indent: true }) ?? [],
+                            )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {nonFlaggedItems.length > 0 && (
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--content-quaternary)] mb-1.5">
-              Line items — edit MRP or remove
+              {resolvingFlags ? 'Other lines' : 'Line items — edit MRP or remove'}
             </p>
             <div className="rounded-lg border border-[var(--border-subtle)] overflow-hidden">
               <div className="grid grid-cols-[1fr_50px_78px_38px] gap-0 bg-[var(--bg-tertiary)] px-2.5 py-1.5 text-[9px] font-semibold uppercase text-[var(--content-quaternary)]">
@@ -446,20 +692,47 @@ function DeskOrderOverlayEditor({
                 <span>MRP</span>
                 <span />
               </div>
-              {itemGroups.map((group) => {
+              {normalItemGroups.map((group) => {
                 const batchCount = orderItemSplitBatchCount(group.siblings);
                 const splitHint =
                   batchCount > 1 ? `${batchCount} MRP batches from pick` : undefined;
                 return (
                   <div key={group.key}>
-                    {renderLineRow(group.root, { splitHint })}
-                    {group.siblings.map((sibling) => renderLineRow(sibling, { indent: true }))}
+                    <DeskNormalLineRow
+                      item={group.root}
+                      edit={edits[group.root.id]!}
+                      splitHint={splitHint}
+                      pendingRemoveId={pendingRemoveId}
+                      onPriceChange={(price) => updatePrice(group.root.id, price, group.root)}
+                      onRequestRemove={() => setPendingRemoveId(group.root.id)}
+                      onConfirmRemove={() => {
+                        patchEdit(group.root.id, { removed: true });
+                        setPendingRemoveId(null);
+                      }}
+                    />
+                    {group.siblings.map((sibling) => (
+                      <DeskNormalLineRow
+                        key={sibling.id}
+                        item={sibling}
+                        edit={edits[sibling.id]!}
+                        indent
+                        pendingRemoveId={pendingRemoveId}
+                        onPriceChange={(price) => updatePrice(sibling.id, price, sibling)}
+                        onRequestRemove={() => setPendingRemoveId(sibling.id)}
+                        onConfirmRemove={() => {
+                          patchEdit(sibling.id, { removed: true });
+                          setPendingRemoveId(null);
+                        }}
+                      />
+                    ))}
                   </div>
                 );
               })}
-                </div>
-              </div>
+            </div>
+          </div>
+        )}
 
+        {showReasonDropdown && (
           <div>
             <label
               htmlFor="desk-change-reason"
@@ -470,7 +743,10 @@ function DeskOrderOverlayEditor({
             <select
               id="desk-change-reason"
               value={reason}
-              onChange={(e) => setReason(e.target.value as ChangeReason)}
+              onChange={(e) => {
+                setReason(e.target.value as ChangeReason);
+                setReasonTouched(true);
+              }}
               className="mt-1 w-full h-9 px-2 text-sm rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)]"
             >
               {CHANGE_REASON_OPTIONS.map((opt) => (
@@ -480,90 +756,99 @@ function DeskOrderOverlayEditor({
               ))}
             </select>
           </div>
-        </div>
+        )}
+      </div>
 
-        <footer className="shrink-0 px-4 py-3 border-t border-[var(--border-subtle)] bg-[var(--bg-tertiary)] space-y-1.5">
-          <div className="flex items-center gap-2.5">
-            <StepCircle
-              state={step === 'idle' ? 'active' : 'done'}
-              number={1}
-            />
+      <footer className="shrink-0 px-4 py-3 border-t border-[var(--border-subtle)] bg-[var(--bg-tertiary)] space-y-1.5">
+        {resolvingFlags && step === 'idle' && (
+          <p className="text-[10px] text-[var(--content-quaternary)] text-center">
+            {allFlagsResolved
+              ? 'All flagged lines resolved — save to continue'
+              : `${resolvedFlagged.length} of ${flaggedItems.length} flagged lines resolved`}
+          </p>
+        )}
+        <div className="flex items-center gap-2.5">
+          <StepCircle state={step === 'idle' ? 'active' : 'done'} number={1} />
+          <button
+            type="button"
+            disabled={saveMutation.isPending || step !== 'idle' || saveBlocked}
+            onClick={() => saveMutation.mutate()}
+            className={`flex-1 h-10 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 ${
+              step !== 'idle'
+                ? 'bg-[var(--bg-positive-subtle)] border border-[var(--border-positive)] text-[var(--content-positive)] cursor-default'
+                : 'bg-[var(--bg-positive)] text-white hover:opacity-95 disabled:opacity-50'
+            }`}
+          >
+            {step !== 'idle' ? (
+              <>
+                <Check size={16} weight="bold" />
+                {flaggedMode ? 'Flag resolved ✓' : 'Bill saved ✓'}
+              </>
+            ) : (
+              <>
+                <Receipt size={16} weight="bold" />
+                {saveBlocked
+                  ? `Resolve ${unresolvedFlagged.length} flagged line${unresolvedFlagged.length === 1 ? '' : 's'} first`
+                  : flaggedMode
+                    ? 'Resolve & save'
+                    : 'Save & Bill'}
+              </>
+            )}
+          </button>
+        </div>
+        <div className="flex items-center gap-2.5">
+          <StepCircle
+            state={
+              !notifyPickerAllowed
+                ? 'waiting'
+                : step === 'saved'
+                  ? 'active'
+                  : step === 'notified'
+                    ? 'done'
+                    : 'waiting'
+            }
+            number={2}
+          />
+          {notifyPickerAllowed ? (
             <button
               type="button"
-              disabled={saveMutation.isPending || step !== 'idle'}
-              onClick={() => saveMutation.mutate()}
+              disabled={
+                step === 'idle' ||
+                step === 'notified' ||
+                notifyMutation.isPending ||
+                saveMutation.isPending
+              }
+              onClick={() => notifyMutation.mutate()}
               className={`flex-1 h-10 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 ${
-                step !== 'idle'
+                step === 'notified'
                   ? 'bg-[var(--bg-positive-subtle)] border border-[var(--border-positive)] text-[var(--content-positive)] cursor-default'
-                  : 'bg-[var(--bg-positive)] text-white hover:opacity-95 disabled:opacity-50'
+                  : step === 'saved'
+                    ? 'bg-[var(--bg-positive)] text-white hover:opacity-95'
+                    : 'bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] text-[var(--content-quaternary)] cursor-not-allowed'
               }`}
             >
-              {step !== 'idle' ? (
+              {step === 'notified' ? (
                 <>
                   <Check size={16} weight="bold" />
-                  {flaggedMode ? 'Flag resolved ✓' : 'Bill saved ✓'}
+                  Picker notified — on their way
                 </>
               ) : (
                 <>
-                  <Receipt size={16} weight="bold" />
-                  {flaggedMode ? 'Resolve flag & save' : 'Save & Bill'}
+                  <Bell size={16} weight="bold" />
+                  Notify picker — collect bill
                 </>
               )}
             </button>
-          </div>
-          <div className="flex items-center gap-2.5">
-            <StepCircle
-              state={
-                !notifyPickerAllowed
-                  ? 'waiting'
-                  : step === 'saved'
-                    ? 'active'
-                    : step === 'notified'
-                      ? 'done'
-                      : 'waiting'
-              }
-              number={2}
-            />
-            {notifyPickerAllowed ? (
-              <button
-                type="button"
-                disabled={
-                  step === 'idle' ||
-                  step === 'notified' ||
-                  notifyMutation.isPending ||
-                  saveMutation.isPending
-                }
-                onClick={() => notifyMutation.mutate()}
-                className={`flex-1 h-10 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 ${
-                  step === 'notified'
-                    ? 'bg-[var(--bg-positive-subtle)] border border-[var(--border-positive)] text-[var(--content-positive)] cursor-default'
-                    : step === 'saved'
-                      ? 'bg-[var(--bg-positive)] text-white hover:opacity-95'
-                      : 'bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] text-[var(--content-quaternary)] cursor-not-allowed'
-                }`}
-              >
-                {step === 'notified' ? (
-                  <>
-                    <Check size={16} weight="bold" />
-                    Picker notified — on their way
-                  </>
-                ) : (
-                  <>
-                    <Bell size={16} weight="bold" />
-                    Notify picker — collect bill
-                  </>
-                )}
-              </button>
-            ) : (
-              <p className="flex-1 text-[11px] text-[var(--content-quaternary)] leading-snug">
-                {orderDetail.workflow_status === 'picking' ||
-                orderDetail.workflow_status === 'completed'
-                  ? 'Pick already started or done — no new queue alert needed.'
-                  : 'Notify picker is only for orders waiting in the pick queue.'}
-              </p>
-            )}
-          </div>
-        </footer>
+          ) : (
+            <p className="flex-1 text-[11px] text-[var(--content-quaternary)] leading-snug">
+              {orderDetail.workflow_status === 'picking' ||
+              orderDetail.workflow_status === 'completed'
+                ? 'Pick already started or done — no new queue alert needed.'
+                : 'Notify picker is only for orders waiting in the pick queue.'}
+            </p>
+          )}
+        </div>
+      </footer>
     </div>
   );
 }

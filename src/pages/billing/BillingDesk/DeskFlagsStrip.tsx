@@ -3,29 +3,10 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
 import { canQuickResolveDeskFlag, resolveDeskPickerFlags } from '../../../lib/billing/deskResolveFlag';
+import { deskOrderFlagTypeLabel } from '../../../lib/billing/deskLineFlagKind';
 import { formatTimeAgo } from '../../../utils/formatters';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 import { deskType } from './deskTypography';
-
-function flagTypeLabel(
-  order: DeskOrderRow,
-): { label: string; tone: 'red' | 'amber' | 'blue' } {
-  const reason = order.pickerFlags[0]?.flagReason ?? order.notes ?? '';
-  const lower = reason.toLowerCase();
-  if (lower.includes('stock') || lower.includes('out of stock')) {
-    return { label: 'Out of stock', tone: 'red' };
-  }
-  if (lower.includes('price') || lower.includes('mrp')) {
-    return { label: 'Price query', tone: 'blue' };
-  }
-  if (order.pickerFlags[0]?.flagReason) {
-    return { label: order.pickerFlags[0].flagReason, tone: 'amber' };
-  }
-  if (order.notes?.toLowerCase().includes('price')) {
-    return { label: 'Price query', tone: 'blue' };
-  }
-  return { label: 'Qty mismatch', tone: 'amber' };
-}
 
 function flagDescription(order: DeskOrderRow): string {
   const first = order.pickerFlags[0];
@@ -88,7 +69,8 @@ export function DeskFlagsStrip({ orders, onReview }: DeskFlagsStripProps): React
 
       <div className="flex flex-col gap-1.5 px-3.5 pb-2.5 max-h-[min(40vh,280px)] overflow-y-auto overscroll-y-contain">
         {orders.map((order) => {
-          const type = flagTypeLabel(order);
+          const flagReasons = order.pickerFlags.map((f) => f.flagReason);
+          const type = deskOrderFlagTypeLabel(flagReasons);
           const isCritical = type.tone === 'red';
           const stillPicking = order.workflow_status === 'picking';
           const canQuickResolve = canQuickResolveDeskFlag(order);

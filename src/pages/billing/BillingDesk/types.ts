@@ -41,10 +41,18 @@ export const CHANGE_REASON_OPTIONS: { value: ChangeReason; label: string }[] = [
   { value: 'data_correction', label: 'Data entry correction' },
 ];
 
+export type OverlayLineResolution =
+  | 'accept_price'
+  | 'keep_quoted'
+  | 'removed'
+  | 'manual_override';
+
 export interface OverlayLineEdit {
   priceQuoted: number;
   removed: boolean;
   priceTouched: boolean;
+  /** Set when billing resolves a flagged line via quick action or manual edit. */
+  resolution: OverlayLineResolution | null;
 }
 
 export interface OverlayEditorState {

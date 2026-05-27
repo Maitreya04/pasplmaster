@@ -712,8 +712,7 @@ export default function ReviewPage(): React.JSX.Element | null {
 
   const canForceCompletePrePick =
     order?.workflow_status === 'approved' &&
-    order.fulfillment_path !== 'direct_bill' &&
-    !order.picker_name;
+    order.fulfillment_path !== 'direct_bill';
 
   const completeStalePickingMutation = useMutation({
     mutationFn: async () => {
@@ -1411,8 +1410,10 @@ export default function ReviewPage(): React.JSX.Element | null {
       >
         <div className="space-y-4">
           <p className="text-sm text-[var(--content-secondary)]">
-            This order is still waiting for a picker. Mark it complete to bill directly
-            and remove it from the warehouse pick queue.
+            {order?.picker_name
+              ? `${order.picker_name} has not finished (or started) warehouse picking. `
+              : 'This order is still waiting for a picker. '}
+            Mark it complete to bill directly and remove it from the pick queue.
           </p>
           <div className="flex gap-3">
             <BigButton

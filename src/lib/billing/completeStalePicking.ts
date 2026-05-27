@@ -69,10 +69,6 @@ export function forceCompletePrePickErrorMessage(result: ForceCompletePrePickRes
   if (result.reason === 'already_direct_bill') {
     return 'Order is already on direct bill path.';
   }
-  if (result.reason === 'picker_assigned') {
-    const who = result.picker_name ? ` (${result.picker_name})` : '';
-    return `A picker is already assigned${who}. Use complete order after picking instead.`;
-  }
   if (result.reason === 'picking_in_progress') {
     const who = result.claimed_by ? ` by ${result.claimed_by}` : '';
     return `Picking is in progress${who}. Wait for the picker to finish or use stale-pick complete.`;
