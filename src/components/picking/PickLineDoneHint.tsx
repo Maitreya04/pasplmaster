@@ -8,12 +8,14 @@ export function PickLineDoneHint({
   targetQty,
   nextPreview,
   onNext,
+  onUndoPick,
 }: {
   kind: 'picked' | 'flagged';
   pickedQty?: number;
   targetQty?: number;
   nextPreview: NextPickLinePreview | null;
   onNext?: () => void;
+  onUndoPick?: () => void;
 }): React.JSX.Element | null {
   if (!onNext) return null;
 
@@ -46,6 +48,7 @@ export function PickLineDoneHint({
       detail={detail}
       nextPreview={nextPreview}
       onConfirmNext={onNext}
+      onUndoPick={kind === 'picked' ? onUndoPick : undefined}
     />
   );
 }

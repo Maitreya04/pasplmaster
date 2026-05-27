@@ -9,12 +9,14 @@ export interface PickMrpSplitProgressProps {
   lineMrp: PickLineMrpState;
   targetQty: number;
   onUndoLastSegment?: () => void;
+  onResetSplitLine?: () => void;
 }
 
 export function PickMrpSplitProgress({
   lineMrp,
   targetQty,
   onUndoLastSegment,
+  onResetSplitLine,
 }: PickMrpSplitProgressProps): React.JSX.Element {
   const goal = lineMrp.originalTargetQty ?? targetQty;
   const committed = pickLineSegmentsCommittedQty(lineMrp);
@@ -77,6 +79,16 @@ export function PickMrpSplitProgress({
             className="mt-2 text-[10px] font-semibold text-[var(--content-secondary)] pick-pressable"
           >
             Undo last batch (₹{Math.round(lastCommitted.mrp)} ×{lastCommitted.qty})
+          </button>
+        ) : null}
+
+        {onResetSplitLine && committed > 0 ? (
+          <button
+            type="button"
+            onClick={onResetSplitLine}
+            className="mt-1 block text-[10px] font-semibold text-[var(--content-secondary)] pick-pressable"
+          >
+            Reset entire line
           </button>
         ) : null}
       </div>

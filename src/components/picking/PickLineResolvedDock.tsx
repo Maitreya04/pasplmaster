@@ -9,6 +9,7 @@ export interface PickLineResolvedDockProps {
   detail?: string;
   nextPreview: NextPickLinePreview | null;
   onNext: () => void;
+  onUndoPick?: () => void;
 }
 
 /**
@@ -20,6 +21,7 @@ export function PickLineResolvedDock({
   detail,
   nextPreview,
   onNext,
+  onUndoPick,
 }: PickLineResolvedDockProps): React.JSX.Element {
   const tone =
     kind === 'picked' ? 'success' : kind === 'partial' ? 'warning' : 'warning';
@@ -31,6 +33,7 @@ export function PickLineResolvedDock({
       detail={detail}
       nextPreview={nextPreview}
       onConfirmNext={onNext}
+      onUndoPick={onUndoPick}
     />
   );
 }

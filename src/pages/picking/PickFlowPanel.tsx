@@ -108,6 +108,10 @@ import {
   type PickLineMrpState,
 } from '../../lib/picking/pickLineMrp';
 import { commitPickMrpSegment, undoPickMrpSegment } from '../../lib/picking/splitMrpSegment';
+import {
+  revertPickLine,
+  type RevertPickLineMode,
+} from '../../lib/picking/revertPickLine';
 import type { StockLocationCode } from '../../types';
 
 type PickItemUiState =
@@ -353,6 +357,12 @@ export function PickFlowPanel({
   const [fifoOverrideReason, setFifoOverrideReason] = useState('');
   const [lineMrpMap, setLineMrpMap] = useState<Map<number, PickLineMrpState>>(() => new Map());
   const [mrpSheetItemId, setMrpSheetItemId] = useState<number | null>(null);
+  const [revertConfirm, setRevertConfirm] = useState<{
+    itemId: number;
+    mode: RevertPickLineMode;
+    itemName: string;
+  } | null>(null);
+  const [revertPickPending, setRevertPickPending] = useState(false);
 
   const orderItems = useMemo(
     () => (order?.items ? pickableOrderItems(order.items) : undefined),
@@ -1056,31 +1066,111 @@ export function PickFlowPanel({
     [],
   );
 
-  const revertLinePick = useCallback(
-    async (itemId: number) => {
-      const orderItem = order?.items.find((oi) => oi.id === itemId);
+  const resolveRevertRestoreQty = useCallback(
+    (orderItem: OrderItem, lineMrp?: PickLineMrpState): number | null => {
+      if (lineMrp?.originalTargetQty != null) return lineMrp.originalTargetQty;
+      const rootId = lineMrp?.rootOrderItemId ?? orderItem.id;
+      const siblings =
+        order?.items.filter((i) => i.split_from_id === rootId) ?? [];
+      if (siblings.length > 0) {
+        const merged =
+          pickQuantityTarget(orderItem) +
+          siblings.reduce((sum, row) => sum + pickQuantityTarget(row), 0);
+        return merged > 0 ? merged : null;
+      }
+      if (isSplitMode(lineMrp) && lineMrp?.segments.some((s) => s.committed)) {
+        return lineMrp.originalTargetQty;
+      }
+      return null;
+    },
+    [order?.items],
+  );
+
+  const executeRevertPick = useCallback(
+    async (itemId: number, mode: RevertPickLineMode) => {
+      if (!order || !userId) return;
+      const orderItem = order.items.find((oi) => oi.id === itemId);
       if (!orderItem) return;
+
+      const lineMrp = lineMrpMap.get(itemId);
+      const rootId = lineMrp?.rootOrderItemId ?? itemId;
+      const restoreQty =
+        mode === 'full'
+          ? resolveRevertRestoreQty(orderItem, lineMrp)
+          : pickQuantityTarget(orderItem);
+
       setLineOutcome(null);
       setUndoSnapshot(null);
+      setRevertConfirm(null);
+      setRevertPickPending(true);
+
       try {
-        const { error } = await supabase
-          .from('order_items')
-          .update({
-            state: 'pending',
-            scan_result: null,
-          })
-          .eq('id', itemId);
-        if (error) throw error;
+        if (isLab) {
+          updateLocalItem(itemId, { uiState: 'pending', scanResult: null });
+          if (mode === 'full') {
+            updateLineMrp(itemId, createDefaultPickLineMrpState());
+          }
+          appHaptics.impactLight();
+          toast.info(
+            mode === 'full'
+              ? 'Line reset — verify MRP and qty again.'
+              : 'Qty reset — pick again.',
+          );
+          return;
+        }
+
+        const result = await revertPickLine({
+          orderId: order.id,
+          claimId,
+          userId,
+          orderItemId: rootId,
+          mode,
+          restoreQty,
+        });
+
+        if (!result.success) {
+          toast.error(result.error ?? 'Could not reset this line. Refresh and try again.');
+          return;
+        }
+
         updateLocalItem(itemId, { uiState: 'pending', scanResult: null });
-        updateLineMrp(itemId, createDefaultPickLineMrpState());
-        queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+        if (mode === 'full') {
+          updateLineMrp(itemId, createDefaultPickLineMrpState());
+        }
+        await queryClient.invalidateQueries({ queryKey: ['order', orderId] });
         appHaptics.impactLight();
-        toast.info('Line reset — verify MRP and qty again.');
-      } catch {
-        toast.error('Could not reset this line. Refresh and try again.');
+        toast.info(
+          mode === 'full'
+            ? 'Line reset — verify MRP and qty again.'
+            : 'Qty reset — pick again.',
+        );
+      } finally {
+        setRevertPickPending(false);
       }
     },
-    [order?.items, orderId, queryClient, toast, updateLineMrp, updateLocalItem],
+    [
+      claimId,
+      isLab,
+      lineMrpMap,
+      order,
+      orderId,
+      queryClient,
+      resolveRevertRestoreQty,
+      toast,
+      updateLineMrp,
+      updateLocalItem,
+      userId,
+    ],
+  );
+
+  const requestRevertPick = useCallback(
+    (itemId: number, mode: RevertPickLineMode) => {
+      const orderItem = order?.items.find((oi) => oi.id === itemId);
+      if (!orderItem) return;
+      appHaptics.selection();
+      setRevertConfirm({ itemId, mode, itemName: orderItem.item_name });
+    },
+    [order?.items],
   );
 
   const revertLastPick = useCallback(async () => {
@@ -2392,8 +2482,18 @@ export function PickFlowPanel({
                           : 'Mark picked'
                       }
                       onUndoLinePick={
-                        isCardCurrent && pickedQty > 0
-                          ? () => revertLinePick(pi.orderItem.id)
+                        isCardCurrent
+                          ? () => requestRevertPick(pi.orderItem.id, 'full')
+                          : undefined
+                      }
+                      onUndoLineQty={
+                        isCardCurrent
+                          ? () => requestRevertPick(pi.orderItem.id, 'qty_only')
+                          : undefined
+                      }
+                      onResetSplitLine={
+                        isCardCurrent
+                          ? () => requestRevertPick(pi.orderItem.id, 'full')
                           : undefined
                       }
                       onFlag={() => openFlagSheet(pi.orderItem.id)}
@@ -2790,6 +2890,45 @@ export function PickFlowPanel({
       {/* Undo toast — top-right, 5s window. The only escape hatch we expose,
           so we don't tempt pickers into deeper rollbacks. After the window,
           a wrong pick can still be flagged/overridden through the normal flow. */}
+      <BottomSheet
+        isOpen={revertConfirm !== null}
+        onClose={() => {
+          if (revertPickPending) return;
+          setRevertConfirm(null);
+        }}
+        title={revertConfirm?.mode === 'qty_only' ? 'Reset qty?' : 'Reset this line?'}
+      >
+        {revertConfirm && (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--content-secondary)]">
+              {revertConfirm.mode === 'qty_only'
+                ? `Clear picked qty on ${revertConfirm.itemName}. MRP stays — pick the qty again.`
+                : `Clear qty and MRP on ${revertConfirm.itemName}. You'll verify rack, MRP, and qty again.`}
+            </p>
+            <div className="flex gap-2">
+              <BigButton
+                variant="secondary"
+                onClick={() => setRevertConfirm(null)}
+                className="flex-1"
+                disabled={revertPickPending}
+              >
+                Cancel
+              </BigButton>
+              <BigButton
+                variant="primary"
+                loading={revertPickPending}
+                onClick={() =>
+                  void executeRevertPick(revertConfirm.itemId, revertConfirm.mode)
+                }
+                className="flex-1 bg-[var(--bg-warning)] text-[var(--content-primary)]"
+              >
+                {revertConfirm.mode === 'qty_only' ? 'Reset qty' : 'Reset line'}
+              </BigButton>
+            </div>
+          </div>
+        )}
+      </BottomSheet>
+
       {undoSnapshot && (
         <div
           className="fixed top-3 right-3 z-[80] max-w-[calc(100vw-1.5rem)] animate-undo-toast-enter"

@@ -1,4 +1,4 @@
-import { ArrowRight, CheckCircle, Flag, Warning } from '@phosphor-icons/react';
+import { ArrowCounterClockwise, ArrowRight, CheckCircle, Flag, Warning } from '@phosphor-icons/react';
 import type { NextPickLinePreview } from '../../lib/picking/deckOrder';
 
 export type PickLineAdvanceTone = 'success' | 'warning' | 'neutral';
@@ -11,6 +11,7 @@ export interface PickLineAdvanceCTAProps {
   /** Next unpicked line — drives button copy and preview */
   nextPreview: NextPickLinePreview | null;
   onConfirmNext: () => void;
+  onUndoPick?: () => void;
 }
 
 function toneStyles(tone: PickLineAdvanceTone): {
@@ -82,6 +83,7 @@ export function PickLineAdvanceCTA({
   detail,
   nextPreview,
   onConfirmNext,
+  onUndoPick,
 }: PickLineAdvanceCTAProps): React.JSX.Element {
   const styles = toneStyles(tone);
   const confirmLabel = nextPreview ? 'Next line' : 'Finish pick';
@@ -117,6 +119,17 @@ export function PickLineAdvanceCTA({
           {previewLine}
         </span>
       </button>
+
+      {onUndoPick ? (
+        <button
+          type="button"
+          onClick={onUndoPick}
+          className="mt-2 flex w-full min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-2.5 text-xs font-semibold text-[var(--content-secondary)] pick-pressable"
+        >
+          <ArrowCounterClockwise size={16} weight="bold" />
+          Undo pick · change MRP or qty
+        </button>
+      ) : null}
 
       <p className="mt-2 text-center text-[10px] font-medium text-[var(--content-tertiary)]">
         Swipe › browse lines · Pull ↑ for queue

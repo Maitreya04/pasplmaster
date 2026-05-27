@@ -21,6 +21,8 @@ export interface PickMetricRowProps {
   onEditMrp: () => void;
   /** Reset qty progress on this line (wrong pick / wrong qty). */
   onUndoPick?: () => void;
+  /** Qty-only reset when MRP is not yet confirmed. */
+  onUndoQty?: () => void;
 }
 
 /**
@@ -39,6 +41,7 @@ export function PickMetricRow({
   onEditQty,
   onEditMrp,
   onUndoPick,
+  onUndoQty,
 }: PickMetricRowProps): React.JSX.Element {
   const splitActive = isSplitMode(lineMrp);
   const activeMrp = splitActive ? getActiveSegmentMrp(lineMrp) : null;
@@ -203,11 +206,11 @@ export function PickMetricRow({
         </div>
       )}
 
-      {pickedQty > 0 && onUndoPick && finalMrp == null && !splitActive && (
+      {pickedQty > 0 && (onUndoQty ?? onUndoPick) && finalMrp == null && !splitActive && (
         <div className="mx-2.5 mb-2.5 flex justify-end sm:mx-3 sm:mb-3">
           <button
             type="button"
-            onClick={onUndoPick}
+            onClick={onUndoQty ?? onUndoPick}
             className="text-[10px] font-semibold text-[var(--content-secondary)] pick-pressable"
           >
             Undo qty · start over

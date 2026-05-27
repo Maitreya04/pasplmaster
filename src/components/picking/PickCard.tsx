@@ -49,6 +49,7 @@ export interface PickCardProps {
   onMarkPicked?: () => void;
   markPickedLabel?: string;
   onUndoLinePick?: () => void;
+  onUndoLineQty?: () => void;
   onFlag?: () => void;
   onEngageScanner?: () => void;
   onSelectLayer?: (layerId: number) => void;
@@ -63,6 +64,7 @@ export interface PickCardProps {
   onConfirmBatch?: () => void;
   onFinishShort?: () => void;
   onUndoLastSegment?: () => void;
+  onResetSplitLine?: () => void;
   activeBatchQty?: number;
 }
 
@@ -91,6 +93,7 @@ export const PickCard = memo(function PickCard({
   onMarkPicked,
   markPickedLabel,
   onUndoLinePick,
+  onUndoLineQty,
   onFlag,
   onEngageScanner,
   onSelectLayer,
@@ -105,6 +108,7 @@ export const PickCard = memo(function PickCard({
   onConfirmBatch,
   onFinishShort,
   onUndoLastSegment,
+  onResetSplitLine,
   activeBatchQty = 0,
 }: PickCardProps): React.JSX.Element {
   const splitInProgress = isSplitInProgress(lineMrp, targetQty);
@@ -154,7 +158,11 @@ export const PickCard = memo(function PickCard({
   const markPickedReady = isVerified && mrpGateOk && qtyGateOk && !isDone && !showingOutcome;
   const singlePendingMrp =
     needsMrpConfirm && mrpHistory.length === 1 ? mrpHistory[0]!.mrp : null;
-  const showMetricRow = isVerified || splitInProgress;
+  const showMetricRow = isVerified || splitInProgress || (isDone && isCurrent);
+  const canUndoLine =
+    isCurrent &&
+    !showingOutcome &&
+    (effectivePickedQty > 0 || mrpConfirmed);
 
   const splitNeedsFirst =
     suggestSplit || (splitActive && splitNeedsNextBatch(lineMrp, targetQty) && !getActiveSegment(lineMrp));
@@ -201,6 +209,7 @@ export const PickCard = memo(function PickCard({
             lineMrp={lineMrp}
             targetQty={targetQty}
             onUndoLastSegment={onUndoLastSegment}
+            onResetSplitLine={onResetSplitLine}
           />
         ) : null}
 
@@ -228,7 +237,8 @@ export const PickCard = memo(function PickCard({
             disabled={!isCurrent}
             onEditQty={() => onManualQty?.()}
             onEditMrp={() => onEditMrp?.()}
-            onUndoPick={effectivePickedQty > 0 && !showingOutcome ? onUndoLinePick : undefined}
+            onUndoPick={canUndoLine ? onUndoLinePick : undefined}
+            onUndoQty={canUndoLine && effectivePickedQty > 0 ? onUndoLineQty : undefined}
           />
         )}
 
@@ -268,6 +278,7 @@ export const PickCard = memo(function PickCard({
           detail={outcomeDetail}
           nextPreview={nextLinePreview}
           onNext={onAdvanceNext}
+          onUndoPick={onUndoLinePick}
         />
       ) : isDone && isCurrent && onAdvanceNext ? (
         <PickLineDoneHint
@@ -276,6 +287,7 @@ export const PickCard = memo(function PickCard({
           targetQty={effectiveTargetQty}
           nextPreview={nextLinePreview}
           onNext={onAdvanceNext}
+          onUndoPick={onUndoLinePick}
         />
       ) : (
         <PickCardCTAs
