@@ -43,8 +43,13 @@ interface ClaimableOrdersOptions {
   stage: ClaimStage;
   /** Filter orders by workflow_status */
   workflowStatus?: WorkflowStatus | WorkflowStatus[];
-  /** Only orders created today */
+  /**
+   * Billing desk / activity board: any workflow touch today (submit, revive,
+   * approve, pick, complete). Matches get_billing_queue_snapshot p_created_from.
+   */
   todayOnly?: boolean;
+  /** Completed tab: bills closed today (completed_at), regardless of created_at. */
+  completedTodayOnly?: boolean;
 }
 
 interface ActiveClaimInfo {
@@ -136,6 +141,22 @@ function getTodayStartIso(): string {
   return d.toISOString();
 }
 
+/** Match orders with any workflow activity on/after today (submit, revive, approve, pick, complete). */
+function applyTodayActivityFilter<T extends { or: (filters: string) => T }>(
+  query: T,
+  todayIso: string,
+): T {
+  return query.or(
+    [
+      `created_at.gte.${todayIso}`,
+      `revived_at.gte.${todayIso}`,
+      `approved_at.gte.${todayIso}`,
+      `picked_at.gte.${todayIso}`,
+      `completed_at.gte.${todayIso}`,
+    ].join(','),
+  );
+}
+
 function workflowStatusesToArray(
   workflowStatus: WorkflowStatus | WorkflowStatus[] | undefined,
 ): WorkflowStatus[] | null {
@@ -189,7 +210,8 @@ async function fetchLegacyClaimableOrders(
   options: ClaimableOrdersOptions,
   userId: number | null,
 ): Promise<OrderWithClaimInfo[]> {
-  const { stage, workflowStatus, todayOnly } = options;
+  const { stage, workflowStatus, todayOnly, completedTodayOnly } = options;
+  const todayIso = getTodayStartIso();
 
   let orderQuery = supabase
     .from('orders')
@@ -204,8 +226,10 @@ async function fetchLegacyClaimableOrders(
     }
   }
 
-  if (todayOnly) {
-    orderQuery = orderQuery.gte('created_at', getTodayStartIso());
+  if (completedTodayOnly) {
+    orderQuery = orderQuery.gte('completed_at', todayIso);
+  } else if (todayOnly) {
+    orderQuery = applyTodayActivityFilter(orderQuery, todayIso);
   }
 
   const { data: rawOrders, error: orderError } = await orderQuery;
@@ -295,10 +319,12 @@ async function fetchBillingQueueSnapshot(
   options: ClaimableOrdersOptions,
   userId: number | null,
 ): Promise<OrderWithClaimInfo[]> {
+  const todayIso = getTodayStartIso();
   const { data, error } = await supabase.rpc('get_billing_queue_snapshot', {
     p_statuses: workflowStatusesToArray(options.workflowStatus),
-    p_created_from: options.todayOnly ? getTodayStartIso() : null,
+    p_created_from: options.todayOnly ? todayIso : null,
     p_created_to: null,
+    p_completed_from: options.completedTodayOnly ? todayIso : null,
   });
 
   if (error) throw error;
@@ -373,6 +399,7 @@ function buildClaimableOrdersQueryKey(
   stage: ClaimStage,
   statusKey: string,
   todayOnly: boolean | undefined,
+  completedTodayOnly: boolean | undefined,
   billingEventsEnabled: boolean,
 ) {
   return [
@@ -380,6 +407,7 @@ function buildClaimableOrdersQueryKey(
     stage,
     statusKey,
     todayOnly ?? false,
+    completedTodayOnly ?? false,
     billingEventsEnabled ? 'billing-events' : 'legacy',
   ] as const;
 }
@@ -399,6 +427,7 @@ export function prefetchClaimableOrders(
       options.stage,
       statusKey,
       options.todayOnly,
+      options.completedTodayOnly,
       billingEventsEnabled,
     ),
     queryFn: async () => {
@@ -425,7 +454,7 @@ export function useClaimableOrders(
   options: ClaimableOrdersOptions,
 ): UseClaimableOrdersReturn {
   const { userId, userName } = useAuth();
-  const { stage, workflowStatus, todayOnly } = options;
+  const { stage, workflowStatus, todayOnly, completedTodayOnly } = options;
   const [billingSnapshotFailed, setBillingSnapshotFailed] = useState(false);
   const [billingRealtimeStatus, setBillingRealtimeStatus] =
     useState<BillingRealtimeStatus>(REALTIME_ON ? 'disconnected' : 'disabled');
@@ -437,8 +466,15 @@ export function useClaimableOrders(
     : workflowStatus ?? 'all';
 
   const queryKey = useMemo(
-    () => buildClaimableOrdersQueryKey(stage, statusKey, todayOnly, billingEventsEnabled),
-    [stage, statusKey, todayOnly, billingEventsEnabled],
+    () =>
+      buildClaimableOrdersQueryKey(
+        stage,
+        statusKey,
+        todayOnly,
+        completedTodayOnly,
+        billingEventsEnabled,
+      ),
+    [stage, statusKey, todayOnly, completedTodayOnly, billingEventsEnabled],
   );
 
   const result = useQuery<OrderWithClaimInfo[]>({
@@ -542,7 +578,9 @@ export function useClaimableOrders(
         let nextChannel: RealtimeChannel;
         try {
           nextChannel = supabase
-            .channel(`billing-queue-events:${statusKey}:${todayOnly ?? false}`)
+            .channel(
+              `billing-queue-events:${statusKey}:${todayOnly ?? false}:${completedTodayOnly ?? false}`,
+            )
             .on(
               'postgres_changes',
               {
@@ -600,7 +638,7 @@ export function useClaimableOrders(
           : undefined;
 
       const unsubOrders = subscribeToTable({
-        channelName: `billing-orders-backstop:${statusKey}:${todayOnly ?? false}`,
+        channelName: `billing-orders-backstop:${statusKey}:${todayOnly ?? false}:${completedTodayOnly ?? false}`,
         table: 'orders',
         filter: ordersFilter,
         onChange: scheduleInvalidate,
@@ -625,7 +663,7 @@ export function useClaimableOrders(
         : undefined;
 
     const unsubOrders = subscribeToTable({
-      channelName: `claimable-orders:${stage}:${statusKey}:${todayOnly ?? false}`,
+      channelName: `claimable-orders:${stage}:${statusKey}:${todayOnly ?? false}:${completedTodayOnly ?? false}`,
       table: 'orders',
       filter: ordersFilter,
       onChange: scheduleInvalidate,
@@ -635,7 +673,7 @@ export function useClaimableOrders(
     const unsubClaims =
       stage === 'picking'
         ? subscribeToTable({
-            channelName: `claimable-orders-claims:${statusKey}:${todayOnly ?? false}`,
+            channelName: `claimable-orders-claims:${statusKey}:${todayOnly ?? false}:${completedTodayOnly ?? false}`,
             table: 'work_claims',
             filter: 'stage=eq.picking',
             onChange: scheduleInvalidate,
@@ -655,6 +693,7 @@ export function useClaimableOrders(
     stage,
     statusKey,
     todayOnly,
+    completedTodayOnly,
     workflowStatus,
   ]);
 

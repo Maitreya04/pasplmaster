@@ -118,10 +118,21 @@ export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
         q = q.eq('salesperson_name', opts.salespersonName);
       }
       if (opts.todayOnly) {
-        q = q.gte('created_at', todayIso);
+        q = q.or(
+          [
+            `created_at.gte.${todayIso}`,
+            `revived_at.gte.${todayIso}`,
+            `approved_at.gte.${todayIso}`,
+            `picked_at.gte.${todayIso}`,
+            `completed_at.gte.${todayIso}`,
+          ].join(','),
+        );
       }
       if (opts.overdueOnly) {
-        q = q.eq('workflow_status', 'submitted').lt('created_at', todayIso);
+        q = q
+          .eq('workflow_status', 'submitted')
+          .lt('created_at', todayIso)
+          .or(`revived_at.is.null,revived_at.lt.${todayIso}`);
       }
       if (opts.dateFrom) {
         q = q.gte('created_at', opts.dateFrom);

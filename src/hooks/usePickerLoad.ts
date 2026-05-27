@@ -42,16 +42,28 @@ export function usePickerLoad() {
   const { data: loadByUserId, isLoading: loadLoading } = useQuery({
     queryKey: ['picker-load-counts'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data: claims, error } = await supabase
         .from('work_claims')
-        .select('claimed_by_user_id')
+        .select('claimed_by_user_id, order_id')
         .eq('stage', 'picking')
         .eq('status', 'active');
 
       if (error) throw error;
+      if (!claims?.length) return new Map<number, number>();
 
+      const orderIds = [...new Set(claims.map((row) => Number(row.order_id)))];
+      const { data: orders, error: ordersError } = await supabase
+        .from('orders')
+        .select('id')
+        .in('id', orderIds)
+        .in('workflow_status', ['approved', 'picking']);
+
+      if (ordersError) throw ordersError;
+
+      const openPickOrderIds = new Set((orders ?? []).map((row) => Number(row.id)));
       const counts = new Map<number, number>();
-      for (const row of data ?? []) {
+      for (const row of claims) {
+        if (!openPickOrderIds.has(Number(row.order_id))) continue;
         const uid = Number(row.claimed_by_user_id);
         counts.set(uid, (counts.get(uid) ?? 0) + 1);
       }

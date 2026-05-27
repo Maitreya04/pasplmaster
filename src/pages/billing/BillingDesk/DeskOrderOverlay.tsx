@@ -9,6 +9,7 @@ import {
 } from '@phosphor-icons/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useOrderDetail } from '../../../hooks/useOrderDetail';
+import { usePendingItems } from '../../../hooks/usePendingItems';
 import { useWorkClaim } from '../../../hooks/useWorkClaim';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
@@ -21,6 +22,10 @@ import {
   formatDeskFlagSummarySubtitle,
   summarizeDeskFlags,
 } from '../../../lib/billing/deskLineFlagKind';
+import {
+  indexPendingItemsByItemId,
+  isDeskFlagLineAlreadyOnPo,
+} from '../../../lib/billing/deskPoCoverage';
 import { shouldNotifyPickers } from '../../../lib/billing/fulfillmentPath';
 import { canBroadcastReadyToPick } from '../../../lib/billing/pickerNotifyPolicy';
 import { pickQuantityTarget } from '../../../lib/cartSupply';
@@ -116,6 +121,14 @@ function DeskOrderOverlayEditor({
   );
 
   const items = orderDetail.items;
+  const { data: pendingItems = [] } = usePendingItems({
+    orderId: orderDetail.id,
+    status: 'pending',
+  });
+  const pendingByItemId = useMemo(
+    () => indexPendingItemsByItemId(pendingItems),
+    [pendingItems],
+  );
   const [edits, setEdits] = useState(() => initEdits(items));
   const [reason, setReason] = useState<ChangeReason>('no_changes');
   const [reasonTouched, setReasonTouched] = useState(false);
@@ -136,9 +149,18 @@ function DeskOrderOverlayEditor({
     };
   }, []);
 
-  const flaggedItems = useMemo(
+  const allFlaggedItems = useMemo(
     () => items.filter((i) => i.state === 'flagged'),
     [items],
+  );
+
+  const flaggedItems = useMemo(
+    () =>
+      allFlaggedItems.filter(
+        (item) =>
+          !isDeskFlagLineAlreadyOnPo(item, pendingByItemId.get(item.item_id) ?? []),
+      ),
+    [allFlaggedItems, pendingByItemId],
   );
 
   const flagSummary = useMemo(
@@ -182,7 +204,8 @@ function DeskOrderOverlayEditor({
 
   const resolvingFlags =
     orderDetail.workflow_status === 'flagged' ||
-    (flaggedMode && flaggedItems.length > 0);
+    flaggedMode ||
+    flaggedItems.length > 0;
 
   const allFlagsResolved = unresolvedFlagged.length === 0;
   const saveBlocked = resolvingFlags && !allFlagsResolved;
@@ -321,6 +344,8 @@ function DeskOrderOverlayEditor({
   const unresolvedOosCount = unresolvedFlagged.filter(
     (i) => deskLineFlagKind(i.flag_reason) === 'oos',
   ).length;
+
+  const poSkippedFlagCount = allFlaggedItems.length - flaggedItems.length;
 
   const showReasonDropdown =
     !resolvingFlags ||
@@ -570,9 +595,21 @@ function DeskOrderOverlayEditor({
           </div>
           <div className="text-right shrink-0">
             <p className="text-[15px] font-medium tabular-nums">{formatCurrencyRaw(total)}</p>
-            <p className="text-[10px] text-[var(--content-quaternary)]">{visibleItems.length} items</p>
+            <p className="text-[10px] text-[var(--content-quaternary)]">
+              {visibleItems.length} items
+              {poSkippedFlagCount > 0 && flaggedItems.length === 0
+                ? ` · ${poSkippedFlagCount} on PO`
+                : ''}
+            </p>
           </div>
         </div>
+
+        {poSkippedFlagCount > 0 && flaggedItems.length === 0 && (
+          <p className="text-[10px] text-[var(--content-quaternary)] rounded-lg border border-[var(--border-faint)] bg-[var(--bg-tertiary)] px-3 py-2">
+            {poSkippedFlagCount} flagged line{poSkippedFlagCount === 1 ? '' : 's'} already on PO — not
+            shown on this bill
+          </p>
+        )}
 
         {resolvingFlags && (
           <>
@@ -609,6 +646,11 @@ function DeskOrderOverlayEditor({
               </div>
               <div className="rounded-lg border border-[var(--border-subtle)] overflow-hidden">
                 <DeskFlaggedSectionHeader />
+                {poSkippedFlagCount > 0 && (
+                  <p className="px-3 py-2 text-[10px] text-[var(--content-quaternary)] border-b border-[var(--border-faint)] bg-[var(--bg-tertiary)]">
+                    {poSkippedFlagCount} line{poSkippedFlagCount === 1 ? '' : 's'} already on PO — hidden from this list
+                  </p>
+                )}
                 {unresolvedFlagged.length === 0 ? (
                   <p className="px-3 py-2 text-[11px] text-[var(--content-positive)] border-t border-[var(--border-faint)]">
                     All flagged lines resolved

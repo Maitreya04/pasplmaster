@@ -29,6 +29,15 @@ export function orderNeedsDeskFlagAction(order: Pick<DeskOrderRow, 'deskStatus' 
   return order.deskStatus === 'flagged' || order.pickerFlags.length > 0;
 }
 
+/** Orders that need billing-desk stale intervention (stuck pick / no ack — not post-pick verify). */
+export function isDeskOrderStale(order: DeskOrderRow): boolean {
+  if (order.deskStatus === 'checking') return false;
+  if (order.pickingClaimStale) return true;
+  if (order.deskStatus === 'no_ack') return true;
+  if (order.claim_info?.is_stale) return true;
+  return false;
+}
+
 const MONITOR_STATUSES: WorkflowStatus[] = [
   'approved',
   'picking',
@@ -135,13 +144,7 @@ export function useBillingDeskOrders() {
   );
 
   const staleCount = useMemo(
-    () =>
-      listOrders.filter(
-        (o) =>
-          o.pickingClaimStale ||
-          o.deskStatus === 'no_ack' ||
-          (o.claim_info?.is_stale ?? false),
-      ).length,
+    () => listOrders.filter(isDeskOrderStale).length,
     [listOrders],
   );
 
@@ -173,10 +176,5 @@ export function filterDeskOrdersByTab(
   if (tab === 'completed') {
     return orders.filter((o) => o.deskStatus === 'checking');
   }
-  return orders.filter(
-    (o) =>
-      o.pickingClaimStale ||
-      o.deskStatus === 'no_ack' ||
-      (o.claim_info?.is_stale ?? false),
-  );
+  return orders.filter(isDeskOrderStale);
 }

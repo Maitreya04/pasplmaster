@@ -34,18 +34,23 @@ export function calendarDayBucket(
   return 'older';
 }
 
+/** When the order entered (or re-entered) the billing queue. */
+export function billingSubmissionReferenceDate(order: Order): string {
+  return order.revived_at ?? order.created_at;
+}
+
 /** Submitted on an earlier calendar day than billing approved it. */
 export function isLateBilled(order: Order): boolean {
   if (!order.approved_at) return false;
   return (
-    localDateKey(new Date(order.created_at)) <
+    localDateKey(new Date(billingSubmissionReferenceDate(order))) <
     localDateKey(new Date(order.approved_at))
   );
 }
 
-/** Still waiting in billing — submitted before today. */
+/** Still waiting in billing — submitted before today (ignores same-day revivals). */
 export function isLateToBill(order: Order, now = new Date()): boolean {
-  return calendarDayBucket(order.created_at, now) !== 'today';
+  return calendarDayBucket(billingSubmissionReferenceDate(order), now) !== 'today';
 }
 
 type SectionCopy = {
@@ -107,7 +112,7 @@ export function groupPickQueueByApprovalDay<T extends Order>(
 ): QueueDaySection<T>[] {
   return groupOrdersByCalendarDay(
     orders,
-    (order) => order.approved_at ?? order.created_at,
+    (order) => order.approved_at,
     {
       today: {
         title: 'Approved today',
@@ -130,14 +135,14 @@ export function groupPickQueueByApprovalDay<T extends Order>(
   );
 }
 
-/** Billing queue: group by when sales submitted the order. */
+/** Billing queue: group by when sales submitted (or billing revived) the order. */
 export function groupBillingQueueBySubmissionDay<T extends Order>(
   orders: T[],
   now = new Date(),
 ): QueueDaySection<T>[] {
   return groupOrdersByCalendarDay(
     orders,
-    (order) => order.created_at,
+    billingSubmissionReferenceDate,
     {
       today: {
         title: 'Submitted today',

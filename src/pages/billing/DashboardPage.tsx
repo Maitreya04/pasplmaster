@@ -100,7 +100,10 @@ function OrderCard({
   pickingClaimStale?: boolean;
 }) {
   const claim = order.claim_info;
-  const timeSource = order.approved_at ?? order.created_at;
+  const timeSource =
+    order.workflow_status === 'completed'
+      ? (order.completed_at ?? order.created_at)
+      : (order.approved_at ?? order.created_at);
 
   return (
     <Card
@@ -224,21 +227,28 @@ export default function DashboardPage(): React.JSX.Element | null {
     }
   };
 
-  // We use useClaimableOrders to fetch all orders but specifically enrich claims for 'billing' stage
-  const { all: orders, isLoading } = useClaimableOrders({
+  // Pipeline cards = live queue (no created_at filter). Completed = bills closed today.
+  const { all: pipelineOrders, isLoading: pipelineLoading } = useClaimableOrders({
     stage: 'billing',
-    todayOnly: true,
+    workflowStatus: ['submitted', 'approved', 'picking'],
   });
+  const { all: completedTodayOrders, isLoading: completedLoading } = useClaimableOrders({
+    stage: 'billing',
+    workflowStatus: 'completed',
+    completedTodayOnly: true,
+  });
+
+  const isLoading = pipelineLoading || completedLoading;
 
   const { data: overdueOrders } = useOverdueOrders();
   const overdueCount = overdueOrders?.length ?? 0;
 
   const pickingOrderIds = useMemo(
     () =>
-      (orders ?? [])
+      (pipelineOrders ?? [])
         .filter((o) => o.workflow_status === 'picking')
         .map((o) => o.id),
-    [orders],
+    [pipelineOrders],
   );
 
   const { data: stalePickingOrderIds } = useQuery({
@@ -270,25 +280,37 @@ export default function DashboardPage(): React.JSX.Element | null {
   });
   
   const { counts, filteredOrders } = useMemo(() => {
-    const list = orders ?? [];
+    const pipeline = pipelineOrders ?? [];
+    const completedToday = completedTodayOrders ?? [];
     const counts: Record<WorkflowStatus, number> = {
       submitted: 0,
       approved: 0,
       picking: 0,
-      completed: 0,
+      completed: completedToday.length,
       rejected: 0,
       flagged: 0,
     };
-    for (const o of list) {
+    for (const o of pipeline) {
       if (o.workflow_status in counts) counts[o.workflow_status as WorkflowStatus]++;
     }
+    const merged = [...pipeline, ...completedToday].sort((a, b) => {
+      const aT = a.completed_at ?? a.created_at;
+      const bT = b.completed_at ?? b.created_at;
+      return new Date(bT).getTime() - new Date(aT).getTime();
+    });
+    const completedSorted = [...completedToday].sort(
+      (a, b) =>
+        new Date(b.completed_at ?? 0).getTime() -
+        new Date(a.completed_at ?? 0).getTime(),
+    );
     const filtered =
       statusFilter === null
-        ? list
-        : list.filter((o) => o.workflow_status === statusFilter);
+        ? merged
+        : statusFilter === 'completed'
+          ? completedSorted
+          : pipeline.filter((o) => o.workflow_status === statusFilter);
     return { counts, filteredOrders: filtered };
-    // eslint-disable-next-line react-hooks/preserve-manual-memoization
-  }, [orders, statusFilter]);
+  }, [pipelineOrders, completedTodayOrders, statusFilter]);
 
   const todayStr = new Date().toLocaleDateString('en-IN', {
     weekday: 'short',
@@ -303,7 +325,7 @@ export default function DashboardPage(): React.JSX.Element | null {
           Billing Dashboard
         </h1>
         <p className="text-sm lg:text-base text-[var(--content-secondary)] mt-1">
-          {todayStr} · Today&apos;s orders
+          {todayStr} · Live pipeline · Completed bills today
         </p>
 
         {overdueCount > 0 && (
@@ -358,9 +380,11 @@ export default function DashboardPage(): React.JSX.Element | null {
               icon={Package}
               title="No orders"
               description={
-                statusFilter
-                  ? `No ${STAT_CONFIG.find((c) => c.status === statusFilter)?.label.toLowerCase()} orders today`
-                  : "No orders today yet"
+                statusFilter === 'completed'
+                  ? 'No orders completed today yet'
+                  : statusFilter
+                    ? `No ${STAT_CONFIG.find((c) => c.status === statusFilter)?.label.toLowerCase()} orders in queue`
+                    : 'No orders in queue'
               }
             />
           ) : (

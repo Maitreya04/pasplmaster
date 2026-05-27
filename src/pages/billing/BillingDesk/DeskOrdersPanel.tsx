@@ -6,6 +6,7 @@ import { useDeskPickProgress } from '../../../hooks/useDeskPickProgress';
 import { usePickerLoad } from '../../../hooks/usePickerLoad';
 import {
   filterDeskOrdersByTab,
+  orderNeedsDeskFlagAction,
   type DeskOrderRow,
   type DeskOrderTab,
 } from '../../../hooks/useBillingDeskOrders';
@@ -186,7 +187,9 @@ export function DeskOrdersPanel({
                 }}
                 showStaleActions={tab === 'stale'}
                 showVerifyAction={tab === 'completed' || order.deskStatus === 'checking'}
-                onEdit={() => onSelectOrder(order, false)}
+                onEdit={() =>
+                  onSelectOrder(order, orderNeedsDeskFlagAction(order))
+                }
               />
             ))
           )}
