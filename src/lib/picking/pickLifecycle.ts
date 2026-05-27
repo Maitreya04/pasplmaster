@@ -89,7 +89,7 @@ export function isMyStaleAssignedPick(
   return !order.claim_info || order.claim_info.is_stale;
 }
 
-/** No assigned orders waiting to start or resume — safe to show the unassigned pool. */
+/** True when the picker has no assigned orders waiting to start or resume. */
 export function isMyAssignedWorkCleared(
   orders: OrderWithClaimInfo[],
   userName: string | null,

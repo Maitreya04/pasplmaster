@@ -98,8 +98,8 @@ export default function PickPreviewPage(): React.JSX.Element | null {
     return { ask, lucas };
   }, [rows]);
 
-  const openInProgressPick = useMemo(
-    () => myActive.find((o) => isInProgressPick(o) && o.id !== orderId),
+  const otherInProgressPicks = useMemo(
+    () => myActive.filter((o) => isInProgressPick(o) && o.id !== orderId),
     [myActive, orderId],
   );
 
@@ -181,16 +181,12 @@ export default function PickPreviewPage(): React.JSX.Element | null {
   });
 
   const handleStartClick = useCallback(() => {
-    if (openInProgressPick) {
-      toast.info('Finish your current pick before starting another order.');
-      return;
-    }
     if (isPoolOrder && !poolConfirmOpen) {
       setPoolConfirmOpen(true);
       return;
     }
     startMutation.mutate();
-  }, [isPoolOrder, openInProgressPick, poolConfirmOpen, startMutation, toast]);
+  }, [isPoolOrder, poolConfirmOpen, startMutation]);
 
   if (orderId === null || !Number.isFinite(orderId) || orderId <= 0) {
     return (
@@ -223,8 +219,6 @@ export default function PickPreviewPage(): React.JSX.Element | null {
       </div>
     );
   }
-
-  const startBlocked = Boolean(openInProgressPick);
 
   return (
     <div className="min-h-screen pb-24">
@@ -268,21 +262,29 @@ export default function PickPreviewPage(): React.JSX.Element | null {
           </div>
         </Card>
 
-        {openInProgressPick && (
+        {otherInProgressPicks.length > 0 && (
           <Card className="border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]">
             <p className="text-sm font-semibold text-[var(--content-primary)]">
-              You have an open pick
+              {otherInProgressPicks.length === 1
+                ? 'You have another pick in progress'
+                : `${otherInProgressPicks.length} other picks in progress`}
             </p>
-            <p className="mt-1 text-sm text-[var(--content-secondary)]">
-              {openInProgressPick.order_number} · {openInProgressPick.customer_name}
-            </p>
-            <button
-              type="button"
-              onClick={() => navigate(`/picking/pick/${openInProgressPick.id}`)}
-              className="mt-3 text-sm font-semibold text-[var(--content-accent)]"
-            >
-              Resume current pick →
-            </button>
+            <ul className="mt-2 space-y-2">
+              {otherInProgressPicks.map((pick) => (
+                <li key={pick.id}>
+                  <p className="text-sm text-[var(--content-secondary)]">
+                    {pick.order_number} · {pick.customer_name}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/picking/pick/${pick.id}`)}
+                    className="mt-1 text-sm font-semibold text-[var(--content-accent)]"
+                  >
+                    Resume →
+                  </button>
+                </li>
+              ))}
+            </ul>
           </Card>
         )}
 
@@ -424,7 +426,7 @@ export default function PickPreviewPage(): React.JSX.Element | null {
       <button
         type="button"
         onClick={handleStartClick}
-        disabled={startBlocked || startMutation.isPending || rows.length === 0}
+        disabled={startMutation.isPending || rows.length === 0}
         className="fixed bottom-6 right-4 z-40 flex h-14 items-center gap-2 rounded-full bg-[var(--bg-inverse-primary)] pl-5 pr-6 text-[var(--content-on-color)] shadow-xl ring-1 ring-black/5 pick-pressable disabled:opacity-50 sm:bottom-8 sm:right-6"
       >
         {startMutation.isPending ? (

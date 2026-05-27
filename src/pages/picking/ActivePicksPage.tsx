@@ -63,11 +63,6 @@ export default function ActivePicksPage(): React.JSX.Element | null {
     [myActive],
   );
 
-  const inProgressPicks = useMemo(
-    () => myActive.filter((order) => isMyInProgressPick(order, userName)),
-    [myActive, userName],
-  );
-
   const unassignedOrders = useMemo(
     () => sortAvailablePickQueueOrders(available.filter(hasPickableLines)),
     [available],
@@ -79,7 +74,6 @@ export default function ActivePicksPage(): React.JSX.Element | null {
   );
 
   const poolCount = unassignedOrders.length + stalePoolOrders.length;
-  const poolClaimBlocked = inProgressPicks.length > 0;
 
   const handleOpen = (orderId: number, order: (typeof boardOrders)[number]) => {
     if (!isAssignedToMe(order, userName)) return;
@@ -93,7 +87,6 @@ export default function ActivePicksPage(): React.JSX.Element | null {
   };
 
   const handlePoolOpen = (orderId: number) => {
-    if (poolClaimBlocked) return;
     navigate(`/picking/preview/${orderId}?source=pool`);
   };
 
@@ -250,11 +243,6 @@ export default function ActivePicksPage(): React.JSX.Element | null {
               showWhenEmpty
               description="Tap to claim — first come, first served"
             />
-            {poolClaimBlocked ? (
-              <p className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
-                Finish your open pick before claiming from the pool.
-              </p>
-            ) : null}
             {isLoading ? (
               <div className="space-y-3">
                 <Skeleton variant="card" count={3} />
@@ -273,7 +261,6 @@ export default function ActivePicksPage(): React.JSX.Element | null {
                     key={order.id}
                     order={order}
                     onOpen={() => handlePoolOpen(order.id)}
-                    disabled={poolClaimBlocked}
                   />
                 ))}
                 {stalePoolOrders.length > 0 && (
@@ -286,7 +273,6 @@ export default function ActivePicksPage(): React.JSX.Element | null {
                         key={order.id}
                         order={order}
                         onOpen={() => handlePoolOpen(order.id)}
-                        disabled={poolClaimBlocked}
                       />
                     ))}
                   </>
