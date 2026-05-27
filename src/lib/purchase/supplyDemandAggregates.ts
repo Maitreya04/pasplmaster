@@ -3,7 +3,7 @@ import {
   normalizeEmbeddedOrder,
   type OpenPoDemandLine,
 } from '../../hooks/useOpenPoDemandLines';
-import { ageDays, groupLabel, linePoValue, type BrandSummary, type SkuSummary } from '../../components/supply/supplyDemandShared';
+import { ageDays, groupLabel, lineBusyCode, linePoValue, type BrandSummary, type SkuSummary } from '../../components/supply/supplyDemandShared';
 
 export function buildBrandSummaries(lines: OpenPoDemandLine[]): BrandSummary[] {
   const brandMap = new Map<
@@ -123,8 +123,9 @@ export function buildSkuSummaries(lines: OpenPoDemandLine[]): SkuSummary[] {
       item_name: string;
       item_alias: string | null;
       item_alias1: string | null;
-      brandLabel: string;
-      totalPo: number;
+        brandLabel: string;
+        busy_code: number | null;
+        totalPo: number;
       totalValue: number;
       lineCount: number;
       customers: Set<string>;
@@ -140,6 +141,7 @@ export function buildSkuSummaries(lines: OpenPoDemandLine[]): SkuSummary[] {
       item_alias: normalizeEmbeddedItem(row.items)?.alias ?? null,
       item_alias1: normalizeEmbeddedItem(row.items)?.alias1 ?? null,
       brandLabel: groupLabel(row),
+      busy_code: lineBusyCode(row),
       totalPo: 0,
       totalValue: 0,
       lineCount: 0,
@@ -165,8 +167,9 @@ export function buildSkuSummaries(lines: OpenPoDemandLine[]): SkuSummary[] {
       item_name: sku.item_name,
       item_alias: sku.item_alias,
       item_alias1: sku.item_alias1,
-      brandLabel: sku.brandLabel,
-      totalPo: sku.totalPo,
+        brandLabel: sku.brandLabel,
+        busy_code: sku.busy_code,
+        totalPo: sku.totalPo,
       totalValue: sku.totalValue,
       lineCount: sku.lineCount,
       customerCount: sku.customers.size,

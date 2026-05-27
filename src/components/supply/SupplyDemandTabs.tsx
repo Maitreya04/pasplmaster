@@ -24,13 +24,16 @@ import {
   formatShortDate,
   formatTimeAgo,
   groupLabel,
+  lineBusyCode,
   linePoValue,
   pendingSourceLabel,
   type BrandSummary,
   type PendingDayRow,
   type SkuSummary,
+  type SupplyDemandLocationStockProps,
   type SupplyDemandViewMode,
 } from './supplyDemandShared';
+import { LocationStockChips } from './LocationStockChips';
 
 export function BrandTab({
   rows,
@@ -159,12 +162,14 @@ export function SkuTab({
   error,
   mode,
   onOpenSku,
+  locationStock,
 }: {
   rows: SkuSummary[];
   loading: boolean;
   error: Error | null;
   mode: SupplyDemandViewMode;
   onOpenSku: (itemId: number, fromTab: 'brand' | 'sku') => void;
+  locationStock?: SupplyDemandLocationStockProps;
 }) {
   if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading items...</p>;
   if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load item demand.</p>;
@@ -204,6 +209,14 @@ export function SkuTab({
               <span>{countLabel(row.lineCount, 'order line')}</span>
               <span>{countLabel(row.customerCount, 'customer')}</span>
             </div>
+            {locationStock && (
+              <LocationStockChips
+                stock={locationStock.stockForItemId(row.item_id)}
+                busyCode={row.busy_code ?? locationStock.busyCodeForItemId(row.item_id)}
+                loading={locationStock.stockLoadingForItemId(row.item_id)}
+                className="mt-3"
+              />
+            )}
           </button>
         </li>
       ))}
@@ -220,6 +233,7 @@ export function LinesTab({
   loading,
   error,
   mode,
+  locationStock,
 }: {
   lines: OpenPoDemandLine[];
   allLines: OpenPoDemandLine[];
@@ -229,6 +243,7 @@ export function LinesTab({
   loading: boolean;
   error: Error | null;
   mode: SupplyDemandViewMode;
+  locationStock?: SupplyDemandLocationStockProps;
 }) {
   if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading lines...</p>;
   if (error) return <p className="text-sm text-[var(--content-negative)]">Could not load PO lines.</p>;
@@ -319,6 +334,15 @@ export function LinesTab({
                   <p className="mt-3 text-xs text-[var(--content-quaternary)]">
                     {formatShortDate(order.created_at)} · {formatTimeAgo(order.created_at)} · {order.workflow_status}
                   </p>
+                )}
+
+                {locationStock && (
+                  <LocationStockChips
+                    stock={locationStock.stockForItemId(row.item_id)}
+                    busyCode={lineBusyCode(row) ?? locationStock.busyCodeForItemId(row.item_id)}
+                    loading={locationStock.stockLoadingForItemId(row.item_id)}
+                    className="mt-3"
+                  />
                 )}
               </li>
             );
@@ -458,6 +482,7 @@ export function PendingTab({
   loading,
   pendingByDay,
   pendingSummary,
+  locationStock,
 }: {
   items: PendingItem[];
   loading: boolean;
@@ -469,6 +494,7 @@ export function PendingTab({
     oldestCreatedAt: string | null;
     sources: Array<{ source: PendingItem['source']; count: number; qty: number }>;
   };
+  locationStock?: SupplyDemandLocationStockProps;
 }) {
   if (loading) return <p className="text-sm text-[var(--content-tertiary)]">Loading pending queue...</p>;
   if (items.length === 0) return <EmptyBlock text="No pending items." />;
@@ -564,6 +590,15 @@ export function PendingTab({
                 </span>
               )}
             </div>
+
+            {locationStock && typeof item.item_id === 'number' && (
+              <LocationStockChips
+                stock={locationStock.stockForItemId(item.item_id)}
+                busyCode={locationStock.busyCodeForItemId(item.item_id)}
+                loading={locationStock.stockLoadingForItemId(item.item_id)}
+                className="mt-3"
+              />
+            )}
           </li>
         ))}
       </ul>

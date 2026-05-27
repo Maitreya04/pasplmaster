@@ -31,6 +31,8 @@ import {
   useSupplyDemandUrlFilters,
 } from '../../components/supply/SupplyDemandFilters';
 import { LinesTab, PendingTab, SkuTab } from '../../components/supply/SupplyDemandTabs';
+import { useSupplyDemandLocationStock } from '../../hooks/useSupplyDemandLocationStock';
+import type { SupplyDemandLocationStockProps } from '../../components/supply/supplyDemandShared';
 import { localDateKey } from '../../lib/purchase/supplyDemandFilters';
 import {
   ageDays,
@@ -141,9 +143,26 @@ export default function PartnerSupplyPage(): React.JSX.Element {
     };
   }, [pendingItems]);
 
+  const {
+    stockForItemId,
+    stockLoadingForItemId,
+    busyCodeByItemId,
+  } = useSupplyDemandLocationStock(locationDemandLines, pendingItems);
+
+  const locationStock = useMemo<SupplyDemandLocationStockProps>(
+    () => ({
+      stockForItemId,
+      stockLoadingForItemId,
+      busyCodeForItemId: (itemId) => busyCodeByItemId.get(itemId) ?? null,
+    }),
+    [stockForItemId, stockLoadingForItemId, busyCodeByItemId],
+  );
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['open-po-demand-lines'] });
     queryClient.invalidateQueries({ queryKey: ['pending-items'] });
+    queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
+    queryClient.invalidateQueries({ queryKey: ['supply-demand-item-busy-codes'] });
   };
 
   const updateTab = (nextTab: PartnerTabId) => {
@@ -290,6 +309,7 @@ export default function PartnerSupplyPage(): React.JSX.Element {
             error={linesError}
             mode="partner"
             onOpenSku={(itemId) => openSkuDetail(itemId)}
+            locationStock={locationStock}
           />
         )}
         {tab === 'lines' && (
@@ -302,6 +322,7 @@ export default function PartnerSupplyPage(): React.JSX.Element {
             loading={linesLoading}
             error={linesError}
             mode="partner"
+            locationStock={locationStock}
           />
         )}
         {tab === 'pending' && (
@@ -310,6 +331,7 @@ export default function PartnerSupplyPage(): React.JSX.Element {
             loading={pendingLoading}
             pendingByDay={pendingByDay}
             pendingSummary={pendingSummary}
+            locationStock={locationStock}
           />
         )}
       </div>

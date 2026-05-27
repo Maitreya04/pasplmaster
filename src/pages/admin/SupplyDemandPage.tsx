@@ -48,7 +48,9 @@ import {
   formatNumber,
   isToday,
   type PendingDayRow,
+  type SupplyDemandLocationStockProps,
 } from '../../components/supply/supplyDemandShared';
+import { useSupplyDemandLocationStock } from '../../hooks/useSupplyDemandLocationStock';
 import { localDateKey } from '../../lib/purchase/supplyDemandFilters';
 import { normalizeEmbeddedOrder } from '../../hooks/useOpenPoDemandLines';
 import type { PendingItem } from '../../types';
@@ -153,9 +155,26 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
     };
   }, [pendingItems]);
 
+  const {
+    stockForItemId,
+    stockLoadingForItemId,
+    busyCodeByItemId,
+  } = useSupplyDemandLocationStock(locationDemandLines, pendingItems);
+
+  const locationStock = useMemo<SupplyDemandLocationStockProps>(
+    () => ({
+      stockForItemId,
+      stockLoadingForItemId,
+      busyCodeForItemId: (itemId) => busyCodeByItemId.get(itemId) ?? null,
+    }),
+    [stockForItemId, stockLoadingForItemId, busyCodeByItemId],
+  );
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['open-po-demand-lines'] });
     queryClient.invalidateQueries({ queryKey: ['pending-items'] });
+    queryClient.invalidateQueries({ queryKey: ['stock_locationwise'] });
+    queryClient.invalidateQueries({ queryKey: ['supply-demand-item-busy-codes'] });
   };
 
   const copyWithToast = async (text: string, id: string, successMessage: string) => {
@@ -329,6 +348,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
               error={linesError}
               mode="admin"
               onOpenSku={openSkuDetail}
+              locationStock={locationStock}
             />
           )}
           {tab === 'lines' && (
@@ -341,6 +361,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
               loading={linesLoading}
               error={linesError}
               mode="admin"
+              locationStock={locationStock}
             />
           )}
           {tab === 'pending' && (
@@ -349,6 +370,7 @@ export default function SupplyDemandPage(): React.JSX.Element | null {
               loading={pendingLoading}
               pendingByDay={pendingByDay}
               pendingSummary={pendingSummary}
+              locationStock={locationStock}
             />
           )}
           {tab === 'pick_issues' && (

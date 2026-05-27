@@ -41,6 +41,7 @@ type ItemGroupRow = {
   alias1: string | null;
   main_group: string | null;
   parent_group: string | null;
+  busy_code?: number | null;
 };
 
 type OrderItemPriceRow = {
@@ -77,7 +78,8 @@ const ORDER_ITEMS_SELECT_WITH_LOCATION = `
     alias,
     alias1,
     main_group,
-    parent_group
+    parent_group,
+    busy_code
   )
 `;
 
@@ -102,7 +104,8 @@ const ORDER_ITEMS_SELECT_BASE = `
     alias,
     alias1,
     main_group,
-    parent_group
+    parent_group,
+    busy_code
   )
 `;
 
@@ -133,6 +136,7 @@ function toItemEmbed(row: ItemGroupRow): NonNullable<OpenPoDemandLine['items']> 
     alias1: row.alias1,
     main_group: row.main_group,
     parent_group: row.parent_group,
+    busy_code: row.busy_code ?? null,
   };
 }
 
@@ -283,7 +287,7 @@ export function useOpenPoDemandLines(options?: UseOpenPoDemandLinesOptions) {
           itemIds.length > 0
             ? supabase
                 .from('items')
-                .select('id, alias, alias1, main_group, parent_group')
+                .select('id, alias, alias1, main_group, parent_group, busy_code')
                 .in('id', itemIds)
                 .returns<ItemGroupRow[]>()
             : Promise.resolve({ data: [], error: null }),

@@ -26,11 +26,14 @@ import {
   formatShortDate,
   formatTimeAgo,
   groupLabel,
+  lineBusyCode,
   linePoValue,
   pendingSourceLabel,
   demandLocationLabel,
   type SupplyDemandViewMode,
 } from './supplyDemandShared';
+import { LocationStockChips } from './LocationStockChips';
+import { useSupplyDemandLocationStock } from '../../hooks/useSupplyDemandLocationStock';
 
 export type SupplyDemandSkuDetailViewProps = {
   mode: SupplyDemandViewMode;
@@ -104,6 +107,14 @@ export function SupplyDemandSkuDetailView({
   const itemCodes = skuLines[0] ? normalizeEmbeddedItem(skuLines[0].items) : null;
   const brandLabel = skuLines[0] ? groupLabel(skuLines[0]) : null;
 
+  const { stockForItemId, stockLoadingForItemId, busyCodeByItemId } =
+    useSupplyDemandLocationStock(skuLines);
+  const skuStock = Number.isInteger(itemId) ? stockForItemId(itemId) : undefined;
+  const skuBusyCode =
+    (skuLines[0] ? lineBusyCode(skuLines[0]) : null) ??
+    (Number.isInteger(itemId) ? busyCodeByItemId.get(itemId) ?? null : null);
+  const skuStockLoading = Number.isInteger(itemId) ? stockLoadingForItemId(itemId) : false;
+
   const backToSummary = () => navigate(backPath);
 
   if (!Number.isInteger(itemId) || itemId <= 0) {
@@ -153,6 +164,12 @@ export function SupplyDemandSkuDetailView({
               </div>
             )}
             <p className="text-lg font-semibold text-[var(--content-primary)]">{itemName}</p>
+            <LocationStockChips
+              stock={skuStock}
+              busyCode={skuBusyCode}
+              loading={skuStockLoading}
+              className="mt-3"
+            />
             <p className="mt-2 text-sm text-[var(--content-tertiary)]">
               {brandLabel ?? 'Item detail'}
               {` · ${activeRangeLabel}`}

@@ -7,6 +7,13 @@ import { demandLineBrandKey } from '../../lib/purchase/partnerBrandMatch';
 import { stockLocationLabel } from '../../hooks/useLocationwiseStock';
 import { formatCurrency, formatShortDate, formatTimeAgo } from '../../utils/formatters';
 import type { PendingItem, StockLocationCode } from '../../types';
+import type { ItemLocationStock } from '../../hooks/useLocationwiseStock';
+
+export type SupplyDemandLocationStockProps = {
+  stockForItemId: (itemId: number) => ItemLocationStock | undefined;
+  stockLoadingForItemId: (itemId: number) => boolean;
+  busyCodeForItemId: (itemId: number) => number | null | undefined;
+};
 
 export type BrandSkuRow = {
   item_id: number;
@@ -39,6 +46,7 @@ export type SkuSummary = {
   item_alias: string | null;
   item_alias1: string | null;
   brandLabel: string;
+  busy_code: number | null;
   totalPo: number;
   totalValue: number;
   lineCount: number;
@@ -101,6 +109,13 @@ export function AgePill({ createdAt }: { createdAt: string }) {
 
 export function groupLabel(line: OpenPoDemandLine): string {
   return demandLineBrandKey(line);
+}
+
+export function lineBusyCode(line: OpenPoDemandLine): number | null {
+  const it = normalizeEmbeddedItem(line.items);
+  const bc = it?.busy_code;
+  if (bc == null || !Number.isFinite(Number(bc))) return null;
+  return Number(bc);
 }
 
 export function linePoValue(line: OpenPoDemandLine): number {
