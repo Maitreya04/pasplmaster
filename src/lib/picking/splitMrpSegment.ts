@@ -1,3 +1,4 @@
+import { syncLabelMrpFlagForOrderItem } from '../billing/syncLabelMrpFlag';
 import { supabase } from '../supabase/client';
 import type { ScanResult } from '../../types';
 
@@ -41,9 +42,16 @@ export async function commitPickMrpSegment(options: {
     };
   }
 
+  const orderItemId =
+    payload.order_item_id != null ? Number(payload.order_item_id) : undefined;
+
+  if (orderItemId != null) {
+    await syncLabelMrpFlagForOrderItem(orderItemId);
+  }
+
   return {
     success: true,
-    order_item_id: payload.order_item_id != null ? Number(payload.order_item_id) : undefined,
+    order_item_id: orderItemId,
     is_new_row: payload.is_new_row === true,
   };
 }

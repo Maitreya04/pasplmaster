@@ -26,6 +26,8 @@ import {
 import { openPickingChalanPrint } from '../../lib/billing/printPickingChalan';
 import type { OrderItem, PendingItem } from '../../types';
 import { formatCurrency, formatTimestamp, formatTimeAgo } from '../../utils/formatters';
+import { shouldUseLabelMrpAcceptLabel } from '../../lib/billing/labelMrpFlag';
+import { orderItemConfirmedMrp } from '../../lib/billing/orderItemSplitGroups';
 import { isFocOrderItem } from '../../lib/specialPricing';
 import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseStock';
@@ -1019,6 +1021,8 @@ export default function ReviewPage(): React.JSX.Element | null {
                   const price = item.price_quoted ?? item.price_system ?? 0;
                   const finalState = deriveFinalBillingLineState(item, pendingIds.has(item.id));
                   const lineTotal = finalState.qtyBilled * price;
+                  const labelMrp = orderItemConfirmedMrp(item);
+                  const useLabelMrpAccept = shouldUseLabelMrpAcceptLabel(item, labelMrp);
                   const isPending = pendingIds.has(item.id);
                   const shipCap = item.qty_shippable;
                   const poGap = finalState.qtyPending;
@@ -1061,8 +1065,15 @@ export default function ReviewPage(): React.JSX.Element | null {
                                 <Warning size={12} weight="fill" />
                                 {item.flag_reason || 'Flagged in picking'}
                               </span>
+                              {labelMrp != null && (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border border-[var(--border-accent)]">
+                                  Label MRP: ₹{Math.round(labelMrp).toLocaleString('en-IN')}
+                                </span>
+                              )}
                               {typeof item.flag_box_price === 'number' &&
-                                !Number.isNaN(item.flag_box_price) && (
+                                !Number.isNaN(item.flag_box_price) &&
+                                (labelMrp == null ||
+                                  Math.round(item.flag_box_price) !== Math.round(labelMrp)) && (
                                   <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border border-[var(--border-warning)]">
                                     Box price: ₹
                                     {item.flag_box_price.toLocaleString('en-IN', {
@@ -1117,7 +1128,7 @@ export default function ReviewPage(): React.JSX.Element | null {
                                       : 'bg-[var(--bg-secondary)] text-[var(--content-secondary)] border-[var(--border-subtle)]'
                                   }`}
                                 >
-                                  Accept box price
+                                  {useLabelMrpAccept ? 'Use label MRP' : 'Accept box price'}
                                 </button>
                                 <button
                                   type="button"

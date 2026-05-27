@@ -5,6 +5,7 @@ import {
   deskLineFlagKind,
 } from '../../../lib/billing/deskLineFlagKind';
 import { orderItemDisplayName } from '../../../utils/formatters';
+import { shouldUseLabelMrpAcceptLabel } from '../../../lib/billing/labelMrpFlag';
 import { orderItemConfirmedMrp } from '../../../lib/billing/orderItemSplitGroups';
 import type { OrderItem } from '../../../types';
 import type { OverlayLineEdit, OverlayLineResolution } from './types';
@@ -89,6 +90,11 @@ export function DeskFlaggedLineRow({
     typeof item.flag_box_price === 'number' && !Number.isNaN(item.flag_box_price)
       ? item.flag_box_price
       : null;
+  const useLabelMrpAccept = shouldUseLabelMrpAcceptLabel(item, labelMrp);
+  const acceptLabel = useLabelMrpAccept ? 'Use label MRP' : 'Accept';
+  const showPriceAccept =
+    !isResolved &&
+    (kind === 'price' || (kind === 'oos' && boxPrice != null && useLabelMrpAccept));
   const suffix = resolutionSuffix(edit.resolution);
 
   const removeTitle =
@@ -134,9 +140,10 @@ export function DeskFlaggedLineRow({
             Label {formatRs(labelMrp)}
           </p>
         ) : null}
-        {kind === 'price' && !isRemoved ? (
+        {(kind === 'price' || (kind === 'oos' && labelMrp != null)) && !isRemoved ? (
           <p className="text-[9px] text-[var(--content-secondary)] truncate mt-0.5">
-            {boxPrice != null ? `Box ${formatRs(boxPrice)} · ` : ''}
+            {labelMrp != null ? `Label ${formatRs(labelMrp)} · ` : ''}
+            {boxPrice != null && labelMrp == null ? `Box ${formatRs(boxPrice)} · ` : ''}
             Quoted {formatRs(quoted)}
             {system !== quoted ? ` · Sys ${formatRs(system)}` : ''}
           </p>
@@ -169,16 +176,20 @@ export function DeskFlaggedLineRow({
       )}
 
       <div className="flex items-center justify-end gap-1 min-w-0">
-        {!isResolved && kind === 'price' ? (
+        {showPriceAccept ? (
           <>
             {boxPrice != null ? (
               <button
                 type="button"
                 onClick={onAcceptPrice}
-                title={`Accept box price ${formatRs(boxPrice)}`}
+                title={
+                  useLabelMrpAccept && labelMrp != null
+                    ? `Bill at label MRP ${formatRs(labelMrp)}`
+                    : `Accept box price ${formatRs(boxPrice)}`
+                }
                 className="h-7 px-1.5 rounded-md text-[9px] font-semibold leading-none bg-[var(--bg-positive)] text-white hover:opacity-95 whitespace-nowrap"
               >
-                Accept
+                {acceptLabel}
               </button>
             ) : null}
             <button

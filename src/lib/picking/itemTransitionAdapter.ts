@@ -1,6 +1,18 @@
+import { syncLabelMrpFlagForOrderItem } from '../billing/syncLabelMrpFlag';
 import { supabase } from '../supabase/client';
 import type { FlagReason } from '../../utils/constants';
 import type { ScanResult } from '../../types';
+
+function confirmedMrpFromScan(scanResult: ScanResult | null | undefined): number | null {
+  const raw = scanResult?.confirmedMrp;
+  if (raw == null || !Number.isFinite(Number(raw))) return null;
+  const n = Number(raw);
+  return n >= 0 ? n : null;
+}
+
+function shouldSyncLabelMrpAfterTransition(input: PickItemTransition): boolean {
+  return input.kind === 'picked' || input.kind === 'flagged';
+}
 
 export type PickItemTransition =
   | {
@@ -38,23 +50,32 @@ export type PickTransitionBackendMode = 'direct_order_items' | 'rpc_scan_ledger'
 
 function toUpdatePayload(input: PickItemTransition): Record<string, unknown> {
   switch (input.kind) {
-    case 'picked':
+    case 'picked': {
+      const confirmed = confirmedMrpFromScan(input.scanResult);
       return {
         state: 'picked',
         scan_result: (input.scanResult ?? null) as unknown as Record<string, unknown> | null,
+        ...(confirmed != null ? { confirmed_mrp: confirmed } : {}),
       };
-    case 'scan_saved':
+    }
+    case 'scan_saved': {
+      const confirmed = confirmedMrpFromScan(input.scanResult);
       return {
         scan_result: input.scanResult as unknown as Record<string, unknown>,
+        ...(confirmed != null ? { confirmed_mrp: confirmed } : {}),
       };
-    case 'flagged':
+    }
+    case 'flagged': {
+      const confirmed = confirmedMrpFromScan(input.scanResult);
       return {
         state: 'flagged',
         flag_reason: input.reason,
         flag_notes: input.notes,
         flag_box_price: input.boxPrice,
         scan_result: (input.scanResult ?? null) as unknown as Record<string, unknown> | null,
+        ...(confirmed != null ? { confirmed_mrp: confirmed } : {}),
       };
+    }
   }
 }
 
@@ -65,6 +86,10 @@ class SupabasePickItemTransitionAdapter implements PickItemTransitionAdapter {
       .update(toUpdatePayload(input))
       .eq('id', input.itemId);
     if (error) throw error;
+
+    if (shouldSyncLabelMrpAfterTransition(input)) {
+      await syncLabelMrpFlagForOrderItem(input.itemId);
+    }
 
     return {
       success: true,
