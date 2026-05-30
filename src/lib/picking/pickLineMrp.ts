@@ -48,6 +48,11 @@ export function shouldSuggestMrpSplit(
   return mrpHistoryCount > 1 || distinctShelfMrpCount > 1;
 }
 
+/** Qty > 1 lines can always start a manual MRP split when stock shows fewer bands. */
+export function canManualMrpSplit(targetQty: number, splitActive: boolean): boolean {
+  return PICK_MRP_SPLIT_ENABLED && targetQty > 1 && !splitActive;
+}
+
 export function distinctShelfMrpCount(
   layers: ReadonlyArray<{ mrp_per_ea: number | string }> | null | undefined,
 ): number {

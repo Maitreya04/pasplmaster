@@ -17,7 +17,7 @@ import { useCart } from '../../context/CartContext';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { useOrderAuthor } from '../../context/OrderAuthorContext';
-import { useOrderRoutes } from '../../context/OrderRoutesContext';
+import { useIsBillingOnBehalfOrderFlow, useOrderRoutes } from '../../context/OrderRoutesContext';
 import { useCustomers } from '../../hooks/useCustomers';
 import {
   sendInternalNotification,
@@ -948,6 +948,8 @@ const PurchaseOrderCard = memo(function PurchaseOrderCard({
 export default function CartPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const routes = useOrderRoutes();
+  const isBillingOnBehalf = useIsBillingOnBehalfOrderFlow();
+  const billingHeaderTop = isBillingOnBehalf ? 'top-11' : undefined;
   const goToNewOrderWithSearchFocus = useCallback(() => {
     navigate(routes.items, { state: { focusSearch: true } });
   }, [navigate, routes.items]);
@@ -1319,6 +1321,7 @@ export default function CartPage(): React.JSX.Element | null {
       <div className="min-h-screen flex flex-col">
         <PageHeader
           title="Order Submitted"
+          stickyTopClassName={billingHeaderTop}
           onBack={() => {
             setSubmitSuccess(null);
             navigate(routes.home);
@@ -1395,6 +1398,7 @@ export default function CartPage(): React.JSX.Element | null {
     <div className="min-h-screen flex flex-col">
       <PageHeader
         title="Your Order"
+        stickyTopClassName={billingHeaderTop}
         onBack={() => navigate(routes.items)}
       />
 

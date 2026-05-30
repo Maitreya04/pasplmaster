@@ -2841,6 +2841,12 @@ export function PickFlowPanel({
           confirmedMrp={lineMrpMap.get(mrpSheetItemId)?.confirmedMrp ?? null}
           customMrp={lineMrpMap.get(mrpSheetItemId)?.customMrp ?? null}
           selectBatchMode={mrpSheetUsesBatchMode(mrpSheetItemId)}
+          batchNumber={
+            mrpSheetUsesBatchMode(mrpSheetItemId)
+              ? (lineMrpMap.get(mrpSheetItemId)?.segments.filter((s) => s.committed).length ?? 0) +
+                1
+              : undefined
+          }
           partCode={
             mrpFocusItem.catalog_alias1 ??
             mrpFocusItem.catalog_alias ??

@@ -40,7 +40,7 @@ import { useUserStockLocation } from '../../hooks/useUserStockLocation';
 import { useCart } from '../../context/CartContext';
 import { appHaptics } from '../../lib/haptics';
 import { useOrderAuthor } from '../../context/OrderAuthorContext';
-import { useOrderRoutes } from '../../context/OrderRoutesContext';
+import { useIsBillingOnBehalfOrderFlow, useOrderRoutes } from '../../context/OrderRoutesContext';
 import { useToast } from '../../context/ToastContext';
 import { useCustomers } from '../../hooks/useCustomers';
 import { usePendingItems } from '../../hooks/usePendingItems';
@@ -1965,6 +1965,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const location = useLocation();
   const routes = useOrderRoutes();
+  const isBillingOnBehalf = useIsBillingOnBehalfOrderFlow();
   const goToCart = useCallback(() => {
     appHaptics.impactMedium();
     navigate(routes.cart);
@@ -2320,11 +2321,20 @@ export default function NewOrderPage(): React.JSX.Element | null {
     focusSearchInput(60);
   };
 
+  const searchStickyTopClass = isSearchMode
+    ? isBillingOnBehalf
+      ? 'top-11 pt-2'
+      : 'top-0 pt-2'
+    : isBillingOnBehalf
+      ? 'top-[5.5rem] pt-1.5'
+      : 'top-11 pt-1.5';
+
   return (
     <div className="min-h-screen flex flex-col">
       {!isSearchMode && (
         <PageHeader
           title="New Order"
+          stickyTopClassName={isBillingOnBehalf ? 'top-11' : undefined}
           action={
             totalCount > 0 ? (
               <button
@@ -2353,7 +2363,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
         {/* Sticky search + filters */}
         <div
           ref={searchRef}
-          className={`sticky z-30 -mx-4 px-4 ${isSearchMode ? 'top-0 pt-2' : 'top-11 pt-1.5'} pb-2 space-y-1.5 bg-[var(--bg-primary)] border-b border-[var(--border-subtle)]`}
+          className={`sticky z-30 -mx-4 px-4 ${searchStickyTopClass} pb-2 space-y-1.5 bg-[var(--bg-primary)] border-b border-[var(--border-subtle)]`}
         >
           <div className="flex items-center gap-2">
             <div className="flex-1 min-w-0">

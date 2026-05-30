@@ -1,3 +1,4 @@
+import { PICKER_MRP_MISMATCH_BADGE } from '../../lib/billing/mrpWorkflowCopy';
 import type { StockMrpHistoryEntry } from '../../types';
 import type { PickDockStep, PickerV10Line } from './types';
 
@@ -124,7 +125,7 @@ export function PickDock({
         )}
         {mrpFlagged && (
           <span className="rounded-full border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-2.5 py-1 text-[11px] font-semibold text-[var(--content-warning-on-light)]">
-            ⚠ MRP mismatch flagged
+            ⚠ {PICKER_MRP_MISMATCH_BADGE}
           </span>
         )}
       </div>

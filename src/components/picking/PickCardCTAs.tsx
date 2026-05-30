@@ -1,5 +1,10 @@
 import { Camera, CheckCircle, Flag, Hash, MapPin } from '@phosphor-icons/react';
-import { MRP_SHEET_TITLE, PICKER_MRP_TAP_TO_CONFIRM } from '../../lib/billing/mrpWorkflowCopy';
+import {
+  MRP_SHEET_TITLE,
+  PICKER_MRP_SPLIT_CHOOSER_SPLIT_HINT,
+  PICKER_MRP_SPLIT_CHOOSER_SPLIT_LABEL,
+  PICKER_MRP_TAP_TO_CONFIRM,
+} from '../../lib/billing/mrpWorkflowCopy';
 
 export type PickCardCtaPhase = 'rack' | 'pick';
 
@@ -10,6 +15,8 @@ export interface PickCardCTAsProps {
   disabled?: boolean;
   /** When MRP must be confirmed before item scan. */
   scanDisabled?: boolean;
+  /** Split vs single-price choice shown above — dock stays minimal. */
+  waitingForSplitChoice?: boolean;
   onManualQty: () => void;
   onFlag: () => void;
   onScan: () => void;
@@ -22,7 +29,7 @@ export interface PickCardCTAsProps {
   onMarkPicked?: () => void;
   canMarkPicked?: boolean;
   markPickedLabel?: string;
-  /** Split-by-MRP mode */
+  /** Split-by-MRP mode (active split only — chooser lives on the card). */
   splitMode?: boolean;
   splitRemaining?: number;
   splitNeedsFirstBatch?: boolean;
@@ -42,6 +49,7 @@ export function PickCardCTAs({
   cameraEngaged,
   disabled = false,
   scanDisabled = false,
+  waitingForSplitChoice = false,
   onManualQty,
   onFlag,
   onScan,
@@ -63,6 +71,26 @@ export function PickCardCTAs({
   confirmBatchLabel,
   onFinishShort,
 }: PickCardCTAsProps): React.JSX.Element {
+  if (waitingForSplitChoice) {
+    return (
+      <div className="border-t border-[var(--border-faint)] bg-[var(--bg-secondary)]">
+        <div className="p-2.5 sm:p-3">
+          <p className="mb-2 text-center text-[10px] font-medium text-[var(--content-tertiary)]">
+            Choose split or same price above to continue
+          </p>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onFlag}
+            className="w-full rounded-xl bg-[var(--bg-warning-subtle)] py-2.5 text-xs font-semibold text-[var(--content-warning-on-light)] pick-pressable disabled:opacity-40"
+          >
+            Flag item
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (splitMode && splitNeedsFirstBatch && onPickFirstBatch) {
     return (
       <div className="border-t border-[var(--border-faint)] bg-[var(--bg-secondary)]">
@@ -71,14 +99,14 @@ export function PickCardCTAs({
             type="button"
             disabled={disabled}
             onClick={onPickFirstBatch}
-            className="flex w-full min-h-[52px] items-center justify-between gap-2 rounded-2xl border-[1.5px] border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 pick-pressable disabled:opacity-40 sm:min-h-[56px] sm:px-4"
+            className="flex w-full min-h-[52px] items-center justify-between gap-2 rounded-2xl border-[1.5px] border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 pick-pressable active:scale-[0.99] disabled:opacity-40 sm:min-h-[56px] sm:px-4"
           >
             <div className="min-w-0 flex-1 text-left">
               <p className="text-sm font-extrabold leading-snug text-[var(--content-warning-on-light)] sm:text-base">
-                Pick first MRP batch
+                {PICKER_MRP_SPLIT_CHOOSER_SPLIT_LABEL} · batch 1
               </p>
               <p className="text-[10px] leading-snug text-[var(--content-warning-on-light)]/80 sm:text-[11px]">
-                Multiple MRPs in stock — pick batch by batch
+                {PICKER_MRP_SPLIT_CHOOSER_SPLIT_HINT}
               </p>
             </div>
             <span className="shrink-0 text-lg text-[var(--content-warning-on-light)]">›</span>
@@ -90,7 +118,7 @@ export function PickCardCTAs({
               onClick={onAllSameMrp}
               className="mt-2 w-full py-2 text-xs font-semibold text-[var(--content-secondary)] pick-pressable"
             >
-              All same MRP on shelf
+              Cancel split · one price for all
             </button>
           ) : null}
           <button
@@ -114,9 +142,9 @@ export function PickCardCTAs({
             type="button"
             disabled={disabled}
             onClick={onPickNextMrp}
-            className="flex w-full min-h-[52px] items-center justify-center gap-2 rounded-2xl bg-[var(--bg-inverse-primary)] px-4 font-extrabold text-white pick-pressable disabled:opacity-40 sm:min-h-[56px]"
+            className="flex w-full min-h-[52px] items-center justify-center gap-2 rounded-2xl bg-[var(--bg-inverse-primary)] px-4 font-extrabold text-white pick-pressable active:scale-[0.99] disabled:opacity-40 sm:min-h-[56px]"
           >
-            Pick next MRP · {splitRemaining} left
+            Next batch MRP · {splitRemaining} pcs left
           </button>
           {onFinishShort ? (
             <button
@@ -125,7 +153,7 @@ export function PickCardCTAs({
               onClick={onFinishShort}
               className="mt-2 w-full py-2 text-xs font-semibold text-[var(--content-secondary)] pick-pressable"
             >
-              Finish short
+              Finish short ({splitRemaining} unpicked)
             </button>
           ) : null}
         </div>
@@ -137,11 +165,16 @@ export function PickCardCTAs({
     return (
       <div className="border-t border-[var(--border-faint)] bg-[var(--bg-secondary)]">
         <div className="space-y-2 p-2.5 sm:p-3">
+          {!canMarkPicked ? (
+            <p className="text-center text-[10px] font-medium text-[var(--content-tertiary)]">
+              Set batch qty first — tap Pick qty above or scan
+            </p>
+          ) : null}
           <button
             type="button"
             disabled={disabled || !canMarkPicked}
             onClick={onConfirmBatch}
-            className={`flex w-full min-h-[52px] items-center justify-center gap-2.5 rounded-2xl px-4 font-extrabold pick-pressable sm:min-h-[56px] ${
+            className={`flex w-full min-h-[52px] items-center justify-center gap-2.5 rounded-2xl px-4 font-extrabold pick-pressable active:scale-[0.99] sm:min-h-[56px] ${
               canMarkPicked
                 ? 'bg-[var(--bg-positive)] text-[var(--content-on-color)] shadow-sm'
                 : 'bg-[var(--bg-tertiary)] text-[var(--content-quaternary)] opacity-60'
@@ -158,7 +191,7 @@ export function PickCardCTAs({
               className="flex min-h-[44px] flex-col items-center justify-center gap-0.5 rounded-2xl bg-[var(--bg-tertiary)] px-1 text-[var(--content-secondary)] pick-pressable disabled:opacity-40"
             >
               <Hash size={20} weight="bold" />
-              <span className="text-[10px] font-semibold leading-tight sm:text-[11px]">Qty</span>
+              <span className="text-[10px] font-semibold leading-tight sm:text-[11px]">Batch qty</span>
             </button>
             <button
               type="button"
@@ -183,7 +216,7 @@ export function PickCardCTAs({
             type="button"
             disabled={disabled}
             onClick={onConfirmMrp}
-            className="flex w-full min-h-[52px] items-center justify-between gap-2 rounded-2xl border-[1.5px] border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 pick-pressable disabled:opacity-40 sm:min-h-[56px] sm:px-4"
+            className="flex w-full min-h-[52px] items-center justify-between gap-2 rounded-2xl border-[1.5px] border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 pick-pressable active:scale-[0.99] disabled:opacity-40 sm:min-h-[56px] sm:px-4"
           >
             <div className="min-w-0 flex-1 text-left">
               <p className="text-sm font-extrabold leading-snug text-[var(--content-warning-on-light)] break-words sm:text-base">
@@ -233,7 +266,7 @@ export function PickCardCTAs({
             disabled={disabled || scanDisabled}
             onClick={onScan}
             aria-pressed={cameraEngaged}
-            className={`flex w-full min-h-[48px] items-center justify-center gap-2 rounded-2xl px-4 font-bold pick-pressable disabled:opacity-40 ${
+            className={`flex w-full min-h-[48px] items-center justify-center gap-2 rounded-2xl px-4 font-bold pick-pressable active:scale-[0.99] disabled:opacity-40 ${
               cameraEngaged
                 ? 'bg-[var(--bg-positive)] text-[var(--content-on-color)] ring-2 ring-[var(--border-positive)]'
                 : 'bg-[var(--bg-inverse-primary)] text-[var(--content-on-color)] shadow-sm'
@@ -286,7 +319,7 @@ export function PickCardCTAs({
             type="button"
             disabled={disabled || !canMarkPicked}
             onClick={onMarkPicked}
-            className={`flex w-full min-h-[52px] items-center justify-center gap-2.5 rounded-2xl px-4 font-extrabold pick-pressable sm:min-h-[56px] ${
+            className={`flex w-full min-h-[52px] items-center justify-center gap-2.5 rounded-2xl px-4 font-extrabold pick-pressable active:scale-[0.99] sm:min-h-[56px] ${
               canMarkPicked
                 ? 'bg-[var(--bg-positive)] text-[var(--content-on-color)] shadow-sm'
                 : 'bg-[var(--bg-tertiary)] text-[var(--content-quaternary)] opacity-60'
@@ -302,7 +335,7 @@ export function PickCardCTAs({
           disabled={disabled || scanDisabled}
           onClick={onScan}
           aria-pressed={cameraEngaged}
-          className={`flex w-full min-h-[48px] items-center justify-center gap-2.5 rounded-2xl px-4 font-bold pick-pressable disabled:opacity-40 ${
+          className={`flex w-full min-h-[48px] items-center justify-center gap-2.5 rounded-2xl px-4 font-bold pick-pressable active:scale-[0.99] disabled:opacity-40 ${
             showMarkPicked ? 'border border-[var(--border-subtle)]' : ''
           } ${
             cameraEngaged
@@ -341,7 +374,7 @@ export function PickCardCTAs({
 
         {showMarkPicked && !canMarkPicked ? (
           <p className="text-center text-[10px] font-medium text-[var(--content-tertiary)]">
-            Confirm MRP and enter qty (manual or scan) to unlock Mark picked
+            Confirm MRP and enter qty to unlock Mark picked
           </p>
         ) : null}
       </div>

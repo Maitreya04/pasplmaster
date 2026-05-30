@@ -66,8 +66,8 @@ function buildPickScanResult(
     method: 'manual',
     timestamp: new Date().toISOString(),
     reason: result.mrpFlagged
-      ? `MRP confirmed with mismatch flag (label ₹${result.confirmedMrp}, system ₹${result.latestMrp})`
-      : 'Picker v2 — MRP confirmed at pick',
+      ? `Label MRP ₹${result.confirmedMrp} differs from suggested ₹${result.latestMrp}`
+      : 'Label MRP confirmed at pick',
     progress: {
       pickedQty,
       remainingQty: Math.max(0, targetQty - pickedQty),

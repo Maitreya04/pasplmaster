@@ -81,11 +81,9 @@ export default function BillingNewOrderLayout(): React.JSX.Element {
       <OrderAuthorProvider salesperson={actingAs}>
         <OrderRoutesProvider routes={BILLING_ORDER_ROUTES}>
           <CartProvider key={`billing:${actingAs.id}`}>
-            <div className="min-h-screen flex flex-col bg-[var(--bg-primary)]">
+            <div className="flex flex-col bg-[var(--bg-primary)] lg:h-full lg:min-h-0">
               <ActingAsBanner name={actingAs.name} onChange={handleChange} />
-              <div className="flex-1 min-h-0">
-                <Outlet />
-              </div>
+              <Outlet />
             </div>
           </CartProvider>
         </OrderRoutesProvider>
@@ -102,7 +100,7 @@ function ActingAsBanner({
   onChange: () => void;
 }): React.JSX.Element {
   return (
-    <div className="sticky top-0 z-30 flex items-center justify-between gap-3 px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-accent-subtle)]/90 backdrop-blur-sm">
+    <div className="sticky top-0 z-30 flex h-11 shrink-0 items-center justify-between gap-3 px-4 border-b border-[var(--border-subtle)] bg-[var(--bg-accent-subtle)]/90 backdrop-blur-sm">
       <div className="flex items-center gap-2 min-w-0">
         <UserCircle size={18} weight="regular" className="text-[var(--content-accent)] shrink-0" />
         <p className="text-sm text-[var(--content-secondary)] truncate">

@@ -9,12 +9,15 @@ import {
   MRP_BADGE_LATEST_STOCK,
   MRP_BADGE_SEEN_ON_LABEL,
   MRP_BADGE_SUGGESTED,
+  MRP_SHEET_CONFIRM_ON_LABEL,
   MRP_SHEET_CUSTOM_CONFIRM,
   MRP_SHEET_CUSTOM_HINT,
   MRP_SHEET_CUSTOM_TITLE,
   MRP_SHEET_EMPTY,
   MRP_SHEET_HEADING,
   MRP_SHEET_SUBHEADING_BATCH,
+  MRP_SHEET_SUBHEADING_BATCH_MANUAL,
+  MRP_SHEET_BATCH_STEP,
   MRP_SHEET_SUBHEADING_MULTI,
   MRP_SHEET_SUBHEADING_SINGLE,
   MRP_SHEET_TITLE,
@@ -62,6 +65,8 @@ export interface MrpHistorySheetProps {
   rackNo?: string | null;
   /** When true, selection starts an active batch instead of setting line MRP. */
   selectBatchMode?: boolean;
+  /** 1-based batch index when picking split line. */
+  batchNumber?: number;
   onSelectMrp: (mrp: number) => void;
   onSelectCustomMrp: (mrp: number) => void;
   onClose: () => void;
@@ -76,6 +81,7 @@ export function MrpHistorySheet({
   partCode = null,
   rackNo = null,
   selectBatchMode = false,
+  batchNumber,
   onSelectMrp,
   onSelectCustomMrp,
   onClose,
@@ -124,11 +130,18 @@ export function MrpHistorySheet({
   const customParsed = parseInt(localBuf, 10);
   const canSaveCustom = Number.isFinite(customParsed) && customParsed > 0;
 
+  const batchLabel =
+    selectBatchMode && batchNumber != null && batchNumber > 0
+      ? MRP_SHEET_BATCH_STEP(batchNumber)
+      : selectBatchMode
+        ? 'MRP for this batch'
+        : MRP_SHEET_TITLE;
+
   return (
     <BottomSheet
       isOpen={isOpen}
       onClose={handleClose}
-      title={selectBatchMode ? 'MRP for this batch' : MRP_SHEET_TITLE}
+      title={batchLabel}
       closeOnly
       keyboardBehavior="static"
       sheetClassName="max-h-[min(92dvh,92vh)] pick-sheet-compact"
@@ -137,7 +150,7 @@ export function MrpHistorySheet({
         mode === 'list' && singleMrp && confirmedMrp !== singleMrp.mrp ? (
           <NumpadConfirmButton
             onConfirm={() => selectMrp(singleMrp.mrp)}
-            confirmLabel={`Confirm ₹${Math.round(singleMrp.mrp)} on label`}
+            confirmLabel={MRP_SHEET_CONFIRM_ON_LABEL(Math.round(singleMrp.mrp))}
           />
         ) : mode === 'custom' ? (
           <NumpadConfirmButton
@@ -184,7 +197,9 @@ export function MrpHistorySheet({
             </p>
             <p className="mt-1 text-xs text-[var(--content-tertiary)]">
               {selectBatchMode
-                ? MRP_SHEET_SUBHEADING_BATCH
+                ? isMulti
+                  ? MRP_SHEET_SUBHEADING_BATCH
+                  : MRP_SHEET_SUBHEADING_BATCH_MANUAL
                 : isMulti
                   ? MRP_SHEET_SUBHEADING_MULTI
                   : MRP_SHEET_SUBHEADING_SINGLE}
@@ -202,6 +217,24 @@ export function MrpHistorySheet({
               <p className="rounded-xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-4 py-3 text-sm text-[var(--content-warning-on-light)]">
                 {MRP_SHEET_EMPTY}
               </p>
+            ) : null}
+
+            {selectBatchMode && !isMulti && !isLoading ? (
+              <button
+                type="button"
+                onClick={() => setMode('custom')}
+                className="flex w-full items-center gap-2.5 rounded-xl border-[1.5px] border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-4 py-3 pick-pressable"
+              >
+                <span className="text-lg text-[var(--content-warning-on-light)]">✎</span>
+                <div className="text-left">
+                  <p className="text-sm font-bold text-[var(--content-warning-on-light)]">
+                    Enter label price for this batch
+                  </p>
+                  <p className="text-[10px] text-[var(--content-warning-on-light)]/80">
+                    Use when stock does not list every MRP on the shelf
+                  </p>
+                </div>
+              </button>
             ) : null}
 
             {history.map((h, i) => {
@@ -258,6 +291,7 @@ export function MrpHistorySheet({
               );
             })}
 
+            {!selectBatchMode || isMulti ? (
             <button
               type="button"
               onClick={() => setMode('custom')}
@@ -269,6 +303,19 @@ export function MrpHistorySheet({
                 <p className="text-[10px] text-[var(--content-tertiary)]">Enter what is printed on the product</p>
               </div>
             </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setMode('custom')}
+                className="flex w-full items-center gap-2.5 rounded-xl border-[1.5px] border-dashed border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3 pick-pressable"
+              >
+                <span className="text-lg text-[var(--content-tertiary)]">✎</span>
+                <div className="text-left">
+                  <p className="text-sm font-bold text-[var(--content-secondary)]">Another label price for next batch</p>
+                  <p className="text-[10px] text-[var(--content-tertiary)]">After this batch, enter the next MRP manually</p>
+                </div>
+              </button>
+            )}
           </div>
         </>
       ) : (

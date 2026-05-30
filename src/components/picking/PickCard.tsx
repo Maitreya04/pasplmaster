@@ -8,12 +8,10 @@ import { PickLineResolvedDock, type PickLineOutcomeKind } from './PickLineResolv
 import type { NextPickLinePreview } from '../../lib/picking/deckOrder';
 import { PickLineDoneHint } from './PickLineDoneHint';
 import { PickMetricRow } from './PickMetricRow';
+import { PickMrpSplitChooser } from './PickMrpSplitChooser';
 import { PickMrpSplitProgress } from './PickMrpSplitProgress';
 import {
-  PICKER_MRP_SPLIT_BANNER_HINT,
-  PICKER_MRP_SPLIT_BANNER_TITLE,
-} from '../../lib/billing/mrpWorkflowCopy';
-import {
+  canManualMrpSplit,
   distinctShelfMrpCount,
   getActiveSegment,
   isPickLineMrpConfirmed,
@@ -154,14 +152,23 @@ export const PickCard = memo(function PickCard({
 
   const shelfMrpBands = distinctShelfMrpCount(shelfLayers);
   const splitMrpBands = Math.max(mrpHistory.length, shelfMrpBands);
+  const latestMrp = mrpHistory[0]?.mrp ?? null;
   const suggestSplit =
     isVerified &&
     shouldSuggestMrpSplit(mrpHistory.length, targetQty, shelfMrpBands) &&
     !splitActive;
+  const manualSplitOffered =
+    isVerified && canManualMrpSplit(targetQty, splitActive) && !suggestSplit;
+  const showSplitChooser =
+    isVerified && !splitActive && !showingOutcome && (suggestSplit || manualSplitOffered);
   const mrpConfirmed = isPickLineMrpConfirmed(lineMrp);
   const hasMrpBands = mrpHistory.length > 0;
   const needsMrpConfirm =
-    isVerified && hasMrpBands && !mrpConfirmed && !suggestSplit && !splitActive;
+    isVerified &&
+    hasMrpBands &&
+    !mrpConfirmed &&
+    !splitActive &&
+    !showSplitChooser;
   const mrpGateOk = splitActive ? mrpConfirmed : !hasMrpBands || mrpConfirmed;
   const qtyGateOk = splitActive ? activeBatchQty > 0 : effectivePickedQty > 0;
   const markPickedReady = isVerified && mrpGateOk && qtyGateOk && !isDone && !showingOutcome;
@@ -175,8 +182,7 @@ export const PickCard = memo(function PickCard({
 
   const splitCommittedQty = splitCommitted;
   const splitNeedsFirst =
-    suggestSplit ||
-    (splitActive && !getActiveSegment(lineMrp) && splitCommittedQty === 0);
+    splitActive && !getActiveSegment(lineMrp) && splitCommittedQty === 0;
   const splitNeedsNext =
     splitActive &&
     splitNeedsNextBatch(lineMrp, targetQty) &&
@@ -190,6 +196,14 @@ export const PickCard = memo(function PickCard({
     activeSegment && activeBatchQty > 0
       ? `Confirm batch · ${activeBatchQty} pcs @ ₹${Math.round(activeSegment.mrp)}`
       : 'Confirm batch';
+
+  const handleConfirmSingle = () => {
+    if (onAllSameMrp && suggestSplit) {
+      onAllSameMrp();
+      return;
+    }
+    (onConfirmMrp ?? onEditMrp)?.();
+  };
 
   return (
     <div
@@ -218,6 +232,20 @@ export const PickCard = memo(function PickCard({
           hideProgressMetrics={showMetricRow}
         />
 
+        {showSplitChooser && onPickFirstBatch ? (
+          <PickMrpSplitChooser
+            targetQty={targetQty}
+            mrpHistory={mrpHistory}
+            mrpLoading={mrpHistoryLoading}
+            autoDetected={suggestSplit}
+            splitMrpBands={splitMrpBands}
+            latestMrp={latestMrp}
+            disabled={!isCurrent}
+            onStartSplit={onPickFirstBatch}
+            onConfirmSingle={handleConfirmSingle}
+          />
+        ) : null}
+
         {splitActive && lineMrp && !showingOutcome ? (
           <PickMrpSplitProgress
             lineMrp={lineMrp}
@@ -226,17 +254,6 @@ export const PickCard = memo(function PickCard({
             onUndoLastSegment={onUndoLastSegment}
             onResetSplitLine={onResetSplitLine}
           />
-        ) : null}
-
-        {suggestSplit && !showingOutcome ? (
-          <div className="mx-3 mb-2 rounded-xl border-2 border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2.5 sm:mx-4">
-            <p className="text-xs font-extrabold text-[var(--content-warning-on-light)]">
-              {PICKER_MRP_SPLIT_BANNER_TITLE(splitMrpBands)}
-            </p>
-            <p className="mt-1 text-[10px] leading-snug text-[var(--content-warning-on-light)]/85">
-              {PICKER_MRP_SPLIT_BANNER_HINT}
-            </p>
-          </div>
         ) : null}
 
         {showMetricRow && !showingOutcome && (
@@ -249,8 +266,7 @@ export const PickCard = memo(function PickCard({
             confirmedMrp={lineMrp?.confirmedMrp ?? null}
             customMrp={lineMrp?.customMrp ?? null}
             lineMrp={lineMrp}
-            suggestSplit={suggestSplit}
-            splitMrpBands={splitMrpBands}
+            splitActive={splitActive}
             disabled={!isCurrent}
             onEditQty={() => onManualQty?.()}
             onEditMrp={() => onEditMrp?.()}
@@ -312,7 +328,10 @@ export const PickCard = memo(function PickCard({
           scanLabel={scanLabel}
           cameraEngaged={scannerLive}
           disabled={!isCurrent || scannerPaused}
-          scanDisabled={needsMrpConfirm || splitNeedsFirst || splitNeedsNext}
+          scanDisabled={
+            showSplitChooser || needsMrpConfirm || splitNeedsFirst || splitNeedsNext
+          }
+          waitingForSplitChoice={showSplitChooser}
           onManualQty={() => onManualQty?.()}
           onFlag={() => onFlag?.()}
           onScan={() => onEngageScanner?.()}
@@ -325,10 +344,12 @@ export const PickCard = memo(function PickCard({
                 ? `Confirm MRP · ₹${Math.round(activeSegment!.mrp)}`
                 : undefined
           }
-          onMarkPicked={isVerified && !isDone && !splitActive ? onMarkPicked : undefined}
+          onMarkPicked={
+            isVerified && !isDone && !splitActive && !showSplitChooser ? onMarkPicked : undefined
+          }
           canMarkPicked={markPickedReady}
           markPickedLabel={markPickedLabel}
-          splitMode={splitActive || suggestSplit}
+          splitMode={splitActive}
           splitRemaining={splitRemaining}
           splitNeedsFirstBatch={splitNeedsFirst}
           splitNeedsNextBatch={splitNeedsNext}

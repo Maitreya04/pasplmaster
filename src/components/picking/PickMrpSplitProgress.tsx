@@ -73,16 +73,24 @@ export function PickMrpSplitProgress({
           </p>
         ) : null}
 
-        {remaining > 0 && !(idleHint && committed === 0 && !active) ? (
+        {remaining > 0 && committed > 0 && !active ? (
           <p className="mt-2 text-[10px] font-medium text-[var(--content-warning-on-light)]">
-            {remaining} pcs left · pick next MRP batch
+            {remaining} pcs left · choose next batch MRP
           </p>
-        ) : (
+        ) : null}
+
+        {remaining > 0 && committed === 0 && !idleHint && !active ? (
+          <p className="mt-2 text-[10px] font-medium text-[var(--content-warning-on-light)]">
+            {remaining} pcs on this line
+          </p>
+        ) : null}
+
+        {remaining <= 0 && committed > 0 ? (
           <p className="mt-2 text-[10px] font-semibold text-[var(--content-positive)]">
             All batches picked · billing will see {committedSegments.length} line
             {committedSegments.length !== 1 ? 's' : ''}
           </p>
-        )}
+        ) : null}
 
         {lastCommitted && onUndoLastSegment && remaining >= 0 ? (
           <button

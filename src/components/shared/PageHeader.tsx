@@ -5,16 +5,23 @@ interface PageHeaderProps {
   title: string;
   onBack?: () => void;
   action?: ReactNode;
+  /** Tailwind top offset when another sticky bar sits above (e.g. billing "on behalf of" banner). */
+  stickyTopClassName?: string;
 }
 
-export function PageHeader({ title, onBack, action }: PageHeaderProps): React.JSX.Element | null {
+export function PageHeader({
+  title,
+  onBack,
+  action,
+  stickyTopClassName = 'top-0',
+}: PageHeaderProps): React.JSX.Element | null {
   return (
     <header
-      className="
-        sticky top-0 z-40 h-11
+      className={`
+        sticky ${stickyTopClassName} z-40 h-11
         flex items-center justify-between px-4
         bg-[var(--bg-primary)] border-b border-[var(--border-subtle)]
-      "
+      `}
     >
       <div className="w-12 flex items-center">
         {onBack && (

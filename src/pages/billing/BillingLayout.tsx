@@ -68,6 +68,7 @@ export default function BillingLayout(): React.JSX.Element | null {
   const navigate = useNavigate();
   const { userId, userName, role } = useAuth();
   const push = useRolePushNotifications({ role, userId, userName });
+  const isNewOrderFlow = location.pathname.startsWith('/billing/new-order');
 
   return (
     <div className="role-billing min-h-screen lg:h-[100dvh] lg:overflow-hidden bg-[var(--bg-primary)] relative">
@@ -112,7 +113,13 @@ export default function BillingLayout(): React.JSX.Element | null {
               <PushAlertsCompact label="Billing alerts" push={push} />
             </div>
           )}
-          <div className="flex-1 min-h-0 flex flex-col overflow-y-auto overscroll-y-contain">
+          <div
+            className={`flex-1 min-h-0 flex flex-col ${
+              isNewOrderFlow
+                ? 'lg:overflow-y-auto lg:overscroll-y-contain'
+                : 'overflow-y-auto overscroll-y-contain'
+            }`}
+          >
             <Outlet />
           </div>
         </main>

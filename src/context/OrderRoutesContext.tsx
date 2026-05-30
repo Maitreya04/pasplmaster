@@ -38,3 +38,10 @@ export function OrderRoutesProvider({
 export function useOrderRoutes(): OrderRoutes {
   return useContext(OrderRoutesContext) ?? DEFAULT_ROUTES;
 }
+
+/** Billing desk flow that reuses NewOrderPage / CartPage under `/billing/new-order`. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useIsBillingOnBehalfOrderFlow(): boolean {
+  const routes = useOrderRoutes();
+  return routes.items.startsWith('/billing/new-order');
+}

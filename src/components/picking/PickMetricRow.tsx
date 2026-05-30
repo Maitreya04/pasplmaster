@@ -2,8 +2,8 @@ import type { StockMrpHistoryEntry } from '../../types';
 import type { PickLineMrpState } from '../../lib/picking/pickLineMrp';
 import {
   MRP_METRIC_LABEL,
+  PICKER_MRP_BILLING_REVIEW,
   PICKER_MRP_CONFIRMED,
-  PICKER_MRP_SPLIT_METRIC_HINT,
   PICKER_MRP_TAP_TO_CONFIRM,
   PICKER_MRP_VS_SUGGESTED,
 } from '../../lib/billing/mrpWorkflowCopy';
@@ -23,9 +23,7 @@ export interface PickMetricRowProps {
   confirmedMrp: number | null;
   customMrp: number | null;
   lineMrp?: PickLineMrpState;
-  /** When true, line should be split by MRP batch (multi-MRP + qty > 1). */
-  suggestSplit?: boolean;
-  splitMrpBands?: number;
+  splitActive?: boolean;
   disabled?: boolean;
   onEditQty: () => void;
   onEditMrp: () => void;
@@ -47,15 +45,14 @@ export function PickMetricRow({
   confirmedMrp,
   customMrp,
   lineMrp,
-  suggestSplit = false,
-  splitMrpBands = 0,
+  splitActive: splitActiveProp = false,
   disabled = false,
   onEditQty,
   onEditMrp,
   onUndoPick,
   onUndoQty,
 }: PickMetricRowProps): React.JSX.Element {
-  const splitActive = isSplitMode(lineMrp);
+  const splitActive = splitActiveProp || isSplitMode(lineMrp);
   const activeMrp = splitActive ? getActiveSegmentMrp(lineMrp) : null;
   const latestMrp = mrpHistory[0]?.mrp ?? null;
   const finalMrp = splitActive ? activeMrp : (customMrp ?? confirmedMrp);
@@ -111,7 +108,9 @@ export function PickMetricRow({
           type="button"
           disabled={disabled || mrpLoading}
           onClick={onEditMrp}
-          className="relative min-w-0 flex-1 px-2.5 py-2.5 text-left pick-pressable disabled:opacity-50 sm:px-4 sm:py-3"
+          className={`relative min-w-0 flex-1 px-2.5 py-2.5 text-left pick-pressable disabled:opacity-50 sm:px-4 sm:py-3 ${
+            splitActive && finalMrp == null ? 'bg-[var(--bg-warning-subtle)]/50' : ''
+          }`}
         >
           <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
             {splitActive ? 'Batch MRP' : MRP_METRIC_LABEL}
@@ -134,7 +133,7 @@ export function PickMetricRow({
                 }`}
               >
                 {splitActive
-                  ? 'active batch'
+                  ? 'this batch'
                   : mrpFlagged
                     ? PICKER_MRP_VS_SUGGESTED(Math.round(finalMrp), Math.round(latestMrp ?? 0))
                     : 'matches suggestion ✓'}
@@ -143,25 +142,16 @@ export function PickMetricRow({
           ) : splitActive ? (
             <>
               <p className="mt-1.5 text-xs font-bold text-[var(--content-warning-on-light)]">
-                Tap to pick batch
+                Choose batch MRP
               </p>
               <p className="text-[10px] leading-snug text-[var(--content-tertiary)]">
-                Choose MRP for this batch
-              </p>
-            </>
-          ) : suggestSplit ? (
-            <>
-              <p className="mt-1.5 text-xs font-bold text-[var(--content-warning-on-light)]">
-                {splitMrpBands > 1 ? `${splitMrpBands} MRP batches` : 'Multiple MRP batches'}
-              </p>
-              <p className="text-[10px] leading-snug text-[var(--content-warning-on-light)]">
-                {PICKER_MRP_SPLIT_METRIC_HINT}
+                Tap or use dock below
               </p>
             </>
           ) : isMultiMrp ? (
             <>
               <p className="mt-1.5 text-xs font-bold text-[var(--content-warning-on-light)]">
-                Multiple found
+                {mrpHistory.length} in stock
               </p>
               <p className="text-[10px] leading-snug text-[var(--content-tertiary)] line-clamp-2 break-words">
                 {mrpHistory.map((h) => `₹${Math.round(h.mrp)}`).join(' · ')}
@@ -186,7 +176,7 @@ export function PickMetricRow({
                 ? mrpFlagged
                   ? 'text-[var(--border-warning)]'
                   : 'text-[var(--border-positive)]'
-                : latestMrp != null
+                : latestMrp != null || splitActive
                   ? 'text-[var(--border-warning)]'
                   : 'text-[var(--border-opaque)]'
             }`}
@@ -211,11 +201,11 @@ export function PickMetricRow({
             }`}
           >
             {mrpFlagged
-              ? `${PICKER_MRP_VS_SUGGESTED(Math.round(finalMrp), Math.round(latestMrp ?? 0))} · billing may review`
+              ? `${PICKER_MRP_VS_SUGGESTED(Math.round(finalMrp), Math.round(latestMrp ?? 0))} · ${PICKER_MRP_BILLING_REVIEW.toLowerCase()}`
               : PICKER_MRP_CONFIRMED(Math.round(finalMrp))}
           </p>
           <button type="button" onClick={onEditMrp} className="shrink-0 text-[10px] font-semibold opacity-80 pick-pressable">
-            Change MRP
+            Change
           </button>
           {onUndoPick ? (
             <button
@@ -223,7 +213,7 @@ export function PickMetricRow({
               onClick={onUndoPick}
               className="shrink-0 text-[10px] font-semibold text-[var(--content-secondary)] pick-pressable"
             >
-              Undo pick
+              Undo
             </button>
           ) : null}
         </div>

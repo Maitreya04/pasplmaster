@@ -1,3 +1,10 @@
+import {
+  MRP_METRIC_LABEL,
+  PICKER_MRP_BILLING_REVIEW,
+  PICKER_MRP_CONFIRMED,
+  PICKER_MRP_TAP_TO_CONFIRM,
+  PICKER_MRP_VS_SUGGESTED,
+} from '../../lib/billing/mrpWorkflowCopy';
 import type { StockMrpHistoryEntry } from '../../types';
 import type { PickerV10Line } from './types';
 
@@ -107,7 +114,7 @@ export function PickItemCard({
           className="relative flex-1 px-5 py-3.5 text-left pick-pressable disabled:opacity-40"
         >
           <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-            MRP on label
+            {MRP_METRIC_LABEL}
           </p>
 
           {finalMrp != null ? (
@@ -124,7 +131,9 @@ export function PickItemCard({
                   mrpFlagged ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-positive)]'
                 }`}
               >
-                {mrpFlagged ? `differs · system ₹${Math.round(latestMrp ?? 0)}` : 'confirmed ✓'}
+                {mrpFlagged
+                  ? PICKER_MRP_VS_SUGGESTED(Math.round(finalMrp), Math.round(latestMrp ?? 0))
+                  : 'matches suggestion ✓'}
               </p>
             </>
           ) : isMultiMrp ? (
@@ -145,7 +154,7 @@ export function PickItemCard({
               <p className="mt-1 font-mono text-3xl font-extrabold tracking-tight text-[var(--content-warning-on-light)]">
                 ₹{Math.round(latestMrp)}
               </p>
-              <p className="text-[9px] text-[var(--content-tertiary)]">tap to confirm</p>
+              <p className="text-[9px] text-[var(--content-tertiary)]">{PICKER_MRP_TAP_TO_CONFIRM}</p>
             </>
           ) : (
             <p className="mt-2 text-sm text-[var(--content-tertiary)]">No MRP data</p>
@@ -181,8 +190,8 @@ export function PickItemCard({
               }`}
             >
               {mrpFlagged
-                ? `MRP flagged — ₹${Math.round(finalMrp)} differs from system ₹${Math.round(latestMrp ?? 0)}`
-                : `MRP confirmed — ₹${Math.round(finalMrp)}`}
+                ? PICKER_MRP_BILLING_REVIEW
+                : PICKER_MRP_CONFIRMED(Math.round(finalMrp))}
             </p>
             {isMultiMrp && !mrpFlagged && (
               <p className="text-[10px] text-[var(--content-positive)] opacity-70">

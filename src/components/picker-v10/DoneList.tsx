@@ -1,4 +1,9 @@
 import type { PickerV10DoneEntry } from './types';
+import {
+  PICKER_MRP_BILLING_REVIEW,
+  PICKER_MRP_CONFIRMED,
+  PICKER_MRP_VS_SUGGESTED,
+} from '../../lib/billing/mrpWorkflowCopy';
 
 export interface DoneListProps {
   entries: PickerV10DoneEntry[];
@@ -37,13 +42,17 @@ export function DoneList({ entries }: DoneListProps): React.JSX.Element | null {
               </p>
               {d.mrpFlagged && (
                 <p className="mt-0.5 text-[10px] font-semibold text-[var(--content-warning-on-light)]">
-                  Label ₹{Math.round(d.confirmedMrp ?? 0)} · system ₹{Math.round(d.latestMrp ?? 0)} · flagged
+                  {PICKER_MRP_VS_SUGGESTED(
+                    Math.round(d.confirmedMrp ?? 0),
+                    Math.round(d.latestMrp ?? 0),
+                  )}{' '}
+                  · {PICKER_MRP_BILLING_REVIEW.toLowerCase()}
                 </p>
               )}
               {!d.mrpFlagged && d.confirmedMrp != null && (
                 <p className="mt-0.5 text-[10px] text-[var(--content-tertiary)]">
-                  MRP ₹{Math.round(d.confirmedMrp)} confirmed
-                  {d.historyCount > 1 ? ` · ${d.historyCount} records in system` : ''}
+                  {PICKER_MRP_CONFIRMED(Math.round(d.confirmedMrp))}
+                  {d.historyCount > 1 ? ` · ${d.historyCount} suggestions in list` : ''}
                 </p>
               )}
               {d.outOfStock && (
