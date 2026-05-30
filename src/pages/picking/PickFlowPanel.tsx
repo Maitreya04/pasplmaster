@@ -89,9 +89,11 @@ import {
 import { MrpHistorySheet } from '../../components/picker-v10/MrpHistorySheet';
 import { PickQtySheet } from '../../components/picking/PickQtySheet';
 import { useStockMrpHistory } from '../../hooks/useStockMrpHistory';
+import { STOCK_MRP_HISTORY_QUERY_KEY } from '../../lib/stockMrpwise';
 import {
   commitActiveSegment,
   createDefaultPickLineMrpState,
+  distinctShelfMrpCount,
   enterSingleModeFromSplit,
   enterSplitMode,
   getActiveSegment,
@@ -255,12 +257,6 @@ function uiStateFromDb(oi: OrderItem): PickItemUiState {
   return 'pending';
 }
 
-function buildPriceMismatchNotes(rawNotes: string, boxPrice: number): string {
-  const base = rawNotes.trim();
-  const structured = `Price mismatch detected at picking. Box price ₹${boxPrice.toFixed(2)}.`;
-  return base ? `${structured} Picker note: ${base}` : structured;
-}
-
 function getPickedQtyFromResult(result: ScanResult | null | undefined): number {
   return Math.max(0, result?.progress?.pickedQty ?? 0);
 }
@@ -357,6 +353,8 @@ export function PickFlowPanel({
   const [fifoOverrideReason, setFifoOverrideReason] = useState('');
   const [lineMrpMap, setLineMrpMap] = useState<Map<number, PickLineMrpState>>(() => new Map());
   const [mrpSheetItemId, setMrpSheetItemId] = useState<number | null>(null);
+  /** Avoid stale lineMrpMap when opening the sheet right after enterSplitMode. */
+  const [mrpSheetBatchMode, setMrpSheetBatchMode] = useState(false);
   const [revertConfirm, setRevertConfirm] = useState<{
     itemId: number;
     mode: RevertPickLineMode;
@@ -758,17 +756,31 @@ export function PickFlowPanel({
     });
   }, []);
 
-  const openMrpSheet = useCallback((itemId: number) => {
+  const openMrpSheet = useCallback((itemId: number, batchMode = false) => {
+    setMrpSheetBatchMode(batchMode);
     setMrpSheetItemId(itemId);
   }, []);
 
-  /** Primary CTA only — confirm a single prefilled MRP without opening the sheet. */
-  const confirmSingleMrp = useCallback(
-    (itemId: number, mrp: number) => {
-      updateLineMrp(itemId, { confirmedMrp: mrp, customMrp: null });
-      appHaptics.success();
+  const closeMrpSheet = useCallback(() => {
+    setMrpSheetBatchMode(false);
+    setMrpSheetItemId(null);
+  }, []);
+
+  const mrpSheetUsesBatchMode = useCallback(
+    (itemId: number): boolean => {
+      if (mrpSheetBatchMode) return true;
+      return isSplitMode(lineMrpMap.get(itemId));
     },
-    [updateLineMrp],
+    [lineMrpMap, mrpSheetBatchMode],
+  );
+
+  const ensureSplitLineMrp = useCallback(
+    (itemId: number, targetQty: number): PickLineMrpState => {
+      const existing = lineMrpMap.get(itemId);
+      if (isSplitMode(existing)) return existing!;
+      return enterSplitMode(existing, itemId, targetQty);
+    },
+    [lineMrpMap],
   );
 
   useEffect(() => {
@@ -799,7 +811,7 @@ export function PickFlowPanel({
       await transitionAdapter.applyTransition(transition);
 
       if (isLab || !order || transition.kind !== 'flagged') return { itemId, previous };
-      const { reason, notes, boxPrice } = transition;
+      const { reason, notes } = transition;
 
       if (reason === 'Out of Stock') {
         const target = order.items.find((oi) => oi.id === itemId);
@@ -847,7 +859,7 @@ export function PickFlowPanel({
             pickerName: userName,
             orderItemId: itemId,
             flagNotes: notes,
-            flagBoxPrice: boxPrice,
+            flagBoxPrice: null,
           });
         } catch {
           /* silent */
@@ -870,6 +882,7 @@ export function PickFlowPanel({
     onSuccess: () => {
       if (!isLab) {
         queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+        queryClient.invalidateQueries({ queryKey: [STOCK_MRP_HISTORY_QUERY_KEY] });
       }
     },
   });
@@ -970,7 +983,7 @@ export function PickFlowPanel({
     const lineMrp = lineMrpMap.get(orderItem.id);
     if (isSplitMode(lineMrp) && !getActiveSegment(lineMrp)) {
       toast.info('Choose MRP for this batch first.');
-      setMrpSheetItemId(orderItem.id);
+      openMrpSheet(orderItem.id, true);
       return;
     }
     const local = localItems.get(orderItem.id);
@@ -988,7 +1001,7 @@ export function PickFlowPanel({
     setManualQtyTargetItemId(orderItem.id);
     setManualQtyInitial(remaining);
     setScannerHint(null);
-  }, [lineMrpMap, localItems, toast]);
+  }, [lineMrpMap, localItems, openMrpSheet, toast]);
 
   const flagOutOfStock = useCallback(
     (itemId: number) => {
@@ -1865,26 +1878,24 @@ export function PickFlowPanel({
         orderItem.id,
         enterSplitMode(lineMrpMap.get(orderItem.id), orderItem.id, targetQty),
       );
-      setMrpSheetItemId(orderItem.id);
+      openMrpSheet(orderItem.id, true);
     },
-    [lineMrpMap, updateLineMrp],
+    [lineMrpMap, openMrpSheet, updateLineMrp],
   );
 
-  const handlePickNextMrp = useCallback((orderItem: OrderItem) => {
-    setMrpSheetItemId(orderItem.id);
-  }, []);
+  const handlePickNextMrp = useCallback(
+    (orderItem: OrderItem) => {
+      openMrpSheet(orderItem.id, true);
+    },
+    [openMrpSheet],
+  );
 
   const handleAllSameMrp = useCallback(
     (orderItem: OrderItem) => {
       updateLineMrp(orderItem.id, enterSingleModeFromSplit(lineMrpMap.get(orderItem.id)));
-      const history = mrpHistoryData?.history ?? [];
-      if (history.length === 1) {
-        confirmSingleMrp(orderItem.id, history[0]!.mrp);
-      } else {
-        setMrpSheetItemId(orderItem.id);
-      }
+      openMrpSheet(orderItem.id, false);
     },
-    [confirmSingleMrp, lineMrpMap, mrpHistoryData?.history, updateLineMrp],
+    [lineMrpMap, openMrpSheet, updateLineMrp],
   );
 
   const handleConfirmBatch = useCallback(
@@ -2064,18 +2075,14 @@ export function PickFlowPanel({
     (payload: FlagSubmitPayload) => {
       if (flagTargetItemId === null) return;
       appHaptics.impactMedium();
-      const notes =
-        payload.reason === 'Price Mismatch' && payload.boxPrice != null
-          ? buildPriceMismatchNotes(payload.notes ?? '', payload.boxPrice)
-          : payload.notes;
       itemTransitionMutation.mutate(
         {
           transition: {
             kind: 'flagged',
             itemId: flagTargetItemId,
             reason: payload.reason,
-            notes,
-            boxPrice: payload.boxPrice,
+            notes: payload.notes,
+            boxPrice: null,
             scanResult: localItems.get(flagTargetItemId)?.scanResult ?? null,
           },
           optimisticState: 'flagged',
@@ -2393,6 +2400,10 @@ export function PickFlowPanel({
                       cardOutcome.pickedQty ?? pickedQty,
                     )
                   : undefined;
+                const cardShelfMrpBands =
+                  showShelf && shelfQuery.data?.layers
+                    ? distinctShelfMrpCount(shelfQuery.data.layers)
+                    : 0;
                 return (
                   <div key={pi.orderItem.id} className="h-full w-full shrink-0 px-0.5">
                     {mountedDeckIndices.has(index) ? (
@@ -2446,32 +2457,32 @@ export function PickFlowPanel({
                       onEditMrp={() => {
                         const history =
                           isCardCurrent && rackVerified ? (mrpHistoryData?.history ?? []) : [];
-                        if (
-                          !isSplitMode(cardLineMrp) &&
-                          shouldSuggestMrpSplit(history.length, targetQty)
-                        ) {
+                        const splitSuggested = shouldSuggestMrpSplit(
+                          history.length,
+                          targetQty,
+                          cardShelfMrpBands,
+                        );
+                        if (!isSplitMode(cardLineMrp) && splitSuggested) {
                           updateLineMrp(
                             pi.orderItem.id,
                             enterSplitMode(cardLineMrp, pi.orderItem.id, targetQty),
                           );
+                          openMrpSheet(pi.orderItem.id, true);
+                          return;
                         }
-                        openMrpSheet(pi.orderItem.id);
+                        openMrpSheet(pi.orderItem.id, isSplitMode(cardLineMrp));
                       }}
                       onConfirmMrp={() => {
                         const history =
                           isCardCurrent && rackVerified ? (mrpHistoryData?.history ?? []) : [];
                         if (
                           !isSplitMode(cardLineMrp) &&
-                          shouldSuggestMrpSplit(history.length, targetQty)
+                          shouldSuggestMrpSplit(history.length, targetQty, cardShelfMrpBands)
                         ) {
                           handlePickFirstBatch(pi.orderItem);
                           return;
                         }
-                        if (history.length === 1 && !isSplitMode(cardLineMrp)) {
-                          confirmSingleMrp(pi.orderItem.id, history[0]!.mrp);
-                          return;
-                        }
-                        openMrpSheet(pi.orderItem.id);
+                        openMrpSheet(pi.orderItem.id, false);
                       }}
                       onMarkPicked={
                         isCardCurrent ? () => handleMarkPicked(pi.orderItem) : undefined
@@ -2829,7 +2840,7 @@ export function PickFlowPanel({
           isLoading={mrpHistoryLoading}
           confirmedMrp={lineMrpMap.get(mrpSheetItemId)?.confirmedMrp ?? null}
           customMrp={lineMrpMap.get(mrpSheetItemId)?.customMrp ?? null}
-          selectBatchMode={isSplitMode(lineMrpMap.get(mrpSheetItemId))}
+          selectBatchMode={mrpSheetUsesBatchMode(mrpSheetItemId)}
           partCode={
             mrpFocusItem.catalog_alias1 ??
             mrpFocusItem.catalog_alias ??
@@ -2838,26 +2849,26 @@ export function PickFlowPanel({
           }
           rackNo={mrpFocusItem.rack_no}
           onSelectMrp={(mrp) => {
-            const sheetMrp = lineMrpMap.get(mrpSheetItemId);
-            if (isSplitMode(sheetMrp)) {
-              const next = startActiveSegment(sheetMrp!, mrp, false);
-              updateLineMrp(mrpSheetItemId, next);
+            if (mrpSheetUsesBatchMode(mrpSheetItemId)) {
+              const targetQty = pickQuantityTarget(mrpFocusItem);
+              const splitState = ensureSplitLineMrp(mrpSheetItemId, targetQty);
+              updateLineMrp(mrpSheetItemId, startActiveSegment(splitState, mrp, false));
             } else {
               updateLineMrp(mrpSheetItemId, { confirmedMrp: mrp, customMrp: null });
             }
-            setMrpSheetItemId(null);
+            closeMrpSheet();
           }}
           onSelectCustomMrp={(mrp) => {
-            const sheetMrp = lineMrpMap.get(mrpSheetItemId);
-            if (isSplitMode(sheetMrp)) {
-              const next = startActiveSegment(sheetMrp!, mrp, true);
-              updateLineMrp(mrpSheetItemId, next);
+            if (mrpSheetUsesBatchMode(mrpSheetItemId)) {
+              const targetQty = pickQuantityTarget(mrpFocusItem);
+              const splitState = ensureSplitLineMrp(mrpSheetItemId, targetQty);
+              updateLineMrp(mrpSheetItemId, startActiveSegment(splitState, mrp, true));
             } else {
               updateLineMrp(mrpSheetItemId, { customMrp: mrp, confirmedMrp: null });
             }
-            setMrpSheetItemId(null);
+            closeMrpSheet();
           }}
-          onClose={() => setMrpSheetItemId(null)}
+          onClose={closeMrpSheet}
         />
       )}
 

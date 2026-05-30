@@ -39,8 +39,25 @@ export function isSplitMode(state: PickLineMrpState | undefined): boolean {
   return state?.mode === 'split';
 }
 
-export function shouldSuggestMrpSplit(mrpHistoryCount: number, targetQty: number): boolean {
-  return PICK_MRP_SPLIT_ENABLED && mrpHistoryCount > 1 && targetQty > 1;
+export function shouldSuggestMrpSplit(
+  mrpHistoryCount: number,
+  targetQty: number,
+  distinctShelfMrpCount = 0,
+): boolean {
+  if (!PICK_MRP_SPLIT_ENABLED || targetQty <= 1) return false;
+  return mrpHistoryCount > 1 || distinctShelfMrpCount > 1;
+}
+
+export function distinctShelfMrpCount(
+  layers: ReadonlyArray<{ mrp_per_ea: number | string }> | null | undefined,
+): number {
+  if (!layers?.length) return 0;
+  const mrps = new Set<number>();
+  for (const layer of layers) {
+    const mrp = Math.round(Number(layer.mrp_per_ea));
+    if (Number.isFinite(mrp) && mrp > 0) mrps.add(mrp);
+  }
+  return mrps.size;
 }
 
 export function pickLineSegmentsCommittedQty(state: PickLineMrpState | undefined): number {

@@ -1,13 +1,8 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, CheckCircle, XCircle, Hourglass, Warning, Printer } from '@phosphor-icons/react';
+import { CheckCircle, XCircle, Hourglass, Warning, Printer } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
-import {
-  formatInternalNotificationError,
-  sendInternalNotification,
-  sendPickerReadyNotification,
-} from '../../lib/pickerPush';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { usePickingClaim } from '../../hooks/usePickingClaim';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
@@ -17,21 +12,15 @@ import {
   PageHeader,
   Card,
   StatusBadge,
-  NumberStepper,
   BigButton,
   BottomSheet,
   BillingApproverChip,
   PickerAttributionChip,
 } from '../../components/shared';
 import { openPickingChalanPrint } from '../../lib/billing/printPickingChalan';
-import type { OrderItem, PendingItem } from '../../types';
+import type { FulfillmentPath } from '../../types';
 import { formatCurrency, formatTimestamp, formatTimeAgo } from '../../utils/formatters';
-import { shouldUseLabelMrpAcceptLabel } from '../../lib/billing/labelMrpFlag';
-import { orderItemConfirmedMrp } from '../../lib/billing/orderItemSplitGroups';
-import { isFocOrderItem } from '../../lib/specialPricing';
-import { buildBillingCustomerUpdate } from '../../lib/buildBillingCustomerUpdate';
 import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseStock';
-import { completeBillingWithClaim } from '../../lib/billing/completeBilling';
 import {
   billingCompleteStalePicking,
   billingForceCompletePrePick,
@@ -41,78 +30,14 @@ import {
 import {
   defaultFulfillmentPath,
   fulfillmentPathLabel,
-  shouldNotifyPickers,
 } from '../../lib/billing/fulfillmentPath';
 import { FulfillmentPathSelector } from '../../components/billing/FulfillmentPathSelector';
-import type { FulfillmentPath } from '../../types';
+import { ReviewBillSection } from '../../components/billing/ReviewBillSection';
+import type { BillSheetEdits } from '../../hooks/useBillSheetEdits';
 import {
-  applyWarehousePickSkipForPoOnlyLine,
   computePickLineProgress,
   countPickableOrderLines,
-  isPickableOrderLine,
 } from '../../lib/cartSupply';
-
-interface EditableItem extends OrderItem {
-  qty_approved: number;
-}
-
-type PendingDraftRow = {
-  order_id: number;
-  order_number: string;
-  customer_id: number;
-  customer_name: string;
-  item_id: number;
-  item_name: string;
-  qty_pending: number;
-  source: 'billing' | 'sales';
-  created_by: string;
-  note: string;
-};
-
-type FinalBillingLineState = {
-  qtyBilled: number;
-  qtyPending: number;
-  pendingSource: 'billing' | 'sales' | null;
-  pendingNote: string | null;
-  shouldFlagBillingPending: boolean;
-};
-
-type PriceResolutionChoice = 'accept_box_price' | 'override_invoice_price';
-
-function deriveFinalBillingLineState(
-  item: EditableItem,
-  isMarkedPending: boolean,
-): FinalBillingLineState {
-  const rawPending = Math.max(
-    Math.max(0, item.qty_po ?? 0),
-    Math.max(0, item.qty_requested - item.qty_approved),
-    isMarkedPending ? Math.max(0, item.qty_approved) : 0,
-  );
-  const qtyPending = Math.min(item.qty_requested, rawPending);
-  const qtyBilled = isMarkedPending
-    ? 0
-    : Math.max(0, Math.min(item.qty_approved, item.qty_requested - qtyPending));
-
-  if (qtyPending <= 0) {
-    return {
-      qtyBilled,
-      qtyPending: 0,
-      pendingSource: null,
-      pendingNote: null,
-      shouldFlagBillingPending: false,
-    };
-  }
-
-  return {
-    qtyBilled,
-    qtyPending,
-    pendingSource: isMarkedPending ? 'billing' : 'sales',
-    pendingNote: isMarkedPending
-      ? 'Marked pending by billing (no stock in Busy)'
-      : 'Purchase order qty from sales checkout',
-    shouldFlagBillingPending: isMarkedPending,
-  };
-}
 
 export default function ReviewPage(): React.JSX.Element | null {
   const { id } = useParams<{ id: string }>();
@@ -129,7 +54,7 @@ export default function ReviewPage(): React.JSX.Element | null {
   );
 
   // Initialize work claim
-  const { claimId, isClaimedByMe, claim, error: claimError } = useWorkClaim(
+  const { isClaimedByMe, claim, error: claimError } = useWorkClaim(
     orderId,
     'billing'
   );
@@ -141,64 +66,21 @@ export default function ReviewPage(): React.JSX.Element | null {
     }
   }, [order?.workflow_status, isClaimedByMe, claim, claimError]);
 
-  const [items, setItems] = useState<EditableItem[]>([]);
-  const [removedIds, setRemovedIds] = useState<Set<number>>(new Set());
-  const [pendingIds, setPendingIds] = useState<Set<number>>(new Set());
   const [rejectSheetOpen, setRejectSheetOpen] = useState(false);
   const [stalePickConfirmOpen, setStalePickConfirmOpen] = useState(false);
   const [prePickConfirmOpen, setPrePickConfirmOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
-  const [priceResolutionByItemId, setPriceResolutionByItemId] = useState<
-    Record<number, PriceResolutionChoice | null>
-  >({});
+  const [billSheetState, setBillSheetState] = useState<BillSheetEdits | null>(null);
+  const handleBillSheetReady = useCallback((sheet: BillSheetEdits) => {
+    setBillSheetState(sheet);
+  }, []);
   const rejectNavigateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [fulfillmentPath, setFulfillmentPath] = useState<FulfillmentPath>('warehouse_pick');
 
-  // Sync items from order when loaded
   useEffect(() => {
-    if (order?.items) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setItems(
-        order.items.map((i) => {
-          let approved =
-            i.qty_approved ?? i.qty_shippable ?? i.qty_requested;
-          if (i.qty_shippable != null) {
-            const floor = i.qty_shippable === 0 ? 0 : 1;
-            approved = Math.min(
-              i.qty_shippable,
-              Math.max(floor, approved),
-            );
-          }
-          return { ...i, qty_approved: approved };
-        }),
-      );
-      setRemovedIds(new Set());
-      setPendingIds(
-        new Set(
-          order.items
-            .filter(
-              (i) =>
-                i.state === 'flagged' &&
-                (i.flag_reason === 'Out of Stock' ||
-                  i.flag_reason === 'Out of Stock (Billing)'),
-            )
-            .map((i) => i.id),
-        ),
-      );
-      setPriceResolutionByItemId(
-        Object.fromEntries(
-          order.items
-            .filter(
-              (i) =>
-                i.flag_reason === 'Price Mismatch' &&
-                !isFocOrderItem(i),
-            )
-            .map((i) => [i.id, null]),
-        ),
-      );
-    }
-  }, [order?.id, order?.items]);
+    setBillSheetState(null);
+  }, [order?.id]);
 
-  // Cleanup reject navigate timeout on unmount
   useEffect(() => {
     return () => {
       if (rejectNavigateTimeoutRef.current) {
@@ -207,17 +89,10 @@ export default function ReviewPage(): React.JSX.Element | null {
     };
   }, []);
 
-  const visibleItems = items.filter((i) => !removedIds.has(i.id));
-  const pickLineCount = useMemo(() => countPickableOrderLines(visibleItems), [visibleItems]);
-  const pickableVisibleItems = useMemo(
-    () => visibleItems.filter((i) => isPickableOrderLine(i)),
-    [visibleItems],
+  const pickLineCount = useMemo(
+    () => countPickableOrderLines(order?.items ?? []),
+    [order?.items],
   );
-  const poOnlyVisibleItems = useMemo(
-    () => visibleItems.filter((i) => !isPickableOrderLine(i)),
-    [visibleItems],
-  );
-  const [fulfillmentPath, setFulfillmentPath] = useState<FulfillmentPath>('warehouse_pick');
 
   useEffect(() => {
     if (!order) return;
@@ -226,53 +101,25 @@ export default function ReviewPage(): React.JSX.Element | null {
     );
   }, [order?.id, order?.stock_location_code, order?.pick_line_count, pickLineCount]);
 
-  const pendingCount = useMemo(() => {
-    let count = 0;
-    for (const id of pendingIds) {
-      if (!removedIds.has(id)) count += 1;
-    }
-    return count;
-  }, [pendingIds, removedIds]);
-
-  const priceMismatchCount = useMemo(
-    () =>
-      visibleItems.filter(
-        (item) =>
-          Boolean(item.flag_reason && item.flag_reason === 'Price Mismatch') &&
-          !isFocOrderItem(item),
-      ).length,
-    [visibleItems],
+  const reviewBusyItemCount = billSheetState?.visibleItems.length ?? order?.items.length ?? 0;
+  const reviewGrandTotal = billSheetState?.total ?? order?.total_value ?? 0;
+  const reviewPriceMismatchCount =
+    billSheetState?.flaggedItems.filter((i) => i.flag_reason === 'Price Mismatch').length ?? 0;
+  const reviewUnresolvedPriceCount = billSheetState?.unresolvedFlagged.length ?? 0;
+  const pendingCount =
+    billSheetState?.resolvedFlagged.filter((item) => {
+      const edit = billSheetState.edits[item.id];
+      return edit?.resolution === 'removed';
+    }).length ?? 0;
+  const reviewReadyCount = Math.max(
+    0,
+    reviewBusyItemCount - reviewPriceMismatchCount - pendingCount,
   );
-
-  const readyToBillCount = useMemo(
-    () => Math.max(0, visibleItems.length - pendingCount - priceMismatchCount),
-    [visibleItems.length, pendingCount, priceMismatchCount],
-  );
-
-  const unresolvedPriceMismatchCount = useMemo(
-    () =>
-      visibleItems.filter(
-        (item) =>
-          item.flag_reason === 'Price Mismatch' &&
-          !isFocOrderItem(item) &&
-          !priceResolutionByItemId[item.id],
-      ).length,
-    [priceResolutionByItemId, visibleItems],
-  );
-
-  const { totalQty, grandTotal } = useMemo(() => {
-    let qty = 0;
-    let total = 0;
-    for (const item of visibleItems) {
-      const finalState = deriveFinalBillingLineState(item, pendingIds.has(item.id));
-      const price = item.price_quoted ?? item.price_system ?? 0;
-      qty += finalState.qtyBilled;
-      total += finalState.qtyBilled * price;
-    }
-    return { totalQty: qty, grandTotal: total };
-  }, [pendingIds, visibleItems]);
-
-  const busyItemCount = visibleItems.length;
+  const totalQty =
+    billSheetState?.visibleItems.reduce((sum, item) => sum + item.qty_requested, 0) ??
+    order?.items.reduce((sum, item) => sum + item.qty_requested, 0) ??
+    0;
+  const billSavePending = billSheetState?.saveMutation.isPending ?? false;
 
   const pickingSummary = useMemo(() => {
     if (!order?.items) {
@@ -287,366 +134,6 @@ export default function ReviewPage(): React.JSX.Element | null {
       done: progress.done,
     };
   }, [order?.items]);
-
-  const updateQty = useCallback((itemId: number, qty: number) => {
-    setItems((prev) =>
-      prev.map((i) => {
-        if (i.id !== itemId) return i;
-        const floor = i.qty_shippable === 0 ? 0 : 1;
-        let next = Math.max(floor, qty);
-        if (i.qty_shippable != null) {
-          next = Math.min(i.qty_shippable, next);
-        }
-        return { ...i, qty_approved: next };
-      }),
-    );
-  }, []);
-
-  const removeItem = useCallback((itemId: number) => {
-    setRemovedIds((prev) => {
-      const next = new Set(prev);
-      next.add(itemId);
-      return next;
-    });
-    setPendingIds((prev) => {
-      if (!prev.has(itemId)) return prev;
-      const next = new Set(prev);
-      next.delete(itemId);
-      return next;
-    });
-  }, []);
-
-  const togglePending = useCallback((itemId: number) => {
-    setPendingIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(itemId)) {
-        next.delete(itemId);
-      } else {
-        next.add(itemId);
-      }
-      return next;
-    });
-  }, []);
-
-  const updatePrice = useCallback((itemId: number, price: number) => {
-    setItems((prev) =>
-      prev.map((i) =>
-        i.id === itemId ? { ...i, price_quoted: Math.max(0, price) } : i
-      )
-    );
-  }, []);
-
-  const choosePriceResolution = useCallback(
-    (item: EditableItem, choice: PriceResolutionChoice) => {
-      setPriceResolutionByItemId((prev) => ({ ...prev, [item.id]: choice }));
-      if (choice === 'accept_box_price' && typeof item.flag_box_price === 'number') {
-        updatePrice(item.id, item.flag_box_price);
-      }
-    },
-    [updatePrice],
-  );
-
-  const approveMutation = useMutation({
-    mutationFn: async () => {
-      if (!order) throw new Error('No order');
-      const reviewer = userName || 'Billing';
-      const resolvingFlags = order.workflow_status === 'flagged';
-      if (resolvingFlags) {
-        const unresolved = visibleItems.find(
-          (item) =>
-            item.state === 'flagged' &&
-            item.flag_reason === 'Price Mismatch' &&
-            !priceResolutionByItemId[item.id],
-        );
-        if (unresolved) {
-          throw new Error('Resolve all price mismatch lines before completing billing.');
-        }
-      }
-      const approvedAt = new Date().toISOString();
-      const billingPendingItemIds: number[] = [];
-      const pendingDraftsByItemId = new Map<number, PendingDraftRow>();
-
-      // Update each remaining item's qty_approved (and price / flags)
-      for (const item of visibleItems) {
-        const finalState = deriveFinalBillingLineState(item, pendingIds.has(item.id));
-        const update: Record<string, unknown> = {
-          qty_approved: finalState.qtyBilled,
-          qty_shippable: finalState.qtyBilled,
-          qty_po: finalState.qtyPending,
-        };
-        applyWarehousePickSkipForPoOnlyLine(update, item, {
-          fulfillmentPath,
-          currentState: item.state,
-          skip: finalState.shouldFlagBillingPending,
-        });
-        // Allow billing to override price when resolving flags
-        if (typeof item.price_quoted === 'number') {
-          update.price_quoted = item.price_quoted;
-        }
-        // When resolving picking flags, clear the flag and mark as picked
-        if (resolvingFlags && item.state === 'flagged') {
-          update.state = 'picked';
-          update.flag_reason = null;
-          update.flag_notes = null;
-          update.flag_box_price = null;
-        }
-
-        await supabase
-          .from('order_items')
-          .update(update)
-          .eq('id', item.id);
-
-        if (finalState.qtyPending > 0 && finalState.pendingSource && finalState.pendingNote) {
-          pendingDraftsByItemId.set(item.item_id, {
-            order_id: order.id,
-            order_number: order.order_number,
-            customer_id: order.customer_id,
-            customer_name: order.customer_name,
-            item_id: item.item_id,
-            item_name: item.item_name,
-            qty_pending: finalState.qtyPending,
-            source: finalState.pendingSource,
-            created_by: reviewer,
-            note: finalState.pendingNote,
-          });
-        }
-
-        if (finalState.shouldFlagBillingPending) {
-          billingPendingItemIds.push(item.id);
-        }
-      }
-
-      // Delete removed items
-      for (const rid of removedIds) {
-        await supabase.from('order_items').delete().eq('id', rid);
-      }
-
-      const { data: existingPendingRows, error: existingPendingError } = await supabase
-        .from('pending_items')
-        .select('*')
-        .eq('order_id', order.id)
-        .eq('status', 'pending')
-        .returns<PendingItem[]>();
-      if (existingPendingError) throw existingPendingError;
-
-      const pendingRowsByItemId = new Map<number, PendingItem[]>();
-      for (const row of existingPendingRows ?? []) {
-        if (row.item_id == null) continue;
-        const bucket = pendingRowsByItemId.get(row.item_id) ?? [];
-        bucket.push(row);
-        pendingRowsByItemId.set(row.item_id, bucket);
-      }
-
-      const pendingIdsToResolve = new Set<number>();
-      const pendingRowsToInsert: PendingDraftRow[] = [];
-
-      for (const [itemId, rows] of pendingRowsByItemId.entries()) {
-        const desired = pendingDraftsByItemId.get(itemId);
-        if (!desired) {
-          for (const row of rows) pendingIdsToResolve.add(row.id);
-          continue;
-        }
-
-        const sortedRows = [...rows].sort((a, b) => {
-          if (a.source === 'sales' && b.source !== 'sales') return -1;
-          if (b.source === 'sales' && a.source !== 'sales') return 1;
-          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-        });
-
-        const primary = sortedRows[0]!;
-        const { error: updatePendingError } = await supabase
-          .from('pending_items')
-          .update({
-            qty_pending: desired.qty_pending,
-            source: primary.source === 'sales' ? 'sales' : desired.source,
-            note: desired.note,
-            status: 'pending',
-            resolved_at: null,
-            resolved_by: null,
-            recovery_status: primary.source === 'sales' ? 'reviewed' : primary.recovery_status,
-          })
-          .eq('id', primary.id);
-        if (updatePendingError) throw updatePendingError;
-
-        for (const duplicate of sortedRows.slice(1)) {
-          pendingIdsToResolve.add(duplicate.id);
-        }
-
-        pendingDraftsByItemId.delete(itemId);
-      }
-
-      for (const draft of pendingDraftsByItemId.values()) {
-        pendingRowsToInsert.push(draft);
-      }
-
-      if (pendingIdsToResolve.size > 0) {
-        const { error: resolvePendingError } = await supabase
-          .from('pending_items')
-          .update({
-            status: 'resolved',
-            resolved_at: approvedAt,
-            resolved_by: reviewer,
-          })
-          .in('id', [...pendingIdsToResolve]);
-        if (resolvePendingError) throw resolvePendingError;
-      }
-
-      if (pendingRowsToInsert.length > 0) {
-        const { error: insertPendingError } = await supabase
-          .from('pending_items')
-          .insert(pendingRowsToInsert);
-        if (insertPendingError) throw insertPendingError;
-      }
-
-      if (billingPendingItemIds.length > 0) {
-        const { error: flagPendingError } = await supabase
-          .from('order_items')
-          .update({
-            state: 'flagged',
-            flag_reason: 'Out of Stock (Billing)',
-          })
-          .in('id', billingPendingItemIds);
-        if (flagPendingError) throw flagPendingError;
-      }
-
-      if (!resolvingFlags) {
-        const { messageText, summary } = buildBillingCustomerUpdate({
-          orderNumber: order.order_number,
-          customerName: order.customer_name,
-          businessName: import.meta.env.VITE_BUSINESS_DISPLAY_NAME,
-          date: new Date(),
-          lines: visibleItems.map((item) => {
-            const finalState = deriveFinalBillingLineState(item, pendingIds.has(item.id));
-            return {
-              itemId: item.item_id,
-              name: item.item_name,
-              qtyRequested: item.qty_requested,
-              qtyBilled: finalState.qtyBilled,
-              qtyPending: finalState.qtyPending,
-            };
-          }),
-        });
-
-        const { data: customerUpdateRow, error: updateInsertError } = await supabase
-          .from('billing_customer_updates')
-          .insert({
-            order_id: order.id,
-            message_text: messageText,
-            summary_json: summary,
-            created_by: reviewer,
-          })
-          .select('id')
-          .single();
-        if (updateInsertError) throw updateInsertError;
-
-        try {
-          await sendInternalNotification({
-            eventType: 'order_update_for_sales',
-            orderId: order.id,
-            orderNumber: order.order_number,
-            customerName: order.customer_name,
-            salespersonName: order.salesperson_name,
-            messageBody: messageText,
-            billingCustomerUpdateId: (customerUpdateRow as { id: number }).id,
-          });
-        } catch (notifyError) {
-          console.error('order_update_for_sales', notifyError);
-          toast.error(
-            `Sales notification failed: ${formatInternalNotificationError(notifyError)}`,
-          );
-        }
-      }
-
-      const billingFulfillmentPath: FulfillmentPath = resolvingFlags
-        ? 'direct_bill'
-        : fulfillmentPath;
-
-      if (claimId && userId) {
-        await completeBillingWithClaim({
-          orderId: order.id,
-          claimId,
-          userId,
-          claim,
-          isResolvingFlags: resolvingFlags,
-          fulfillmentPath: billingFulfillmentPath,
-        });
-      } else {
-        // Fallback for orders without claims (e.g. already flagged or old records)
-        const orderUpdate: Record<string, unknown> = {
-          reviewer_name: reviewer,
-          item_count: visibleItems.length,
-          total_value: grandTotal,
-          fulfillment_path: billingFulfillmentPath,
-        };
-
-        if (resolvingFlags || billingFulfillmentPath === 'direct_bill') {
-          orderUpdate.workflow_status = 'completed';
-          orderUpdate.priority = 'normal';
-          orderUpdate.approved_at = approvedAt;
-          orderUpdate.completed_at = approvedAt;
-        } else {
-          orderUpdate.workflow_status = 'approved';
-          orderUpdate.approved_at = approvedAt;
-        }
-
-        await supabase.from('orders').update(orderUpdate).eq('id', order.id);
-      }
-
-      if (!resolvingFlags && shouldNotifyPickers(billingFulfillmentPath)) {
-        try {
-          await sendPickerReadyNotification({
-            eventType: 'order_ready_to_pick',
-            orderId: order.id,
-            orderNumber: order.order_number,
-            customerName: order.customer_name,
-            priority: order.priority,
-            approvedAt,
-          });
-        } catch (pushError) {
-          console.error('Failed to send picker push notification', pushError);
-        }
-      }
-
-      if (order.order_kind === 'recovery') {
-        const { error: resolveRecoveryError } = await supabase
-          .from('pending_items')
-          .update({
-            status: 'resolved',
-            resolved_at: approvedAt,
-            resolved_by: reviewer,
-            recovery_status: 'reviewed',
-            recovery_reviewed_at: approvedAt,
-            recovery_reviewed_by: reviewer,
-          })
-          .eq('recovery_order_id', order.id)
-          .eq('status', 'pending');
-        if (resolveRecoveryError) throw resolveRecoveryError;
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
-      queryClient.invalidateQueries({ queryKey: ['pending-items'] });
-      queryClient.invalidateQueries({ queryKey: ['open-po-demand-lines'] });
-      void invalidateLocationwiseStockQueries(queryClient);
-      queryClient.invalidateQueries({ queryKey: ['billing-customer-update', orderId] });
-      toast.success(
-        order?.workflow_status === 'flagged'
-          ? 'Flags resolved and order marked completed'
-          : fulfillmentPath === 'warehouse_pick'
-            ? 'Order approved and sent to picking'
-            : 'Order approved — direct bill (no pick queue)',
-      );
-      navigate('/billing');
-    },
-    onError: (err) => {
-      const message =
-        err instanceof Error && err.message
-          ? err.message
-          : 'Failed to approve order';
-      toast.error(message);
-    },
-  });
 
   const rejectMutation = useMutation({
     mutationFn: async () => {
@@ -777,11 +264,11 @@ export default function ReviewPage(): React.JSX.Element | null {
 
   const handlePrintPickingChalan = useCallback(() => {
     if (!order) return;
-    const opened = openPickingChalanPrint(order, order.items ?? items);
+    const opened = openPickingChalanPrint(order, order.items ?? []);
     if (!opened) {
       toast.error('Allow pop-ups to print the picking chalan.');
     }
-  }, [order, items, toast]);
+  }, [order, toast]);
 
   if (!orderId) {
     navigate('/billing');
@@ -1008,225 +495,12 @@ export default function ReviewPage(): React.JSX.Element | null {
                 </Card>
               )}
 
-            {/* Item list */}
-            <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-[var(--content-primary)]">
-                {order.workflow_status === 'submitted' ? 'Items' : 'Warehouse pick lines'}
-              </h2>
-              <div className="space-y-3">
-                {(order.workflow_status === 'submitted'
-                  ? visibleItems
-                  : pickableVisibleItems
-                ).map((item) => {
-                  const price = item.price_quoted ?? item.price_system ?? 0;
-                  const finalState = deriveFinalBillingLineState(item, pendingIds.has(item.id));
-                  const lineTotal = finalState.qtyBilled * price;
-                  const labelMrp = orderItemConfirmedMrp(item);
-                  const useLabelMrpAccept = shouldUseLabelMrpAcceptLabel(item, labelMrp);
-                  const isPending = pendingIds.has(item.id);
-                  const shipCap = item.qty_shippable;
-                  const poGap = finalState.qtyPending;
-                  const showSplitLine =
-                    poGap > 0 ||
-                    (shipCap != null && shipCap < item.qty_requested);
-                  return (
-                  <Card
-                    key={item.id}
-                    className={`flex flex-col lg:flex-row lg:items-center gap-4 ${
-                      isPending ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]' : ''
-                    }`}
-                  >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-semibold text-[var(--content-primary)] text-base lg:text-lg">
-                            {item.item_name}
-                          </p>
-                          {isFocOrderItem(item) && (
-                            <span className="inline-flex items-center rounded-full border border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-[var(--content-positive)]">
-                              FOC
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-[var(--content-secondary)] mt-1">
-                          Requested: {item.qty_requested} · Unit: ₹
-                          {price.toLocaleString('en-IN')}
-                        </p>
-                        {showSplitLine && (
-                          <p className="text-xs text-[var(--content-tertiary)] mt-1">
-                            {shipCap != null && shipCap > 0 ? `Bill now: ${shipCap}` : ''}
-                            {shipCap != null && shipCap > 0 && poGap > 0 ? ' · ' : ''}
-                            {poGap > 0 ? `PO: ${poGap}` : ''}
-                          </p>
-                        )}
-                        {item.state === 'flagged' && (
-                          <div className="mt-2 space-y-1 text-xs">
-                            <div className="flex flex-wrap gap-2">
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border border-[var(--border-warning)]">
-                                <Warning size={12} weight="fill" />
-                                {item.flag_reason || 'Flagged in picking'}
-                              </span>
-                              {labelMrp != null && (
-                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border border-[var(--border-accent)]">
-                                  Label MRP: ₹{Math.round(labelMrp).toLocaleString('en-IN')}
-                                </span>
-                              )}
-                              {typeof item.flag_box_price === 'number' &&
-                                !Number.isNaN(item.flag_box_price) &&
-                                (labelMrp == null ||
-                                  Math.round(item.flag_box_price) !== Math.round(labelMrp)) && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border border-[var(--border-warning)]">
-                                    Box price: ₹
-                                    {item.flag_box_price.toLocaleString('en-IN', {
-                                      maximumFractionDigits: 2,
-                                    })}
-                                  </span>
-                                )}
-                              {item.flag_notes && (
-                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border border-[var(--border-warning)]">
-                                  {item.flag_notes}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-xs text-[var(--content-secondary)]">
-                                System price:
-                              </span>
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[var(--bg-tertiary)] text-[var(--content-secondary)] border border-[var(--border-subtle)]">
-                                ₹{(item.price_system ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                              </span>
-                              <span className="text-xs text-[var(--content-secondary)]">
-                                Invoice price (per unit):
-                              </span>
-                              <div className="flex items-center gap-1">
-                                <span className="text-xs text-[var(--content-tertiary)]">₹</span>
-                                <input
-                                  type="number"
-                                  inputMode="decimal"
-                                  step="0.01"
-                                  min="0"
-                                  value={item.price_quoted ?? item.price_system ?? 0}
-                                  onChange={(e) =>
-                                    updatePrice(
-                                      item.id,
-                                      Number.parseFloat(e.target.value || '0'),
-                                    )
-                                  }
-                                  className="w-24 px-2 py-1 rounded-xl border border-[var(--border-opaque)] text-xs text-[var(--content-primary)] bg-[var(--bg-secondary)] min-h-11"
-                                />
-                              </div>
-                            </div>
-                            {item.flag_reason === 'Price Mismatch' && (
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    choosePriceResolution(item, 'accept_box_price')
-                                  }
-                                  className={`inline-flex items-center gap-1 h-7 pl-2 pr-3 rounded-full text-xs border ${
-                                    priceResolutionByItemId[item.id] === 'accept_box_price'
-                                      ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border-[var(--border-positive)]'
-                                      : 'bg-[var(--bg-secondary)] text-[var(--content-secondary)] border-[var(--border-subtle)]'
-                                  }`}
-                                >
-                                  {useLabelMrpAccept ? 'Use label MRP' : 'Accept box price'}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    choosePriceResolution(item, 'override_invoice_price')
-                                  }
-                                  className={`inline-flex items-center gap-1 h-7 pl-2 pr-3 rounded-full text-xs border ${
-                                    priceResolutionByItemId[item.id] === 'override_invoice_price'
-                                      ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border-[var(--border-positive)]'
-                                      : 'bg-[var(--bg-secondary)] text-[var(--content-secondary)] border-[var(--border-subtle)]'
-                                  }`}
-                                >
-                                  Keep override
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        {isPending ? (
-                          <button
-                            type="button"
-                            onClick={() => togglePending(item.id)}
-                            className="inline-flex items-center gap-1 h-6 pl-2 pr-3 rounded-full text-xs font-semibold bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border border-[var(--border-warning)]"
-                          >
-                            <Hourglass size={14} weight="bold" />
-                            Pending (no stock)
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => togglePending(item.id)}
-                            className="inline-flex items-center gap-1 h-6 pl-2 pr-3 rounded-full text-xs font-medium text-[var(--content-warning)] bg-[var(--bg-warning-subtle)] border border-[var(--border-warning)] hover:bg-[var(--bg-warning-subtle)] transition-colors"
-                          >
-                            <Hourglass size={14} weight="bold" />
-                            Mark as pending (no stock)
-                          </button>
-                        )}
-                      </div>
-                      </div>
-                      <div className="flex items-center gap-3 lg:gap-4 shrink-0">
-                        <NumberStepper
-                          value={item.qty_approved}
-                          onChange={(q) => updateQty(item.id, q)}
-                          min={item.qty_shippable === 0 ? 0 : 1}
-                          max={item.qty_shippable != null ? item.qty_shippable : undefined}
-                          presets={[]}
-                        />
-                        <span className="font-mono font-semibold text-[var(--content-primary)] min-w-[88px] text-base lg:text-lg">
-                          ₹{lineTotal.toLocaleString('en-IN')}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => removeItem(item.id)}
-                          className="min-h-12 min-w-12 flex items-center justify-center rounded-lg text-[var(--content-negative)] hover:bg-[var(--bg-negative-subtle)] transition-colors"
-                          aria-label="Remove item"
-                        >
-                          <X size={22} weight="bold" />
-                        </button>
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-              {order.workflow_status !== 'submitted' && poOnlyVisibleItems.length > 0 && (
-                <div className="space-y-3 pt-2">
-                  <h3 className="text-sm font-semibold text-[var(--content-secondary)]">
-                    Purchase order — not sent to warehouse
-                  </h3>
-                  {poOnlyVisibleItems.map((item) => {
-                    const price = item.price_quoted ?? item.price_system ?? 0;
-                    const finalState = deriveFinalBillingLineState(item, pendingIds.has(item.id));
-                    const poGap = finalState.qtyPending;
-                    return (
-                      <Card
-                        key={item.id}
-                        className="flex flex-col gap-2 border-[var(--border-subtle)] bg-[var(--bg-tertiary)]"
-                      >
-                        <div className="min-w-0">
-                          <p className="font-semibold text-[var(--content-primary)] text-base">
-                            {item.item_name}
-                          </p>
-                          <p className="text-sm text-[var(--content-secondary)] mt-1">
-                            Requested: {item.qty_requested} · Unit: ₹
-                            {price.toLocaleString('en-IN')}
-                          </p>
-                          {poGap > 0 && (
-                            <p className="text-xs text-[var(--content-tertiary)] mt-1">
-                              PO: {poGap}
-                            </p>
-                          )}
-                        </div>
-                      </Card>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <ReviewBillSection
+              order={order}
+              fulfillmentPath={fulfillmentPath}
+              onReady={handleBillSheetReady}
+              onSaved={() => navigate('/billing')}
+            />
 
             {/* Notes */}
             {order.notes && (
@@ -1258,7 +532,7 @@ export default function ReviewPage(): React.JSX.Element | null {
                       <span>Items ready to bill</span>
                     </div>
                     <span className="font-mono font-semibold text-[var(--content-positive)]">
-                      {readyToBillCount}
+                      {reviewReadyCount}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
@@ -1267,17 +541,17 @@ export default function ReviewPage(): React.JSX.Element | null {
                       <span>Price mismatches to review</span>
                     </div>
                     <span className="font-mono font-semibold text-[var(--content-warning)]">
-                      {priceMismatchCount}
+                      {reviewPriceMismatchCount}
                     </span>
                   </div>
-                  {unresolvedPriceMismatchCount > 0 && (
+                  {reviewUnresolvedPriceCount > 0 && (
                     <div className="flex items-center justify-between">
                       <div className="inline-flex items-center gap-2">
                         <Warning size={16} weight="bold" className="text-[var(--content-negative)]" />
                         <span>Price mismatches unresolved</span>
                       </div>
                       <span className="font-mono font-semibold text-[var(--content-negative)]">
-                        {unresolvedPriceMismatchCount}
+                        {reviewUnresolvedPriceCount}
                       </span>
                     </div>
                   )}
@@ -1296,7 +570,7 @@ export default function ReviewPage(): React.JSX.Element | null {
                     <div>
                       <p className="text-xs text-[var(--content-secondary)]">Items (Busy)</p>
                       <p className="text-xl font-bold tabular-nums text-[var(--content-primary)]">
-                        {busyItemCount}
+                        {reviewBusyItemCount}
                       </p>
                     </div>
                     <div>
@@ -1309,7 +583,7 @@ export default function ReviewPage(): React.JSX.Element | null {
                   <div className="text-left sm:text-right">
                     <p className="text-xs text-[var(--content-secondary)]">Grand total</p>
                     <p className="text-2xl lg:text-3xl font-bold font-mono text-[var(--content-primary)]">
-                      {formatCurrency(grandTotal)}
+                      {formatCurrency(reviewGrandTotal)}
                     </p>
                   </div>
                 </div>
@@ -1323,7 +597,7 @@ export default function ReviewPage(): React.JSX.Element | null {
                   onChange={setFulfillmentPath}
                   stockLocationCode={order.stock_location_code}
                   pickLineCount={pickLineCount}
-                  disabled={approveMutation.isPending}
+                  disabled={billSavePending}
                 />
               </div>
             )}
@@ -1352,8 +626,9 @@ export default function ReviewPage(): React.JSX.Element | null {
                   </BigButton>
                   <BigButton
                     variant="primary"
-                    onClick={() => approveMutation.mutate()}
-                    loading={approveMutation.isPending}
+                    onClick={() => billSheetState?.saveMutation.mutate()}
+                    loading={billSheetState?.saveMutation.isPending ?? false}
+                    disabled={!billSheetState || billSheetState.saveBlocked}
                     className="sm:flex-[2] hover:opacity-90 bg-[var(--bg-positive)]"
                   >
                     <CheckCircle size={20} weight="bold" />
@@ -1364,9 +639,9 @@ export default function ReviewPage(): React.JSX.Element | null {
               {order.workflow_status === 'flagged' && (
                 <BigButton
                   variant="primary"
-                  onClick={() => approveMutation.mutate()}
-                  loading={approveMutation.isPending}
-                  disabled={unresolvedPriceMismatchCount > 0}
+                  onClick={() => billSheetState?.saveMutation.mutate()}
+                  loading={billSheetState?.saveMutation.isPending ?? false}
+                  disabled={!billSheetState || billSheetState.saveBlocked}
                   className="sm:flex-[2] hover:opacity-90 bg-[var(--bg-warning)]"
                 >
                   <CheckCircle size={20} weight="bold" />

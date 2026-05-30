@@ -83,6 +83,7 @@ export function useOrderDetail(orderId: number | null) {
         `,
         )
         .eq('order_id', orderId!)
+        .order('bill_line_no', { ascending: true })
         .order('id', { ascending: true });
 
       if (itemsError) throw itemsError;

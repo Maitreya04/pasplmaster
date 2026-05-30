@@ -1,4 +1,5 @@
 import { Camera, CheckCircle, Flag, Hash, MapPin } from '@phosphor-icons/react';
+import { MRP_SHEET_TITLE, PICKER_MRP_TAP_TO_CONFIRM } from '../../lib/billing/mrpWorkflowCopy';
 
 export type PickCardCtaPhase = 'rack' | 'pick';
 
@@ -186,11 +187,11 @@ export function PickCardCTAs({
           >
             <div className="min-w-0 flex-1 text-left">
               <p className="text-sm font-extrabold leading-snug text-[var(--content-warning-on-light)] break-words sm:text-base">
-                {confirmMrpLabel ?? 'Confirm MRP on label'}
+                {confirmMrpLabel ?? MRP_SHEET_TITLE}
               </p>
               {!confirmMrpLabel ? (
                 <p className="text-[10px] leading-snug text-[var(--content-warning-on-light)]/80 sm:text-[11px]">
-                  Tap to match the price on the physical label
+                  {PICKER_MRP_TAP_TO_CONFIRM}
                 </p>
               ) : null}
             </div>

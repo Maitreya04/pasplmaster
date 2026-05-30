@@ -4,6 +4,53 @@ import type { StockMrpHistoryEntry } from '../../types';
 import { Numpad, NumpadConfirmButton, numKey } from './Numpad';
 import { PickSheetContext } from '../picking/PickSheetContext';
 import { appHaptics } from '../../lib/haptics';
+import {
+  MRP_BADGE_BILLING_CONFIRMED,
+  MRP_BADGE_LATEST_STOCK,
+  MRP_BADGE_SEEN_ON_LABEL,
+  MRP_BADGE_SUGGESTED,
+  MRP_SHEET_CUSTOM_CONFIRM,
+  MRP_SHEET_CUSTOM_HINT,
+  MRP_SHEET_CUSTOM_TITLE,
+  MRP_SHEET_EMPTY,
+  MRP_SHEET_HEADING,
+  MRP_SHEET_SUBHEADING_BATCH,
+  MRP_SHEET_SUBHEADING_MULTI,
+  MRP_SHEET_SUBHEADING_SINGLE,
+  MRP_SHEET_TITLE,
+} from '../../lib/billing/mrpWorkflowCopy';
+
+function mrpHistorySourceBadge(
+  entry: StockMrpHistoryEntry,
+  isSuggested: boolean,
+): React.ReactNode | null {
+  if (entry.source === 'billing_verified') {
+    return (
+      <span className="ml-1.5 rounded bg-[var(--bg-positive)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+        {MRP_BADGE_BILLING_CONFIRMED}
+      </span>
+    );
+  }
+  if (entry.source === 'picker_verified') {
+    const pickCount =
+      entry.confirmation_count != null && entry.confirmation_count > 1
+        ? ` · ${entry.confirmation_count} picks`
+        : '';
+    return (
+      <span className="ml-1.5 rounded bg-[var(--bg-accent-subtle)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--content-accent)] border border-[var(--border-accent)]">
+        {MRP_BADGE_SEEN_ON_LABEL}{pickCount}
+      </span>
+    );
+  }
+  if (isSuggested) {
+    return (
+      <span className="ml-1.5 rounded bg-[var(--bg-inverse-primary)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+        {entry.source === 'stock_mrpwise' ? MRP_BADGE_LATEST_STOCK : MRP_BADGE_SUGGESTED}
+      </span>
+    );
+  }
+  return null;
+}
 
 export interface MrpHistorySheetProps {
   isOpen: boolean;
@@ -81,7 +128,7 @@ export function MrpHistorySheet({
     <BottomSheet
       isOpen={isOpen}
       onClose={handleClose}
-      title={selectBatchMode ? 'MRP for this batch' : 'MRP on label'}
+      title={selectBatchMode ? 'MRP for this batch' : MRP_SHEET_TITLE}
       closeOnly
       keyboardBehavior="static"
       sheetClassName="max-h-[min(92dvh,92vh)] pick-sheet-compact"
@@ -95,7 +142,7 @@ export function MrpHistorySheet({
         ) : mode === 'custom' ? (
           <NumpadConfirmButton
             onConfirm={submitCustom}
-            confirmLabel={canSaveCustom ? `Save ₹${customParsed} — will be flagged` : 'Enter MRP'}
+            confirmLabel={canSaveCustom ? MRP_SHEET_CUSTOM_CONFIRM(customParsed) : 'Enter label price'}
             disabled={!canSaveCustom}
             tone="amber"
           />
@@ -133,18 +180,14 @@ export function MrpHistorySheet({
         <>
           <div className="mb-4">
             <p className="text-base font-extrabold text-[var(--content-primary)]">
-              {selectBatchMode
-                ? 'Which MRP is on this batch?'
-                : 'What MRP does the label show?'}
+              {selectBatchMode ? MRP_SHEET_SUBHEADING_BATCH : MRP_SHEET_HEADING}
             </p>
             <p className="mt-1 text-xs text-[var(--content-tertiary)]">
               {selectBatchMode
-                ? 'Tap the MRP printed on the pieces you are picking now'
+                ? MRP_SHEET_SUBHEADING_BATCH
                 : isMulti
-                  ? `${history.length} MRP records found — tap the one on the label`
-                  : singleMrp
-                    ? 'One record found — confirm it matches the label'
-                    : 'Confirm the MRP printed on the label'}
+                  ? MRP_SHEET_SUBHEADING_MULTI
+                  : MRP_SHEET_SUBHEADING_SINGLE}
             </p>
           </div>
 
@@ -157,13 +200,19 @@ export function MrpHistorySheet({
 
             {!isLoading && history.length === 0 ? (
               <p className="rounded-xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-4 py-3 text-sm text-[var(--content-warning-on-light)]">
-                No MRP in stock_mrpwise for this SKU — confirm what is printed on the label below.
+                {MRP_SHEET_EMPTY}
               </p>
             ) : null}
 
             {history.map((h, i) => {
-              const isLatest = i === 0 || h.is_latest;
+              const isSuggested = h.is_latest;
               const isSelected = confirmedMrp === h.mrp && customMrp == null;
+              const qtyLabel =
+                h.source === 'picker_verified' || h.source === 'billing_verified'
+                  ? 'warehouse verified'
+                  : h.qty > 0
+                    ? `${h.qty} pcs`
+                    : '—';
               return (
                 <button
                   key={`${h.mrp}-${i}`}
@@ -188,13 +237,12 @@ export function MrpHistorySheet({
                         isSelected ? 'text-[var(--content-positive)]' : 'text-[var(--content-tertiary)]'
                       }`}
                     >
-                      {h.qty > 0 ? `${h.qty} pcs` : '—'}
-                      {h.date ? ` · recorded ${h.date}` : ''}
-                      {isLatest && (
-                        <span className="ml-1.5 rounded bg-[var(--bg-inverse-primary)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
-                          Latest
-                        </span>
-                      )}
+                      {qtyLabel}
+                      {h.date && h.source === 'stock_mrpwise' ? ` · recorded ${h.date}` : ''}
+                      {h.date && (h.source === 'picker_verified' || h.source === 'billing_verified')
+                        ? ` · ${h.date}`
+                        : ''}
+                      {mrpHistorySourceBadge(h, isSuggested)}
                     </p>
                   </div>
                   <div
@@ -217,8 +265,8 @@ export function MrpHistorySheet({
             >
               <span className="text-lg text-[var(--content-tertiary)]">✎</span>
               <div className="text-left">
-                <p className="text-sm font-bold text-[var(--content-secondary)]">Different MRP on label</p>
-                <p className="text-[10px] text-[var(--content-tertiary)]">Label shows something else — enter it</p>
+                <p className="text-sm font-bold text-[var(--content-secondary)]">Different price on label</p>
+                <p className="text-[10px] text-[var(--content-tertiary)]">Enter what is printed on the product</p>
               </div>
             </button>
           </div>
@@ -238,18 +286,16 @@ export function MrpHistorySheet({
 
           <div className="mb-2">
             <p className="text-base font-extrabold text-[var(--content-warning-on-light)]">
-              Enter MRP from label
+              {MRP_SHEET_CUSTOM_TITLE}
             </p>
-            <p className="mt-1 text-xs text-[var(--content-tertiary)]">
-              Will be flagged if it differs from system records
-            </p>
+            <p className="mt-1 text-xs text-[var(--content-tertiary)]">{MRP_SHEET_CUSTOM_HINT}</p>
           </div>
 
           <Numpad
             display={localBuf}
             onKey={(k) => numKey(k, localBuf, setLocalBuf)}
             onConfirm={submitCustom}
-            confirmLabel={canSaveCustom ? `Save ₹${customParsed} — will be flagged` : 'Enter MRP'}
+            confirmLabel={canSaveCustom ? MRP_SHEET_CUSTOM_CONFIRM(customParsed) : 'Enter label price'}
             tone="amber"
             hideConfirm
           />

@@ -102,6 +102,8 @@ export interface Order {
 export interface OrderItem {
   id: number;
   order_id: number;
+  /** Stable bill row position — same order in desk, review, and Live Queue copy. */
+  bill_line_no?: number;
   item_id: number;
   /** True when this row is explicit free-of-charge qty from sales/billing. */
   is_foc?: boolean | null;
@@ -488,6 +490,12 @@ export interface BinPickerShelf {
   layers: BinPickerShelfLayer[];
 }
 
+export type StockMrpHistoryEntrySource =
+  | 'stock_mrpwise'
+  | 'picker_verified'
+  | 'billing_verified'
+  | 'items_fallback';
+
 export interface StockMrpHistoryEntry {
   mrp: number;
   qty: number;
@@ -497,6 +505,10 @@ export interface StockMrpHistoryEntry {
   date: string | null;
   updated_at: string | null;
   is_latest: boolean;
+  /** Where this MRP row came from — ERP stock, picker overlay, or catalog fallback. */
+  source?: StockMrpHistoryEntrySource;
+  /** Picker overlay only — how many times this label MRP was confirmed. */
+  confirmation_count?: number;
 }
 
 export interface StockMrpHistoryResult {

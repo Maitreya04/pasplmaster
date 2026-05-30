@@ -1,4 +1,5 @@
 import { syncLabelMrpFlagForOrderItem } from '../billing/syncLabelMrpFlag';
+import { recordPickerLabelMrpForOrderItem } from './recordPickerLabelMrp';
 import { supabase } from '../supabase/client';
 import type { ScanResult } from '../../types';
 
@@ -47,6 +48,7 @@ export async function commitPickMrpSegment(options: {
 
   if (orderItemId != null) {
     await syncLabelMrpFlagForOrderItem(orderItemId);
+    await recordPickerLabelMrpForOrderItem(orderItemId);
   }
 
   return {

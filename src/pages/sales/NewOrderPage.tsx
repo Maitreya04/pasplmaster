@@ -31,6 +31,11 @@ import {
   isLocationwiseStockResolving,
   useLocationwiseStock,
 } from '../../hooks/useLocationwiseStock';
+import { useBillingVerifiedLabelMrpMap } from '../../hooks/useBillingVerifiedLabelMrpMap';
+import {
+  cartSpecialRateForVerified,
+  defaultSalesRateForItem,
+} from '../../lib/billing/billingVerifiedMrp';
 import { useUserStockLocation } from '../../hooks/useUserStockLocation';
 import { useCart } from '../../context/CartContext';
 import { appHaptics } from '../../lib/haptics';
@@ -2169,6 +2174,12 @@ export default function NewOrderPage(): React.JSX.Element | null {
     isFetching: locationwiseStockFetching,
   } = useLocationwiseStock(visibleBusyCodes);
 
+  const { data: billingVerifiedMrpMap } = useBillingVerifiedLabelMrpMap(
+    visibleBusyCodes,
+    sellableLocationCode,
+    !stockLocationLoading,
+  );
+
 
   const cartQtyByItem = useMemo(() => {
     const totals = new Map<number, number>();
@@ -2210,7 +2221,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const getTotalInOrderQty = (id: number) => cartQtyByItem.get(id) ?? 0;
   const getPaidQtyInCart = (id: number) => paidQtyByItem.get(id) ?? 0;
   const getFocQtyInCart = (id: number) => focQtyByItem.get(id) ?? 0;
-  const getPrice = (item: Item) => item.sales_price;
+  const getPrice = (item: Item) => defaultSalesRateForItem(item, billingVerifiedMrpMap);
   const getMainStoreStockQty = (item: Item) => {
     const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
     if (!Number.isFinite(busyCode)) return null;
@@ -2281,7 +2292,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
 
   const handleConfirmAdd = (item: Item, qty: number, focQty: number) => {
     appHaptics.impactMedium();
-    addItem(item, qty, null, focQty);
+    addItem(item, qty, cartSpecialRateForVerified(item, billingVerifiedMrpMap), focQty);
     setPendingAddItemId(null);
     showAddedFeedback(item.id);
   };
@@ -2415,7 +2426,11 @@ export default function NewOrderPage(): React.JSX.Element | null {
                   setSelectedCustomer(customer);
                 }
                 for (const entry of entries) {
-                  addItem(entry.item, entry.qty);
+                  addItem(
+                    entry.item,
+                    entry.qty,
+                    cartSpecialRateForVerified(entry.item, billingVerifiedMrpMap),
+                  );
                 }
                 goToCart();
               }}
@@ -2517,7 +2532,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
         {rateItem && (
           <div className="space-y-4">
             <p className="text-sm text-[var(--content-tertiary)]">
-              Qty: <span className="font-mono">{rateQty}</span> · Default: {formatCurrency(rateItem.sales_price)}
+              Qty: <span className="font-mono">{rateQty}</span> · Default: {formatCurrency(getPrice(rateItem))}
             </p>
             <input
               type="text"

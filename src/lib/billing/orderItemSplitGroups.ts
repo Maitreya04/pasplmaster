@@ -1,4 +1,5 @@
 import type { OrderItem } from '../../types';
+import { billLineSortKey } from './sortBillLines';
 
 export type OrderItemDisplayGroup = {
   key: string;
@@ -24,7 +25,9 @@ export function groupOrderItemsForDisplay(items: OrderItem[]): OrderItemDisplayG
   return roots.map((root) => ({
     key: String(root.id),
     root,
-    siblings: splitChildren.get(root.id) ?? [],
+    siblings: (splitChildren.get(root.id) ?? []).sort(
+      (a, b) => billLineSortKey(a) - billLineSortKey(b),
+    ),
   }));
 }
 

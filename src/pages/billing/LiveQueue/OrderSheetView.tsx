@@ -30,6 +30,9 @@ import {
   orderItemProductCode,
 } from '../../../utils/formatters';
 import { orderItemConfirmedMrp } from '../../../lib/billing/orderItemSplitGroups';
+import { billLineIdentity } from '../../../lib/billing/billLineIdentity';
+import { sortBillLines } from '../../../lib/billing/sortBillLines';
+import { BILLING_LABEL_CHIP } from '../../../lib/billing/mrpWorkflowCopy';
 
 /** UI labels for billing (Windows-first). Finish still works with Cmd+Enter on Mac. */
 const SHORTCUT_COPY_ALL = 'Alt+C';
@@ -123,8 +126,10 @@ export function OrderSheetView({
   const customerLocation = [city, customerAddress?.trim()].filter(Boolean).join(' · ');
   const trimmedNotes = notes?.trim() ?? '';
 
+  const sortedItems = useMemo(() => sortBillLines(items), [items]);
+
   const visibleRows = useMemo(
-    () => items.filter((i) => !lineEdits[i.id]?.removed),
+    () => sortBillLines(items.filter((i) => !lineEdits[i.id]?.removed)),
     [items, lineEdits],
   );
 
@@ -695,7 +700,7 @@ export function OrderSheetView({
                 </tr>
               </thead>
               <tbody>
-                {items.map((serverItem) => {
+                {sortedItems.map((serverItem) => {
                   const removed = !!lineEdits[serverItem.id]?.removed;
                   if (removed) {
                     const removedCode = orderItemProductCode(serverItem);
@@ -751,6 +756,7 @@ export function OrderSheetView({
                   const isActive = activeRow === idx;
                   const isPartialInput = partialInputRow === idx;
                   const productCode = orderItemProductCode(item);
+                  const lineCodes = billLineIdentity(item);
                   const hasSpecialRate = isSpecialRateItem(item);
                   const quotedPrice = getQuotedPrice(item);
                   const bookPrice = getBookPrice(item);
@@ -808,7 +814,7 @@ export function OrderSheetView({
                           <span className="text-[var(--role-primary)] font-bold text-xs">&#9654;</span>
                         ) : (
                           <span className="text-[var(--content-quaternary)] text-xs font-mono">
-                            {idx + 1}
+                            {item.bill_line_no ?? idx + 1}
                           </span>
                         )}
                       </td>
@@ -846,7 +852,7 @@ export function OrderSheetView({
                         )}
                         {labelMrp != null ? (
                           <p className="mt-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
-                            Label MRP ₹{Math.round(labelMrp)}
+                            {BILLING_LABEL_CHIP(labelMrp)}
                             {isSplitSibling ? ' · split batch' : ''}
                           </p>
                         ) : null}
@@ -855,11 +861,16 @@ export function OrderSheetView({
                       <td className="hidden sm:table-cell align-top min-w-0 w-[10.5rem] max-w-[10.5rem] lg:w-[13rem] lg:max-w-[13rem]">
                         <div
                           className="max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]"
-                          title={productCode || undefined}
+                          title={lineCodes.pickCode || undefined}
                         >
-                          <span className="inline-block font-ds-label-size font-mono text-[var(--content-quaternary)] whitespace-nowrap pr-1">
-                            {productCode || '—'}
+                          <span className="inline-block font-ds-label-size font-mono text-[var(--content-secondary)] whitespace-nowrap pr-1">
+                            {lineCodes.pickCode || '—'}
                           </span>
+                          {lineCodes.altCode ? (
+                            <span className="block font-ds-label-size font-mono text-[var(--content-quaternary)] whitespace-nowrap pr-1 mt-0.5">
+                              {lineCodes.altCode}
+                            </span>
+                          ) : null}
                         </div>
                       </td>
 

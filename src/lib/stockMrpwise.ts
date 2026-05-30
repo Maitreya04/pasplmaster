@@ -8,6 +8,16 @@ function parseHistoryEntry(raw: unknown): StockMrpHistoryEntry | null {
   const row = raw as Record<string, unknown>;
   const mrp = Number(row.mrp);
   if (!Number.isFinite(mrp)) return null;
+  const sourceRaw = row.source;
+  const source =
+    sourceRaw === 'picker_verified' ||
+    sourceRaw === 'billing_verified' ||
+    sourceRaw === 'stock_mrpwise' ||
+    sourceRaw === 'items_fallback'
+      ? sourceRaw
+      : undefined;
+  const confirmationCount =
+    row.confirmation_count != null ? Number(row.confirmation_count) : undefined;
   return {
     mrp,
     qty: Number(row.qty) || 0,
@@ -17,6 +27,11 @@ function parseHistoryEntry(raw: unknown): StockMrpHistoryEntry | null {
     date: typeof row.date === 'string' ? row.date : null,
     updated_at: typeof row.updated_at === 'string' ? row.updated_at : null,
     is_latest: row.is_latest === true,
+    source,
+    confirmation_count:
+      confirmationCount != null && Number.isFinite(confirmationCount)
+        ? confirmationCount
+        : undefined,
   };
 }
 
@@ -45,6 +60,7 @@ function itemsFallbackHistory(mrp: number): StockMrpHistoryResult {
     date: null,
     updated_at: null,
     is_latest: true,
+    source: 'items_fallback',
   };
   return {
     success: true,

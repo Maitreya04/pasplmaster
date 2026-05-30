@@ -38,6 +38,19 @@ export function shouldUseLabelMrpAcceptLabel(
   return isAutoLabelMrpFlagNotes(item.flag_notes);
 }
 
+/** Price billing should accept when resolving a label / price flag. */
+export function resolvedLabelPriceForBilling(
+  item: Pick<OrderItem, 'flag_box_price'>,
+  labelMrp: number | null,
+): number | null {
+  if (labelMrp != null) return roundBillingRupee(labelMrp);
+  const box =
+    typeof item.flag_box_price === 'number' && Number.isFinite(item.flag_box_price)
+      ? roundBillingRupee(item.flag_box_price)
+      : null;
+  return box;
+}
+
 export type LabelMrpBillingFlagPlan =
   | { action: 'skip'; reason: 'foc' | 'no_label' | 'matched' | 'manual_price_flag' | 'other_flag' }
   | {

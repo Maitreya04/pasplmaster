@@ -1,3 +1,6 @@
+import {
+  PICKER_MRP_SPLIT_PROGRESS_IDLE,
+} from '../../lib/billing/mrpWorkflowCopy';
 import type { PickLineMrpState } from '../../lib/picking/pickLineMrp';
 import {
   getActiveSegment,
@@ -8,6 +11,8 @@ import {
 export interface PickMrpSplitProgressProps {
   lineMrp: PickLineMrpState;
   targetQty: number;
+  /** Show pre-split callout before the first batch is chosen. */
+  idleHint?: boolean;
   onUndoLastSegment?: () => void;
   onResetSplitLine?: () => void;
 }
@@ -15,6 +20,7 @@ export interface PickMrpSplitProgressProps {
 export function PickMrpSplitProgress({
   lineMrp,
   targetQty,
+  idleHint = false,
   onUndoLastSegment,
   onResetSplitLine,
 }: PickMrpSplitProgressProps): React.JSX.Element {
@@ -61,7 +67,13 @@ export function PickMrpSplitProgress({
           ) : null}
         </div>
 
-        {remaining > 0 ? (
+        {idleHint && committed === 0 && !active ? (
+          <p className="mt-2 text-[10px] font-medium leading-snug text-[var(--content-warning-on-light)]">
+            {PICKER_MRP_SPLIT_PROGRESS_IDLE}
+          </p>
+        ) : null}
+
+        {remaining > 0 && !(idleHint && committed === 0 && !active) ? (
           <p className="mt-2 text-[10px] font-medium text-[var(--content-warning-on-light)]">
             {remaining} pcs left · pick next MRP batch
           </p>

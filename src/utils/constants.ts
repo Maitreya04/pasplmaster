@@ -1,5 +1,4 @@
 export const FLAG_REASONS = [
-  'Price Mismatch',
   'Out of Stock',
   'Wrong Part',
   'Damaged',

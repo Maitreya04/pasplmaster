@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CaretLeft } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { pickQuantityTarget } from '../../lib/cartSupply';
+import { STOCK_MRP_HISTORY_QUERY_KEY } from '../../lib/stockMrpwise';
 import { defaultPickItemTransitionAdapter } from '../../lib/picking/itemTransitionAdapter';
 import {
   binIdForPickItem,
@@ -157,6 +158,7 @@ export function PickPageV2Panel({
           scanResult,
         });
         void queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+        void queryClient.invalidateQueries({ queryKey: [STOCK_MRP_HISTORY_QUERY_KEY] });
         return;
       }
 
@@ -183,6 +185,7 @@ export function PickPageV2Panel({
         scanResult,
       });
       void queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+      void queryClient.invalidateQueries({ queryKey: [STOCK_MRP_HISTORY_QUERY_KEY] });
       appHaptics.success();
     },
     [order.id, orderItems, queryClient, warning, userId, userName],

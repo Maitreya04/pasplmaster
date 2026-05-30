@@ -4,8 +4,15 @@ import {
   deskLineFlagChipLabel,
   deskLineFlagKind,
 } from '../../../lib/billing/deskLineFlagKind';
+import { resolvedLabelPriceForBilling } from '../../../lib/billing/labelMrpFlag';
+import {
+  BILLING_ACCEPT_LABEL,
+  BILLING_KEEP_QUOTED,
+  BILLING_LABEL_CHIP,
+  BILLING_PRICE_SUMMARY,
+  formatRoundedRs,
+} from '../../../lib/billing/mrpWorkflowCopy';
 import { orderItemDisplayName } from '../../../utils/formatters';
-import { shouldUseLabelMrpAcceptLabel } from '../../../lib/billing/labelMrpFlag';
 import { orderItemConfirmedMrp } from '../../../lib/billing/orderItemSplitGroups';
 import type { OrderItem } from '../../../types';
 import type { OverlayLineEdit, OverlayLineResolution } from './types';
@@ -29,10 +36,6 @@ function accentChipClass(accent: ReturnType<typeof deskLineFlagAccent>): string 
   return 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] border-[var(--border-warning)]';
 }
 
-function formatRs(value: number): string {
-  return `₹${Math.round(value).toLocaleString('en-IN')}`;
-}
-
 function resolutionSuffix(resolution: OverlayLineResolution | null): string | null {
   if (resolution === 'accept_price') return 'accepted';
   if (resolution === 'keep_quoted') return 'kept';
@@ -48,7 +51,7 @@ export function DeskFlaggedSectionHeader(): React.JSX.Element {
     >
       <span>Item</span>
       <span className="text-center">Qty</span>
-      <span>MRP</span>
+      <span>Bill rate</span>
       <span className="text-right">Action</span>
     </div>
   );
@@ -85,22 +88,16 @@ export function DeskFlaggedLineRow({
   const isRemoved = edit.resolution === 'removed' || edit.removed;
   const labelMrp = orderItemConfirmedMrp(item);
   const quoted = item.price_quoted ?? item.price_system ?? 0;
-  const system = item.price_system ?? 0;
-  const boxPrice =
-    typeof item.flag_box_price === 'number' && !Number.isNaN(item.flag_box_price)
-      ? item.flag_box_price
-      : null;
-  const useLabelMrpAccept = shouldUseLabelMrpAcceptLabel(item, labelMrp);
-  const acceptLabel = useLabelMrpAccept ? 'Use label MRP' : 'Accept';
+  const labelPrice = resolvedLabelPriceForBilling(item, labelMrp);
   const showPriceAccept =
-    !isResolved &&
-    (kind === 'price' || (kind === 'oos' && boxPrice != null && useLabelMrpAccept));
+    !isResolved && kind === 'price' && labelPrice != null;
+  const showOosKeep = !isResolved && kind === 'oos';
   const suffix = resolutionSuffix(edit.resolution);
 
   const removeTitle =
     kind === 'oos'
       ? 'Remove from order · adds to pending'
-      : "Remove & log for warehouse audit";
+      : 'Remove & log for warehouse audit';
 
   return (
     <div
@@ -135,17 +132,14 @@ export function DeskFlaggedLineRow({
         {splitHint ? (
           <p className="text-[9px] text-[var(--content-quaternary)] truncate mt-0.5">{splitHint}</p>
         ) : null}
-        {labelMrp != null && !isRemoved ? (
-          <p className="text-[9px] text-[var(--content-quaternary)] truncate mt-0.5">
-            Label {formatRs(labelMrp)}
+        {kind === 'price' && labelPrice != null && !isRemoved ? (
+          <p className="text-[9px] text-[var(--content-secondary)] truncate mt-0.5">
+            {BILLING_PRICE_SUMMARY(labelPrice, quoted)}
           </p>
         ) : null}
-        {(kind === 'price' || (kind === 'oos' && labelMrp != null)) && !isRemoved ? (
-          <p className="text-[9px] text-[var(--content-secondary)] truncate mt-0.5">
-            {labelMrp != null ? `Label ${formatRs(labelMrp)} · ` : ''}
-            {boxPrice != null && labelMrp == null ? `Box ${formatRs(boxPrice)} · ` : ''}
-            Quoted {formatRs(quoted)}
-            {system !== quoted ? ` · Sys ${formatRs(system)}` : ''}
+        {labelMrp != null && kind !== 'price' && !isRemoved ? (
+          <p className="text-[9px] text-[var(--content-quaternary)] truncate mt-0.5">
+            {BILLING_LABEL_CHIP(labelMrp)}
           </p>
         ) : null}
         {item.flag_notes ? (
@@ -178,40 +172,34 @@ export function DeskFlaggedLineRow({
       <div className="flex items-center justify-end gap-1 min-w-0">
         {showPriceAccept ? (
           <>
-            {boxPrice != null ? (
-              <button
-                type="button"
-                onClick={onAcceptPrice}
-                title={
-                  useLabelMrpAccept && labelMrp != null
-                    ? `Bill at label MRP ${formatRs(labelMrp)}`
-                    : `Accept box price ${formatRs(boxPrice)}`
-                }
-                className="h-7 px-1.5 rounded-md text-[9px] font-semibold leading-none bg-[var(--bg-positive)] text-white hover:opacity-95 whitespace-nowrap"
-              >
-                {acceptLabel}
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={onAcceptPrice}
+              title={`${BILLING_ACCEPT_LABEL} ${formatRoundedRs(labelPrice!)}`}
+              className="h-7 px-1.5 rounded-md text-[9px] font-semibold leading-none bg-[var(--bg-positive)] text-white hover:opacity-95 whitespace-nowrap"
+            >
+              {BILLING_ACCEPT_LABEL}
+            </button>
             <button
               type="button"
               onClick={onKeepQuoted}
-              title={`Keep quoted ${formatRs(quoted)}`}
+              title={`${BILLING_KEEP_QUOTED} ${formatRoundedRs(quoted)}`}
               className="h-7 px-1.5 rounded-md text-[9px] font-medium leading-none border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] whitespace-nowrap"
             >
-              Keep
+              {BILLING_KEEP_QUOTED}
             </button>
           </>
         ) : null}
 
-        {!isResolved && kind !== 'price' ? (
+        {showOosKeep ? (
           <>
             <button
               type="button"
               onClick={onKeepQuoted}
-              title={`Keep in order at ${formatRs(edit.priceQuoted)}`}
+              title={`Keep in order at ${formatRoundedRs(edit.priceQuoted)}`}
               className="h-7 px-1.5 rounded-md text-[9px] font-semibold leading-none bg-[var(--bg-positive)] text-white hover:opacity-95 whitespace-nowrap"
             >
-              Keep
+              {BILLING_KEEP_QUOTED}
             </button>
             <button
               type="button"
@@ -287,13 +275,11 @@ export function DeskNormalLineRow({
           {orderItemDisplayName(item)}
         </p>
         {splitHint ? (
-          <span className="mt-0.5 block text-[9px] text-[var(--content-quaternary)]">
-            {splitHint}
-          </span>
+          <span className="mt-0.5 block text-[9px] text-[var(--content-quaternary)]">{splitHint}</span>
         ) : null}
         {labelMrp != null ? (
           <span className="mt-0.5 block text-[9px] font-medium text-[var(--content-secondary)]">
-            Label MRP ₹{Math.round(labelMrp)}
+            {BILLING_LABEL_CHIP(labelMrp)}
           </span>
         ) : null}
       </div>

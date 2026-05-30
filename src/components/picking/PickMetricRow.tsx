@@ -1,6 +1,13 @@
 import type { StockMrpHistoryEntry } from '../../types';
 import type { PickLineMrpState } from '../../lib/picking/pickLineMrp';
 import {
+  MRP_METRIC_LABEL,
+  PICKER_MRP_CONFIRMED,
+  PICKER_MRP_SPLIT_METRIC_HINT,
+  PICKER_MRP_TAP_TO_CONFIRM,
+  PICKER_MRP_VS_SUGGESTED,
+} from '../../lib/billing/mrpWorkflowCopy';
+import {
   getActiveSegmentMrp,
   isSplitMode,
   pickLineSegmentsCommittedQty,
@@ -16,6 +23,9 @@ export interface PickMetricRowProps {
   confirmedMrp: number | null;
   customMrp: number | null;
   lineMrp?: PickLineMrpState;
+  /** When true, line should be split by MRP batch (multi-MRP + qty > 1). */
+  suggestSplit?: boolean;
+  splitMrpBands?: number;
   disabled?: boolean;
   onEditQty: () => void;
   onEditMrp: () => void;
@@ -37,6 +47,8 @@ export function PickMetricRow({
   confirmedMrp,
   customMrp,
   lineMrp,
+  suggestSplit = false,
+  splitMrpBands = 0,
   disabled = false,
   onEditQty,
   onEditMrp,
@@ -102,7 +114,7 @@ export function PickMetricRow({
           className="relative min-w-0 flex-1 px-2.5 py-2.5 text-left pick-pressable disabled:opacity-50 sm:px-4 sm:py-3"
         >
           <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-            {splitActive ? 'Batch MRP' : 'MRP on label'}
+            {splitActive ? 'Batch MRP' : MRP_METRIC_LABEL}
           </p>
 
           {mrpLoading ? (
@@ -124,8 +136,8 @@ export function PickMetricRow({
                 {splitActive
                   ? 'active batch'
                   : mrpFlagged
-                    ? `differs · system ₹${Math.round(latestMrp ?? 0)}`
-                    : 'confirmed ✓'}
+                    ? PICKER_MRP_VS_SUGGESTED(Math.round(finalMrp), Math.round(latestMrp ?? 0))
+                    : 'matches suggestion ✓'}
               </p>
             </>
           ) : splitActive ? (
@@ -135,6 +147,15 @@ export function PickMetricRow({
               </p>
               <p className="text-[10px] leading-snug text-[var(--content-tertiary)]">
                 Choose MRP for this batch
+              </p>
+            </>
+          ) : suggestSplit ? (
+            <>
+              <p className="mt-1.5 text-xs font-bold text-[var(--content-warning-on-light)]">
+                {splitMrpBands > 1 ? `${splitMrpBands} MRP batches` : 'Multiple MRP batches'}
+              </p>
+              <p className="text-[10px] leading-snug text-[var(--content-warning-on-light)]">
+                {PICKER_MRP_SPLIT_METRIC_HINT}
               </p>
             </>
           ) : isMultiMrp ? (
@@ -151,7 +172,9 @@ export function PickMetricRow({
               <p className="pick-metric-value mt-1 font-mono font-extrabold tracking-tight text-[var(--content-warning-on-light)]">
                 ₹{Math.round(latestMrp)}
               </p>
-              <p className="text-[9px] font-medium text-[var(--content-warning-on-light)]">tap to confirm</p>
+              <p className="text-[9px] font-medium text-[var(--content-warning-on-light)]">
+                {PICKER_MRP_TAP_TO_CONFIRM}
+              </p>
             </>
           ) : (
             <p className="mt-2 text-xs text-[var(--content-tertiary)]">Tap to enter</p>
@@ -188,8 +211,8 @@ export function PickMetricRow({
             }`}
           >
             {mrpFlagged
-              ? `Label ₹${Math.round(finalMrp)} ≠ system ₹${Math.round(latestMrp ?? 0)}`
-              : `MRP ₹${Math.round(finalMrp)} confirmed on label`}
+              ? `${PICKER_MRP_VS_SUGGESTED(Math.round(finalMrp), Math.round(latestMrp ?? 0))} · billing may review`
+              : PICKER_MRP_CONFIRMED(Math.round(finalMrp))}
           </p>
           <button type="button" onClick={onEditMrp} className="shrink-0 text-[10px] font-semibold opacity-80 pick-pressable">
             Change MRP

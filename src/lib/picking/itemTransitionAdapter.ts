@@ -1,4 +1,5 @@
 import { syncLabelMrpFlagForOrderItem } from '../billing/syncLabelMrpFlag';
+import { recordPickerLabelMrpForOrderItem } from './recordPickerLabelMrp';
 import { supabase } from '../supabase/client';
 import type { FlagReason } from '../../utils/constants';
 import type { ScanResult } from '../../types';
@@ -89,6 +90,7 @@ class SupabasePickItemTransitionAdapter implements PickItemTransitionAdapter {
 
     if (shouldSyncLabelMrpAfterTransition(input)) {
       await syncLabelMrpFlagForOrderItem(input.itemId);
+      await recordPickerLabelMrpForOrderItem(input.itemId);
     }
 
     return {
