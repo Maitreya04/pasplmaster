@@ -12,11 +12,10 @@ import {
   sendInternalNotification,
   sendPickerReadyNotification,
 } from '../../../lib/pickerPush';
-import { buildBillingCustomerUpdate } from '../../../lib/buildBillingCustomerUpdate';
+import { applyBillingApprove } from '../../../lib/billing/applyBillingApprove';
 import { completeBillingWithClaim } from '../../../lib/billing/completeBilling';
 import { shouldNotifyPickers } from '../../../lib/billing/fulfillmentPath';
 import { ACCOUNT_HOLD_NOTE } from '../../../lib/billing/rejectionKind';
-import { applyWarehousePickSkipForPoOnlyLine } from '../../../lib/cartSupply';
 import type { FulfillmentPath, RejectionKind } from '../../../types';
 import { formatSupabaseUserMessage } from '../../../lib/supabase/formatUserMessage';
 import {
@@ -24,6 +23,7 @@ import {
   persistBillingLiveQueueDraft,
   type BillingLineEdit,
 } from '../../../lib/billing/liveQueueDraft';
+import { sortBillLines } from '../../../lib/billing/sortBillLines';
 
 import { useBillingFlow } from '../../../hooks/useBillingFlow';
 import { useBillingStockFreshness } from '../../../hooks/useBillingStockFreshness';
@@ -44,13 +44,8 @@ type BillingReportSnapshot = {
   salesperson: string | null;
   items: OrderItem[];
   flags: Record<number, ItemFlag>;
-};
-
-type LiveQueueLineState = {
-  qtyBilled: number;
-  qtyPending: number;
-  pendingSource: 'billing' | 'sales' | null;
-  pendingNote: string | null;
+  resolvedFulfillmentPath: FulfillmentPath;
+  effectivePickLineCount: number;
 };
 
 function mergeOrderLine(item: OrderItem, edit?: BillingLineEdit): OrderItem {
@@ -59,43 +54,6 @@ function mergeOrderLine(item: OrderItem, edit?: BillingLineEdit): OrderItem {
     ...item,
     qty_requested: edit.qtyRequested ?? item.qty_requested,
     price_quoted: edit.priceQuoted ?? item.price_quoted,
-  };
-}
-
-function deriveLiveQueueLineState(
-  item: OrderItem,
-  approvedQty: number,
-  flag: { type: 'no_stock' | 'partial'; availableQty?: number } | undefined,
-): LiveQueueLineState {
-  const rawPending = Math.max(
-    Math.max(0, item.qty_po ?? 0),
-    Math.max(0, item.qty_requested - approvedQty),
-    flag?.type === 'no_stock' ? item.qty_requested : 0,
-  );
-  const qtyPending = Math.min(item.qty_requested, rawPending);
-  const qtyBilled = flag?.type === 'no_stock'
-    ? 0
-    : Math.max(0, Math.min(approvedQty, item.qty_requested - qtyPending));
-
-  if (qtyPending <= 0) {
-    return {
-      qtyBilled,
-      qtyPending: 0,
-      pendingSource: null,
-      pendingNote: null,
-    };
-  }
-
-  return {
-    qtyBilled,
-    qtyPending,
-    pendingSource: flag ? 'billing' : 'sales',
-    pendingNote:
-      flag?.type === 'no_stock'
-        ? 'No stock in Busy — fully pending'
-        : flag?.type === 'partial'
-          ? `Partial stock — ${qtyBilled} billed, ${qtyPending} pending`
-          : 'Purchase order qty from sales checkout',
   };
 }
 
@@ -200,8 +158,8 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
   useEffect(() => {
     if (flow.state !== 'orderSheet') return;
     if (items.length === 0) return;
-    flow.pruneLineEditsForRemovedRows(new Set(items.map((i) => i.id)));
-  }, [items, flow.state, flow.pruneLineEditsForRemovedRows]);
+    flowRef.current.pruneLineEditsForRemovedRows(new Set(items.map((i) => i.id)));
+  }, [items, flow.state]);
 
   const freshnessQuery = useBillingStockFreshness(
     flow.state === 'orderSheet' ? effectiveOrderId : null,
@@ -522,8 +480,8 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
         if (eeErr) throw eeErr;
       }
 
-      const visibleMergedForReport = visibleLines.map((l) =>
-        mergeOrderLine(l, lineEdits[l.id]),
+      const visibleMergedForReport = sortBillLines(
+        visibleLines.map((l) => mergeOrderLine(l, lineEdits[l.id])),
       );
 
       const snapFlags: Record<number, ItemFlag> = {};
@@ -532,6 +490,25 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
         if (f) snapFlags[it.id] = f;
       }
 
+      const approveResult = await applyBillingApprove({
+        order: {
+          id: order.id,
+          order_number: order.order_number,
+          customer_id: order.customer_id,
+          customer_name: order.customer_name,
+          salesperson_name: order.salesperson_name,
+          stock_location_code: order.stock_location_code,
+          priority: order.priority,
+        },
+        visibleLines: visibleMergedForReport,
+        removedLines,
+        flags,
+        requestedFulfillmentPath: fulfillmentPath,
+        reviewer,
+        userId,
+        notifySales: true,
+      });
+
       const reportSnapshot: BillingReportSnapshot = {
         orderId: order.id,
         orderNumber: order.order_number?.trim() || '',
@@ -539,133 +516,25 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
         salesperson: order.salesperson_name?.trim() || null,
         items: visibleMergedForReport.map((line) => ({ ...line })),
         flags: snapFlags,
+        resolvedFulfillmentPath: approveResult.resolvedFulfillmentPath,
+        effectivePickLineCount: approveResult.effectivePickLineCount,
       };
 
-      const lineResults = visibleMergedForReport.map((item) => {
-        const flag = flags[item.id];
-        let approvedQty = item.qty_requested;
-        if (flag?.type === 'no_stock') approvedQty = 0;
-        else if (flag?.type === 'partial' && flag.availableQty != null) {
-          approvedQty = flag.availableQty;
-        }
-        const finalState = deriveLiveQueueLineState(item, approvedQty, flag);
-        return { item, approvedQty, flag, finalState };
-      });
-
-      const updateResponses = await Promise.all(
-        lineResults.map(({ item, finalState }) => {
-          const qty_shippable = finalState.qtyBilled;
-          const qty_po = Math.max(0, item.qty_requested - qty_shippable);
-          const update: Record<string, unknown> = {
-            qty_approved: qty_shippable,
-            qty_po,
-            qty_shippable,
-            qty_requested: item.qty_requested,
-            price_quoted: item.price_quoted,
-          };
-          applyWarehousePickSkipForPoOnlyLine(update, item, {
-            fulfillmentPath,
-            currentState: item.state,
-          });
-          return supabase.from('order_items').update(update).eq('id', item.id);
-        }),
-      );
-      const updateError = updateResponses.find((r) => r.error)?.error;
-      if (updateError) throw new Error(formatSupabaseUserMessage(updateError));
-
-      const { error: resolvePendingError } = await supabase
-        .from('pending_items')
-        .update({
-          status: 'resolved',
-          resolved_at: nowIso,
-          resolved_by: reviewer,
-        })
-        .eq('order_id', order.id)
-        .eq('status', 'pending');
-      if (resolvePendingError) throw resolvePendingError;
-
-      const pendingRows = lineResults
-        .map(({ item, finalState }) => {
-          if (finalState.qtyPending <= 0 || !finalState.pendingSource || !finalState.pendingNote) {
-            return null;
-          }
-          return {
-            order_id: order.id,
-            order_number: order.order_number,
-            customer_id: order.customer_id,
-            customer_name: order.customer_name,
-            item_id: item.item_id,
-            item_name: item.item_name,
-            qty_pending: finalState.qtyPending,
-            source: finalState.pendingSource,
-            created_by: reviewer,
-            note: finalState.pendingNote,
-            stock_location_code:
-              order.stock_location_code ?? item.stock_location_code ?? 'main_store',
-          };
-        })
-        .filter((row): row is NonNullable<typeof row> => row != null);
-
-      if (pendingRows.length > 0) {
-        const { error: pendingError } = await supabase.from('pending_items').insert(pendingRows);
-        if (pendingError) throw pendingError;
-      }
-
-      const nextItemCount = lineResults.length;
-      const nextTotalValue = lineResults.reduce((acc, { item, finalState }) => {
-        const rate = Number(item.price_quoted ?? 0);
-        return acc + rate * Math.max(0, finalState.qtyBilled);
-      }, 0);
-
-      const { error: orderTotalsErr } = await supabase
-        .from('orders')
-        .update({
-          item_count: nextItemCount,
-          total_value: nextTotalValue,
-        })
-        .eq('id', order.id);
-      if (orderTotalsErr) throw orderTotalsErr;
-
-      const { messageText: customerMessageText, summary: customerMessageSummary } =
-        buildBillingCustomerUpdate({
-          orderNumber: order.order_number,
-          customerName: order.customer_name,
-          businessName: import.meta.env.VITE_BUSINESS_DISPLAY_NAME,
-          date: new Date(),
-          lines: lineResults.map(({ item, finalState }) => ({
-            itemId: item.item_id,
-            name: item.item_name,
-            qtyRequested: item.qty_requested,
-            qtyBilled: finalState.qtyBilled,
-            qtyPending: finalState.qtyPending,
-          })),
-        });
-
-      const { data: customerUpdateRow, error: customerUpdateError } = await supabase
-        .from('billing_customer_updates')
-        .insert({
-          order_id: order.id,
-          message_text: customerMessageText,
-          summary_json: customerMessageSummary,
-          created_by: reviewer,
-        })
-        .select('id')
-        .single();
-
-      if (customerUpdateError) throw customerUpdateError;
-
-      // Complete billing with claim retry so transient claim desync does not fail approval.
-      await completeBillingWithClaim({
+      const billingComplete = await completeBillingWithClaim({
         orderId: order.id,
         claimId: activeClaimId,
         userId,
         claim,
         isResolvingFlags: false,
-        fulfillmentPath,
+        fulfillmentPath: approveResult.resolvedFulfillmentPath,
       });
 
+      if (approveResult.clientPathDowngraded || billingComplete.pick_path_downgraded) {
+        toast.info('No pickable lines — order direct-billed (skipped warehouse pick).');
+      }
+
       const approvedAt = new Date().toISOString();
-      if (shouldNotifyPickers(fulfillmentPath)) {
+      if (shouldNotifyPickers(approveResult.resolvedFulfillmentPath)) {
         void sendPickerReadyNotification({
           eventType: 'order_ready_to_pick',
           orderId: order.id,
@@ -675,21 +544,6 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
           approvedAt,
         }).catch(() => { /* silent */ });
       }
-
-      void sendInternalNotification({
-        eventType: 'order_update_for_sales',
-        orderId: order.id,
-        orderNumber: order.order_number,
-        customerName: order.customer_name,
-        salespersonName: order.salesperson_name,
-        messageBody: customerMessageText,
-        billingCustomerUpdateId: (customerUpdateRow as { id: number }).id,
-      }).catch((e) => {
-        console.error('order_update_for_sales', e);
-        toast.error(
-          `Sales notification failed: ${formatInternalNotificationError(e)}`,
-        );
-      });
 
       return reportSnapshot;
     },
@@ -967,6 +821,8 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
           salesperson={snap?.salesperson ?? order?.salesperson_name ?? null}
           items={snap?.items ?? items}
           flags={snap?.flags ?? {}}
+          resolvedFulfillmentPath={snap?.resolvedFulfillmentPath ?? 'warehouse_pick'}
+          effectivePickLineCount={snap?.effectivePickLineCount ?? 0}
           totalWaiting={Math.max(
             0,
             queue.filter(

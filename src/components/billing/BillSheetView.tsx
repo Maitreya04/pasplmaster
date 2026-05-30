@@ -1,6 +1,10 @@
 import { Bell, Check, Receipt } from '@phosphor-icons/react';
 import { BillLineRow, BillLineTableHeader } from './BillLineRow';
 import { billLinePosition } from '../../lib/billing/sortBillLines';
+import {
+  DeskFlaggedLineRow,
+  DeskFlaggedSectionHeader,
+} from '../../pages/billing/BillingDesk/DeskFlaggedLineRow';
 import { formatCurrencyRaw } from '../../utils/formatters';
 import {
   CHANGE_REASON_OPTIONS,
@@ -51,6 +55,32 @@ function StepCircle({
   );
 }
 
+function isHiddenPoSkippedFlag(
+  item: OrderItem,
+  hidePoSkippedFlags: boolean,
+  flaggedItemIds: Set<number>,
+): boolean {
+  return (
+    hidePoSkippedFlags &&
+    item.state === 'flagged' &&
+    !flaggedItemIds.has(item.id)
+  );
+}
+
+function isUnresolvedPickerFlag(
+  item: OrderItem,
+  edit: OverlayLineEdit | undefined,
+  flaggedItemIds: Set<number>,
+): boolean {
+  return (
+    item.state === 'flagged' &&
+    flaggedItemIds.has(item.id) &&
+    edit != null &&
+    edit.resolution == null &&
+    !edit.removed
+  );
+}
+
 export function BillSheetView({
   orderDetail,
   billSheet,
@@ -96,36 +126,78 @@ export function BillSheetView({
     flaggedItems,
   } = billSheet;
 
+  const flaggedItemIds = new Set(flaggedItems.map((item) => item.id));
+
   const displayLines = hidePoSkippedFlags
     ? sortedLines.filter(
         (item) =>
           item.state !== 'flagged' ||
-          flaggedItems.some((f) => f.id === item.id) ||
+          flaggedItemIds.has(item.id) ||
           edits[item.id]?.removed,
       )
     : sortedLines;
 
-  const renderRow = (item: OrderItem, edit: OverlayLineEdit) => (
-    <BillLineRow
-      key={item.id}
-      lineNo={billLinePosition(item, sortedLines)}
-      item={item}
-      edit={edit}
-      isSplitChild={item.split_from_id != null}
-      pendingRemoveId={pendingRemoveId}
-      showUndoRemove={undoRemoveId === item.id}
-      onAcceptPrice={() => acceptBoxPrice(item)}
-      onKeepQuoted={() => keepQuoted(item)}
-      onRemove={() => removeFlaggedLine(item)}
-      onUndoRemove={() => undoRemove(item.id)}
-      onPriceChange={(price) => updatePrice(item.id, price, item)}
-      onRequestRemove={() => setPendingRemoveId(item.id)}
-      onConfirmRemove={() => {
-        patchEdit(item.id, { removed: true });
-        setPendingRemoveId(null);
-      }}
-    />
-  );
+  const lineNodes: React.ReactNode[] = [];
+  let billHeaderShown = false;
+  let flaggedHeaderShown = false;
+
+  for (const item of displayLines) {
+    const edit = edits[item.id];
+    if (!edit) continue;
+    if (isHiddenPoSkippedFlag(item, hidePoSkippedFlags, flaggedItemIds)) continue;
+
+    if (isUnresolvedPickerFlag(item, edit, flaggedItemIds)) {
+      if (!flaggedHeaderShown) {
+        lineNodes.push(<DeskFlaggedSectionHeader key="flagged-header" />);
+        flaggedHeaderShown = true;
+      }
+      lineNodes.push(
+        <DeskFlaggedLineRow
+          key={item.id}
+          item={item}
+          edit={edit}
+          onAcceptPrice={() => acceptBoxPrice(item)}
+          onKeepQuoted={() => keepQuoted(item)}
+          onRemove={() => removeFlaggedLine(item)}
+          onUndoRemove={() => undoRemove(item.id)}
+          onPriceChange={(price) => updatePrice(item.id, price, item)}
+          showUndoRemove={undoRemoveId === item.id}
+        />,
+      );
+      continue;
+    }
+
+    if (item.state === 'flagged' && edit.resolution == null && !edit.removed) {
+      continue;
+    }
+
+    if (!billHeaderShown) {
+      lineNodes.push(<BillLineTableHeader key="bill-header" compact={compact} />);
+      billHeaderShown = true;
+    }
+
+    lineNodes.push(
+      <BillLineRow
+        key={item.id}
+        lineNo={billLinePosition(item, sortedLines)}
+        item={item}
+        edit={edit}
+        isSplitChild={item.split_from_id != null}
+        pendingRemoveId={pendingRemoveId}
+        showUndoRemove={undoRemoveId === item.id}
+        onAcceptPrice={() => acceptBoxPrice(item)}
+        onKeepQuoted={() => keepQuoted(item)}
+        onRemove={() => removeFlaggedLine(item)}
+        onUndoRemove={() => undoRemove(item.id)}
+        onPriceChange={(price) => updatePrice(item.id, price, item)}
+        onRequestRemove={() => setPendingRemoveId(item.id)}
+        onConfirmRemove={() => {
+          patchEdit(item.id, { removed: true });
+          setPendingRemoveId(null);
+        }}
+      />,
+    );
+  }
 
   return (
     <div className={variant === 'page' ? 'space-y-3' : 'flex flex-col min-h-0 flex-1'}>
@@ -137,7 +209,7 @@ export function BillSheetView({
         {resolvingFlags && unresolvedFlagged.length > 0 && (
           <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-[var(--border-faint)] bg-[var(--bg-tertiary)]">
             <p className="text-[10px] text-[var(--content-quaternary)]">
-              Resolve flags inline · row order stays fixed
+              Resolve flags inline · row order matches Busy paste
             </p>
             <div className="flex shrink-0 flex-wrap justify-end gap-1">
               {unresolvedPriceCount >= 2 && (
@@ -169,15 +241,7 @@ export function BillSheetView({
           </p>
         )}
 
-        <BillLineTableHeader compact={compact} />
-        {displayLines.map((item) => {
-          const edit = edits[item.id];
-          if (!edit) return null;
-          if (item.state === 'flagged' && hidePoSkippedFlags && !flaggedItems.some((f) => f.id === item.id)) {
-            return null;
-          }
-          return renderRow(item, edit);
-        })}
+        {lineNodes.length > 0 && <div>{lineNodes}</div>}
 
         {resolvingFlags && allFlagsResolved && unresolvedFlagged.length === 0 && (
           <p className="px-3 py-2 text-[11px] text-[var(--content-positive)] border-t border-[var(--border-faint)]">

@@ -31,7 +31,13 @@ import { Check, Copy, Lightning, CheckCircle, Warning, Question, CaretLeft, Care
 import type { OrderWithClaimInfo } from '../../hooks/useClaimableOrders';
 import type { OrderItem } from '../../types';
 import { isFocOrderItem } from '../../lib/specialPricing';
-import { applyWarehousePickSkipForPoOnlyLine, countPickableOrderLines } from '../../lib/cartSupply';
+import { applyWarehousePickSkipForPoOnlyLine } from '../../lib/cartSupply';
+import { BILLING_OOS_FLAG_REASON, flagsFromCompactDecisions } from '../../lib/billing/applyBillingApprove';
+import {
+  countEffectivePickLinesAfterBilling,
+  resolveFulfillmentPathAfterBilling,
+} from '../../lib/billing/billLineOutcome';
+import { persistAndNotifySalesOrderUpdate } from '../../lib/billing/notifySalesOrderUpdate';
 
 function sortByUrgencyAndAge(orders: OrderWithClaimInfo[]): OrderWithClaimInfo[] {
   return [...orders].sort((a, b) => {
@@ -653,32 +659,56 @@ export default function CompactQueuePage() {
   // 3. Order Detail
   const { data: order, isLoading: orderLoading } = useOrderDetail(effectiveOrderId);
   const items = useMemo(() => order?.items ?? [], [order]);
-  const pickLineCount = useMemo(() => countPickableOrderLines(items), [items]);
-  const [fulfillmentPath, setFulfillmentPath] = useState<FulfillmentPath>('warehouse_pick');
-
-  useEffect(() => {
-    if (!order) return;
-    setFulfillmentPath(
-      defaultFulfillmentPath(order.stock_location_code, order.pick_line_count ?? pickLineCount),
-    );
-  }, [order?.id, order?.stock_location_code, order?.pick_line_count, pickLineCount]);
 
   // 4. State Machine
   const machine = useBillingFlowMachine(items);
 
+  const compactFlags = useMemo(
+    () => flagsFromCompactDecisions(items, machine.decisions),
+    [items, machine.decisions],
+  );
+  const pickLineCount = useMemo(
+    () => countEffectivePickLinesAfterBilling(items, compactFlags),
+    [items, compactFlags],
+  );
+  const autoFulfillmentPath = useMemo(
+    () =>
+      order
+        ? defaultFulfillmentPath(order.stock_location_code, pickLineCount)
+        : ('warehouse_pick' as FulfillmentPath),
+    [order, pickLineCount],
+  );
+  const [manualFulfillmentPath, setManualFulfillmentPath] = useState<FulfillmentPath | null>(null);
+  const fulfillmentScopeKey = `${order?.id ?? ''}:${pickLineCount}:${order?.stock_location_code ?? ''}`;
+  const [boundFulfillmentScopeKey, setBoundFulfillmentScopeKey] = useState(fulfillmentScopeKey);
+  if (fulfillmentScopeKey !== boundFulfillmentScopeKey) {
+    setBoundFulfillmentScopeKey(fulfillmentScopeKey);
+    setManualFulfillmentPath(null);
+  }
+  const fulfillmentPath = manualFulfillmentPath ?? autoFulfillmentPath;
+
   // Auto-claim on commit
   const claimAttempted = useRef<number | null>(null);
   const resetMachine = machine.reset;
-  // Block commit when sales has frozen the order in My Orders
-  useEffect(() => {
-    if (!activeInQueue || machine.state !== 'commit') return;
-    if (!isSalesEditFreshLock(activeInQueue)) return;
-    const who = activeInQueue.sales_edit_claim_info?.claimed_by_name ?? 'Sales';
-    toast.warning(`This order is frozen — ${who} is editing it from My Orders.`);
-    claimAttempted.current = null;
+  const salesFrozenBlocksCommit =
+    activeInQueue != null &&
+    machine.state === 'commit' &&
+    isSalesEditFreshLock(activeInQueue);
+  const frozenBlockKey = salesFrozenBlocksCommit ? String(activeInQueue.id) : null;
+  const [handledFrozenBlockKey, setHandledFrozenBlockKey] = useState<string | null>(null);
+  if (frozenBlockKey !== null && frozenBlockKey !== handledFrozenBlockKey) {
+    setHandledFrozenBlockKey(frozenBlockKey);
     resetMachine();
     setSelectedOrderId(null);
-  }, [activeInQueue, machine.state, toast, resetMachine]);
+  } else if (frozenBlockKey === null && handledFrozenBlockKey !== null) {
+    setHandledFrozenBlockKey(null);
+  }
+  useEffect(() => {
+    if (handledFrozenBlockKey === null || !activeInQueue) return;
+    claimAttempted.current = null;
+    const who = activeInQueue.sales_edit_claim_info?.claimed_by_name ?? 'Sales';
+    toast.warning(`This order is frozen — ${who} is editing it from My Orders.`);
+  }, [handledFrozenBlockKey, activeInQueue, toast]);
 
   useEffect(() => {
     if (machine.state !== 'commit' || !effectiveOrderId || isClaimedByMe) return;
@@ -751,6 +781,25 @@ export default function CompactQueuePage() {
         return { ...item, approvedQty, decision };
       });
 
+      const flags = flagsFromCompactDecisions(items, machine.decisions);
+      const resolvedFulfillmentPath = resolveFulfillmentPathAfterBilling(
+        fulfillmentPath,
+        order.stock_location_code,
+        countEffectivePickLinesAfterBilling(items, flags),
+      );
+
+      const nowIso = new Date().toISOString();
+      const { error: resolvePendingError } = await supabase
+        .from('pending_items')
+        .update({
+          status: 'resolved',
+          resolved_at: nowIso,
+          resolved_by: reviewer,
+        })
+        .eq('order_id', order.id)
+        .eq('status', 'pending');
+      if (resolvePendingError) throw resolvePendingError;
+
       for (const item of finalItems) {
         const approvedQty = item.approvedQty;
         const qtyPo = Math.max(0, item.qty_requested - approvedQty);
@@ -763,9 +812,10 @@ export default function CompactQueuePage() {
           update.qty_approved = 0;
           update.qty_shippable = 0;
           update.qty_po = item.qty_requested;
+          update.flag_reason = BILLING_OOS_FLAG_REASON;
         }
         applyWarehousePickSkipForPoOnlyLine(update, item, {
-          fulfillmentPath,
+          fulfillmentPath: resolvedFulfillmentPath,
           currentState: item.state,
         });
         const { error: updateError } = await supabase.from('order_items').update(update).eq('id', item.id);
@@ -791,39 +841,66 @@ export default function CompactQueuePage() {
         }
       }
 
-      await completeBillingWithClaim({
-        orderId: order.id,
-        claimId,
-        userId,
-        claim,
-        isResolvingFlags: false,
-        fulfillmentPath,
+      const customerLines = finalItems.map((item) => {
+        const approvedQty = item.approvedQty;
+        const qtyPending =
+          item.decision === 'drop_entirely'
+            ? item.qty_requested
+            : Math.max(0, item.qty_requested - approvedQty);
+        const qtyBilled = item.decision === 'drop_entirely' ? 0 : approvedQty;
+        return {
+          itemId: item.item_id,
+          name: item.item_name,
+          qtyRequested: item.qty_requested,
+          qtyBilled,
+          qtyPending,
+        };
       });
 
-      if (vars?.salesDraftText) {
-        try {
-          const notifyResult = await sendInternalNotification({
+      try {
+        const { messageText } = await persistAndNotifySalesOrderUpdate({
+          orderId: order.id,
+          orderNumber: order.order_number,
+          customerName: order.customer_name,
+          salespersonName: order.salesperson_name,
+          createdBy: reviewer,
+          lines: customerLines,
+          notifySales: true,
+        });
+        if (vars?.salesDraftText?.trim() && vars.salesDraftText.trim() !== messageText) {
+          await sendInternalNotification({
             eventType: 'order_update_for_sales',
             orderId: order.id,
             orderNumber: order.order_number,
             customerName: order.customer_name,
             salespersonName: order.salesperson_name,
-            messageBody: vars.salesDraftText,
+            messageBody: vars.salesDraftText.trim(),
           });
-          if (notifyResult?.inboxCount === 0) {
-            toast.info(
-              'No sales users in the database received this update. Check users.role = sales and is_active.',
-            );
-          }
-        } catch (e) {
-          console.error('order_update_for_sales', e);
-          toast.error(
-            `Sales notification failed: ${formatInternalNotificationError(e)}. Deploy send-internal-notification and run migration 014.`,
-          );
         }
+      } catch (e) {
+        console.error('order_update_for_sales', e);
+        toast.error(
+          `Sales notification failed: ${formatInternalNotificationError(e)}. Deploy send-internal-notification and run migration 014.`,
+        );
       }
 
-      if (shouldNotifyPickers(fulfillmentPath)) {
+      const billingComplete = await completeBillingWithClaim({
+        orderId: order.id,
+        claimId,
+        userId,
+        claim,
+        isResolvingFlags: false,
+        fulfillmentPath: resolvedFulfillmentPath,
+      });
+
+      if (
+        (fulfillmentPath === 'warehouse_pick' && resolvedFulfillmentPath === 'direct_bill') ||
+        billingComplete.pick_path_downgraded
+      ) {
+        toast.info('No pickable lines — order direct-billed (skipped warehouse pick).');
+      }
+
+      if (shouldNotifyPickers(resolvedFulfillmentPath)) {
         try {
           await sendPickerReadyNotification({
             eventType: 'order_ready_to_pick',
@@ -908,7 +985,7 @@ export default function CompactQueuePage() {
             activeIndex={machine.activeItemIndex}
             isSubmitting={approveMutation.isPending}
             fulfillmentPath={fulfillmentPath}
-            onFulfillmentPathChange={setFulfillmentPath}
+            onFulfillmentPathChange={setManualFulfillmentPath}
             stockLocationCode={order.stock_location_code}
             pickLineCount={pickLineCount}
             onAdvance={machine.advanceProcessCursor}
@@ -946,7 +1023,7 @@ export default function CompactQueuePage() {
             decisions={machine.decisions}
             manualFlags={machine.manualFlags}
             fulfillmentPath={fulfillmentPath}
-            onFulfillmentPathChange={setFulfillmentPath}
+            onFulfillmentPathChange={setManualFulfillmentPath}
             stockLocationCode={order.stock_location_code}
             pickLineCount={pickLineCount}
             isSubmitting={approveMutation.isPending}

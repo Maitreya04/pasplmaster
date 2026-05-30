@@ -11,7 +11,8 @@ import {
 } from '@phosphor-icons/react';
 import { ACCOUNT_HOLD_NOTE } from '../../../lib/billing/rejectionKind';
 import type { FulfillmentPath, OrderItem, RejectionKind, StockLocationCode } from '../../../types';
-import { countPickableOrderLines } from '../../../lib/cartSupply';
+import { countEffectivePickLinesAfterBilling } from '../../../lib/billing/billLineOutcome';
+import type { BillingLiveQueueFlag } from '../../../lib/billing/liveQueueDraft';
 import { defaultFulfillmentPath } from '../../../lib/billing/fulfillmentPath';
 import { FulfillmentPathSelector } from '../../../components/billing/FulfillmentPathSelector';
 import type { BillingLineEdit, ItemFlag } from '../../../hooks/useBillingFlow';
@@ -31,7 +32,11 @@ import {
 } from '../../../utils/formatters';
 import { orderItemConfirmedMrp } from '../../../lib/billing/orderItemSplitGroups';
 import { billLineIdentity } from '../../../lib/billing/billLineIdentity';
-import { sortBillLines } from '../../../lib/billing/sortBillLines';
+import {
+  buildBusyPasteText,
+  sortBillLines,
+  sortFlagsByBillLine,
+} from '../../../lib/billing/sortBillLines';
 import { BILLING_LABEL_CHIP } from '../../../lib/billing/mrpWorkflowCopy';
 
 /** UI labels for billing (Windows-first). Finish still works with Cmd+Enter on Mac. */
@@ -133,23 +138,34 @@ export function OrderSheetView({
     [items, lineEdits],
   );
 
-  const pickLineCount = useMemo(
-    () => countPickableOrderLines(visibleRows),
-    [visibleRows],
-  );
-
-  const [fulfillmentPath, setFulfillmentPath] = useState<FulfillmentPath>(() =>
-    defaultFulfillmentPath(stockLocationCode, pickLineCount),
-  );
-
-  useEffect(() => {
-    setFulfillmentPath(defaultFulfillmentPath(stockLocationCode, pickLineCount));
-  }, [orderNumber, stockLocationCode, pickLineCount]);
-
   const mergedVisibleRows = useMemo(
     () => visibleRows.map((i) => mergeLine(i, lineEdits[i.id])),
     [visibleRows, lineEdits],
   );
+
+  const pickLineCount = useMemo(
+    () =>
+      countEffectivePickLinesAfterBilling(
+        mergedVisibleRows,
+        flags as Record<number, BillingLiveQueueFlag>,
+      ),
+    [mergedVisibleRows, flags],
+  );
+
+  const autoFulfillmentPath = useMemo(
+    () => defaultFulfillmentPath(stockLocationCode, pickLineCount),
+    [stockLocationCode, pickLineCount],
+  );
+  const [manualFulfillmentPath, setManualFulfillmentPath] = useState<FulfillmentPath | null>(null);
+  const [fulfillmentScopeKey, setFulfillmentScopeKey] = useState(
+    () => `${orderNumber}:${pickLineCount}:${stockLocationCode ?? ''}`,
+  );
+  const nextFulfillmentScopeKey = `${orderNumber}:${pickLineCount}:${stockLocationCode ?? ''}`;
+  if (nextFulfillmentScopeKey !== fulfillmentScopeKey) {
+    setFulfillmentScopeKey(nextFulfillmentScopeKey);
+    setManualFulfillmentPath(null);
+  }
+  const fulfillmentPath = manualFulfillmentPath ?? autoFulfillmentPath;
 
   const [copyState, setCopyState] = useState<CopyState>('ready');
 
@@ -222,15 +238,13 @@ export function OrderSheetView({
     };
   }, []);
 
-  useEffect(() => {
-    if (!lastRemoved) return;
+  const visibleLastRemoved = useMemo(() => {
+    if (!lastRemoved) return null;
     const stillRemoved = !!lineEdits[lastRemoved.id]?.removed;
     const stillPresent = items.some((i) => i.id === lastRemoved.id);
-    if (!stillRemoved || !stillPresent) {
-      if (lastRemovedTimerRef.current) clearTimeout(lastRemovedTimerRef.current);
-      setLastRemoved(null);
-    }
-  }, [items, lineEdits, lastRemoved]);
+    if (!stillRemoved || !stillPresent) return null;
+    return lastRemoved;
+  }, [lastRemoved, lineEdits, items]);
 
   const flagCount = Object.keys(flags).length;
   const { specialLineCount, specialQty } = summarizeSpecialPricing(mergedVisibleRows);
@@ -264,12 +278,14 @@ export function OrderSheetView({
   }, [copyState]);
 
   const copyAllItems = useCallback(() => {
-    const text = mergedVisibleRows
-      .map((i) => `${orderItemDisplayName(i)}\t${i.qty_requested}`)
-      .join('\n');
-    copy(text, 'all-items');
+    copy(buildBusyPasteText(mergedVisibleRows), 'all-items');
     setCopyState('copied');
   }, [mergedVisibleRows, copy]);
+
+  const sortedFlagEntries = useMemo(
+    () => sortFlagsByBillLine(flags, items),
+    [flags, items],
+  );
 
   const showHintsTemporarily = useCallback(() => {
     setShowHints(true);
@@ -574,6 +590,15 @@ export function OrderSheetView({
     ? 'density-compact h-full min-h-0 bg-[var(--bg-primary)] flex flex-col animate-slide-up overflow-hidden'
     : 'density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col animate-slide-up';
 
+  const codeColClass = embedded
+    ? 'table-cell align-top min-w-0 w-[7rem] max-w-[7rem]'
+    : 'hidden sm:table-cell align-top min-w-0 w-[10.5rem] max-w-[10.5rem] lg:w-[13rem] lg:max-w-[13rem]';
+  const tableClass = embedded ? 'ds-table w-full table-fixed text-[13px]' : 'ds-table w-full table-fixed';
+  const indexColClass = embedded ? 'w-10 text-center border-l-[3px] border-l-transparent' : 'w-14 text-center border-l-[3px] border-l-transparent';
+  const rateColClass = embedded ? 'text-right w-20' : 'text-right w-28';
+  const qtyColClass = embedded ? 'text-right w-12' : 'text-right w-16';
+  const statusColClass = embedded ? 'text-right w-[7rem]' : 'text-right w-[8.5rem]';
+
   return (
     <div className={shellClass}>
 
@@ -685,17 +710,15 @@ export function OrderSheetView({
           </button>
 
           <div className="ds-card overflow-hidden">
-            <table className="ds-table w-full table-fixed">
+            <table className={tableClass}>
               <thead>
                 <tr>
-                  <th className="w-14 text-center border-l-[3px] border-l-transparent">#</th>
+                  <th className={indexColClass}>#</th>
                   <th className="min-w-0">Item</th>
-                  <th className="hidden sm:table-cell w-[10.5rem] max-w-[10.5rem] lg:w-[13rem] lg:max-w-[13rem] align-top">
-                    Code
-                  </th>
-                  <th className="text-right w-28">Rate</th>
-                  <th className="text-right w-16">Qty</th>
-                  <th className="text-right w-[8.5rem]">Status</th>
+                  <th className={codeColClass}>Code</th>
+                  <th className={rateColClass}>Rate</th>
+                  <th className={qtyColClass}>Qty</th>
+                  <th className={statusColClass}>Status</th>
                   <th className="w-10 text-center pr-2"> </th>
                 </tr>
               </thead>
@@ -840,7 +863,7 @@ export function OrderSheetView({
                             </span>
                           )}
                         </div>
-                        {productCode && (
+                        {productCode && !embedded && (
                           <div className="mt-1 sm:hidden max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]">
                             <span
                               className="inline-block font-ds-label-size font-mono text-[var(--content-quaternary)] whitespace-nowrap"
@@ -858,7 +881,7 @@ export function OrderSheetView({
                         ) : null}
                       </td>
 
-                      <td className="hidden sm:table-cell align-top min-w-0 w-[10.5rem] max-w-[10.5rem] lg:w-[13rem] lg:max-w-[13rem]">
+                      <td className={codeColClass}>
                         <div
                           className="max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]"
                           title={lineCodes.pickCode || undefined}
@@ -1130,7 +1153,7 @@ export function OrderSheetView({
         </div>
       </div>
 
-      {lastRemoved && (
+      {visibleLastRemoved && (
         <div className="shrink-0 px-4 lg:px-6 pt-3" role="status" aria-live="polite">
           <div className="max-w-3xl mx-auto flex items-center gap-3 rounded-2xl border border-[var(--border-negative)] bg-[var(--bg-negative-subtle)] px-3 py-2.5 shadow-sm animate-slide-up">
             <span className="ds-chip ds-chip--sm shrink-0 bg-[var(--bg-negative)] text-white border-transparent">
@@ -1138,22 +1161,22 @@ export function OrderSheetView({
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-[var(--content-primary)] truncate">
-                {lastRemoved.name}
+                {visibleLastRemoved.name}
               </p>
               <p className="font-ds-label-size text-[var(--content-tertiary)] tabular-nums">
-                {lastRemoved.code ? (
-                  <span className="font-mono">{lastRemoved.code}</span>
+                {visibleLastRemoved.code ? (
+                  <span className="font-mono">{visibleLastRemoved.code}</span>
                 ) : null}
-                {lastRemoved.code ? <span className="px-1">·</span> : null}
+                {visibleLastRemoved.code ? <span className="px-1">·</span> : null}
                 <span>
-                  {lastRemoved.qty} ×{' '}
-                  {lastRemoved.price != null ? formatCurrency(lastRemoved.price) : '—'}
+                  {visibleLastRemoved.qty} ×{' '}
+                  {visibleLastRemoved.price != null ? formatCurrency(visibleLastRemoved.price) : '—'}
                 </span>
               </p>
             </div>
             <button
               type="button"
-              onClick={() => handleRestoreLine(lastRemoved.id)}
+              onClick={() => handleRestoreLine(visibleLastRemoved.id)}
               className="shrink-0 inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl text-xs font-semibold bg-[var(--bg-primary)] border border-[var(--border-accent)] text-[var(--content-accent)] hover:opacity-90"
             >
               <ArrowCounterClockwise size={14} weight="bold" />
@@ -1204,7 +1227,7 @@ export function OrderSheetView({
           <div className="w-full mb-3">
             <FulfillmentPathSelector
               value={fulfillmentPath}
-              onChange={setFulfillmentPath}
+              onChange={setManualFulfillmentPath}
               stockLocationCode={stockLocationCode}
               pickLineCount={pickLineCount}
               disabled={isApproving || isRejecting || isClaiming}
@@ -1261,7 +1284,7 @@ export function OrderSheetView({
             <div className="mb-4 shrink-0">
               <FulfillmentPathSelector
                 value={fulfillmentPath}
-                onChange={setFulfillmentPath}
+                onChange={setManualFulfillmentPath}
                 stockLocationCode={stockLocationCode}
                 pickLineCount={pickLineCount}
                 disabled={isApproving || isClaiming}
@@ -1300,22 +1323,22 @@ export function OrderSheetView({
                   {billedNormalCount} item{billedNormalCount !== 1 ? 's' : ''} billed normally
                 </p>
               )}
-              {Object.entries(flags)
+              {sortedFlagEntries
                 .filter(([, f]) => f.type === 'partial')
-                .map(([idStr, f]) => {
-                  const item = mergedVisibleRows.find((it) => it.id === Number(idStr));
+                .map(([orderItemId, f]) => {
+                  const item = mergedVisibleRows.find((it) => it.id === orderItemId);
                   return (
-                    <p key={idStr} className="text-sm text-[var(--content-warning)]">
+                    <p key={orderItemId} className="text-sm text-[var(--content-warning)]">
                       {item ? orderItemDisplayName(item) : ''} — {f.availableQty} of {item?.qty_requested}, rest pending
                     </p>
                   );
                 })}
-              {Object.entries(flags)
+              {sortedFlagEntries
                 .filter(([, f]) => f.type === 'no_stock')
-                .map(([idStr]) => {
-                  const item = mergedVisibleRows.find((it) => it.id === Number(idStr));
+                .map(([orderItemId]) => {
+                  const item = mergedVisibleRows.find((it) => it.id === orderItemId);
                   return (
-                    <p key={idStr} className="text-sm text-[var(--content-negative)]">
+                    <p key={orderItemId} className="text-sm text-[var(--content-negative)]">
                       {item ? orderItemDisplayName(item) : ''} — no stock, {item?.qty_requested} pending
                     </p>
                   );
@@ -1324,7 +1347,9 @@ export function OrderSheetView({
 
             <div className="shrink-0 border-t border-[var(--border-subtle)] pt-4 mt-0">
               <p className="font-ds-label-size text-[var(--content-quaternary)] mb-4">
-                Out of stock items will be marked pending. Partial items billed at available qty.
+                {pickLineCount <= 0
+                  ? 'Nothing to pick — order will direct-bill only; pending lines go to the pending queue.'
+                  : 'Out of stock items will be marked pending. Partial items billed at available qty.'}
               </p>
 
               <p className="font-ds-label-size text-[var(--content-quaternary)] mb-5 text-center sm:text-left">

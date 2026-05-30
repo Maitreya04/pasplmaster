@@ -1,8 +1,9 @@
 import { useEffect, useMemo, type ReactElement } from 'react';
 import { CheckCircle, Copy, Check, WhatsappLogo, ArrowRight } from '@phosphor-icons/react';
 import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
+import { sortBillLines } from '../../../lib/billing/sortBillLines';
 import { orderLineLabel } from '../../../utils/formatters';
-import type { OrderItem } from '../../../types';
+import type { FulfillmentPath, OrderItem } from '../../../types';
 import type { ItemFlag } from '../../../hooks/useBillingFlow';
 
 interface ReportViewProps {
@@ -12,8 +13,26 @@ interface ReportViewProps {
   salesperson: string | null;
   items: OrderItem[];
   flags: Record<number, ItemFlag>;
+  resolvedFulfillmentPath?: FulfillmentPath;
+  effectivePickLineCount?: number;
   totalWaiting: number;
   onNext: () => void;
+}
+
+function fulfillmentFooterMessage(
+  path: FulfillmentPath,
+  pickLineCount: number,
+  pendingLineCount: number,
+): string {
+  if (path === 'direct_bill' && pickLineCount <= 0) {
+    return pendingLineCount > 0
+      ? 'Order direct-billed — pending items recorded, no warehouse pick.'
+      : 'Order direct-billed — no warehouse pick.';
+  }
+  if (pendingLineCount > 0 && pickLineCount > 0) {
+    return `Approved — ${pickLineCount} line${pickLineCount === 1 ? '' : 's'} sent to warehouse pick; ${pendingLineCount} pending.`;
+  }
+  return 'Order approved and sent to warehouse pick.';
 }
 
 function buildReportText(params: {
@@ -22,8 +41,18 @@ function buildReportText(params: {
   salesperson: string | null;
   items: OrderItem[];
   flags: Record<number, ItemFlag>;
+  resolvedFulfillmentPath: FulfillmentPath;
+  effectivePickLineCount: number;
 }): string {
-  const { orderNumber, orderName, salesperson, items, flags } = params;
+  const {
+    orderNumber,
+    orderName,
+    salesperson,
+    items,
+    flags,
+    resolvedFulfillmentPath,
+    effectivePickLineCount,
+  } = params;
   const lines: string[] = [];
 
   const num = orderNumber.trim();
@@ -62,7 +91,14 @@ function buildReportText(params: {
     lines.push(`${billedCount} item${billedCount !== 1 ? 's' : ''} billed as ordered.`);
   }
 
-  lines.push('Order approved and sent to picking.');
+  const pendingLineCount = items.filter((item) => flags[item.id]).length;
+  lines.push(
+    fulfillmentFooterMessage(
+      resolvedFulfillmentPath,
+      effectivePickLineCount,
+      pendingLineCount,
+    ),
+  );
   return lines.join('\n\n');
 }
 
@@ -73,11 +109,14 @@ export function ReportView({
   salesperson,
   items,
   flags,
+  resolvedFulfillmentPath = 'warehouse_pick',
+  effectivePickLineCount = 0,
   totalWaiting,
   onNext,
 }: ReportViewProps): ReactElement {
   const { copy, copiedId } = useCopyToClipboard();
   const hasFlags = Object.keys(flags).length > 0;
+  const sentToPick = resolvedFulfillmentPath === 'warehouse_pick' && effectivePickLineCount > 0;
 
   const shellClass = embedded
     ? 'density-compact h-full min-h-0 bg-[var(--bg-primary)] flex flex-col items-center justify-center p-4 animate-slide-up overflow-y-auto'
@@ -87,12 +126,31 @@ export function ReportView({
     ? 'density-compact h-full min-h-0 bg-[var(--bg-primary)] flex flex-col items-center justify-center p-3 animate-slide-up overflow-y-auto'
     : 'density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-center p-4 lg:p-6 animate-slide-up';
 
+  const sortedItems = useMemo(() => sortBillLines(items), [items]);
+
   const reportText = useMemo(
-    () => buildReportText({ orderNumber, orderName, salesperson, items, flags }),
-    [orderNumber, orderName, salesperson, items, flags],
+    () =>
+      buildReportText({
+        orderNumber,
+        orderName,
+        salesperson,
+        items: sortedItems,
+        flags,
+        resolvedFulfillmentPath,
+        effectivePickLineCount,
+      }),
+    [
+      orderNumber,
+      orderName,
+      salesperson,
+      sortedItems,
+      flags,
+      resolvedFulfillmentPath,
+      effectivePickLineCount,
+    ],
   );
 
-  const billedCount = items.filter((item) => !flags[item.id]).length;
+  const billedCount = sortedItems.filter((item) => !flags[item.id]).length;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -124,7 +182,9 @@ export function ReportView({
             {orderName} — billed
           </h2>
           <p className="text-sm text-[var(--content-secondary)] mb-8">
-            All {items.length} items billed. Sent to picking.
+            {sentToPick
+              ? `All ${items.length} items billed. Sent to warehouse pick.`
+              : `All ${items.length} items billed. Direct bill — no warehouse pick.`}
           </p>
           <button
             onClick={onNext}

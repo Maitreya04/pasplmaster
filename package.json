@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:contrast": "node scripts/contrast-test.mjs",
+    "test:bill-outcome": "npx tsx src/lib/billing/billLineOutcome.test.ts",
+    "test:sort-bill-lines": "npx tsx src/lib/billing/sortBillLines.test.ts",
     "tokens:generate": "node scripts/generate-palette.mjs"
   },
   "dependencies": {

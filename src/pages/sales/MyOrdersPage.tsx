@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CaretDown, CaretUp, Check, Copy, Package, Trash, Warning } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
@@ -26,6 +27,7 @@ import {
   pendingRecoveryLabel,
 } from '../../lib/pendingRecovery';
 import { supabase } from '../../lib/supabase/client';
+import { BILLING_OOS_FLAG_REASON } from '../../lib/billing/applyBillingApprove';
 import { SalesEditAddLineSheet } from './SalesEditAddLineSheet';
 
 const SALES_CLAIM_MESSAGES: Record<string, string> = {
@@ -50,7 +52,6 @@ const REMOVE_SALES_LINE_MESSAGES: Record<string, string> = {
   submit_failed: 'Could not remove line. Try again.',
 };
 
-const BILLING_OOS_FLAG_REASON = 'Out of Stock (Billing)';
 const TEXT_STATUS_PARTIAL = 'text-[color:var(--content-warning-on-light)]';
 const TEXT_STATUS_CRITICAL = 'text-[color:var(--content-negative)]';
 
@@ -64,6 +65,7 @@ function isPickerOrNonBillingFlag(item: OrderItem): boolean {
 
 function inferSalesUpdateLabel(text: string): string {
   const t = text.toLowerCase();
+  if (t.includes('bill finalized') || t.includes('direct-bill')) return 'Bill finalized';
   if (t.includes('sent to po') || t.includes('pending') || t.includes('po.')) return 'Partial (PO)';
   if (t.includes('*billed:*') || t.includes('billed items as of')) return 'Billed';
   if (t.includes('removed from order') || t.includes('dropped')) return 'Dropped';
@@ -199,13 +201,29 @@ function mergeOrderLinesAndPending(
 
 // ─── Tiny inline tag ──────────────────────────────────────────
 
-function StatusTag({ variant, pickerFlagged }: { variant: StockUiVariant; pickerFlagged: boolean }): React.JSX.Element | null {
+function StatusTag({
+  variant,
+  pickerFlagged,
+  pickerFlagReason,
+}: {
+  variant: StockUiVariant;
+  pickerFlagged: boolean;
+  pickerFlagReason?: string | null;
+}): React.JSX.Element | null {
   if (variant === 'ok' && !pickerFlagged) return null;
 
   if (pickerFlagged) {
+    const isOos =
+      pickerFlagReason === 'Out of Stock' || pickerFlagReason === 'Out of Stock (Billing)';
     return (
-      <span className="inline-flex shrink-0 items-center rounded px-1.5 py-px font-ds-micro font-semibold bg-[var(--bg-tertiary)] text-[var(--content-secondary)] leading-tight">
-        Warehouse
+      <span
+        className={`inline-flex shrink-0 items-center rounded px-1.5 py-px font-ds-micro font-semibold leading-tight ${
+          isOos
+            ? `bg-[var(--bg-negative-subtle)] ${TEXT_STATUS_CRITICAL}`
+            : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
+        }`}
+      >
+        {isOos ? 'Picker: no stock' : 'Picker flagged'}
       </span>
     );
   }
@@ -247,6 +265,7 @@ function OrderLineRow({
   name,
   variant,
   pickerFlagged,
+  pickerFlagReason,
   billed,
   requested,
   lineTotal,
@@ -262,6 +281,7 @@ function OrderLineRow({
   name: string;
   variant: StockUiVariant;
   pickerFlagged: boolean;
+  pickerFlagReason?: string | null;
   billed: number;
   requested: number;
   lineTotal: number;
@@ -297,7 +317,11 @@ function OrderLineRow({
           {(variant !== 'ok' || pickerFlagged) && (
             <>
               {' '}
-              <StatusTag variant={variant} pickerFlagged={pickerFlagged} />
+              <StatusTag
+                variant={variant}
+                pickerFlagged={pickerFlagged}
+                pickerFlagReason={pickerFlagReason}
+              />
             </>
           )}
           {recoveryStatus && (
@@ -385,7 +409,26 @@ function OrderCard({
             rejectionKind={order.rejection_kind}
           />
         </div>
+        {order.workflow_status === 'flagged' && (
+          <p className="text-xs font-medium text-[var(--content-warning)]">
+            Warehouse flagged lines — open order to see what billing needs
+          </p>
+        )}
         <p className="font-bold text-[var(--content-primary)]">{order.customer_name}</p>
+        {((order.picker_flag_line_count ?? 0) > 0 || (order.billing_oos_line_count ?? 0) > 0) && (
+          <div className="flex flex-wrap gap-1.5">
+            {(order.picker_flag_line_count ?? 0) > 0 && (
+              <span className="inline-flex rounded px-1.5 py-px text-[10px] font-semibold bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]">
+                {order.picker_flag_line_count} picker flag{(order.picker_flag_line_count ?? 0) === 1 ? '' : 's'}
+              </span>
+            )}
+            {(order.billing_oos_line_count ?? 0) > 0 && (
+              <span className="inline-flex rounded px-1.5 py-px text-[10px] font-semibold bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]">
+                {order.billing_oos_line_count} pending at billing
+              </span>
+            )}
+          </div>
+        )}
         <div className="flex items-center justify-between text-sm">
           <span className="font-mono text-[var(--content-secondary)]">
             {order.item_count} items · {formatCurrency(order.total_value)}
@@ -914,6 +957,7 @@ function OrderDetailSheet({
                   name={item.item_name}
                   variant={pickerFlagged ? 'neutral' : v}
                   pickerFlagged={pickerFlagged}
+                  pickerFlagReason={item.flag_reason}
                   billed={billed}
                   requested={item.qty_requested}
                   lineTotal={lineTotal}
@@ -988,6 +1032,7 @@ function OrderDetailSheet({
 
 export default function MyOrdersPage(): React.JSX.Element | null {
   const { userName, userId } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: orders, isLoading, error } = useOrders({
     salespersonName: userName ?? undefined,
     /** Cap payload: newest-first; keeps list refetches small. Realtime + default keep-alive stay snappy. */
@@ -1011,7 +1056,7 @@ export default function MyOrdersPage(): React.JSX.Element | null {
       const existing = map.get(n.order_id);
       const label =
         n.type === 'item_flagged_by_picker'
-          ? 'Flagged'
+          ? 'Picker flag'
           : n.type === 'pending_item_back_in_stock'
             ? 'Back in stock'
             : inferSalesUpdateLabel(n.body);
@@ -1038,6 +1083,18 @@ export default function MyOrdersPage(): React.JSX.Element | null {
     },
     [markRead, notifications],
   );
+
+  /** Bell / push deep links: /sales/orders?openOrderId=123 */
+  useEffect(() => {
+    const raw = searchParams.get('openOrderId');
+    if (!raw) return;
+    const orderId = Number(raw);
+    if (!Number.isFinite(orderId)) return;
+    void openOrder(orderId);
+    const next = new URLSearchParams(searchParams);
+    next.delete('openOrderId');
+    setSearchParams(next, { replace: true });
+  }, [openOrder, searchParams, setSearchParams]);
 
   return (
     <div className="p-4 min-h-screen bg-[var(--bg-primary)]">

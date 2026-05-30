@@ -87,6 +87,10 @@ export interface Order {
   item_count: number;
   /** Lines with qty to pick from stock (excludes full PO / billing-dropped rows). */
   pick_line_count?: number;
+  /** Open picker flags on order lines (from list embed). */
+  picker_flag_line_count?: number;
+  /** Billing no-stock flags on order lines (from list embed). */
+  billing_oos_line_count?: number;
   /** Lines whose catalog or line text resolves to ASK (see `isAskLine`). Set when loading queue embeds. */
   ask_line_count?: number;
   /** Lines whose catalog or line text resolves to Lucas (see `isLucasLine`). Set when loading queue embeds. */

@@ -1,4 +1,5 @@
 import type { Order, Item } from '../types';
+import { BILLING_OOS_FLAG_REASON } from './billing/applyBillingApprove';
 import { countPickableOrderLines, isPickableOrderLine } from './cartSupply';
 import { isAskLine } from './picking/askBrand';
 import { isLucasLine } from './picking/lucasBrand';
@@ -19,7 +20,7 @@ import { ITEMS_QUERY_KEY } from '../hooks/useItems';
  * one-time snapshot — payloads shrink by ~40–60% with zero UI regression.
  */
 export const ORDERS_SELECT_WITH_ITEM_LINE_COUNT =
-  '*, order_items(item_id,price_quoted,price_system,qty_requested,qty_shippable,qty_po,qty_approved,item_name,state,rack_no)' as const;
+  '*, order_items(item_id,price_quoted,price_system,qty_requested,qty_shippable,qty_po,qty_approved,item_name,state,flag_reason,rack_no)' as const;
 
 export type OrderItemEmbedRow = {
   item_id?: number | null;
@@ -31,6 +32,7 @@ export type OrderItemEmbedRow = {
   qty_approved?: number | null;
   item_name?: string | null;
   state?: string | null;
+  flag_reason?: string | null;
   rack_no?: string | null;
 };
 
@@ -118,10 +120,20 @@ export function normalizeOrderBusyItemCount(row: OrderRowWithEmbed): Order & {
     })),
   );
 
+  let pickerFlagLineCount = 0;
+  let billingOosLineCount = 0;
+  for (const oi of embed ?? []) {
+    if (oi.state !== 'flagged') continue;
+    if (oi.flag_reason === BILLING_OOS_FLAG_REASON) billingOosLineCount += 1;
+    else pickerFlagLineCount += 1;
+  }
+
   return {
     ...rest,
     item_count: liveLineCount,
     pick_line_count: pickLineCount,
+    picker_flag_line_count: pickerFlagLineCount,
+    billing_oos_line_count: billingOosLineCount,
     ask_line_count: askLineCount,
     lucas_line_count: lucasLineCount,
     special_rate_line_count: specialLineCount,
@@ -186,10 +198,20 @@ export function normalizeOrderListBusyItemCount(
       })),
     );
 
+    let pickerFlagLineCount = 0;
+    let billingOosLineCount = 0;
+    for (const oi of embed ?? []) {
+      if (oi.state !== 'flagged') continue;
+      if (oi.flag_reason === BILLING_OOS_FLAG_REASON) billingOosLineCount += 1;
+      else pickerFlagLineCount += 1;
+    }
+
     return {
       ...rest,
       item_count: liveLineCount,
       pick_line_count: pickLineCount,
+      picker_flag_line_count: pickerFlagLineCount,
+      billing_oos_line_count: billingOosLineCount,
       ask_line_count: askLineCount,
       lucas_line_count: lucasLineCount,
       special_rate_line_count: specialLineCount,

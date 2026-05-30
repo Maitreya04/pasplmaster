@@ -10,7 +10,7 @@ import type { DeskOrderRow } from '../../hooks/useBillingDeskOrders';
 
 export default function BillingDeskPage(): React.JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { flaggedOrders, listOrders, staleCount, completedCount, isLoading, all } =
+  const { listOrders, resolveCount, assignCount, reviewCount, completedCount, isLoading, all } =
     useBillingDeskOrders();
 
   const [manualOverlay, setManualOverlay] = useState<{
@@ -63,8 +63,9 @@ export default function BillingDeskPage(): React.JSX.Element {
               <DeskOrdersPanel
                 allOrders={all}
                 listOrders={listOrders}
-                flaggedOrders={flaggedOrders}
-                staleCount={staleCount}
+                resolveCount={resolveCount}
+                assignCount={assignCount}
+                reviewCount={reviewCount}
                 completedCount={completedCount}
                 isLoading={isLoading}
                 onSelectOrder={handleSelectOrder}

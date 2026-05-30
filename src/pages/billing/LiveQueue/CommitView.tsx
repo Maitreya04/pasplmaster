@@ -3,6 +3,7 @@ import { ArrowLeft, Warning, Copy, Check, ArrowRight } from '@phosphor-icons/rea
 import type { OrderItem } from '../../../types';
 import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
 import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
+import { buildBusyPasteText } from '../../../lib/billing/sortBillLines';
 
 interface CommitViewProps {
   orderName: string;
@@ -41,10 +42,7 @@ export function CommitView({
   const totalIssues = flaggedItems + noStockItems;
 
   const copyAllItems = () => {
-    const text = items
-      .map(i => `${i.item_name}\t${i.qty_requested}`)
-      .join('\n');
-    copy(text, 'all-items');
+    copy(buildBusyPasteText(items), 'all-items');
     setHasCopied(true);
   };
 

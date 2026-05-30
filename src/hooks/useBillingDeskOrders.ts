@@ -8,7 +8,7 @@ import type { WorkflowStatus } from '../types';
 
 export type { DeskPickerFlagLine };
 
-export type DeskOrderTab = 'all' | 'picking' | 'stale' | 'completed';
+export type DeskOrderTab = 'resolve' | 'assign' | 'picking' | 'review' | 'completed';
 
 export type DeskOrderStatus =
   | 'picking'
@@ -35,6 +35,13 @@ export function isDeskOrderStale(order: DeskOrderRow): boolean {
   if (order.pickingClaimStale) return true;
   if (order.deskStatus === 'no_ack') return true;
   if (order.claim_info?.is_stale) return true;
+  return false;
+}
+
+function isAssignTabOrder(order: DeskOrderRow): boolean {
+  if (orderNeedsDeskFlagAction(order)) return false;
+  if (order.deskStatus === 'unassigned' || order.deskStatus === 'no_ack') return true;
+  if (order.workflow_status === 'approved' && isDeskOrderStale(order)) return true;
   return false;
 }
 
@@ -138,43 +145,58 @@ export function useBillingDeskOrders() {
     [enriched],
   );
 
-  const listOrders = useMemo(
-    () => enriched.filter((o) => !orderNeedsDeskFlagAction(o)),
-    [enriched],
-  );
+  const listOrders = enriched;
 
-  const staleCount = useMemo(
-    () => listOrders.filter(isDeskOrderStale).length,
+  const resolveCount = flaggedOrders.length;
+
+  const assignCount = useMemo(
+    () => listOrders.filter(isAssignTabOrder).length,
     [listOrders],
   );
 
-  const completedCount = useMemo(
-    () => listOrders.filter((o) => o.deskStatus === 'checking').length,
+  const reviewCount = useMemo(
+    () =>
+      listOrders.filter(
+        (o) => !orderNeedsDeskFlagAction(o) && o.deskStatus === 'checking',
+      ).length,
     [listOrders],
   );
+
+  const completedCount = reviewCount;
 
   return {
     isLoading,
     all: enriched,
     flaggedOrders,
     listOrders,
-    staleCount,
+    resolveCount,
+    assignCount,
+    reviewCount,
     completedCount,
   };
 }
-
-const ACTIVE_PICK_STATUSES: DeskOrderStatus[] = ['unassigned', 'no_ack', 'picking'];
 
 export function filterDeskOrdersByTab(
   orders: DeskOrderRow[],
   tab: DeskOrderTab,
 ): DeskOrderRow[] {
-  if (tab === 'all') return orders;
+  if (tab === 'resolve') {
+    return orders.filter((o) => orderNeedsDeskFlagAction(o));
+  }
+  if (tab === 'assign') {
+    return orders.filter(isAssignTabOrder);
+  }
   if (tab === 'picking') {
-    return orders.filter((o) => ACTIVE_PICK_STATUSES.includes(o.deskStatus));
+    return orders.filter(
+      (o) => !orderNeedsDeskFlagAction(o) && o.deskStatus === 'picking',
+    );
   }
-  if (tab === 'completed') {
-    return orders.filter((o) => o.deskStatus === 'checking');
+  if (tab === 'review') {
+    return orders.filter(
+      (o) => !orderNeedsDeskFlagAction(o) && o.deskStatus === 'checking',
+    );
   }
-  return orders.filter(isDeskOrderStale);
+  return orders.filter(
+    (o) => !orderNeedsDeskFlagAction(o) && o.deskStatus === 'checking',
+  );
 }

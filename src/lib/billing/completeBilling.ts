@@ -9,9 +9,12 @@ interface ClaimResult {
   claimed_by?: string;
 }
 
-interface CompleteBillingResult {
+export interface CompleteBillingResult {
   success?: boolean;
   reason?: string;
+  fulfillment_path?: FulfillmentPath;
+  requested_fulfillment_path?: FulfillmentPath;
+  pick_path_downgraded?: boolean;
 }
 
 interface CompleteBillingOptions {
@@ -56,7 +59,9 @@ async function callCompleteBilling(
   return data as CompleteBillingResult;
 }
 
-export async function completeBillingWithClaim(options: CompleteBillingOptions): Promise<void> {
+export async function completeBillingWithClaim(
+  options: CompleteBillingOptions,
+): Promise<CompleteBillingResult> {
   const {
     orderId,
     userId,
@@ -74,7 +79,7 @@ export async function completeBillingWithClaim(options: CompleteBillingOptions):
     isResolvingFlags,
     fulfillmentPath,
   );
-  if (result?.success) return;
+  if (result?.success) return result;
 
   // Re-claim once (stale React claim id, heartbeat timeout, tab backgrounded, etc.)
   activeClaimId = await claimForBilling(claim);
@@ -85,7 +90,7 @@ export async function completeBillingWithClaim(options: CompleteBillingOptions):
     isResolvingFlags,
     fulfillmentPath,
   );
-  if (result?.success) return;
+  if (result?.success) return result;
 
   throw billingApprovalError(result);
 }

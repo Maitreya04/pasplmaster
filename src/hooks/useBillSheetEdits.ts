@@ -6,6 +6,15 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { supabase } from '../lib/supabase/client';
 import { completeBillingWithClaim } from '../lib/billing/completeBilling';
+import {
+  countEffectivePickLinesAfterBilling,
+  resolveFulfillmentPathAfterBilling,
+} from '../lib/billing/billLineOutcome';
+import {
+  formatInternalNotificationError,
+  persistAndNotifySalesOrderUpdate,
+  type NotifySalesOrderUpdateParams,
+} from '../lib/billing/notifySalesOrderUpdate';
 import { ensurePendingItem } from '../lib/billing/ensurePendingItem';
 import {
   deskLineFlagKind,
@@ -26,7 +35,7 @@ import { BILLING_ACCEPT_ALL_LABEL } from '../lib/billing/mrpWorkflowCopy';
 import { BILLING_VERIFIED_MRP_QUERY_KEY } from '../lib/billing/billingVerifiedMrp';
 import { STOCK_MRP_HISTORY_QUERY_KEY } from '../lib/stockMrpwise';
 import { orderItemConfirmedMrp } from '../lib/billing/orderItemSplitGroups';
-import type { FulfillmentPath, OrderItem, OrderWithItems } from '../types';
+import type { FulfillmentPath, OrderItem, OrderWithItems, PendingItem } from '../types';
 import {
   CHANGE_REASON_OPTIONS,
   type ChangeReason,
@@ -34,6 +43,36 @@ import {
   type OverlayLineResolution,
   type OverlayStep,
 } from '../pages/billing/BillingDesk/types';
+
+function buildDeskNotifyLines(
+  visibleItems: OrderItem[],
+  pendingByItemId: Map<number, PendingItem[]>,
+): NotifySalesOrderUpdateParams['lines'] {
+  return visibleItems.map((item) => {
+    const pendingQty = (item.item_id != null ? pendingByItemId.get(item.item_id) : undefined) ?? [];
+    const pendingTotal = pendingQty
+      .filter((p) => p.status === 'pending')
+      .reduce((sum, p) => sum + p.qty_pending, 0);
+    const authoritativePending = Math.min(
+      item.qty_requested,
+      Math.max(pendingTotal, item.qty_po ?? 0),
+    );
+    const billed = Math.max(
+      0,
+      Math.min(
+        item.qty_approved ?? item.qty_requested,
+        item.qty_requested - authoritativePending,
+      ),
+    );
+    return {
+      itemId: item.item_id,
+      name: item.item_name,
+      qtyRequested: item.qty_requested,
+      qtyBilled: billed,
+      qtyPending: authoritativePending,
+    };
+  });
+}
 
 function initEdits(items: OrderItem[]): Record<number, OverlayLineEdit> {
   const edits: Record<number, OverlayLineEdit> = {};
@@ -99,14 +138,17 @@ export function useBillSheetEdits({
   const [undoRemoveId, setUndoRemoveId] = useState<number | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
+  const resetKey = `${orderDetail.id}:${items.map((item) => item.id).join(',')}`;
+  const [boundResetKey, setBoundResetKey] = useState(resetKey);
+  if (resetKey !== boundResetKey) {
+    setBoundResetKey(resetKey);
     setEdits(initEdits(items));
     setReason('no_changes');
     setReasonTouched(false);
     setPendingRemoveId(null);
     setStep('idle');
     setUndoRemoveId(null);
-  }, [orderDetail.id, items]);
+  }
 
   useEffect(() => {
     if (orderDetail.workflow_status !== 'submitted' || isClaimedByMe) return;
@@ -126,9 +168,11 @@ export function useBillSheetEdits({
 
   const flaggedItems = useMemo(
     () =>
-      allFlaggedItems.filter(
-        (item) =>
-          !isDeskFlagLineAlreadyOnPo(item, pendingByItemId.get(item.item_id) ?? []),
+      sortBillLines(
+        allFlaggedItems.filter(
+          (item) =>
+            !isDeskFlagLineAlreadyOnPo(item, pendingByItemId.get(item.item_id) ?? []),
+        ),
       ),
     [allFlaggedItems, pendingByItemId],
   );
@@ -375,6 +419,30 @@ export function useBillSheetEdits({
         })
         .eq('id', orderDetail.id);
 
+      const shouldNotifySales =
+        resolvingFlags ||
+        orderDetail.workflow_status === 'flagged' ||
+        orderDetail.workflow_status === 'completed';
+
+      if (shouldNotifySales && visibleItems.length > 0) {
+        try {
+          await persistAndNotifySalesOrderUpdate({
+            orderId: orderDetail.id,
+            orderNumber: orderDetail.order_number,
+            customerName: orderDetail.customer_name,
+            salespersonName: orderDetail.salesperson_name,
+            createdBy: reviewer,
+            lines: buildDeskNotifyLines(visibleItems, pendingByItemId),
+            notifySales: true,
+          });
+        } catch (e) {
+          console.error('order_update_for_sales', e);
+          toast.error(
+            `Sales notification failed: ${formatInternalNotificationError(e)}`,
+          );
+        }
+      }
+
       if (orderDetail.workflow_status === 'submitted') {
         if (!claimId && !isClaimedByMe) {
           const claimResult = await claim();
@@ -383,13 +451,20 @@ export function useBillSheetEdits({
           }
         }
 
+        const deskFlags: Record<number, never> = {};
+        const resolvedPath = resolveFulfillmentPathAfterBilling(
+          fulfillmentPath,
+          orderDetail.stock_location_code,
+          countEffectivePickLinesAfterBilling(visibleItems, deskFlags),
+        );
+
         await completeBillingWithClaim({
           orderId: orderDetail.id,
           claimId: claimId,
           userId,
           claim,
           isResolvingFlags: false,
-          fulfillmentPath,
+          fulfillmentPath: resolvedPath,
         });
       } else if (resolvingFlags) {
         if (orderDetail.workflow_status === 'picking') {

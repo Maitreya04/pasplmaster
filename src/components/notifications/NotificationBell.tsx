@@ -70,10 +70,12 @@ function deepLinkFromPayload(n: UserNotification): string | null {
     return `/picking/preview/${n.order_id}?source=assigned`;
   }
   if (n.type === 'item_flagged_by_picker' && n.order_id) {
+    const dl = payloadDeepLink(n);
+    if (dl?.startsWith('/sales')) return dl;
     return `/billing/desk?orderId=${n.order_id}`;
   }
   if (n.type === 'order_update_for_sales') {
-    return '/sales/orders';
+    return n.order_id != null ? `/sales/orders?openOrderId=${n.order_id}` : '/sales/orders';
   }
   if (n.type === 'pending_item_back_in_stock') {
     return '/sales/pending-recovery';

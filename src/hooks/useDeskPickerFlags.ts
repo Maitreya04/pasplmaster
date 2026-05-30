@@ -19,6 +19,7 @@ type FlaggedOrderItemRow = {
   item_id: number;
   item_name: string | null;
   flag_reason: string | null;
+  bill_line_no: number | null;
   qty_requested: number;
   qty_shippable: number | null;
   qty_po: number | null;
@@ -38,7 +39,7 @@ export function useDeskPickerFlags(orderIds: number[]) {
       const { data, error } = await supabase
         .from('order_items')
         .select(
-          'id, order_id, item_id, item_name, flag_reason, qty_requested, qty_shippable, qty_po, qty_approved',
+          'id, order_id, item_id, item_name, flag_reason, bill_line_no, qty_requested, qty_shippable, qty_po, qty_approved',
         )
         .in('order_id', orderIds)
         .eq('state', 'flagged');
@@ -61,7 +62,13 @@ export function useDeskPickerFlags(orderIds: number[]) {
       }
 
       const grouped = new Map<number, DeskPickerFlagLine[]>();
-      for (const row of rows) {
+      const sortedRows = [...rows].sort((a, b) => {
+        const keyA = a.bill_line_no ?? a.id;
+        const keyB = b.bill_line_no ?? b.id;
+        return keyA - keyB;
+      });
+
+      for (const row of sortedRows) {
         if (
           isDeskFlagLineAlreadyOnPo(
             row,

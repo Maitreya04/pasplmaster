@@ -600,7 +600,7 @@ serve(async (req) => {
         : salesTarget.salespersonName
           ? await resolveSalesUserIds(admin, salesTarget.salespersonName)
           : await fetchActiveUserIds(admin, 'sales');
-      const salesDeepLink = `/sales/orders`;
+      const salesDeepLink = `/sales/orders?openOrderId=${payload.orderId}`;
       await insertUserNotifications(
         admin,
         salesIds.map((user_id) => ({
@@ -695,7 +695,7 @@ serve(async (req) => {
       const salesIds = salesTarget.userId
         ? [salesTarget.userId]
         : await resolveSalesUserIds(admin, resolvedSalespersonName);
-      const deepLink = `/sales/orders`;
+      const deepLink = `/sales/orders?openOrderId=${payload.orderId}`;
       await insertUserNotifications(
         admin,
         salesIds.map((user_id) => ({
