@@ -89,7 +89,7 @@ export function PickLineAdvanceCTA({
   const confirmLabel = nextPreview ? 'Next line' : 'Finish pick';
   const previewLine = nextPreview
     ? `${nextPreview.code} · Rack ${nextPreview.rackNo ?? '—'}`
-    : 'All lines handled — open finish sheet below';
+    : 'All lines handled — pack & finish next';
 
   return (
     <div className={`shrink-0 border-t px-3 py-3 sm:px-4 sm:py-4 ${styles.border} ${styles.bg}`}>

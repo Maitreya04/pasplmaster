@@ -44,6 +44,15 @@ type InternalRequest =
       linesDone: number;
       linesTotal: number;
       linesRemaining: number;
+    }
+  | {
+      eventType: 'pick_ready_for_billing';
+      orderId: number;
+      orderNumber: string;
+      customerName: string;
+      boxCount: number;
+      flaggedLineCount: number;
+      pickerName: string | null;
     };
 
 interface PushSubscriptionRow {
@@ -673,6 +682,88 @@ serve(async (req) => {
         sentCount,
         failedCount,
         inboxCount: billingIds.length + salesIds.length,
+      });
+    }
+
+    if (eventType === 'pick_ready_for_billing') {
+      const payload = raw as Partial<InternalRequest>;
+      if (
+        typeof payload.orderId !== 'number' ||
+        typeof payload.orderNumber !== 'string' ||
+        typeof payload.customerName !== 'string' ||
+        typeof payload.boxCount !== 'number' ||
+        typeof payload.flaggedLineCount !== 'number'
+      ) {
+        return json(400, { error: 'Invalid pick_ready_for_billing payload' });
+      }
+
+      const boxCount = payload.boxCount;
+      const flaggedLineCount = payload.flaggedLineCount;
+      const title =
+        flaggedLineCount > 0
+          ? `Pick ready · ${payload.orderNumber} (${flaggedLineCount} flagged)`
+          : `Pick ready · ${payload.orderNumber}`;
+      const body =
+        flaggedLineCount > 0
+          ? `${payload.customerName} · ${boxCount} box${boxCount === 1 ? '' : 'es'} · resolve flags & bill`
+          : `${payload.customerName} · ${boxCount} box${boxCount === 1 ? '' : 'es'} · ready to bill`;
+
+      const billingIds = await fetchActiveUserIds(admin, 'billing');
+      const billingDeepLink = `/billing/review/${payload.orderId}`;
+      await insertUserNotifications(
+        admin,
+        billingIds.map((user_id) => ({
+          user_id,
+          title,
+          body,
+          type: 'pick_ready_for_billing',
+          order_id: payload.orderId,
+          payload: {
+            eventType: 'pick_ready_for_billing',
+            orderNumber: payload.orderNumber,
+            customerName: payload.customerName,
+            boxCount,
+            flaggedLineCount,
+            pickerName: payload.pickerName ?? null,
+            deep_link: billingDeepLink,
+          },
+        })),
+      );
+
+      let sentCount = 0;
+      let failedCount = 0;
+      if (pushConfigured) {
+        const billingSubs = await fetchPushSubscriptions(admin, cutoffIso, { role: 'billing' });
+        const billingResult = await sendWebPushes(admin, billingSubs, {
+          title,
+          body: pushBodyPreview(body),
+          url: billingDeepLink,
+          tag: `pick-ready-${payload.orderId}`,
+          payload: {
+            eventType: 'pick_ready_for_billing',
+            orderId: payload.orderId,
+            orderNumber: payload.orderNumber,
+            boxCount,
+          },
+        });
+        sentCount += billingResult.sentCount;
+        failedCount += billingResult.failedCount;
+      }
+
+      await admin.from('notification_events').insert({
+        event_type: 'pick_ready_for_billing',
+        order_id: payload.orderId,
+        payload: raw,
+        target_role: 'billing',
+        sent_count: sentCount,
+        failed_count: failedCount,
+      });
+
+      return json(200, {
+        success: true,
+        sentCount,
+        failedCount,
+        inboxCount: billingIds.length,
       });
     }
 

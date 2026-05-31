@@ -99,8 +99,12 @@ export interface Order {
   created_at: string;
   approved_at: string | null;
   picked_at: string | null;
+  /** When the picker finished the warehouse pick stage (clean or flagged). */
+  picking_completed_at?: string | null;
   completed_at: string | null;
   dispatched_at: string | null;
+  /** Shipping cartons packed at pick finalisation. */
+  box_count?: number | null;
 }
 
 export interface OrderItem {

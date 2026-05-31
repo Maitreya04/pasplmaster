@@ -11,6 +11,7 @@ function getTodayStartIso(): string {
 export interface PickerDailyStats {
   ordersAssigned: number;
   ordersCompleted: number;
+  ordersFlagged: number;
   linesCompleted: number;
 }
 
@@ -32,10 +33,10 @@ export function usePickerDailyStats() {
           .gte('approved_at', todayStart),
         supabase
           .from('orders')
-          .select('id, pick_line_count, item_count, completed_at')
+          .select('id, pick_line_count, item_count, workflow_status, picking_completed_at')
           .eq('picker_name', pickerName)
           .in('workflow_status', ['completed', 'flagged'])
-          .gte('completed_at', todayStart),
+          .gte('picking_completed_at', todayStart),
       ]);
 
       if (assignedRes.error) throw assignedRes.error;
@@ -43,6 +44,7 @@ export function usePickerDailyStats() {
 
       const completedRows = completedRes.data ?? [];
       let linesCompleted = 0;
+      let ordersFlagged = 0;
       for (const row of completedRows) {
         const lineCount =
           typeof row.pick_line_count === 'number'
@@ -51,11 +53,13 @@ export function usePickerDailyStats() {
               ? row.item_count
               : 0;
         linesCompleted += lineCount;
+        if (row.workflow_status === 'flagged') ordersFlagged += 1;
       }
 
       return {
         ordersAssigned: assignedRes.data?.length ?? 0,
         ordersCompleted: completedRows.length,
+        ordersFlagged,
         linesCompleted,
       };
     },

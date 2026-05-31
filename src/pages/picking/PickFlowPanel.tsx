@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -21,7 +21,6 @@ import {
   StatusBadge,
 } from '../../components/shared';
 import type { OrderItem, OrderItemState, ScanResult } from '../../types';
-import { PickCompleteScreen } from './PickCompleteScreen';
 import { type QueueSheetRow } from './QueueSheet';
 import type { SwipeDeckDotStatus } from '../../components/picking/SwipeDeck';
 import { PickSwipeDeck } from '../../components/picker-v10/PickSwipeDeck';
@@ -36,10 +35,7 @@ import {
 } from '../../lib/picking/pickLineStatus';
 import { JumpListSheet } from '../../components/picking/JumpListSheet';
 import { TransportChip } from '../../components/picking/TransportChip';
-import {
-  formatBilledLabel,
-  formatLineCountLabel,
-} from '../../lib/picking/pickQueueDisplay';
+import { formatBilledLabel } from '../../lib/picking/pickQueueDisplay';
 import { FlagReasonSheet, type FlagSubmitPayload } from '../../components/picking/FlagReasonSheet';
 import {
   buildDeckOrder,
@@ -310,7 +306,6 @@ export function PickFlowPanel({
     itemId: number;
     mode: 'rack' | 'item';
   } | null>(null);
-  const [showComplete, setShowComplete] = useState(false);
   const [scannerHint, setScannerHint] = useState<string | null>(null);
   const [lastScanMeta, setLastScanMeta] = useState<{
     rawValue: string;
@@ -329,7 +324,6 @@ export function PickFlowPanel({
   const [undoSnapshot, setUndoSnapshot] = useState<UndoSnapshot | null>(null);
   const [queueSheetOpen, setQueueSheetOpen] = useState(true);
   const [queueDragProgress, setQueueDragProgress] = useState(0);
-  const [completeSheetOpen, setCompleteSheetOpen] = useState(false);
   const [flagSheetOpen, setFlagSheetOpen] = useState(false);
   const [flagTargetItemId, setFlagTargetItemId] = useState<number | null>(null);
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
@@ -479,7 +473,6 @@ export function PickFlowPanel({
     if (
       flagSheetOpen ||
       queueSheetOpen ||
-      completeSheetOpen ||
       manualQtyTargetItemId !== null ||
       pendingPackConfirmation !== null ||
       fifoOverrideSheet !== null
@@ -489,7 +482,6 @@ export function PickFlowPanel({
   }, [
     flagSheetOpen,
     queueSheetOpen,
-    completeSheetOpen,
     manualQtyTargetItemId,
     pendingPackConfirmation,
     fifoOverrideSheet,
@@ -548,24 +540,18 @@ export function PickFlowPanel({
     };
   }, [pickItems]);
 
-  const pieceTotals = useMemo(() => {
-    let target = 0;
-    let picked = 0;
-    for (const pi of pickItems) {
-      const lineTarget = pickQuantityTarget(pi.orderItem);
-      target += lineTarget;
-      const linePicked = Math.min(lineTarget, getPickedQtyFromResult(pi.scanResult));
-      picked += linePicked;
-    }
-    return { target, picked };
-  }, [pickItems]);
-
   const allDone = counts.remaining === 0 && counts.total > 0;
-  const hasFlagged = counts.flagged > 0;
+  const prevAllDoneRef = useRef(false);
 
   useEffect(() => {
-    if (allDone) setCompleteSheetOpen(true);
-  }, [allDone]);
+    if (allDone && !prevAllDoneRef.current && orderId) {
+      const finishPath = isLab
+        ? `/picking/pick/${orderId}/finish?lab=1`
+        : `/picking/pick/${orderId}/finish`;
+      navigate(finishPath, { state: { expectAllDone: true } });
+    }
+    prevAllDoneRef.current = allDone;
+  }, [allDone, isLab, navigate, orderId]);
   const visibility = useMemo(() => {
     let packAssisted = 0;
     let manual = 0;
@@ -923,60 +909,6 @@ export function PickFlowPanel({
     },
     [isLab, preferredPickLayer, queryClient, toast, userId],
   );
-
-  const completeMutation = useMutation({
-    mutationFn: async () => {
-      if (!order) throw new Error('No order');
-      if (isLab) return;
-      const isCompleted = !hasFlagged;
-      
-      if (claimId && userId) {
-        const { error } = await supabase.rpc('complete_picking', {
-          p_order_id: order.id,
-          p_claim_id: claimId,
-          p_user_id: userId,
-          p_has_flags: hasFlagged,
-        });
-        if (error) throw error;
-      } else {
-        // Fallback for orders without claims
-        const updates: {
-          workflow_status: 'completed' | 'flagged';
-          completed_at?: string;
-          priority?: 'normal';
-        } = {
-          workflow_status: isCompleted ? 'completed' : 'flagged',
-        };
-        if (!order.completed_at && isCompleted) {
-          updates.completed_at = new Date().toISOString();
-        }
-        if (isCompleted) {
-          updates.priority = 'normal';
-        }
-        const { error } = await supabase
-          .from('orders')
-          .update(updates)
-          .eq('id', order.id);
-        if (error) throw error;
-      }
-    },
-    onSuccess: () => {
-      if (isLab) {
-        appHaptics.success();
-        toast.info('Lab session complete — order unchanged in production.');
-        setShowComplete(true);
-        return;
-      }
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
-      queryClient.invalidateQueries({ queryKey: ['picker-daily-stats'] });
-      appHaptics.success();
-      setShowComplete(true);
-    },
-    onError: () => {
-      toast.error('Failed to complete order');
-    },
-  });
 
   const openManualQty = useCallback((orderItem: OrderItem) => {
     appHaptics.selection();
@@ -2197,22 +2129,6 @@ export function PickFlowPanel({
   const pickProgressPct =
     counts.total > 0 ? ((counts.picked + counts.flagged) / counts.total) * 100 : 0;
 
-  if (showComplete && order) {
-    return (
-      <PickCompleteScreen
-        orderNumber={order.order_number}
-        customerName={order.customer_name}
-        customerCity={order.customer_city}
-        transportName={order.transport_name}
-        pickedLineCount={counts.picked}
-        flaggedLineCount={counts.flagged}
-        totalLineCount={counts.total}
-        pickedPieceCount={pieceTotals.picked}
-        totalPieceCount={pieceTotals.target}
-      />
-    );
-  }
-
   if (isLoading) {
     return (
       <div className="min-h-screen pb-32">
@@ -2279,7 +2195,6 @@ export function PickFlowPanel({
   const scannerPaused =
     flagSheetOpen ||
     queueSheetOpen ||
-    completeSheetOpen ||
     manualQtyTargetItemId !== null ||
     pendingPackConfirmation !== null ||
     fifoOverrideSheet !== null ||
@@ -2570,101 +2485,28 @@ export function PickFlowPanel({
               <p className="mt-1 text-sm text-[var(--content-secondary)]">{order.transport_name}</p>
             )}
             <p className="mt-3 text-sm text-[var(--content-tertiary)]">
-              All lines handled — open the finish sheet below to send to billing.
+              All lines handled — pack & finish to send to billing.
             </p>
+            <button
+              type="button"
+              onClick={() => {
+                appHaptics.impactMedium();
+                navigate(
+                  isLab
+                    ? `/picking/pick/${orderId}/finish?lab=1`
+                    : `/picking/pick/${orderId}/finish`,
+                  { state: { expectAllDone: true } },
+                );
+              }}
+              className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--bg-positive)] px-5 py-2.5 text-sm font-semibold text-[var(--content-on-color)] pick-pressable"
+            >
+              <ArrowRight size={18} weight="bold" />
+              Pack & finish
+            </button>
           </div>
         )}
 
       </div>
-
-      {/* Finish pick — party-first confirmation sheet */}
-      <BottomSheet
-        isOpen={allDone && completeSheetOpen}
-        onClose={() => setCompleteSheetOpen(false)}
-        title="Finish this pick"
-      >
-        <div className="space-y-4">
-          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-2">
-            <p className="text-xl font-bold text-[var(--content-primary)] leading-tight">
-              {order.customer_name}
-            </p>
-            {order.customer_city && (
-              <p className="text-sm text-[var(--content-secondary)]">{order.customer_city}</p>
-            )}
-            {formatBilledLabel(order.approved_at, order.created_at) && (
-              <p className="text-sm text-[var(--content-tertiary)]">
-                {formatBilledLabel(order.approved_at, order.created_at)}
-              </p>
-            )}
-            <div className="pt-1">
-              {order.transport_name ? (
-                <TransportChip name={order.transport_name} size="md" />
-              ) : (
-                <p className="text-sm font-semibold text-[var(--content-warning)]">
-                  No transport on order
-                </p>
-              )}
-            </div>
-            <p className="font-mono text-xs text-[var(--content-quaternary)] pt-1">
-              {order.order_number}
-            </p>
-          </div>
-
-          <div className="rounded-xl bg-[var(--bg-tertiary)] px-4 py-3 text-sm text-[var(--content-secondary)] space-y-1">
-            <p className="tabular-nums">
-              {formatLineCountLabel(counts.picked, { short: true })} picked
-              {counts.flagged > 0 && (
-                <span className="text-[var(--content-negative)]">
-                  {' '}
-                  · {counts.flagged} flagged
-                </span>
-              )}
-            </p>
-            <p className="tabular-nums text-[var(--content-tertiary)]">
-              {pieceTotals.picked}/{pieceTotals.target} pcs picked
-            </p>
-          </div>
-
-          <BigButton
-            variant="primary"
-            onClick={() => {
-              appHaptics.impactMedium();
-              completeMutation.mutate();
-            }}
-            loading={completeMutation.isPending}
-            className={
-              hasFlagged
-                ? 'bg-[var(--bg-warning)] text-[var(--content-primary)]'
-                : 'bg-[var(--bg-positive)] text-[var(--content-on-color)]'
-            }
-          >
-            {hasFlagged ? (
-              <>
-                <Warning size={20} weight="bold" />
-                Send to billing with {counts.flagged} flagged
-              </>
-            ) : (
-              <>
-                <ArrowRight size={20} weight="bold" />
-                Finish pick for {order.customer_name.split(/\s+/)[0]}
-              </>
-            )}
-          </BigButton>
-        </div>
-      </BottomSheet>
-
-      {allDone && !completeSheetOpen && (
-        <div className="fixed bottom-0 left-0 right-0 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
-          <button
-            type="button"
-            onClick={() => setCompleteSheetOpen(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--bg-positive)] py-3 text-sm font-semibold text-[var(--content-on-color)]"
-          >
-            <CheckCircle size={18} weight="fill" />
-            Finish pick — {order.customer_name}
-          </button>
-        </div>
-      )}
 
       {/* Flag reason sheet */}
       <FlagReasonSheet

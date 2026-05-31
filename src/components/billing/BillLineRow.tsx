@@ -1,6 +1,7 @@
 import { Check, Trash } from '@phosphor-icons/react';
 import { billLineChangeSegments } from '../../lib/billing/billLineChangeStrip';
 import { billLineIdentity } from '../../lib/billing/billLineIdentity';
+import { deriveBillLineFulfillment } from '../../lib/billing/billLineFulfillment';
 import {
   deskLineFlagAccent,
   deskLineFlagKind,
@@ -12,7 +13,7 @@ import {
   formatRoundedRs,
 } from '../../lib/billing/mrpWorkflowCopy';
 import { orderItemConfirmedMrp } from '../../lib/billing/orderItemSplitGroups';
-import type { OrderItem } from '../../types';
+import type { OrderItem, PendingItem } from '../../types';
 import type { OverlayLineEdit } from '../../pages/billing/BillingDesk/types';
 
 const ROW_GRID =
@@ -48,17 +49,43 @@ export function BillLineTableHeader({
       <span className="text-center">#</span>
       <span>Code</span>
       <span>Item</span>
-      <span className="text-center">Qty</span>
+      <span>Qty</span>
       <span>{compact ? 'MRP' : 'Bill rate'}</span>
       <span className="text-right">Action</span>
     </div>
   );
 }
 
+function fulfillmentChipClass(tone: ReturnType<typeof deriveBillLineFulfillment>['chipTone']): string {
+  if (tone === 'green') {
+    return 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border-[var(--border-positive)]';
+  }
+  if (tone === 'blue') {
+    return 'bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border-[var(--border-accent)]';
+  }
+  if (tone === 'red') {
+    return 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] border-[var(--border-negative)]';
+  }
+  if (tone === 'amber') {
+    return 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] border-[var(--border-warning)]';
+  }
+  return 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)] border-[var(--border-subtle)]';
+}
+
+function formatQtyBreakdown(fulfillment: ReturnType<typeof deriveBillLineFulfillment>): string {
+  const parts: string[] = [];
+  if (fulfillment.qtyBillToday > 0) parts.push(`${fulfillment.qtyBillToday} bill`);
+  if (fulfillment.qtySalesPo > 0) parts.push(`${fulfillment.qtySalesPo} PO`);
+  if (fulfillment.qtyPickerOos > 0) parts.push(`${fulfillment.qtyPickerOos} OOS`);
+  if (parts.length === 0) return String(fulfillment.qtyOrdered);
+  return parts.join(' · ');
+}
+
 export interface BillLineRowProps {
   lineNo: number;
   item: OrderItem;
   edit: OverlayLineEdit;
+  pendingRows?: PendingItem[];
   isSplitChild?: boolean;
   pendingRemoveId: number | null;
   showUndoRemove?: boolean;
@@ -75,6 +102,7 @@ export function BillLineRow({
   lineNo,
   item,
   edit,
+  pendingRows = [],
   isSplitChild,
   pendingRemoveId,
   showUndoRemove,
@@ -88,6 +116,7 @@ export function BillLineRow({
 }: BillLineRowProps): React.JSX.Element | null {
   if (edit.removed && item.state !== 'flagged') return null;
 
+  const fulfillment = deriveBillLineFulfillment(item, pendingRows);
   const identity = billLineIdentity(item);
   const changeSegments = billLineChangeSegments(item, edit);
   const isFlagged = item.state === 'flagged';
@@ -118,6 +147,8 @@ export function BillLineRow({
     }
   } else if (isSplitChild) {
     rowClass += ' bg-[var(--bg-secondary)]/60';
+  } else if (fulfillment.excludeFromBusyBill) {
+    rowClass += ' bg-[var(--bg-tertiary)]/50 opacity-90';
   }
 
   return (
@@ -153,8 +184,14 @@ export function BillLineRow({
           {isSplitChild ? '↳ ' : ''}
           {identity.description}
         </p>
-        {changeSegments.length > 0 ? (
+        {changeSegments.length > 0 || fulfillment.chipLabel ? (
           <div className="mt-0.5 flex flex-wrap gap-1">
+            <span
+              className={`shrink-0 text-[8px] font-semibold px-1 py-px rounded-full border whitespace-nowrap ${fulfillmentChipClass(fulfillment.chipTone)}`}
+              title={fulfillment.summary}
+            >
+              {fulfillment.chipLabel}
+            </span>
             {changeSegments.map((seg, i) => {
               if (seg.kind === 'flag' || seg.kind === 'resolved') {
                 return (
@@ -183,11 +220,14 @@ export function BillLineRow({
         ) : null}
       </div>
 
-      <span className="text-[11px] text-[var(--content-quaternary)] tabular-nums text-center">
-        {item.qty_requested}
+      <span
+        className="text-[10px] text-[var(--content-secondary)] tabular-nums text-center leading-tight"
+        title={fulfillment.summary}
+      >
+        {formatQtyBreakdown(fulfillment)}
       </span>
 
-      {!isRemoved ? (
+      {!isRemoved && !fulfillment.excludeFromBusyBill ? (
         <input
           type="number"
           inputMode="decimal"
@@ -196,11 +236,18 @@ export function BillLineRow({
           className={`w-full h-7 px-1 text-[11px] rounded-md border tabular-nums ${
             edit.priceTouched || edit.resolution === 'accept_price'
               ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]'
-              : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)]'
+              : fulfillment.role === 'foc'
+                ? 'border-[var(--border-accent)] bg-[var(--bg-accent-subtle)]/40 text-[var(--content-accent)]'
+                : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)]'
           }`}
         />
       ) : (
-        <span className="text-[10px] text-[var(--content-quaternary)] text-center">—</span>
+        <span
+          className="text-[9px] font-medium text-[var(--content-quaternary)] text-center leading-tight"
+          title={fulfillment.excludeFromBusyBill ? 'Skip — not billing today' : undefined}
+        >
+          {fulfillment.excludeFromBusyBill ? 'skip' : '—'}
+        </span>
       )}
 
       <div className="flex items-center justify-end gap-1 min-w-0">

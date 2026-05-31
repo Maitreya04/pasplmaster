@@ -38,6 +38,7 @@ function matchesRole(n: UserNotification, role: AppRole | null): boolean {
   if (role === 'billing') {
     if (n.type === 'order_update_for_sales') return false;
     if (n.type === 'pending_item_ready_for_billing') return true;
+    if (n.type === 'pick_ready_for_billing') return true;
     if (n.type !== 'item_flagged_by_picker') return false;
     const dl = payloadDeepLink(n);
     if (dl?.startsWith('/sales')) return false;
@@ -82,6 +83,10 @@ function deepLinkFromPayload(n: UserNotification): string | null {
   }
   if (n.type === 'pending_item_ready_for_billing' && n.order_id) {
     return `/billing/desk?orderId=${n.order_id}`;
+  }
+  if (n.type === 'pick_ready_for_billing' && n.order_id) {
+    const dl = payloadDeepLink(n);
+    return dl ?? `/billing/review/${n.order_id}`;
   }
   return null;
 }
@@ -145,6 +150,8 @@ function notificationTypeLabel(type: string): string {
       return 'Back in stock';
     case 'pending_item_ready_for_billing':
       return 'Ready for billing';
+    case 'pick_ready_for_billing':
+      return 'Pick ready to bill';
     default:
       return type.replace(/_/g, ' ');
   }

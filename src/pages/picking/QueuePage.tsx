@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Package,
@@ -6,10 +6,15 @@ import {
   Bell,
   GearSix,
   Barcode,
+  CheckCircle,
 } from '@phosphor-icons/react';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
 import { usePickerPushNotifications } from '../../hooks/usePickerPushNotifications';
 import { usePickerDailyStats } from '../../hooks/usePickerDailyStats';
+import {
+  usePickerCompletedOrders,
+  type PickerCompletedOrder,
+} from '../../hooks/usePickerCompletedOrders';
 import { NotificationBell } from '../../components/notifications/NotificationBell';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -20,25 +25,80 @@ import {
   Skeleton,
   QueueSectionHeader,
   InitialsAvatar,
+  FilterChip,
 } from '../../components/shared';
 import { ActivePickRow } from '../../components/picking/ActivePickRow';
 import { AssignedOrderRow } from '../../components/picking/AssignedOrderRow';
+import { CompletedPickRow } from '../../components/picking/CompletedPickRow';
+import { CompletedPickSummarySheet } from '../../components/picking/CompletedPickSummarySheet';
 import { PickerDailyStatsStrip } from '../../components/picking/PickerDailyStatsStrip';
 import { isMyAssignedPending, isMyInProgressPick } from '../../lib/picking/pickLifecycle';
+import type { PickerCompletedDay } from '../../lib/picking/completedPickSummary';
+
+type QueueView = 'work' | 'done';
 
 function hasPickableLines(order: { pick_line_count?: number; item_count: number }): boolean {
   if (order.pick_line_count != null) return order.pick_line_count > 0;
   return order.item_count > 0;
 }
 
+function isQueueView(value: string | null): value is QueueView {
+  return value === 'work' || value === 'done';
+}
+
+function isCompletedDay(value: string | null): value is PickerCompletedDay {
+  return value === 'today' || value === 'yesterday';
+}
+
 export default function QueuePage(): React.JSX.Element | null {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToast();
   const { role, userId, userName } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [summaryOrder, setSummaryOrder] = useState<PickerCompletedOrder | null>(null);
+
+  const viewParam = searchParams.get('view');
+  const dayParam = searchParams.get('day');
+  const view: QueueView = viewParam === 'done' ? 'done' : 'work';
+  const completedDay: PickerCompletedDay = dayParam === 'yesterday' ? 'yesterday' : 'today';
+
   const claimOrderIdParam = searchParams.get('claimOrderId');
   const legacyClaimOrderId = claimOrderIdParam ? Number.parseInt(claimOrderIdParam, 10) : null;
+
+  const syncQueueParams = useCallback(
+    (nextView: QueueView, nextDay: PickerCompletedDay) => {
+      const params = new URLSearchParams(searchParams);
+      if (nextView === 'work') {
+        params.delete('view');
+        params.delete('day');
+      } else {
+        params.set('view', 'done');
+        params.set('day', nextDay);
+      }
+      setSearchParams(params, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const switchView = useCallback(
+    (nextView: QueueView) => {
+      syncQueueParams(nextView, completedDay);
+    },
+    [completedDay, syncQueueParams],
+  );
+
+  const switchCompletedDay = useCallback(
+    (nextDay: PickerCompletedDay) => {
+      if (view === 'done') syncQueueParams('done', nextDay);
+      else {
+        const params = new URLSearchParams(searchParams);
+        params.set('day', nextDay);
+        setSearchParams(params, { replace: true });
+      }
+    },
+    [searchParams, setSearchParams, syncQueueParams, view],
+  );
 
   // Legacy push links — open trip brief for pool claim.
   useEffect(() => {
@@ -56,6 +116,7 @@ export default function QueuePage(): React.JSX.Element | null {
   });
 
   const dailyStats = usePickerDailyStats();
+  const completedOrdersQuery = usePickerCompletedOrders(completedDay);
   const pushAlerts = usePickerPushNotifications({ role, userId, userName });
 
   /** In-progress picks assigned to you — includes stale / lapsed sessions. */
@@ -102,6 +163,10 @@ export default function QueuePage(): React.JSX.Element | null {
     [myActive, userName],
   );
 
+  const completedOrders = completedOrdersQuery.data ?? [];
+  const completedTodayQuery = usePickerCompletedOrders('today');
+  const completedYesterdayQuery = usePickerCompletedOrders('yesterday');
+
   const openAssignedPreview = (orderId: number) => {
     navigate(`/picking/preview/${orderId}?source=assigned`);
   };
@@ -129,13 +194,18 @@ export default function QueuePage(): React.JSX.Element | null {
     }
   };
 
+  const handleCompletedStatsTap = () => {
+    switchView('done');
+    switchCompletedDay('today');
+  };
+
   const queueWorkCount = assignedOrders.length + resumeOrders.length;
   const queueIsEmpty = !isLoading && queueWorkCount === 0;
 
   return (
     <div className="min-h-screen">
       <PageHeader
-        title="Picking queue"
+        title={view === 'work' ? 'Picking queue' : 'Completed picks'}
         action={
           <div className="flex items-center gap-1">
             <InitialsAvatar name={userName} size="sm" className="mr-0.5" />
@@ -173,81 +243,156 @@ export default function QueuePage(): React.JSX.Element | null {
         }
       />
 
-      <PickerDailyStatsStrip stats={dailyStats.data} isLoading={dailyStats.isLoading} />
+      <PickerDailyStatsStrip
+        stats={dailyStats.data}
+        isLoading={dailyStats.isLoading}
+        onCompletedTap={handleCompletedStatsTap}
+      />
 
       <div className="space-y-4 p-4">
-        {isLoading ? (
-          <div className="space-y-3">
-            <Skeleton variant="card" count={3} />
-          </div>
-        ) : (
-          <section className="space-y-4">
-            {resumeOrders.length > 0 && (
-              <div className="space-y-2">
-                <QueueSectionHeader
-                  label="Continue picking"
-                  count={resumeOrders.length}
-                  description={
-                    staleResumeCount > 0
-                      ? `${staleResumeCount} stale — tap to resume where you left off`
-                      : 'Tap to open the pick deck and finish these lines'
-                  }
-                />
-                <div className="space-y-2">
-                  {resumeOrders.map((order) => (
-                    <ActivePickRow
-                      key={order.id}
-                      order={order}
-                      isMine
-                      onOpen={() => openResumePick(order.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
+        <p className="text-sm text-[var(--content-secondary)]">
+          {view === 'work'
+            ? 'Resume in-progress picks and start new billing assignments.'
+            : 'Orders you finished — tap a row for line details and flags.'}
+        </p>
 
-            <div className="space-y-2">
-              <QueueSectionHeader
-                label="Your assignments"
-                count={assignedOrders.length}
-                showWhenEmpty
-                description={
-                  assignedOrders.length === 0
-                    ? resumeOrders.length > 0
-                      ? 'New billing assignments appear here when ready to start'
-                      : 'Billing-assigned orders appear here when ready to start'
-                    : 'Tap an order to review the pick list, then start picking'
-                }
-              />
-              {assignedOrders.length === 0 ? (
-                queueIsEmpty ? (
-                  <EmptyState
-                    icon={Package}
-                    title="No assignments"
-                    description="New billing assignments show up here. Live picks and the unassigned pool are on Team."
-                    action={{
-                      label: 'Open Team',
-                      onClick: () => navigate('/picking/active'),
-                    }}
-                  />
-                ) : resumeOrders.length > 0 ? null : (
-                  <p className="rounded-2xl border border-dashed border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
-                    No new assignments right now. Active picks are on the Team tab.
-                  </p>
-                )
-              ) : (
+        <div className="flex gap-2">
+          <FilterChip
+            label="Work"
+            selected={view === 'work'}
+            onClick={() => switchView('work')}
+            count={queueWorkCount}
+          />
+          <FilterChip
+            label="Done"
+            selected={view === 'done'}
+            onClick={() => switchView('done')}
+            count={completedTodayQuery.data?.length}
+          />
+        </div>
+
+        {view === 'work' ? (
+          isLoading ? (
+            <div className="space-y-3">
+              <Skeleton variant="card" count={3} />
+            </div>
+          ) : (
+            <section className="space-y-4">
+              {resumeOrders.length > 0 && (
                 <div className="space-y-2">
-                  {assignedOrders.map((order) => (
-                    <AssignedOrderRow
-                      key={order.id}
-                      order={order}
-                      onOpen={() => openAssignedPreview(order.id)}
-                    />
-                  ))}
+                  <QueueSectionHeader
+                    label="Continue picking"
+                    count={resumeOrders.length}
+                    description={
+                      staleResumeCount > 0
+                        ? `${staleResumeCount} stale — tap to resume where you left off`
+                        : 'Tap to open the pick deck and finish these lines'
+                    }
+                  />
+                  <div className="space-y-2">
+                    {resumeOrders.map((order) => (
+                      <ActivePickRow
+                        key={order.id}
+                        order={order}
+                        isMine
+                        onOpen={() => openResumePick(order.id)}
+                      />
+                    ))}
+                  </div>
                 </div>
               )}
+
+              <div className="space-y-2">
+                <QueueSectionHeader
+                  label="Your assignments"
+                  count={assignedOrders.length}
+                  showWhenEmpty
+                  description={
+                    assignedOrders.length === 0
+                      ? resumeOrders.length > 0
+                        ? 'New billing assignments appear here when ready to start'
+                        : 'Billing-assigned orders appear here when ready to start'
+                      : 'Tap an order to review the pick list, then start picking'
+                  }
+                />
+                {assignedOrders.length === 0 ? (
+                  queueIsEmpty ? (
+                    <EmptyState
+                      icon={Package}
+                      title="No assignments"
+                      description="New billing assignments show up here. Live picks and the unassigned pool are on Team."
+                      action={{
+                        label: 'Open Team',
+                        onClick: () => navigate('/picking/active'),
+                      }}
+                    />
+                  ) : resumeOrders.length > 0 ? null : (
+                    <p className="rounded-2xl border border-dashed border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--content-secondary)]">
+                      No new assignments right now. Active picks are on the Team tab.
+                    </p>
+                  )
+                ) : (
+                  <div className="space-y-2">
+                    {assignedOrders.map((order) => (
+                      <AssignedOrderRow
+                        key={order.id}
+                        order={order}
+                        onOpen={() => openAssignedPreview(order.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          )
+        ) : (
+          <>
+            <div className="flex gap-2">
+              <FilterChip
+                label="Today"
+                selected={completedDay === 'today'}
+                onClick={() => switchCompletedDay('today')}
+                count={completedTodayQuery.data?.length}
+              />
+              <FilterChip
+                label="Yesterday"
+                selected={completedDay === 'yesterday'}
+                onClick={() => switchCompletedDay('yesterday')}
+                count={completedYesterdayQuery.data?.length}
+              />
             </div>
-          </section>
+
+            {completedOrdersQuery.isLoading ? (
+              <div className="space-y-3">
+                <Skeleton variant="card" count={3} />
+              </div>
+            ) : completedOrders.length === 0 ? (
+              <EmptyState
+                icon={CheckCircle}
+                title={completedDay === 'today' ? 'No picks finished today' : 'Nothing from yesterday'}
+                description={
+                  completedDay === 'today'
+                    ? 'Completed orders appear here after you finish and finalise a pick.'
+                    : 'Orders you finished yesterday show up here for reference.'
+                }
+                action={
+                  queueWorkCount > 0
+                    ? { label: 'Back to work', onClick: () => switchView('work') }
+                    : undefined
+                }
+              />
+            ) : (
+              <div className="space-y-2">
+                {completedOrders.map((order) => (
+                  <CompletedPickRow
+                    key={order.id}
+                    order={order}
+                    onOpen={() => setSummaryOrder(order)}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         <button
@@ -305,6 +450,12 @@ export default function QueuePage(): React.JSX.Element | null {
           </Card>
         )}
       </div>
+
+      <CompletedPickSummarySheet
+        order={summaryOrder}
+        isOpen={summaryOrder != null}
+        onClose={() => setSummaryOrder(null)}
+      />
     </div>
   );
 }

@@ -13,6 +13,8 @@ interface PickCompleteScreenProps {
   totalLineCount: number;
   pickedPieceCount: number;
   totalPieceCount: number;
+  boxCount?: number | null;
+  billingNotified?: boolean;
 }
 
 export function PickCompleteScreen({
@@ -24,6 +26,8 @@ export function PickCompleteScreen({
   flaggedLineCount,
   pickedPieceCount,
   totalPieceCount,
+  boxCount,
+  billingNotified = false,
 }: PickCompleteScreenProps): React.JSX.Element | null {
   const navigate = useNavigate();
   const hasFlagged = flaggedLineCount > 0;
@@ -57,9 +61,20 @@ export function PickCompleteScreen({
         {hasFlagged ? 'Sent to billing with flags' : 'Pick complete'}
         {' · '}
         <span className="font-mono">{orderNumber}</span>
+        {billingNotified && (
+          <>
+            {' · '}
+            Billing notified
+          </>
+        )}
       </p>
 
       <div className="w-full max-w-xs bg-white/20 backdrop-blur-sm rounded-2xl p-5 mb-8 space-y-2 text-white/90 text-sm">
+        {boxCount != null && boxCount >= 1 && (
+          <p className="tabular-nums font-semibold">
+            {boxCount} box{boxCount === 1 ? '' : 'es'} packed
+          </p>
+        )}
         <p className="tabular-nums">
           {formatLineCountLabel(pickedLineCount, { short: true })} picked
         </p>
@@ -74,7 +89,7 @@ export function PickCompleteScreen({
         )}
       </div>
 
-      <div className="w-full max-w-xs">
+      <div className="w-full max-w-xs space-y-3">
         <BigButton
           variant="secondary"
           onClick={() => navigate('/picking', { replace: true })}
@@ -83,6 +98,13 @@ export function PickCompleteScreen({
           <ArrowRight size={20} weight="bold" />
           Next order
         </BigButton>
+        <button
+          type="button"
+          onClick={() => navigate('/picking?view=done&day=today', { replace: true })}
+          className="w-full text-sm font-semibold text-white/90 underline-offset-2 hover:underline"
+        >
+          View in completed
+        </button>
       </div>
     </div>
   );

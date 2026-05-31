@@ -1,57 +1,51 @@
-import { useEffect, useRef } from 'react';
 import { BillSheetView } from './BillSheetView';
-import { useBillSheetEdits, type BillSheetEdits } from '../../hooks/useBillSheetEdits';
-import type { FulfillmentPath, OrderWithItems } from '../../types';
+import { ReviewBillTable } from './ReviewBillTable';
+import type { BillSheetEdits } from '../../hooks/useBillSheetEdits';
+import type { OrderWithItems } from '../../types';
 
 export interface ReviewBillSectionProps {
   order: OrderWithItems;
-  fulfillmentPath: FulfillmentPath;
-  onReady: (billSheet: BillSheetEdits) => void;
-  onSaved?: () => void;
+  billSheet: BillSheetEdits;
 }
 
 export function ReviewBillSection({
   order,
-  fulfillmentPath,
-  onReady,
-  onSaved,
+  billSheet,
 }: ReviewBillSectionProps): React.JSX.Element {
-  const onReadyRef = useRef(onReady);
-  onReadyRef.current = onReady;
-
-  const billSheet = useBillSheetEdits({
-    orderDetail: order,
-    flaggedMode: order.workflow_status === 'flagged',
-    fulfillmentPath,
-    orderIdForClaim: order.id,
-    onSaved,
-  });
-
-  useEffect(() => {
-    onReadyRef.current(billSheet);
-  });
+  const isPostPick = order.workflow_status !== 'submitted';
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold text-[var(--content-primary)]">
-          {order.workflow_status === 'submitted' ? 'Bill lines' : 'Warehouse bill lines'}
-        </h2>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-[var(--content-primary)]">
+            {isPostPick ? 'Bill in Busy' : 'Bill lines'}
+          </h2>
+          {isPostPick ? (
+            <p className="mt-1 text-sm font-medium text-[var(--content-secondary)]">
+              Status tags show what each row means · green group = copy into Busy
+            </p>
+          ) : null}
+        </div>
         <a
           href={`/billing/desk?orderId=${order.id}`}
-          className="text-xs font-medium text-[var(--content-accent)] hover:underline"
+          className="text-sm font-semibold text-[var(--content-accent)] hover:underline"
         >
           Open in Desk
         </a>
       </div>
-      <BillSheetView
-        orderDetail={order}
-        billSheet={billSheet}
-        variant="page"
-        mode={order.workflow_status === 'submitted' ? 'submitted' : 'post_pick'}
-        showFooter={false}
-        flaggedMode={order.workflow_status === 'flagged'}
-      />
+      {isPostPick ? (
+        <ReviewBillTable billSheet={billSheet} />
+      ) : (
+        <BillSheetView
+          orderDetail={order}
+          billSheet={billSheet}
+          variant="page"
+          mode="submitted"
+          showFooter={false}
+          flaggedMode={order.workflow_status === 'flagged'}
+        />
+      )}
     </div>
   );
 }

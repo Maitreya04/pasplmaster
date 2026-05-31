@@ -34,6 +34,7 @@ const PickingLayout = lazy(() =>
 const QueuePage = lazy(() => import('./pages/picking/QueuePage'));
 const PickPage = lazy(() => import('./pages/picking/PickPage'));
 const PickPreviewPage = lazy(() => import('./pages/picking/PickPreviewPage'));
+const PickFinalisePage = lazy(() => import('./pages/picking/PickFinalisePage'));
 const ActivePicksPage = lazy(() => import('./pages/picking/ActivePicksPage'));
 
 const AdminPage = lazy(() => import('./pages/admin/AdminPage'));
@@ -188,6 +189,7 @@ export default function App(): React.JSX.Element | null {
           <Route path="active" element={<ActivePicksPage />} />
           <Route path="barcode-mapping" element={<BarcodeMappingPage />} />
           <Route path="pick/:id" element={<PickPage />} />
+          <Route path="pick/:id/finish" element={<PickFinalisePage />} />
           <Route path="preview/:id" element={<PickPreviewPage />} />
         </Route>
 

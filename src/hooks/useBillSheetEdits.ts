@@ -34,6 +34,10 @@ import { promoteBillingVerifiedLabelMrp } from '../lib/picking/recordPickerLabel
 import { BILLING_ACCEPT_ALL_LABEL } from '../lib/billing/mrpWorkflowCopy';
 import { BILLING_VERIFIED_MRP_QUERY_KEY } from '../lib/billing/billingVerifiedMrp';
 import { STOCK_MRP_HISTORY_QUERY_KEY } from '../lib/stockMrpwise';
+import {
+  billableQtyForTotal,
+  deriveBillLineFulfillment,
+} from '../lib/billing/billLineFulfillment';
 import { orderItemConfirmedMrp } from '../lib/billing/orderItemSplitGroups';
 import type { FulfillmentPath, OrderItem, OrderWithItems, PendingItem } from '../types';
 import {
@@ -116,7 +120,10 @@ export function useBillSheetEdits({
     orderIdForClaim ??
     (orderDetail.workflow_status === 'submitted' ? orderDetail.id : null);
 
-  const { claimId, isClaimedByMe, claim } = useWorkClaim(claimOrderId, 'billing');
+  const { claimId, isClaimedByMe, claim, error: claimError } = useWorkClaim(
+    claimOrderId,
+    'billing',
+  );
 
   const items = orderDetail.items;
   const sortedLines = useMemo(() => sortBillLines(items), [items]);
@@ -187,9 +194,13 @@ export function useBillSheetEdits({
       visibleItems.reduce((acc, item) => {
         const edit = edits[item.id];
         const price = edit?.priceQuoted ?? item.price_quoted ?? item.price_system ?? 0;
-        return acc + price * item.qty_requested;
+        const pending =
+          item.item_id != null ? pendingByItemId.get(item.item_id) ?? [] : [];
+        const fulfillment = deriveBillLineFulfillment(item, pending);
+        const billQty = billableQtyForTotal(item, fulfillment);
+        return acc + price * billQty;
       }, 0),
-    [visibleItems, edits],
+    [visibleItems, edits, pendingByItemId],
   );
 
   const unresolvedFlagged = useMemo(
@@ -545,6 +556,7 @@ export function useBillSheetEdits({
   });
 
   return {
+    claimError,
     sortedLines,
     edits,
     reason,
@@ -578,6 +590,7 @@ export function useBillSheetEdits({
     saveMutation,
     notifyMutation,
     acceptAllLabel: BILLING_ACCEPT_ALL_LABEL,
+    pendingByItemId,
   };
 }
 

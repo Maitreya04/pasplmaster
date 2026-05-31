@@ -48,11 +48,22 @@ export type PickCompleteReminderPayload = {
   linesRemaining: number;
 };
 
+export type PickReadyForBillingPayload = {
+  eventType: 'pick_ready_for_billing';
+  orderId: number;
+  orderNumber: string;
+  customerName: string;
+  boxCount: number;
+  flaggedLineCount: number;
+  pickerName: string | null;
+};
+
 export type InternalNotificationPayload =
   | PickerReadyPayload
   | ItemFlaggedPayload
   | OrderUpdateForSalesPayload
-  | PickCompleteReminderPayload;
+  | PickCompleteReminderPayload
+  | PickReadyForBillingPayload;
 
 /** Edge function JSON body (partial; varies by eventType). */
 export type InternalNotificationResult = {

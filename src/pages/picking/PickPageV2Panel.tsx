@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { CaretLeft } from '@phosphor-icons/react';
-import { supabase } from '../../lib/supabase/client';
 import { pickQuantityTarget } from '../../lib/cartSupply';
 import { STOCK_MRP_HISTORY_QUERY_KEY } from '../../lib/stockMrpwise';
 import { defaultPickItemTransitionAdapter } from '../../lib/picking/itemTransitionAdapter';
@@ -12,7 +12,6 @@ import {
 import { orderItemPickCode } from '../../utils/itemCodes';
 import { PickerV10Flow } from '../../components/picker-v10';
 import type { PickerV10Line, PickerV10PickResult } from '../../components/picker-v10';
-import { PickCompleteScreen } from './PickCompleteScreen';
 import type { OrderItem, OrderWithItems, ScanResult, StockLocationCode } from '../../types';
 import { useToast } from '../../context/ToastContext';
 import { appHaptics } from '../../lib/haptics';
@@ -88,56 +87,25 @@ function buildPickScanResult(
 export function PickPageV2Panel({
   order,
   orderItems,
-  claimId,
   userId,
   userName,
   onBack,
 }: PickPageV2PanelProps): React.JSX.Element {
-  const { error, warning } = useToast();
+  const navigate = useNavigate();
+  const { warning } = useToast();
   const queryClient = useQueryClient();
-  const [showComplete, setShowComplete] = useState(false);
 
   const activeItems = useMemo(() => pendingLines(orderItems), [orderItems]);
   const lines = useMemo(() => activeItems.map(toPickerLine), [activeItems]);
+  const allDone = lines.length === 0 && orderItems.length > 0;
+  const prevAllDoneRef = useRef(false);
 
-  const totalLines = orderItems.length;
-  const pickedLines = orderItems.filter((oi) => oi.state === 'picked').length;
-  const flaggedLines = orderItems.filter((oi) => oi.state === 'flagged').length;
-  const totalPieces = orderItems.reduce((s, oi) => s + pickQuantityTarget(oi), 0);
-  const pickedPieces = orderItems
-    .filter((oi) => oi.state === 'picked')
-    .reduce((s, oi) => s + pickQuantityTarget(oi), 0);
-
-  const completeMutation = useMutation({
-    mutationFn: async () => {
-      const flagged = orderItems.some((oi) => oi.state === 'flagged');
-      if (claimId && userId) {
-        const { error } = await supabase.rpc('complete_picking', {
-          p_order_id: order.id,
-          p_claim_id: claimId,
-          p_user_id: userId,
-          p_has_flags: flagged,
-        });
-        if (error) throw error;
-        return;
-      }
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          workflow_status: flagged ? 'flagged' : 'completed',
-          ...(flagged ? {} : { completed_at: new Date().toISOString(), priority: 'normal' }),
-        })
-        .eq('id', order.id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['orders'] });
-      void queryClient.invalidateQueries({ queryKey: ['order', order.id] });
-      appHaptics.success();
-      setShowComplete(true);
-    },
-    onError: () => error('Failed to complete order'),
-  });
+  useEffect(() => {
+    if (allDone && !prevAllDoneRef.current) {
+      navigate(`/picking/pick/${order.id}/finish`, { state: { expectAllDone: true } });
+    }
+    prevAllDoneRef.current = allDone;
+  }, [allDone, navigate, order.id]);
 
   const handlePickLine = useCallback(
     async (result: PickerV10PickResult): Promise<void> => {
@@ -192,24 +160,8 @@ export function PickPageV2Panel({
   );
 
   const handleAllComplete = useCallback(() => {
-    void completeMutation.mutate();
-  }, [completeMutation]);
-
-  if (showComplete) {
-    return (
-      <PickCompleteScreen
-        orderNumber={order.order_number}
-        customerName={order.customer_name}
-        customerCity={order.customer_city}
-        transportName={order.transport_name}
-        pickedLineCount={pickedLines}
-        flaggedLineCount={flaggedLines}
-        totalLineCount={totalLines}
-        pickedPieceCount={pickedPieces}
-        totalPieceCount={totalPieces}
-      />
-    );
-  }
+    navigate(`/picking/pick/${order.id}/finish`);
+  }, [navigate, order.id]);
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
@@ -236,10 +188,9 @@ export function PickPageV2Panel({
           <button
             type="button"
             onClick={handleAllComplete}
-            disabled={completeMutation.isPending}
-            className="mt-4 rounded-xl bg-[var(--bg-inverse-primary)] px-6 py-3 text-sm font-bold text-white pick-pressable disabled:opacity-50"
+            className="mt-4 rounded-xl bg-[var(--bg-positive)] px-6 py-3 text-sm font-bold text-[var(--content-on-color)] pick-pressable"
           >
-            {completeMutation.isPending ? 'Submitting…' : 'Complete order'}
+            Pack & finish
           </button>
         </div>
       ) : (

@@ -1,11 +1,10 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, XCircle, Hourglass, Warning, Printer } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { usePickingClaim } from '../../hooks/usePickingClaim';
-import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import {
@@ -33,7 +32,8 @@ import {
 } from '../../lib/billing/fulfillmentPath';
 import { FulfillmentPathSelector } from '../../components/billing/FulfillmentPathSelector';
 import { ReviewBillSection } from '../../components/billing/ReviewBillSection';
-import type { BillSheetEdits } from '../../hooks/useBillSheetEdits';
+import { useBillSheetEdits } from '../../hooks/useBillSheetEdits';
+import type { OrderWithItems } from '../../types';
 import {
   computePickLineProgress,
   countPickableOrderLines,
@@ -53,33 +53,18 @@ export default function ReviewPage(): React.JSX.Element | null {
     order?.workflow_status === 'picking',
   );
 
-  // Initialize work claim
-  const { isClaimedByMe, claim, error: claimError } = useWorkClaim(
-    orderId,
-    'billing'
-  );
-
-  // Auto-claim if submitted
-  useEffect(() => {
-    if (order?.workflow_status === 'submitted' && !isClaimedByMe && !claimError) {
-      claim();
-    }
-  }, [order?.workflow_status, isClaimedByMe, claim, claimError]);
-
   const [rejectSheetOpen, setRejectSheetOpen] = useState(false);
   const [stalePickConfirmOpen, setStalePickConfirmOpen] = useState(false);
   const [prePickConfirmOpen, setPrePickConfirmOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
-  const [billSheetState, setBillSheetState] = useState<BillSheetEdits | null>(null);
-  const handleBillSheetReady = useCallback((sheet: BillSheetEdits) => {
-    setBillSheetState(sheet);
-  }, []);
   const rejectNavigateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [fulfillmentPath, setFulfillmentPath] = useState<FulfillmentPath>('warehouse_pick');
 
   useEffect(() => {
-    setBillSheetState(null);
-  }, [order?.id]);
+    if (!orderId) {
+      navigate('/billing/needs-review', { replace: true });
+    }
+  }, [orderId, navigate]);
 
   useEffect(() => {
     return () => {
@@ -100,26 +85,6 @@ export default function ReviewPage(): React.JSX.Element | null {
       defaultFulfillmentPath(order.stock_location_code, order.pick_line_count ?? pickLineCount),
     );
   }, [order?.id, order?.stock_location_code, order?.pick_line_count, pickLineCount]);
-
-  const reviewBusyItemCount = billSheetState?.visibleItems.length ?? order?.items.length ?? 0;
-  const reviewGrandTotal = billSheetState?.total ?? order?.total_value ?? 0;
-  const reviewPriceMismatchCount =
-    billSheetState?.flaggedItems.filter((i) => i.flag_reason === 'Price Mismatch').length ?? 0;
-  const reviewUnresolvedPriceCount = billSheetState?.unresolvedFlagged.length ?? 0;
-  const pendingCount =
-    billSheetState?.resolvedFlagged.filter((item) => {
-      const edit = billSheetState.edits[item.id];
-      return edit?.resolution === 'removed';
-    }).length ?? 0;
-  const reviewReadyCount = Math.max(
-    0,
-    reviewBusyItemCount - reviewPriceMismatchCount - pendingCount,
-  );
-  const totalQty =
-    billSheetState?.visibleItems.reduce((sum, item) => sum + item.qty_requested, 0) ??
-    order?.items.reduce((sum, item) => sum + item.qty_requested, 0) ??
-    0;
-  const billSavePending = billSheetState?.saveMutation.isPending ?? false;
 
   const pickingSummary = useMemo(() => {
     if (!order?.items) {
@@ -179,7 +144,7 @@ export default function ReviewPage(): React.JSX.Element | null {
       });
       rejectNavigateTimeoutRef.current = setTimeout(() => {
         rejectNavigateTimeoutRef.current = null;
-        navigate('/billing');
+        navigate('/billing/needs-review');
       }, 3000);
     },
     onError: () => {
@@ -271,15 +236,18 @@ export default function ReviewPage(): React.JSX.Element | null {
   }, [order, toast]);
 
   if (!orderId) {
-    navigate('/billing');
     return null;
   }
+
+  const handleBack = () => {
+    navigate('/billing/needs-review');
+  };
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
       <PageHeader
         title={order?.order_number ?? 'Review Order'}
-        onBack={() => navigate('/billing')}
+        onBack={handleBack}
         action={
           canPrintPickingChalan ? (
             <button
@@ -296,22 +264,6 @@ export default function ReviewPage(): React.JSX.Element | null {
       />
 
       <div className="p-4 lg:px-8 lg:py-6 max-w-4xl mx-auto">
-        {claimError && (
-          <div className="mb-6 p-4 rounded-xl bg-[var(--bg-negative-subtle)] border-2 border-[var(--border-negative)] flex items-start gap-3">
-            <XCircle size={24} className="text-[var(--content-negative)] mt-0.5 shrink-0" weight="fill" />
-            <div>
-              <h3 className="font-bold text-[var(--content-negative)]">Cannot review this order</h3>
-              <p className="text-[var(--content-negative)] text-sm mt-1 opacity-90">{claimError}</p>
-              <button 
-                onClick={() => navigate('/billing')}
-                className="mt-3 px-4 py-2 bg-[var(--bg-negative)] text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors"
-              >
-                Go back to dashboard
-              </button>
-            </div>
-          </div>
-        )}
-
         {isLoading ? (
           <div className="animate-pulse space-y-4">
             <div className="h-8 bg-[var(--bg-tertiary)] rounded w-1/3" />
@@ -321,8 +273,228 @@ export default function ReviewPage(): React.JSX.Element | null {
         ) : error || !order ? (
           <p className="text-[var(--content-negative)]">Failed to load order</p>
         ) : (
-          <>
-            {/* Order info bar */}
+          <ReviewOrderContent
+            order={order}
+            fulfillmentPath={fulfillmentPath}
+            setFulfillmentPath={setFulfillmentPath}
+            pickLineCount={pickLineCount}
+            pickingClaim={pickingClaim}
+            pickingSummary={pickingSummary}
+            canCompleteStalePicking={canCompleteStalePicking}
+            canForceCompletePrePick={canForceCompletePrePick}
+            onReject={() => setRejectSheetOpen(true)}
+            onStalePickConfirm={() => setStalePickConfirmOpen(true)}
+            onPrePickConfirm={() => setPrePickConfirmOpen(true)}
+            onBack={handleBack}
+          />
+        )}
+      </div>
+
+      {/* Pre-pick force complete confirmation */}
+      <BottomSheet
+        isOpen={prePickConfirmOpen}
+        onClose={() => setPrePickConfirmOpen(false)}
+        title="Force complete without picking?"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-[var(--content-secondary)]">
+            {order?.picker_name
+              ? `${order.picker_name} has not finished (or started) warehouse picking. `
+              : 'This order is still waiting for a picker. '}
+            Mark it complete to bill directly and remove it from the pick queue.
+          </p>
+          <div className="flex gap-3">
+            <BigButton
+              variant="secondary"
+              onClick={() => setPrePickConfirmOpen(false)}
+              disabled={forceCompletePrePickMutation.isPending}
+              className="flex-1"
+            >
+              Cancel
+            </BigButton>
+            <BigButton
+              variant="primary"
+              onClick={() => forceCompletePrePickMutation.mutate()}
+              loading={forceCompletePrePickMutation.isPending}
+              className="flex-[2] bg-[var(--bg-positive)]"
+            >
+              Confirm complete
+            </BigButton>
+          </div>
+        </div>
+      </BottomSheet>
+
+      {/* Stale pick complete confirmation */}
+      <BottomSheet
+        isOpen={stalePickConfirmOpen}
+        onClose={() => setStalePickConfirmOpen(false)}
+        title="Complete stale pick?"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-[var(--content-secondary)]">
+            {order?.picker_name
+              ? `${order.picker_name}'s picking session has gone stale. `
+              : 'The picking session has gone stale. '}
+            Mark this order complete only if warehouse picking is finished.
+          </p>
+          {pickingSummary && pickingSummary.remaining > 0 && (
+            <p className="text-sm text-[var(--content-warning)]">
+              {pickingSummary.remaining} line
+              {pickingSummary.remaining === 1 ? '' : 's'} still not picked or flagged.
+            </p>
+          )}
+          <div className="flex gap-3">
+            <BigButton
+              variant="secondary"
+              onClick={() => setStalePickConfirmOpen(false)}
+              disabled={completeStalePickingMutation.isPending}
+              className="flex-1"
+            >
+              Cancel
+            </BigButton>
+            <BigButton
+              variant="primary"
+              onClick={() => completeStalePickingMutation.mutate()}
+              loading={completeStalePickingMutation.isPending}
+              className="flex-[2] bg-[var(--bg-positive)]"
+            >
+              Confirm complete
+            </BigButton>
+          </div>
+        </div>
+      </BottomSheet>
+
+      {/* Reject reason sheet */}
+      <BottomSheet
+        isOpen={rejectSheetOpen}
+        onClose={() => {
+          setRejectSheetOpen(false);
+          setRejectReason('');
+        }}
+        title="Reject order"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-[var(--content-secondary)]">
+            Please provide a reason for rejecting this order.
+          </p>
+          <textarea
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            placeholder="e.g. Incorrect pricing, customer requested cancellation..."
+            className="w-full h-24 px-4 py-3 rounded-xl border border-[var(--border-opaque)] text-[var(--content-primary)] placeholder-[var(--content-quaternary)] focus:outline-none focus:ring-2 focus:ring-[var(--role-primary)]"
+            autoFocus
+          />
+          <BigButton
+            variant="danger"
+            onClick={handleReject}
+            loading={rejectMutation.isPending}
+          >
+            Confirm Reject
+          </BigButton>
+        </div>
+      </BottomSheet>
+
+    </div>
+  );
+}
+
+interface ReviewOrderContentProps {
+  order: OrderWithItems;
+  fulfillmentPath: FulfillmentPath;
+  setFulfillmentPath: Dispatch<SetStateAction<FulfillmentPath>>;
+  pickLineCount: number;
+  pickingClaim: ReturnType<typeof usePickingClaim>['data'];
+  pickingSummary: {
+    totalLines: number;
+    picked: number;
+    flagged: number;
+    remaining: number;
+    done: number;
+  } | null;
+  canCompleteStalePicking: boolean;
+  canForceCompletePrePick: boolean;
+  onReject: () => void;
+  onStalePickConfirm: () => void;
+  onPrePickConfirm: () => void;
+  onBack: () => void;
+}
+
+function ReviewOrderContent({
+  order,
+  fulfillmentPath,
+  setFulfillmentPath,
+  pickLineCount,
+  pickingClaim,
+  pickingSummary,
+  canCompleteStalePicking,
+  canForceCompletePrePick,
+  onReject,
+  onStalePickConfirm,
+  onPrePickConfirm,
+  onBack,
+}: ReviewOrderContentProps): React.JSX.Element {
+  const navigate = useNavigate();
+  const toast = useToast();
+
+  const billSheet = useBillSheetEdits({
+    orderDetail: order,
+    flaggedMode: order.workflow_status === 'flagged',
+    fulfillmentPath,
+    orderIdForClaim: order.id,
+    onSaved: () => navigate('/billing/needs-review'),
+  });
+
+  const { claimError } = billSheet;
+
+  const reviewBusyItemCount = billSheet.visibleItems.length;
+  const reviewGrandTotal = billSheet.total;
+  const reviewPriceMismatchCount = billSheet.flaggedItems.filter(
+    (i) => i.flag_reason === 'Price Mismatch',
+  ).length;
+  const reviewUnresolvedPriceCount = billSheet.unresolvedFlagged.length;
+  const pendingCount = billSheet.resolvedFlagged.filter((item) => {
+    const edit = billSheet.edits[item.id];
+    return edit?.resolution === 'removed';
+  }).length;
+  const reviewReadyCount = Math.max(
+    0,
+    reviewBusyItemCount - reviewPriceMismatchCount - pendingCount,
+  );
+  const totalQty = billSheet.visibleItems.reduce(
+    (sum, item) => sum + item.qty_requested,
+    0,
+  );
+  const billSavePending = billSheet.saveMutation.isPending;
+
+  const canPrintPickingChalan =
+    ['approved', 'picking', 'completed', 'flagged'].includes(order.workflow_status);
+
+  const handlePrintPickingChalan = useCallback(() => {
+    const opened = openPickingChalanPrint(order, order.items ?? []);
+    if (!opened) {
+      toast.error('Allow pop-ups to print the picking chalan.');
+    }
+  }, [order, toast]);
+
+  return (
+    <>
+      {claimError ? (
+        <div className="mb-6 p-4 rounded-xl bg-[var(--bg-negative-subtle)] border-2 border-[var(--border-negative)] flex items-start gap-3">
+          <XCircle size={24} className="text-[var(--content-negative)] mt-0.5 shrink-0" weight="fill" />
+          <div>
+            <h3 className="font-bold text-[var(--content-negative)]">Cannot review this order</h3>
+            <p className="text-[var(--content-negative)] text-sm mt-1 opacity-90">{claimError}</p>
+            <button
+              type="button"
+              onClick={onBack}
+              className="mt-3 px-4 py-2 bg-[var(--bg-negative)] text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors"
+            >
+              Back to needs review
+            </button>
+          </div>
+        </div>
+      ) : null}
+
             <Card className="mb-6 lg:mb-8">
               <div className="space-y-2 text-base lg:text-lg">
                 <p className="font-bold text-[var(--content-primary)]">{order.customer_name}</p>
@@ -363,6 +535,11 @@ export default function ReviewPage(): React.JSX.Element | null {
                         Waiting for picker
                       </span>
                     )
+                  )}
+                  {order.box_count != null && order.box_count >= 1 && (
+                    <span className="inline-flex items-center h-6 px-3 rounded-full border border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] text-xs font-semibold text-[var(--content-positive)]">
+                      {order.box_count} box{order.box_count === 1 ? '' : 'es'} · ready to bill
+                    </span>
                   )}
                 </div>
                 {order.workflow_status === 'picking' && order.picker_name && (
@@ -495,12 +672,7 @@ export default function ReviewPage(): React.JSX.Element | null {
                 </Card>
               )}
 
-            <ReviewBillSection
-              order={order}
-              fulfillmentPath={fulfillmentPath}
-              onReady={handleBillSheetReady}
-              onSaved={() => navigate('/billing')}
-            />
+            <ReviewBillSection order={order} billSheet={billSheet} />
 
             {/* Notes */}
             {order.notes && (
@@ -618,7 +790,7 @@ export default function ReviewPage(): React.JSX.Element | null {
                 <>
                   <BigButton
                     variant="danger"
-                    onClick={() => setRejectSheetOpen(true)}
+                    onClick={onReject}
                     className="sm:flex-1"
                   >
                     <XCircle size={20} weight="bold" />
@@ -626,9 +798,9 @@ export default function ReviewPage(): React.JSX.Element | null {
                   </BigButton>
                   <BigButton
                     variant="primary"
-                    onClick={() => billSheetState?.saveMutation.mutate()}
-                    loading={billSheetState?.saveMutation.isPending ?? false}
-                    disabled={!billSheetState || billSheetState.saveBlocked}
+                    onClick={() => billSheet.saveMutation.mutate()}
+                    loading={billSheet.saveMutation.isPending}
+                    disabled={billSheet.saveBlocked}
                     className="sm:flex-[2] hover:opacity-90 bg-[var(--bg-positive)]"
                   >
                     <CheckCircle size={20} weight="bold" />
@@ -639,31 +811,29 @@ export default function ReviewPage(): React.JSX.Element | null {
               {order.workflow_status === 'flagged' && (
                 <BigButton
                   variant="primary"
-                  onClick={() => billSheetState?.saveMutation.mutate()}
-                  loading={billSheetState?.saveMutation.isPending ?? false}
-                  disabled={!billSheetState || billSheetState.saveBlocked}
+                  onClick={() => billSheet.saveMutation.mutate()}
+                  loading={billSheet.saveMutation.isPending}
+                  disabled={billSheet.saveBlocked}
                   className="sm:flex-[2] hover:opacity-90 bg-[var(--bg-warning)]"
                 >
                   <CheckCircle size={20} weight="bold" />
                   Confirm & Generate Bill
                 </BigButton>
               )}
-              {canForceCompletePrePick && (
+              {canForceCompletePrePick ? (
                 <BigButton
                   variant="primary"
-                  onClick={() => setPrePickConfirmOpen(true)}
-                  loading={forceCompletePrePickMutation.isPending}
+                  onClick={onPrePickConfirm}
                   className="sm:flex-[2] hover:opacity-90 bg-[var(--bg-positive)]"
                 >
                   <CheckCircle size={20} weight="bold" />
                   Force complete (skip pick)
                 </BigButton>
-              )}
-              {canCompleteStalePicking && (
+              ) : null}
+              {canCompleteStalePicking ? (
                 <BigButton
                   variant="primary"
-                  onClick={() => setStalePickConfirmOpen(true)}
-                  loading={completeStalePickingMutation.isPending}
+                  onClick={onStalePickConfirm}
                   className={`sm:flex-[2] hover:opacity-90 ${
                     (pickingSummary?.flagged ?? 0) > 0
                       ? 'bg-[var(--bg-warning)] text-[var(--content-primary)]'
@@ -682,116 +852,8 @@ export default function ReviewPage(): React.JSX.Element | null {
                     </>
                   )}
                 </BigButton>
-              )}
+              ) : null}
             </div>
-          </>
-        )}
-      </div>
-
-      {/* Pre-pick force complete confirmation */}
-      <BottomSheet
-        isOpen={prePickConfirmOpen}
-        onClose={() => setPrePickConfirmOpen(false)}
-        title="Force complete without picking?"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-[var(--content-secondary)]">
-            {order?.picker_name
-              ? `${order.picker_name} has not finished (or started) warehouse picking. `
-              : 'This order is still waiting for a picker. '}
-            Mark it complete to bill directly and remove it from the pick queue.
-          </p>
-          <div className="flex gap-3">
-            <BigButton
-              variant="secondary"
-              onClick={() => setPrePickConfirmOpen(false)}
-              disabled={forceCompletePrePickMutation.isPending}
-              className="flex-1"
-            >
-              Cancel
-            </BigButton>
-            <BigButton
-              variant="primary"
-              onClick={() => forceCompletePrePickMutation.mutate()}
-              loading={forceCompletePrePickMutation.isPending}
-              className="flex-[2] bg-[var(--bg-positive)]"
-            >
-              Confirm complete
-            </BigButton>
-          </div>
-        </div>
-      </BottomSheet>
-
-      {/* Stale pick complete confirmation */}
-      <BottomSheet
-        isOpen={stalePickConfirmOpen}
-        onClose={() => setStalePickConfirmOpen(false)}
-        title="Complete stale pick?"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-[var(--content-secondary)]">
-            {order?.picker_name
-              ? `${order.picker_name}'s picking session has gone stale. `
-              : 'The picking session has gone stale. '}
-            Mark this order complete only if warehouse picking is finished.
-          </p>
-          {pickingSummary && pickingSummary.remaining > 0 && (
-            <p className="text-sm text-[var(--content-warning)]">
-              {pickingSummary.remaining} line
-              {pickingSummary.remaining === 1 ? '' : 's'} still not picked or flagged.
-            </p>
-          )}
-          <div className="flex gap-3">
-            <BigButton
-              variant="secondary"
-              onClick={() => setStalePickConfirmOpen(false)}
-              disabled={completeStalePickingMutation.isPending}
-              className="flex-1"
-            >
-              Cancel
-            </BigButton>
-            <BigButton
-              variant="primary"
-              onClick={() => completeStalePickingMutation.mutate()}
-              loading={completeStalePickingMutation.isPending}
-              className="flex-[2] bg-[var(--bg-positive)]"
-            >
-              Confirm complete
-            </BigButton>
-          </div>
-        </div>
-      </BottomSheet>
-
-      {/* Reject reason sheet */}
-      <BottomSheet
-        isOpen={rejectSheetOpen}
-        onClose={() => {
-          setRejectSheetOpen(false);
-          setRejectReason('');
-        }}
-        title="Reject order"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-[var(--content-secondary)]">
-            Please provide a reason for rejecting this order.
-          </p>
-          <textarea
-            value={rejectReason}
-            onChange={(e) => setRejectReason(e.target.value)}
-            placeholder="e.g. Incorrect pricing, customer requested cancellation..."
-            className="w-full h-24 px-4 py-3 rounded-xl border border-[var(--border-opaque)] text-[var(--content-primary)] placeholder-[var(--content-quaternary)] focus:outline-none focus:ring-2 focus:ring-[var(--role-primary)]"
-            autoFocus
-          />
-          <BigButton
-            variant="danger"
-            onClick={handleReject}
-            loading={rejectMutation.isPending}
-          >
-            Confirm Reject
-          </BigButton>
-        </div>
-      </BottomSheet>
-
-    </div>
+    </>
   );
 }

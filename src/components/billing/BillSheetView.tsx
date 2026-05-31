@@ -11,6 +11,7 @@ import {
   type OverlayLineEdit,
 } from '../../pages/billing/BillingDesk/types';
 import type { BillSheetEdits } from '../../hooks/useBillSheetEdits';
+import { summarizeBillFulfillment } from '../../lib/billing/billLineFulfillment';
 import type { OrderItem, OrderWithItems } from '../../types';
 
 export type BillSheetVariant = 'overlay' | 'page';
@@ -81,10 +82,49 @@ function isUnresolvedPickerFlag(
   );
 }
 
+function BillFulfillmentSummary({
+  items,
+  pendingByItemId,
+}: {
+  items: OrderItem[];
+  pendingByItemId: Map<number, import('../../types').PendingItem[]>;
+}): React.JSX.Element | null {
+  const totals = summarizeBillFulfillment(items, pendingByItemId);
+  const hasPo = totals.salesPoQty > 0;
+  const hasOos = totals.pickerOosQty > 0;
+  const hasFoc = totals.focQty > 0;
+  if (!hasPo && !hasOos && !hasFoc) return null;
+
+  return (
+    <div className="px-3 py-2.5 border-b border-[var(--border-faint)] bg-[var(--bg-secondary)] space-y-1.5">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--content-quaternary)]">
+        What to enter in Busy
+      </p>
+      <p className="text-xs text-[var(--content-primary)]">
+        <span className="font-semibold text-[var(--content-positive)]">
+          {totals.busyBillLines} line{totals.busyBillLines === 1 ? '' : 's'}
+        </span>
+        {' · '}
+        {totals.billTodayQty} pcs to bill today
+        {hasFoc ? ` (${totals.focQty} FOC at ₹0)` : ''}
+      </p>
+      {(hasPo || hasOos) && (
+        <p className="text-xs text-[var(--content-secondary)]">
+          Not billing today:
+          {hasPo ? ` ${totals.salesPoQty} pcs on sales PO` : ''}
+          {hasPo && hasOos ? ' ·' : ''}
+          {hasOos ? ` ${totals.pickerOosQty} pcs picker out of stock` : ''}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function BillSheetView({
   orderDetail,
   billSheet,
   variant = 'overlay',
+  mode = 'submitted',
   showFooter = true,
   flaggedMode = false,
   hidePoSkippedFlags = true,
@@ -124,6 +164,7 @@ export function BillSheetView({
     notifyMutation,
     acceptAllLabel,
     flaggedItems,
+    pendingByItemId,
   } = billSheet;
 
   const flaggedItemIds = new Set(flaggedItems.map((item) => item.id));
@@ -182,6 +223,7 @@ export function BillSheetView({
         lineNo={billLinePosition(item, sortedLines)}
         item={item}
         edit={edit}
+        pendingRows={item.item_id != null ? pendingByItemId.get(item.item_id) ?? [] : []}
         isSplitChild={item.split_from_id != null}
         pendingRemoveId={pendingRemoveId}
         showUndoRemove={undoRemoveId === item.id}
@@ -206,6 +248,9 @@ export function BillSheetView({
           variant === 'page' ? '' : 'mx-0'
         }`}
       >
+        {mode === 'post_pick' && (
+          <BillFulfillmentSummary items={visibleItems} pendingByItemId={pendingByItemId} />
+        )}
         {resolvingFlags && unresolvedFlagged.length > 0 && (
           <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-[var(--border-faint)] bg-[var(--bg-tertiary)]">
             <p className="text-[10px] text-[var(--content-quaternary)]">
