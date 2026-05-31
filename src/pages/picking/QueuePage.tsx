@@ -60,8 +60,8 @@ export default function QueuePage(): React.JSX.Element | null {
 
   const viewParam = searchParams.get('view');
   const dayParam = searchParams.get('day');
-  const view: QueueView = viewParam === 'done' ? 'done' : 'work';
-  const completedDay: PickerCompletedDay = dayParam === 'yesterday' ? 'yesterday' : 'today';
+  const view: QueueView = isQueueView(viewParam) ? viewParam : 'work';
+  const completedDay: PickerCompletedDay = isCompletedDay(dayParam) ? dayParam : 'today';
 
   const claimOrderIdParam = searchParams.get('claimOrderId');
   const legacyClaimOrderId = claimOrderIdParam ? Number.parseInt(claimOrderIdParam, 10) : null;

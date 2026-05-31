@@ -54,7 +54,7 @@ export type RejectionKind = 'account_hold' | 'terminal';
 /** @deprecated Use WorkflowStatus instead */
 export type OrderStatus = WorkflowStatus;
 export type OrderPriority = 'normal' | 'urgent';
-export type OrderItemState = 'pending' | 'picked' | 'flagged';
+export type OrderItemState = 'pending' | 'picked' | 'flagged' | 'overridden';
 
 /** Set at billing approval: warehouse pick queue vs skip pick (direct Busy bill). */
 export type FulfillmentPath = 'warehouse_pick' | 'direct_bill';

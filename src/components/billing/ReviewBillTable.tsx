@@ -352,7 +352,7 @@ function TableRow({
   billSheet: BillSheetEdits;
   pendingRemoveId: number | null;
 }): React.JSX.Element {
-  const { item, edit, fulfillment, lineTotal, samePartAsPrevious } = row;
+  const { item, fulfillment, lineTotal, samePartAsPrevious } = row;
   const product = reviewProductLabel(row);
   const notes = reviewStatusLabel(row).long;
   const labelMrp = orderItemConfirmedMrp(item);
