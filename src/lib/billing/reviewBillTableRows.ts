@@ -130,7 +130,7 @@ export function buildReviewBillTableGroups(
 
   groups.push({
     id: 'bill',
-    title: 'Enter in Busy',
+    title: 'Being billed',
     hint: 'Copy line order into Busy — rate × qty = line total',
     rows: bill,
     subtotal: bill.reduce((s, r) => s + r.lineTotal, 0),
@@ -140,8 +140,8 @@ export function buildReviewBillTableGroups(
   if (skip.length > 0) {
     groups.push({
       id: 'skip',
-      title: 'Do not bill today',
-      hint: 'Sales PO backlog or picker out-of-stock — skip in Busy',
+      title: 'Pending order',
+      hint: 'Out of stock · will fulfil separately — skip in Busy today',
       rows: skip,
       subtotal: 0,
       lineCount: skip.length,

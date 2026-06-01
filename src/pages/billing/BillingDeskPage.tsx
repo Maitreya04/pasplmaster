@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useBillingDeskOrders, orderNeedsDeskFlagAction } from '../../hooks/useBillingDeskOrders';
+import { useBillingDeskOrders, orderHasDeskPickerFlags } from '../../hooks/useBillingDeskOrders';
 import { LiveQueueWorkspace } from './LiveQueue/LiveQueueWorkspace';
 import { DeskMobileFallback } from './BillingDesk/DeskMobileFallback';
 import { DeskOrderOverlay } from './BillingDesk/DeskOrderOverlay';
@@ -30,7 +30,7 @@ export default function BillingDeskPage(): React.JSX.Element {
     if (!found) return null;
     return {
       order: found,
-      flaggedMode: orderNeedsDeskFlagAction(found),
+      flaggedMode: orderHasDeskPickerFlags(found),
     };
   }, [all, dismissedUrlOpen, preselectedId]);
 

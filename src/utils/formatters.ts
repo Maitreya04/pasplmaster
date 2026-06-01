@@ -5,10 +5,12 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Same rule as New Order search rows: `alias1 ?? alias`, with snapshot fallback. */
+/** Fallback pick code (`alias1 ?? alias ?? snapshot`) — search, paste labels, etc. */
 export function orderItemProductCode(item: OrderItem): string {
   return orderItemPickCode(item);
 }
+
+export { orderItemAlias1Code } from './itemCodes';
 
 /**
  * Catalog `item_name` often repeats the product code as a leading token.
@@ -27,6 +29,24 @@ export function orderItemDisplayName(item: OrderItem): string {
     if (stripped.length > 0) return stripped;
   }
   return name;
+}
+
+/** Title-case ALL-CAPS catalog names for on-screen reading (copy/paste keeps raw names). */
+export function readableCatalogName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return trimmed;
+  const letters = trimmed.replace(/[^A-Za-z]/g, '');
+  if (letters.length < 4) return trimmed;
+  const upperCount = trimmed.replace(/[^A-Z]/g, '').length;
+  if (upperCount / letters.length < 0.65) return trimmed;
+
+  return trimmed
+    .toLowerCase()
+    .replace(/(?:^|[\s(/])\S/g, (match) => match.toUpperCase());
+}
+
+export function orderItemReadableName(item: OrderItem): string {
+  return readableCatalogName(orderItemDisplayName(item));
 }
 
 /** One line for messages: code + description (matches New Order semantics). */

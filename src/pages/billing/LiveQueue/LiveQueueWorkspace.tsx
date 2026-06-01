@@ -23,6 +23,7 @@ import {
   persistBillingLiveQueueDraft,
   type BillingLineEdit,
 } from '../../../lib/billing/liveQueueDraft';
+import { billingClaimFailureMessage } from '../../../lib/billing/claimFailureMessage';
 import { sortBillLines } from '../../../lib/billing/sortBillLines';
 
 import { useBillingFlow } from '../../../hooks/useBillingFlow';
@@ -117,9 +118,19 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
   const effectiveOrderId = activeInQueue?.id ?? null;
 
   const claimAttempted = useRef<number | null>(null);
+  const claimFailureToasted = useRef<number | null>(null);
+
+  useEffect(() => {
+    claimAttempted.current = null;
+    claimFailureToasted.current = null;
+  }, [effectiveOrderId]);
+
+  const activeOrderSalesLocked =
+    activeInQueue != null && isSalesEditFreshLock(activeInQueue);
 
   const handleBillingClaimLost = useCallback(() => {
     claimAttempted.current = null;
+    claimFailureToasted.current = null;
     toast.warning('Billing claim expired — reclaiming this order…');
   }, [toast]);
 
@@ -298,7 +309,7 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
 
   useEffect(() => {
     if (flow.state !== 'orderSheet' || !effectiveOrderId || isClaimedByMe) return;
-    if (activeInQueue && isSalesEditFreshLock(activeInQueue)) return;
+    if (activeOrderSalesLocked) return;
     if (claimAttempted.current === effectiveOrderId) return;
 
     claimAttempted.current = effectiveOrderId;
@@ -306,31 +317,47 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
       const result = await claim();
       if (result.success) return;
 
-      claimAttempted.current = null;
-
       if (result.reason === 'locked_by_sales_edit') {
+        claimAttempted.current = null;
         const who =
           typeof result.locked_by_name === 'string' && result.locked_by_name.trim()
             ? result.locked_by_name.trim()
             : 'Sales';
         toast.warning(`Locked — ${who} is editing this order from sales.`);
-        flow.returnToQueue();
+        flowRef.current.returnToQueue();
         setCurrentOrderId(null);
         return;
       }
 
       if (result.reason === 'already_claimed') {
-        const who =
-          typeof result.claimed_by === 'string' && result.claimed_by.trim()
-            ? result.claimed_by
-            : 'someone else';
-        toast.warning(`Being billed by ${who}. Take over from the queue if their session is stale.`);
+        if (claimFailureToasted.current !== effectiveOrderId) {
+          claimFailureToasted.current = effectiveOrderId;
+          const who =
+            typeof result.claimed_by === 'string' && result.claimed_by.trim()
+              ? result.claimed_by
+              : 'someone else';
+          toast.warning(
+            `Being billed by ${who}. Take over from the queue if their session is stale.`,
+          );
+        }
         return;
       }
 
-      toast.error(`Could not claim order: ${result.reason ?? 'unknown error'}`);
+      if (claimFailureToasted.current !== effectiveOrderId) {
+        claimFailureToasted.current = effectiveOrderId;
+        toast.error(
+          `Could not claim order: ${billingClaimFailureMessage(result.reason)}`,
+        );
+      }
     })();
-  }, [flow.state, effectiveOrderId, isClaimedByMe, claim, toast, flow, activeInQueue]);
+  }, [
+    flow.state,
+    effectiveOrderId,
+    isClaimedByMe,
+    claim,
+    toast,
+    activeOrderSalesLocked,
+  ]);
 
   // ── Skip / Release ──
   const handleSkip = useCallback(async () => {
@@ -731,10 +758,14 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
           salesLocked={salesLocked}
           isLoading={queueLoading}
           onSelect={(orderId) => {
+            claimAttempted.current = null;
+            claimFailureToasted.current = null;
             setCurrentOrderId(orderId);
             flow.openOrder();
           }}
           onTakeover={(orderId) => {
+            claimAttempted.current = null;
+            claimFailureToasted.current = null;
             setCurrentOrderId(orderId);
             flow.openOrder();
           }}
@@ -752,10 +783,12 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
       <div className={shellClass}>
         {urgentBanner}
         <OrderSheetView
+          orderId={order.id}
           embedded={embedded}
           orderName={order.customer_name}
           orderNumber={order.order_number}
           salesperson={order.salesperson_name}
+          transportName={order.transport_name}
           customerAddress={order.customer_address ?? null}
           notes={order.notes}
           city={order.customer_city}

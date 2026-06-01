@@ -15,7 +15,13 @@ import {
   isBillingQueueEventsEnabled,
   isSupabasePostgresChangesEnabled,
 } from '../lib/realtimePolicy';
-import type { Order, ClaimStage, WorkflowStatus } from '../types';
+import type {
+  FulfillmentPath,
+  Order,
+  ClaimStage,
+  StockLocationCode,
+  WorkflowStatus,
+} from '../types';
 
 const REALTIME_ON = isSupabasePostgresChangesEnabled();
 const BILLING_QUEUE_EVENTS_ON = isBillingQueueEventsEnabled();
@@ -108,6 +114,8 @@ type BillingQueueSnapshotRow = {
   salesperson_user_id: number | null;
   reviewer_name: string | null;
   picker_name: string | null;
+  stock_location_code: string | null;
+  fulfillment_path: string | null;
   workflow_status: WorkflowStatus;
   priority: 'normal' | 'urgent';
   notes: string | null;
@@ -374,6 +382,8 @@ async function fetchBillingQueueSnapshot(
         row.salesperson_user_id == null ? null : Number(row.salesperson_user_id),
       reviewer_name: row.reviewer_name,
       picker_name: row.picker_name,
+      stock_location_code: (row.stock_location_code as StockLocationCode | null) ?? null,
+      fulfillment_path: (row.fulfillment_path as FulfillmentPath | null) ?? null,
       workflow_status: row.workflow_status,
       priority: row.priority,
       notes: row.notes,

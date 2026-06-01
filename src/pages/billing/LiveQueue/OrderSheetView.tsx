@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactElement } from 'react';
 import {
-  ArrowLeft,
   ArrowCounterClockwise,
-  Copy,
-  Check,
-  Warning,
   XCircle,
-  Trash,
   Plus,
+  NotePencil,
+  ListChecks,
+  Tag,
+  Gift,
+  ClockCounterClockwise,
 } from '@phosphor-icons/react';
 import { ACCOUNT_HOLD_NOTE } from '../../../lib/billing/rejectionKind';
 import type { FulfillmentPath, OrderItem, RejectionKind, StockLocationCode } from '../../../types';
@@ -16,38 +16,54 @@ import type { BillingLiveQueueFlag } from '../../../lib/billing/liveQueueDraft';
 import { defaultFulfillmentPath } from '../../../lib/billing/fulfillmentPath';
 import { FulfillmentPathSelector } from '../../../components/billing/FulfillmentPathSelector';
 import type { BillingLineEdit, ItemFlag } from '../../../hooks/useBillingFlow';
-import {
-  billingFreshnessChipLabel,
-  billingFreshnessChipTitle,
-  type BillingFreshnessRow,
-} from '../../../hooks/useBillingStockFreshness';
-import { StatusBadge } from '../../../components/shared';
+import type { BillingFreshnessRow } from '../../../hooks/useBillingStockFreshness';
 import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
-import { getBookPrice, getQuotedPrice, isSpecialRateItem, summarizeSpecialPricing } from '../../../lib/specialPricing';
+import { getQuotedPrice } from '../../../lib/specialPricing';
 import {
   formatCurrency,
-  formatTimeAgo,
   orderItemDisplayName,
   orderItemProductCode,
 } from '../../../utils/formatters';
 import { orderItemConfirmedMrp } from '../../../lib/billing/orderItemSplitGroups';
-import { billLineIdentity } from '../../../lib/billing/billLineIdentity';
 import {
   buildBusyPasteText,
   sortBillLines,
   sortFlagsByBillLine,
 } from '../../../lib/billing/sortBillLines';
-import { BILLING_LABEL_CHIP } from '../../../lib/billing/mrpWorkflowCopy';
+import {
+  deriveBusyFinishAction,
+} from '../../../lib/billing/busyFinishAction';
+import {
+  markBusyEnteredIds,
+  readBusyEnteredIds,
+  toggleBusyEnteredId,
+  writeBusyEnteredIds,
+} from '../../../lib/billing/busyEntrySession';
+import { BillingActionBar } from '../../../components/billing/chrome/BillingActionBar';
+import { BillingBillHeader } from '../../../components/billing/chrome/BillingBillHeader';
+import { BillingOrderChrome } from '../../../components/billing/chrome/BillingOrderChrome';
+import {
+  busyEntryBrandLabel,
+  busyEntryLineNature,
+} from '../../../lib/billing/busyEntryLineNature';
+import {
+  BusyEntryLineRow,
+  BusyEntryTableHeader,
+} from '../../../components/billing/busyEntry/BusyEntryLineRow';
+import { BusyEntryCopyHint } from '../../../components/billing/busyEntry/BusyEntryCopyHint';
+import { QueueSectionHeader } from '../../../components/shared/QueueSectionHeader';
 
 /** UI labels for billing (Windows-first). Finish still works with Cmd+Enter on Mac. */
 const SHORTCUT_COPY_ALL = 'Alt+C';
 const SHORTCUT_FINISH = 'Ctrl+Enter';
 
 interface OrderSheetViewProps {
+  orderId: number;
   embedded?: boolean;
   orderName: string;
   orderNumber: string;
   salesperson: string | null;
+  transportName?: string | null;
   customerAddress: string | null;
   notes: string | null;
   city: string | null;
@@ -82,6 +98,10 @@ interface OrderSheetViewProps {
 
 type CopyState = 'ready' | 'copied' | 'settled';
 
+function isSkipLine(flag: ItemFlag | undefined): boolean {
+  return flag?.type === 'no_stock' || flag?.type === 'partial';
+}
+
 function mergeLine(item: OrderItem, edit?: BillingLineEdit): OrderItem {
   if (!edit || edit.removed) return item;
   return {
@@ -91,16 +111,65 @@ function mergeLine(item: OrderItem, edit?: BillingLineEdit): OrderItem {
   };
 }
 
+type WorkSummaryTone = 'default' | 'warning' | 'positive' | 'info';
+
+function workSummaryToneClass(tone: WorkSummaryTone): string {
+  switch (tone) {
+    case 'warning':
+      return 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]';
+    case 'positive':
+      return 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]';
+    case 'info':
+      return 'border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]';
+    default:
+      return 'border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)]';
+  }
+}
+
+function WorkSummaryButton({
+  icon,
+  label,
+  count,
+  tone = 'default',
+  disabled = false,
+  onClick,
+}: {
+  icon: ReactElement;
+  label: string;
+  count: number;
+  tone?: WorkSummaryTone;
+  disabled?: boolean;
+  onClick: () => void;
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      disabled={disabled || count === 0}
+      onClick={onClick}
+      className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 font-ds-caption-size font-semibold tabular-nums transition-colors ${
+        workSummaryToneClass(tone)
+      } disabled:cursor-default disabled:opacity-45 enabled:hover:brightness-[0.98]`}
+      style={{ borderWidth: '0.5px' }}
+    >
+      {icon}
+      <span>{label}</span>
+      <span className="font-ds-body-size">{count}</span>
+    </button>
+  );
+}
+
 export function OrderSheetView({
+  orderId,
   embedded = false,
   orderName,
   orderNumber,
   salesperson,
-  customerAddress,
+  transportName,
+  customerAddress: _customerAddress,
   notes,
-  city,
+  city: _city,
   itemCount,
-  totalValue,
+  totalValue: _totalValue,
   priority,
   createdAt,
   stockLocationCode,
@@ -117,7 +186,7 @@ export function OrderSheetView({
   onFlagPartial,
   onClearFlag,
   onEditLineQty,
-  onEditLineRate,
+  onEditLineRate: _onEditLineRate,
   onRemoveLine,
   onRestoreLine,
   onApplyLiveStock,
@@ -127,8 +196,6 @@ export function OrderSheetView({
   onSkip,
 }: OrderSheetViewProps): ReactElement {
   const { copy } = useCopyToClipboard();
-  const headerMeta = [orderNumber, salesperson].filter(Boolean).join(' · ');
-  const customerLocation = [city, customerAddress?.trim()].filter(Boolean).join(' · ');
   const trimmedNotes = notes?.trim() ?? '';
 
   const sortedItems = useMemo(() => sortBillLines(items), [items]);
@@ -168,6 +235,68 @@ export function OrderSheetView({
   const fulfillmentPath = manualFulfillmentPath ?? autoFulfillmentPath;
 
   const [copyState, setCopyState] = useState<CopyState>('ready');
+  const [enteredIds, setEnteredIds] = useState(() => readBusyEnteredIds(orderId));
+
+  const toggleEntered = useCallback(
+    (lineId: number) => {
+      setEnteredIds(toggleBusyEnteredId(orderId, lineId));
+    },
+    [orderId],
+  );
+
+  const billableRows = useMemo(
+    () => mergedVisibleRows.filter((item) => !isSkipLine(flags[item.id])),
+    [mergedVisibleRows, flags],
+  );
+
+  const skipRowCount = useMemo(
+    () => mergedVisibleRows.filter((item) => isSkipLine(flags[item.id])).length,
+    [mergedVisibleRows, flags],
+  );
+
+  /** Billable lines first, then skip/pending — avoids in-sort-order items appearing under skip header. */
+  const tableItemOrder = useMemo(() => {
+    const billable: OrderItem[] = [];
+    const skip: OrderItem[] = [];
+    const removed: OrderItem[] = [];
+    for (const item of sortedItems) {
+      if (lineEdits[item.id]?.removed) {
+        removed.push(item);
+      } else if (isSkipLine(flags[item.id])) {
+        skip.push(item);
+      } else {
+        billable.push(item);
+      }
+    }
+    return {
+      items: [...billable, ...skip, ...removed],
+      skipSectionStartId: skip[0]?.id ?? null,
+    };
+  }, [sortedItems, lineEdits, flags]);
+
+  const copyBillable = useCallback(() => {
+    if (billableRows.length === 0) return;
+    copy(buildBusyPasteText(billableRows, { lineEdits, includeRate: true }), 'all-items');
+    setCopyState('copied');
+  }, [billableRows, lineEdits, copy]);
+
+  const markAllEntered = useCallback(() => {
+    if (billableRows.length === 0) return;
+    setEnteredIds(markBusyEnteredIds(orderId, billableRows.map((row) => row.id)));
+  }, [billableRows, orderId]);
+
+  const toggleAllEntered = useCallback(() => {
+    if (billableRows.length === 0) return;
+    const next = readBusyEnteredIds(orderId);
+    const allEntered = billableRows.every((row) => next.has(row.id));
+    if (allEntered) {
+      for (const row of billableRows) next.delete(row.id);
+    } else {
+      for (const row of billableRows) next.add(row.id);
+    }
+    writeBusyEnteredIds(orderId, next);
+    setEnteredIds(next);
+  }, [billableRows, orderId]);
 
   const [activeRow, setActiveRow] = useState<number | null>(null);
   const [showHints, setShowHints] = useState(false);
@@ -179,8 +308,6 @@ export function OrderSheetView({
 
   const [editingQtyRow, setEditingQtyRow] = useState<number | null>(null);
   const [qtyDraft, setQtyDraft] = useState('');
-  const [editingRateRow, setEditingRateRow] = useState<number | null>(null);
-  const [rateDraft, setRateDraft] = useState('');
 
   const [showConfirm, setShowConfirm] = useState(false);
   const confirmFinishRef = useRef<HTMLButtonElement>(null);
@@ -247,7 +374,18 @@ export function OrderSheetView({
   }, [lastRemoved, lineEdits, items]);
 
   const flagCount = Object.keys(flags).length;
-  const { specialLineCount, specialQty } = summarizeSpecialPricing(mergedVisibleRows);
+  const specialRateRows = useMemo(
+    () => billableRows.filter((item) => busyEntryLineNature(item) === 'special_rate'),
+    [billableRows],
+  );
+  const focRows = useMemo(
+    () => billableRows.filter((item) => busyEntryLineNature(item) === 'foc'),
+    [billableRows],
+  );
+  const pendingRows = useMemo(
+    () => mergedVisibleRows.filter((item) => isSkipLine(flags[item.id])),
+    [mergedVisibleRows, flags],
+  );
 
   const removedCount = items.filter((i) => lineEdits[i.id]?.removed).length;
   const editCount = Object.entries(lineEdits).filter(
@@ -257,6 +395,18 @@ export function OrderSheetView({
   ).length;
 
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
+  const focusLineById = useCallback(
+    (lineId: number | undefined) => {
+      if (lineId == null) return;
+      const rowIndex = mergedVisibleRows.findIndex((row) => row.id === lineId);
+      if (rowIndex < 0) return;
+      setActiveRow(rowIndex);
+      requestAnimationFrame(() => {
+        rowRefs.current[rowIndex]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      });
+    },
+    [mergedVisibleRows],
+  );
 
   useEffect(() => {
     if (activeRow !== null && rowRefs.current[activeRow]) {
@@ -277,10 +427,7 @@ export function OrderSheetView({
     }
   }, [copyState]);
 
-  const copyAllItems = useCallback(() => {
-    copy(buildBusyPasteText(mergedVisibleRows), 'all-items');
-    setCopyState('copied');
-  }, [mergedVisibleRows, copy]);
+  const copyAllItems = copyBillable;
 
   const sortedFlagEntries = useMemo(
     () => sortFlagsByBillLine(flags, items),
@@ -384,12 +531,6 @@ export function OrderSheetView({
           setQtyDraft('');
           return;
         }
-        if (editingRateRow !== null) {
-          e.preventDefault();
-          setEditingRateRow(null);
-          setRateDraft('');
-          return;
-        }
       }
 
       if (e.key === 'ArrowDown') {
@@ -458,16 +599,6 @@ export function OrderSheetView({
         }
         return;
       }
-      if ((e.key === 'r' || e.key === 'R') && activeRow !== null) {
-        e.preventDefault();
-        const rowItem = mergedVisibleRows[activeRow];
-        if (rowItem) {
-          setEditingRateRow(activeRow);
-          setRateDraft(String(rowItem.price_quoted ?? rowItem.price_system ?? 0));
-          showHintsTemporarily();
-        }
-        return;
-      }
       if ((e.key === 'x' || e.key === 'X' || e.key === 'Delete' || e.key === 'Backspace') && activeRow !== null) {
         if (e.key === 'Backspace' && mergedVisibleRows.length === 0) return;
         e.preventDefault();
@@ -501,7 +632,6 @@ export function OrderSheetView({
     flags,
     partialInputRow,
     editingQtyRow,
-    editingRateRow,
     showConfirm,
     showReject,
     jumpBuffer,
@@ -559,20 +689,13 @@ export function OrderSheetView({
     setQtyDraft('');
   }, [editingQtyRow, qtyDraft, mergedVisibleRows, items, onEditLineQty]);
 
-  const commitRateEdit = useCallback(() => {
-    if (editingRateRow === null) return;
-    const rowItem = mergedVisibleRows[editingRateRow];
-    if (!rowItem) return;
-    const r = parseFloat(rateDraft.replace(',', ''));
-    if (!Number.isFinite(r) || r < 0) {
-      setEditingRateRow(null);
-      setRateDraft('');
-      return;
-    }
-    onEditLineRate(rowItem.id, r);
-    setEditingRateRow(null);
-    setRateDraft('');
-  }, [editingRateRow, rateDraft, mergedVisibleRows, onEditLineRate]);
+  const handleUndoFlag = useCallback(
+    (orderItemId: number) => {
+      onClearFlag(orderItemId);
+      showHintsTemporarily();
+    },
+    [onClearFlag, showHintsTemporarily],
+  );
 
   const handleRejectConfirm = useCallback(() => {
     if (isRejecting) return;
@@ -586,144 +709,223 @@ export function OrderSheetView({
 
   const billedNormalCount = mergedVisibleRows.filter((it) => !flags[it.id]).length;
 
+  const billableForBusyCount = billableRows.length;
+  const enteredCount = billableRows.filter((item) => enteredIds.has(item.id)).length;
+  const busyProgress = {
+    entered: enteredCount,
+    total: billableForBusyCount,
+    skipCount: skipRowCount,
+  };
+  const finishAction = deriveBusyFinishAction({
+    billableCount: billableForBusyCount,
+    enteredCount,
+    skipCount: skipRowCount,
+    isClaiming,
+    isApproving,
+    isRejecting,
+    hasVisibleRows: mergedVisibleRows.length > 0,
+    enabledLabel: 'Done — assign picker',
+  });
+
+  const linesToEnterTone =
+    billableForBusyCount > 0 && enteredCount >= billableForBusyCount
+      ? ('positive' as const)
+      : ('warning' as const);
+
+  const busyRemaining = Math.max(0, billableForBusyCount - enteredCount);
+  const showCopyHint = copyState !== 'ready' && busyRemaining > 0;
+
+  const billableTotal = useMemo(
+    () =>
+      billableRows.reduce((sum, item) => {
+        const price = getQuotedPrice(item) ?? item.price_system ?? 0;
+        return sum + price * item.qty_requested;
+      }, 0),
+    [billableRows],
+  );
+
   const shellClass = embedded
-    ? 'density-compact h-full min-h-0 bg-[var(--bg-primary)] flex flex-col animate-slide-up overflow-hidden'
+    ? 'density-billing-work h-full min-h-0 bg-[var(--bg-secondary)] flex flex-col animate-slide-up overflow-hidden'
     : 'density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col animate-slide-up';
 
-  const codeColClass = embedded
-    ? 'table-cell align-top min-w-0 w-[7rem] max-w-[7rem]'
-    : 'hidden sm:table-cell align-top min-w-0 w-[10.5rem] max-w-[10.5rem] lg:w-[13rem] lg:max-w-[13rem]';
-  const tableClass = embedded ? 'ds-table w-full table-fixed text-[13px]' : 'ds-table w-full table-fixed';
-  const indexColClass = embedded ? 'w-10 text-center border-l-[3px] border-l-transparent' : 'w-14 text-center border-l-[3px] border-l-transparent';
-  const rateColClass = embedded ? 'text-right w-20' : 'text-right w-28';
-  const qtyColClass = embedded ? 'text-right w-12' : 'text-right w-16';
-  const statusColClass = embedded ? 'text-right w-[7rem]' : 'text-right w-[8.5rem]';
+  const tableClass = embedded
+    ? 'ds-table ds-table--billing w-full'
+    : 'ds-table ds-table--billing w-full max-w-3xl mx-auto';
+
+  const bodyWrapClass = embedded
+    ? 'flex flex-col min-h-0 gap-3 p-3'
+    : 'max-w-3xl mx-auto px-4 lg:px-6 py-4 space-y-3';
+
+  const copyButtonLabel =
+    copyState === 'copied'
+      ? 'Copied'
+      : copyState === 'settled'
+        ? 'Copy all items again'
+        : 'Copy all items';
 
   return (
     <div className={shellClass}>
-
-      <div className="px-4 lg:px-6 py-3 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] shrink-0">
-        <button
-          onClick={onSkip}
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--content-secondary)] hover:text-[var(--content-primary)] transition-colors px-2 py-1 -ml-2 rounded-lg hover:bg-[var(--bg-tertiary)]"
-        >
-          <ArrowLeft size={16} weight="bold" />
-          Queue
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-4 lg:px-6 py-6 space-y-4">
-
-          <div className="ds-card p-4 lg:p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  {priority === 'urgent' && <StatusBadge status="urgent" />}
-                  <h1 className="text-xl font-bold text-[var(--content-primary)] truncate">
-                    {orderName}
-                  </h1>
+      <BillingOrderChrome
+        stage="busy_entry"
+        embedded={embedded}
+        className="flex-1 min-h-0"
+        showNavBar
+        onBack={onSkip}
+        onReject={() => setShowReject(true)}
+        rejectDisabled={isApproving || isRejecting}
+        context={{
+          salesperson,
+          createdAt,
+          transportName,
+          busyProgress,
+          lineCount: itemCount,
+          pendingCount: skipRowCount > 0 ? skipRowCount : undefined,
+        }}
+        billHeader={
+          <BillingBillHeader
+            customerName={orderName}
+            orderId={orderNumber}
+            createdAt={createdAt}
+            priority={priority}
+            transportName={transportName}
+          />
+        }
+        summaryStats={[
+          {
+            label: 'Billable total',
+            value: formatCurrency(billableTotal),
+          },
+          {
+            label: 'Lines to enter',
+            value: `${enteredCount} of ${billableForBusyCount}`,
+            tone: linesToEnterTone,
+          },
+          ...(skipRowCount > 0
+            ? [
+                {
+                  label: 'Pending',
+                  value: `${skipRowCount} skipped`,
+                  tone: 'info' as const,
+                },
+              ]
+            : []),
+        ]}
+        actions={
+          <BillingActionBar
+            secondaryCopyLabel="Copy all items"
+            onSecondaryCopy={copyBillable}
+            secondaryCopyDisabled={isClaiming || billableRows.length === 0}
+            ghostLabel="Mark all entered"
+            onGhostClick={markAllEntered}
+            gateWarning={finishAction.gateWarning}
+            primaryLabel={finishAction.label}
+            primaryDisabled={finishAction.disabled}
+            primaryLoading={isClaiming || isApproving}
+            onPrimary={handleFinishAttempt}
+          />
+        }
+      >
+        <div className={bodyWrapClass}>
+          <section className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] overflow-hidden">
+            {trimmedNotes ? (
+              <div className="grid grid-cols-[124px_minmax(0,1fr)] border-b border-[var(--border-faint)]">
+                <div className="flex items-center gap-2 border-r border-[var(--border-faint)] bg-[var(--bg-secondary)] px-3 py-3">
+                  <NotePencil size={16} weight="bold" className="text-[var(--content-warning-on-light)]" />
+                  <span className="font-ds-micro font-semibold uppercase text-[var(--content-quaternary)]">
+                    Sales note
+                  </span>
                 </div>
-                {headerMeta && (
-                  <p className="text-xs text-[var(--content-tertiary)]">
-                    {headerMeta}
+                <div className="min-w-0 px-4 py-3">
+                  <p className="font-ds-body-size font-semibold leading-snug text-[var(--content-primary)] whitespace-pre-wrap">
+                    {trimmedNotes}
                   </p>
-                )}
-                {customerLocation && (
-                  <p className="mt-1 text-sm text-[var(--content-tertiary)] line-clamp-2">
-                    <span className="font-medium text-[var(--content-secondary)]">
-                      {city}
-                    </span>
-                    {city && customerAddress?.trim() && (
-                      <span className="px-1 text-[var(--content-quaternary)]">·</span>
-                    )}
-                    {customerAddress?.trim() && (
-                      <span>{customerAddress.trim()}</span>
-                    )}
-                  </p>
-                )}
+                </div>
               </div>
-              <div className="text-right shrink-0">
-                <p className="text-base font-mono font-semibold text-[var(--content-primary)] tabular-nums">
-                  {formatCurrency(totalValue)}
-                </p>
-                <p className="font-ds-label-size text-[var(--content-quaternary)] mt-0.5">
-                  {itemCount} items · {formatTimeAgo(createdAt)}
-                </p>
+            ) : null}
+
+            <div className="grid grid-cols-[124px_minmax(0,1fr)]">
+              <div className="flex items-center border-r border-[var(--border-faint)] bg-[var(--bg-secondary)] px-3 py-3">
+                <span className="font-ds-micro font-semibold uppercase text-[var(--content-quaternary)]">
+                  Bill focus
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+                <WorkSummaryButton
+                  icon={<ListChecks size={14} weight="bold" />}
+                  label="Billable"
+                  count={billableForBusyCount}
+                  onClick={() => focusLineById(billableRows[0]?.id)}
+                />
+                <WorkSummaryButton
+                  icon={<Tag size={14} weight="bold" />}
+                  label="Special rate"
+                  count={specialRateRows.length}
+                  tone="warning"
+                  onClick={() => focusLineById(specialRateRows[0]?.id)}
+                />
+                <WorkSummaryButton
+                  icon={<Gift size={14} weight="bold" />}
+                  label="FOC"
+                  count={focRows.length}
+                  tone="positive"
+                  onClick={() => focusLineById(focRows[0]?.id)}
+                />
+                <WorkSummaryButton
+                  icon={<ClockCounterClockwise size={14} weight="bold" />}
+                  label="Pending"
+                  count={pendingRows.length}
+                  tone="info"
+                  onClick={() => focusLineById(pendingRows[0]?.id)}
+                />
               </div>
             </div>
-            {specialLineCount > 0 && (
-              <div className="mt-4 rounded-2xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-4 py-3">
-                <p className="text-sm font-semibold text-[var(--content-warning)]">
-                  Special-rate order on {specialLineCount} line{specialLineCount === 1 ? '' : 's'}
-                  {specialQty > 0 ? ` · ${specialQty} pcs` : ''}.
-                </p>
-                <p className="mt-1 text-xs text-[var(--content-warning)]">
-                  Busy may default to book price after paste. Use the highlighted quoted rate shown on each line while billing.
-                </p>
-              </div>
-            )}
-            {trimmedNotes && (
-              <div className="mt-4 rounded-2xl border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--content-accent)]">
-                  Sales note for billing
-                </p>
-                <p className="mt-1 text-sm whitespace-pre-wrap text-[var(--content-primary)]">
-                  {trimmedNotes}
-                </p>
-              </div>
-            )}
-          </div>
+          </section>
 
-          <button
-            onClick={copyAllItems}
-            disabled={isClaiming || mergedVisibleRows.length === 0}
-            className={`w-full h-11 transition-all active:scale-[0.98] rounded-xl font-semibold inline-flex items-center justify-center gap-2 ${
-              copyState === 'ready'
-                ? 'bg-[var(--role-primary)] text-white text-sm shadow-sm hover:opacity-90'
-                : copyState === 'copied'
-                  ? 'bg-[var(--bg-positive)] text-white text-sm'
-                  : 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] text-xs border border-[var(--border-positive)]'
-            } ${isClaiming ? 'opacity-50 cursor-not-allowed' : ''}`}
+          <section
+            className={`flex flex-col min-h-0 bg-[var(--bg-secondary)] ${
+              embedded
+                ? 'rounded-lg border border-[var(--border-subtle)] overflow-hidden'
+                : 'rounded-xl border border-[var(--border-subtle)] overflow-hidden shadow-sm'
+            }`}
           >
-            {copyState === 'ready' && (
-              <>
-                <Copy size={16} weight="bold" />
-                <span>Copy {mergedVisibleRows.length} items to clipboard</span>
-                <kbd className="hidden sm:inline-flex font-mono bg-white/15 border border-white/25 rounded-md px-1.5 py-0.5 text-[10px] font-medium ml-1 tabular-nums">
-                  {SHORTCUT_COPY_ALL}
-                </kbd>
-              </>
-            )}
-            {copyState === 'copied' && (
-              <>
-                <Check size={16} weight="bold" />
-                <span>Copied {mergedVisibleRows.length} items!</span>
-              </>
-            )}
-            {copyState === 'settled' && (
-              <>
-                <Check size={14} weight="bold" />
-                <span>Copied · Tap to re-copy</span>
-              </>
-            )}
-          </button>
-
-          <div className="ds-card overflow-hidden">
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--border-faint)] bg-[var(--bg-primary)]">
+              <QueueSectionHeader
+                label="Items to enter"
+                count={billableRows.length}
+                description={
+                  skipRowCount > 0
+                    ? `${skipRowCount} pending below, not copied to Busy`
+                    : undefined
+                }
+                variant="subtle"
+                className="py-0"
+              />
+              <button
+                type="button"
+                onClick={copyBillable}
+                disabled={isClaiming || billableRows.length === 0}
+                className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 font-ds-caption-size font-semibold border transition-colors disabled:opacity-40 ${
+                  copyState === 'copied'
+                    ? 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
+                    : 'border-[var(--content-primary)] bg-[var(--content-primary)] text-[var(--bg-primary)] hover:opacity-90'
+                }`}
+                style={{ borderWidth: '0.5px' }}
+              >
+                {copyButtonLabel}
+              </button>
+            </div>
+            {showCopyHint ? (
+              <BusyEntryCopyHint remaining={busyRemaining} onMarkAllEntered={markAllEntered} />
+            ) : null}
+            <div className="overflow-x-auto min-w-0">
             <table className={tableClass}>
-              <thead>
-                <tr>
-                  <th className={indexColClass}>#</th>
-                  <th className="min-w-0">Item</th>
-                  <th className={codeColClass}>Code</th>
-                  <th className={rateColClass}>Rate</th>
-                  <th className={qtyColClass}>Qty</th>
-                  <th className={statusColClass}>Status</th>
-                  <th className="w-10 text-center pr-2"> </th>
-                </tr>
-              </thead>
+              <BusyEntryTableHeader
+                enteredCount={enteredCount}
+                totalCount={billableForBusyCount}
+                onToggleAll={toggleAllEntered}
+              />
               <tbody>
-                {sortedItems.map((serverItem) => {
+                {tableItemOrder.items.map((serverItem) => {
                   const removed = !!lineEdits[serverItem.id]?.removed;
                   if (removed) {
                     const removedCode = orderItemProductCode(serverItem);
@@ -735,7 +937,7 @@ export function OrderSheetView({
                         key={`removed-${serverItem.id}`}
                         className="bg-[var(--bg-tertiary)]"
                       >
-                        <td colSpan={7} className="py-2.5 px-3">
+                        <td colSpan={6} className="py-2.5 px-3">
                           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2">
                             <div className="min-w-0 flex items-start gap-2">
                               <span className="ds-chip ds-chip--sm shrink-0 mt-0.5 bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] border-[var(--border-negative)]">
@@ -776,323 +978,123 @@ export function OrderSheetView({
                   if (!item) return null;
 
                   const flag = flags[item.id];
-                  const isActive = activeRow === idx;
-                  const isPartialInput = partialInputRow === idx;
-                  const productCode = orderItemProductCode(item);
-                  const lineCodes = billLineIdentity(item);
-                  const hasSpecialRate = isSpecialRateItem(item);
-                  const quotedPrice = getQuotedPrice(item);
-                  const bookPrice = getBookPrice(item);
-                  const sys = item.price_system ?? 0;
-                  const rateLooksLow =
-                    sys > 0 &&
-                    quotedPrice != null &&
-                    quotedPrice < sys * 0.5;
+                  const isSkip = isSkipLine(flag);
+                  const entered = !isSkip && enteredIds.has(item.id);
 
+                  const skipHeaderRow =
+                    !removed &&
+                    skipRowCount > 0 &&
+                    serverItem.id === tableItemOrder.skipSectionStartId ? (
+                      <tr key="skip-section-header">
+                        <td colSpan={6} className="p-0 border-t border-[var(--border-opaque)]">
+                          <QueueSectionHeader
+                            label="Skip — pending"
+                            count={skipRowCount}
+                            variant="divider"
+                            description="out of stock · not billed today"
+                          />
+                        </td>
+                      </tr>
+                    ) : null;
+
+                  const isActive = activeRow === idx;
+                  const billableLineNo = isSkip
+                    ? item.bill_line_no ?? idx + 1
+                    : billableRows.findIndex((row) => row.id === item.id) + 1;
+                  const isPartialInput = partialInputRow === idx;
                   const fresh = freshnessMap?.[item.id];
                   const serverQty = serverItem.qty_requested;
                   const qtyEdited =
                     lineEdits[item.id]?.qtyRequested != null &&
                     lineEdits[item.id]!.qtyRequested !== serverQty;
-                  const serverPrice = serverItem.price_quoted ?? serverItem.price_system ?? 0;
-                  const rateEdited =
-                    lineEdits[item.id]?.priceQuoted != null &&
-                    lineEdits[item.id]!.priceQuoted !== serverPrice;
-
-                  let rowBg = '';
-                  if (flag?.type === 'no_stock') rowBg = 'bg-[var(--bg-negative-subtle)]';
-                  else if (flag?.type === 'partial') rowBg = 'bg-[var(--bg-warning-subtle)]';
-                  else if (hasSpecialRate) rowBg = 'bg-[var(--bg-warning-subtle)]';
 
                   const isNew = sessionNewOrderItemIds?.has(item.id);
-                  const isEdited = (qtyEdited || rateEdited) && !isNew;
-
-                  let stripeColor = 'transparent';
-                  if (flag?.type === 'no_stock') stripeColor = 'var(--border-negative)';
-                  else if (flag?.type === 'partial') stripeColor = 'var(--border-warning)';
-                  else if (isNew) stripeColor = 'var(--border-positive)';
-                  else if (isEdited) stripeColor = 'var(--border-accent)';
-                  else if (hasSpecialRate) stripeColor = 'var(--border-warning)';
+                  const isEdited = qtyEdited && !isNew;
+                  const nature = busyEntryLineNature(item);
+                  const brandName = busyEntryBrandLabel(item);
 
                   const labelMrp = orderItemConfirmedMrp(item);
                   const isSplitSibling = item.split_from_id != null;
 
                   return (
-                    <tr
-                      key={item.id}
-                      ref={(el) => {
-                        rowRefs.current[idx] = el;
-                      }}
-                      onClick={() => {
-                        setActiveRow(idx);
-                        showHintsTemporarily();
-                      }}
-                      className={`cursor-pointer ${rowBg} ${isActive ? 'ds-row--selected' : ''}`}
-                    >
-                      <td
-                        className="text-center tabular-nums align-top pt-2 border-l-[3px]"
-                        style={{ borderLeftColor: stripeColor }}
-                      >
-                        {isActive ? (
-                          <span className="text-[var(--role-primary)] font-bold text-xs">&#9654;</span>
-                        ) : (
-                          <span className="text-[var(--content-quaternary)] text-xs font-mono">
-                            {item.bill_line_no ?? idx + 1}
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="min-w-0 align-top">
-                        <div className="flex items-start gap-2">
-                          <p
-                            className={`text-sm font-medium leading-snug whitespace-normal break-words [overflow-wrap:anywhere] min-w-0 flex-1 ${
-                              flag ? 'text-[var(--content-secondary)]' : 'text-[var(--content-primary)]'
-                            }`}
-                          >
-                            {isSplitSibling ? '↳ ' : ''}
-                            {orderItemDisplayName(item)}
-                          </p>
-                          {isNew && (
-                            <span className="ds-chip ds-chip--sm shrink-0 bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border-[var(--border-positive)]">
-                              New
-                            </span>
-                          )}
-                          {isEdited && (
-                            <span className="ds-chip ds-chip--sm shrink-0 bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border-[var(--border-accent)]">
-                              Edited
-                            </span>
-                          )}
-                        </div>
-                        {productCode && !embedded && (
-                          <div className="mt-1 sm:hidden max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]">
-                            <span
-                              className="inline-block font-ds-label-size font-mono text-[var(--content-quaternary)] whitespace-nowrap"
-                              title={productCode}
-                            >
-                              {productCode}
-                            </span>
-                          </div>
-                        )}
-                        {labelMrp != null ? (
-                          <p className="mt-0.5 text-[10px] font-medium text-[var(--content-secondary)]">
-                            {BILLING_LABEL_CHIP(labelMrp)}
-                            {isSplitSibling ? ' · split batch' : ''}
-                          </p>
-                        ) : null}
-                      </td>
-
-                      <td className={codeColClass}>
-                        <div
-                          className="max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] [scrollbar-width:thin]"
-                          title={lineCodes.pickCode || undefined}
-                        >
-                          <span className="inline-block font-ds-label-size font-mono text-[var(--content-secondary)] whitespace-nowrap pr-1">
-                            {lineCodes.pickCode || '—'}
-                          </span>
-                          {lineCodes.altCode ? (
-                            <span className="block font-ds-label-size font-mono text-[var(--content-quaternary)] whitespace-nowrap pr-1 mt-0.5">
-                              {lineCodes.altCode}
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-
-                      <td className="text-right align-top pt-2">
-                        {editingRateRow === idx ? (
-                          <div className="flex flex-col items-end gap-1" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="number"
-                              step={0.01}
-                              min={0}
-                              value={rateDraft}
-                              onChange={(e) => setRateDraft(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  commitRateEdit();
-                                }
-                                if (e.key === 'Escape') {
-                                  e.preventDefault();
-                                  setEditingRateRow(null);
-                                  setRateDraft('');
-                                }
-                              }}
-                              className="ds-input w-24 text-right text-sm font-mono py-1 px-2"
-                            />
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            className="flex flex-col items-end gap-1 text-right w-full min-h-[44px]"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingRateRow(idx);
-                              setRateDraft(String(item.price_quoted ?? item.price_system ?? 0));
-                            }}
-                          >
-                            <span
-                              className={`text-sm font-mono font-semibold tabular-nums ${
-                                hasSpecialRate ? 'text-[var(--content-warning)]' : 'text-[var(--content-primary)]'
-                              }`}
-                            >
-                              {formatCurrency(quotedPrice)}
-                            </span>
-                            {rateLooksLow && (
-                              <span className="ds-chip ds-chip--warning ds-chip--sm">Low rate?</span>
-                            )}
-                            {hasSpecialRate && bookPrice != null && (
-                              <>
-                                <span className="ds-chip ds-chip--warning ds-chip--sm">Special</span>
-                                <span className="text-[11px] text-[var(--content-quaternary)]">
-                                  Book {formatCurrency(bookPrice)}
-                                </span>
-                              </>
-                            )}
-                          </button>
-                        )}
-                      </td>
-
-                      <td className="text-right align-top pt-2">
-                        {editingQtyRow === idx ? (
-                          <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="number"
-                              min={1}
-                              max={serverQty}
-                              value={qtyDraft}
-                              onChange={(e) => setQtyDraft(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  commitQtyEdit();
-                                }
-                                if (e.key === 'Escape') {
-                                  e.preventDefault();
-                                  setEditingQtyRow(null);
-                                  setQtyDraft('');
-                                }
-                              }}
-                              className="ds-input w-14 text-right text-sm font-mono py-1 px-2"
-                            />
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            className="inline-flex flex-col items-end gap-0.5 min-h-[44px]"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingQtyRow(idx);
-                              setQtyDraft(String(item.qty_requested));
-                            }}
-                          >
-                            {qtyEdited && (
-                              <span className="text-[11px] line-through text-[var(--content-quaternary)] tabular-nums">
-                                {serverQty}
-                              </span>
-                            )}
-                            <span className="text-sm font-mono font-semibold text-[var(--content-primary)] tabular-nums">
-                              {item.qty_requested}
-                            </span>
-                          </button>
-                        )}
-                      </td>
-
-                      <td className="text-right align-top pt-1">
-                        <div className="flex flex-col items-end gap-1">
-                          {fresh?.isStale && fresh.liveCapacity != null && (
-                            fresh.canApplyLive ? (
-                              <button
-                                type="button"
-                                className="ds-chip ds-chip--sm bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border-[var(--border-accent)] max-w-[11rem] text-left"
-                                title={billingFreshnessChipTitle(fresh)}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void onApplyLiveStock(item.id, fresh.liveCapacity!);
-                                }}
-                              >
-                                {billingFreshnessChipLabel(fresh)}
-                              </button>
-                            ) : (
-                              <span
-                                className="ds-chip ds-chip--sm bg-[var(--bg-tertiary)] text-[var(--content-tertiary)] border-[var(--border-subtle)] max-w-[11rem] text-left"
-                                title={billingFreshnessChipTitle(fresh)}
-                              >
-                                {billingFreshnessChipLabel(fresh)}
-                              </span>
-                            )
-                          )}
-                          {isPartialInput ? (
-                            <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                ref={partialInputRef}
-                                type="number"
-                                value={partialQty}
-                                onChange={(e) => setPartialQty(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    confirmPartial();
-                                  }
-                                  if (e.key === 'Escape') {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    setPartialInputRow(null);
-                                    setPartialQty('');
-                                  }
-                                }}
-                                placeholder={`/${item.qty_requested}`}
-                                min={0}
-                                max={item.qty_requested}
-                                className="ds-input w-16 text-right text-sm font-mono py-1 px-2"
-                              />
-                            </div>
-                          ) : flag?.type === 'no_stock' ? (
-                            <span className="ds-chip ds-chip--negative ds-chip--sm">
-                              <XCircle size={12} weight="fill" />
-                              No Stock
-                            </span>
-                          ) : flag?.type === 'partial' ? (
-                            <span className="ds-chip ds-chip--warning ds-chip--sm">
-                              <Warning size={12} weight="fill" />
-                              {flag.availableQty}/{item.qty_requested}
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-
-                      <td className="text-center align-top pt-2 pr-2">
-                        <button
-                          type="button"
-                          aria-label="Remove line"
-                          className="p-2 rounded-lg text-[var(--content-negative)] hover:bg-[var(--bg-negative-subtle)] transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRemoveLine(item.id);
-                          }}
-                        >
-                          <Trash size={18} weight="bold" />
-                        </button>
-                      </td>
-                    </tr>
+                    <>
+                      {skipHeaderRow}
+                      <BusyEntryLineRow
+                        key={item.id}
+                        item={item}
+                        lineNo={billableLineNo > 0 ? billableLineNo : idx + 1}
+                        isActive={isActive}
+                        isSkip={isSkip}
+                        entered={entered}
+                        flag={flag}
+                        nature={nature}
+                        brandName={brandName}
+                        isSplitSibling={isSplitSibling}
+                        isNew={!!isNew}
+                        isEdited={isEdited}
+                        labelMrp={labelMrp}
+                        fresh={fresh}
+                        editingQty={editingQtyRow === idx}
+                        qtyDraft={qtyDraft}
+                        serverQty={serverQty}
+                        qtyEdited={qtyEdited}
+                        isPartialInput={isPartialInput}
+                        partialQty={partialQty}
+                        partialInputRef={partialInputRef}
+                        rowRef={(el) => {
+                          rowRefs.current[idx] = el;
+                        }}
+                        onRowClick={() => {
+                          if (!isSkip) toggleEntered(item.id);
+                          setActiveRow(idx);
+                          showHintsTemporarily();
+                        }}
+                        onToggleEntered={() => toggleEntered(item.id)}
+                        onUndoFlag={() => handleUndoFlag(item.id)}
+                        onRemove={() => handleRemoveLine(item.id)}
+                        onQtyEditStart={() => {
+                          setEditingQtyRow(idx);
+                          setQtyDraft(String(item.qty_requested));
+                        }}
+                        onQtyDraftChange={setQtyDraft}
+                        onQtyCommit={commitQtyEdit}
+                        onQtyCancel={() => {
+                          setEditingQtyRow(null);
+                          setQtyDraft('');
+                        }}
+                        onPartialConfirm={confirmPartial}
+                        onPartialCancel={() => {
+                          setPartialInputRow(null);
+                          setPartialQty('');
+                        }}
+                        onPartialQtyChange={setPartialQty}
+                        onApplyLiveStock={
+                          fresh?.canApplyLive && fresh.liveCapacity != null
+                            ? () => void onApplyLiveStock(item.id, fresh.liveCapacity!)
+                            : undefined
+                        }
+                      />
+                    </>
                   );
                 })}
               </tbody>
             </table>
-          </div>
-
-          <button
-            type="button"
-            disabled={isClaiming}
-            onClick={onOpenAddLine}
-            className="group w-full h-11 rounded-xl border border-dashed border-[var(--border-accent)] bg-[var(--bg-accent-subtle)]/60 text-[var(--content-accent)] text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-[var(--bg-accent-subtle)] hover:border-solid transition-all disabled:opacity-50"
-          >
-            <Plus size={16} weight="bold" />
-            <span>Add line</span>
-            <kbd className="hidden sm:inline-flex font-mono bg-[var(--bg-primary)]/70 border border-[var(--border-accent)]/40 rounded-md px-1.5 py-0.5 text-[10px] font-medium ml-1 opacity-70 group-hover:opacity-100">
-              A
-            </kbd>
-          </button>
+            </div>
+            <div className={`border-t border-[var(--border-faint)] ${embedded ? 'px-4' : 'px-3'} py-2.5`}>
+              <button
+                type="button"
+                disabled={isClaiming}
+                onClick={onOpenAddLine}
+                className="group w-full h-8 rounded-md border border-dashed border-[var(--border-subtle)] text-[var(--content-secondary)] font-ds-caption-size font-medium inline-flex items-center justify-center gap-1.5 hover:border-[var(--border-opaque)] hover:bg-[var(--bg-primary)] transition-colors disabled:opacity-50"
+              >
+                <Plus size={14} weight="bold" />
+                <span>Add line</span>
+                <kbd className="hidden sm:inline-flex font-mono bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 text-[10px] font-medium ml-1 opacity-70 group-hover:opacity-100">
+                  A
+                </kbd>
+              </button>
+            </div>
+          </section>
 
           {showHints && (
             <div className="text-center animate-slide-up">
@@ -1123,11 +1125,6 @@ export function OrderSheetView({
                 </span>
                 <span className="text-[var(--border-opaque)]">·</span>
                 <span>
-                  <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 font-ds-micro mx-0.5">R</kbd>{' '}
-                  Rate
-                </span>
-                <span className="text-[var(--border-opaque)]">·</span>
-                <span>
                   <kbd className="font-mono bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5 font-ds-micro mx-0.5">X</kbd>{' '}
                   Remove
                 </span>
@@ -1151,7 +1148,7 @@ export function OrderSheetView({
           )}
 
         </div>
-      </div>
+      </BillingOrderChrome>
 
       {visibleLastRemoved && (
         <div className="shrink-0 px-4 lg:px-6 pt-3" role="status" aria-live="polite">
@@ -1197,75 +1194,6 @@ export function OrderSheetView({
         </div>
       )}
 
-      <div className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 lg:px-6 py-3">
-        <div className="max-w-3xl mx-auto flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="ds-chip ds-chip--sm bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border-[var(--border-positive)] tabular-nums font-semibold">
-              {billedNormalCount} to bill
-            </span>
-            {flagCount > 0 && (
-              <span className="ds-chip ds-chip--sm bg-[var(--bg-warning-subtle)] text-[var(--content-warning)] border-[var(--border-warning)] tabular-nums font-semibold">
-                {flagCount} flagged
-              </span>
-            )}
-            {editCount > 0 && (
-              <span className="ds-chip ds-chip--sm bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border-[var(--border-accent)] tabular-nums font-semibold">
-                {editCount} edited
-              </span>
-            )}
-            {addedLinesSessionCount > 0 && (
-              <span className="ds-chip ds-chip--sm bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border-[var(--border-positive)] tabular-nums font-semibold">
-                {addedLinesSessionCount} added
-              </span>
-            )}
-            {removedCount > 0 && (
-              <span className="ds-chip ds-chip--sm bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] border-[var(--border-negative)] tabular-nums font-semibold">
-                {removedCount} removed
-              </span>
-            )}
-          </div>
-          <div className="w-full mb-3">
-            <FulfillmentPathSelector
-              value={fulfillmentPath}
-              onChange={setManualFulfillmentPath}
-              stockLocationCode={stockLocationCode}
-              pickLineCount={pickLineCount}
-              disabled={isApproving || isRejecting || isClaiming}
-              compact
-            />
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => setShowReject(true)}
-              disabled={isApproving || isRejecting}
-              className="h-11 px-4 rounded-xl text-[var(--content-negative)] text-sm font-semibold hover:bg-[var(--bg-negative-subtle)] transition-all disabled:opacity-50"
-            >
-              Reject
-            </button>
-            <button
-              onClick={handleFinishAttempt}
-              disabled={
-                isClaiming ||
-                isApproving ||
-                isRejecting ||
-                mergedVisibleRows.length === 0
-              }
-              className="h-11 px-5 rounded-xl bg-[var(--role-primary)] text-white text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all shadow-sm disabled:opacity-50 inline-flex items-center gap-2"
-            >
-              <span>
-                {isClaiming ? 'Claiming…' : isApproving ? 'Approving…' : 'Finish Billing'}
-              </span>
-              {!isClaiming && !isApproving && (
-                <kbd className="hidden sm:inline-flex font-mono bg-white/15 border border-white/25 rounded-md px-1.5 py-0.5 text-[10px] font-medium tabular-nums">
-                  {SHORTCUT_FINISH}
-                </kbd>
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-
       {showConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div
@@ -1310,7 +1238,7 @@ export function OrderSheetView({
               )}
               {editCount > 0 && (
                 <p className="text-sm text-[var(--content-accent)]">
-                  {editCount} line{editCount !== 1 ? 's' : ''} edited (qty/rate).
+                  {editCount} line{editCount !== 1 ? 's' : ''} edited (qty).
                 </p>
               )}
               {billedNormalCount > 0 && flagCount === 0 && (

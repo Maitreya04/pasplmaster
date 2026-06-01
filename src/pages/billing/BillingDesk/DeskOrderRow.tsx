@@ -4,7 +4,7 @@ import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
 import type { PickLineProgress } from '../../../lib/cartSupply';
 import type { PickerLoadInfo } from '../../../hooks/usePickerLoad';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
-import { DeskInlinePickerPick } from './DeskInlinePickerPick';
+import { AssignPickerStage } from '../../../components/billing/stages/AssignPickerStage';
 import { DeskOrderQuickActions } from './DeskOrderQuickActions';
 import { DeskPickProgress } from './DeskPickProgress';
 import {
@@ -26,8 +26,8 @@ const STATUS_PILL: Record<
     className: 'text-[var(--role-content)] bg-[var(--role-primary-subtle)]',
   },
   checking: {
-    label: 'Done',
-    className: 'text-[var(--content-positive)] bg-[var(--bg-positive-subtle)]',
+    label: 'Verify bill',
+    className: 'text-[var(--content-accent)] bg-[var(--bg-accent-subtle)]',
   },
   no_ack: {
     label: 'Waiting',
@@ -230,11 +230,13 @@ export function DeskOrderRowCard({
       )}
 
       {isAssignExpanded && showAssignAction && onAssignToggle && (
-        <DeskInlinePickerPick
+        <AssignPickerStage
           order={order}
           pickers={pickers}
           pickerColors={pickerColors}
-          onDone={onAssignToggle}
+          onClose={onAssignToggle}
+          onAssigned={onAssignToggle}
+          variant="inline"
         />
       )}
     </div>

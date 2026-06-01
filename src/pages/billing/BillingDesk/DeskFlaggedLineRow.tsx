@@ -1,5 +1,11 @@
 import { Check, Trash } from '@phosphor-icons/react';
 import {
+  billLineFlagChipClasses,
+  billLineRemovedStripeClasses,
+  billLineResolvedStripeClasses,
+  billLineStripeClasses,
+} from '../../../lib/billing/billLineRowStyle';
+import {
   deskLineFlagAccent,
   deskLineFlagChipLabel,
   deskLineFlagKind,
@@ -20,22 +26,6 @@ import type { OverlayLineEdit, OverlayLineResolution } from './types';
 const FLAGGED_GRID =
   'grid grid-cols-[minmax(0,1fr)_32px_64px_minmax(88px,max-content)] gap-x-1.5 items-center';
 
-function accentBorderClass(accent: ReturnType<typeof deskLineFlagAccent>): string {
-  if (accent === 'red') return 'border-l-[var(--border-negative)] bg-[var(--bg-negative-subtle)]/35';
-  if (accent === 'blue') return 'border-l-[var(--border-accent)] bg-[var(--bg-accent-subtle)]/35';
-  return 'border-l-[var(--border-warning)] bg-[var(--bg-warning-subtle)]';
-}
-
-function accentChipClass(accent: ReturnType<typeof deskLineFlagAccent>): string {
-  if (accent === 'red') {
-    return 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] border-[var(--border-negative)]';
-  }
-  if (accent === 'blue') {
-    return 'bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border-[var(--border-accent)]';
-  }
-  return 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] border-[var(--border-warning)]';
-}
-
 function resolutionSuffix(resolution: OverlayLineResolution | null): string | null {
   if (resolution === 'accept_price') return 'accepted';
   if (resolution === 'keep_quoted') return 'kept';
@@ -47,7 +37,7 @@ function resolutionSuffix(resolution: OverlayLineResolution | null): string | nu
 export function DeskFlaggedSectionHeader(): React.JSX.Element {
   return (
     <div
-      className={`${FLAGGED_GRID} bg-[var(--bg-tertiary)] px-2.5 py-1.5 text-[9px] font-semibold uppercase text-[var(--content-quaternary)]`}
+      className={`${FLAGGED_GRID} bg-[var(--bg-tertiary)] px-2.5 py-1.5 font-ds-micro font-semibold uppercase text-[var(--content-quaternary)]`}
     >
       <span>Item</span>
       <span className="text-center">Qty</span>
@@ -101,12 +91,12 @@ export function DeskFlaggedLineRow({
 
   return (
     <div
-      className={`${FLAGGED_GRID} border-t border-[var(--border-faint)] border-l-2 px-2.5 py-2 ${
+      className={`${FLAGGED_GRID} border-t border-[var(--border-faint)] border-l-[3px] px-2.5 py-2 ${
         isResolved && !isRemoved
-          ? 'border-l-[var(--border-positive)] bg-[var(--bg-positive-subtle)]/25'
+          ? billLineResolvedStripeClasses()
           : isRemoved
-            ? 'border-l-[var(--border-subtle)] bg-[var(--bg-tertiary)]/70 opacity-80'
-            : accentBorderClass(accent)
+            ? billLineRemovedStripeClasses()
+            : billLineStripeClasses(accent)
       } ${indent ? 'pl-4' : ''}`}
     >
       <div className="min-w-0">
@@ -123,7 +113,7 @@ export function DeskFlaggedLineRow({
             {orderItemDisplayName(item)}
           </p>
           <span
-            className={`shrink-0 text-[8px] font-semibold px-1 py-px rounded-full border whitespace-nowrap ${accentChipClass(accent)}`}
+            className={`shrink-0 font-ds-micro font-semibold px-1 py-px rounded-full border whitespace-nowrap ${billLineFlagChipClasses(accent)}`}
           >
             {deskLineFlagChipLabel(item.flag_reason)}
             {suffix ? ` · ${suffix}` : ''}

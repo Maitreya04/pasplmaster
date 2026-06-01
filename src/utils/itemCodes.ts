@@ -29,6 +29,13 @@ export function orderItemPickCode(
   return firstAvailableCode(item.catalog_alias1, item.catalog_alias, item.item_alias);
 }
 
+/** Catalog `items.alias1` only — what operators type into Busy (no alias fallback). */
+export function orderItemAlias1Code(
+  item: Pick<OrderItem, 'catalog_alias1'>,
+): string {
+  return cleanCode(item.catalog_alias1);
+}
+
 export function orderItemAlternateCode(
   item: Pick<OrderItem, 'catalog_alias1' | 'catalog_alias' | 'item_alias'>,
 ): string | null {

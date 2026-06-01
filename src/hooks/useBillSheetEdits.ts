@@ -157,10 +157,13 @@ export function useBillSheetEdits({
     setUndoRemoveId(null);
   }
 
+  const claimAutoAttemptedRef = useRef<number | null>(null);
   useEffect(() => {
     if (orderDetail.workflow_status !== 'submitted' || isClaimedByMe) return;
+    if (claimAutoAttemptedRef.current === orderDetail.id) return;
+    claimAutoAttemptedRef.current = orderDetail.id;
     void claim();
-  }, [orderDetail.workflow_status, isClaimedByMe, claim]);
+  }, [orderDetail.id, orderDetail.workflow_status, isClaimedByMe, claim]);
 
   useEffect(() => {
     return () => {
@@ -493,6 +496,14 @@ export function useBillSheetEdits({
               approved_at: orderDetail.approved_at ?? nowIso,
               completed_at: nowIso,
               fulfillment_path: 'direct_bill',
+            })
+            .eq('id', orderDetail.id);
+        } else if (orderDetail.workflow_status === 'completed') {
+          await supabase
+            .from('orders')
+            .update({
+              reviewer_name: reviewer,
+              approved_at: orderDetail.approved_at ?? nowIso,
             })
             .eq('id', orderDetail.id);
         }

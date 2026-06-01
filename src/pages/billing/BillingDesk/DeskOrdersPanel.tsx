@@ -6,7 +6,7 @@ import { useDeskPickProgress } from '../../../hooks/useDeskPickProgress';
 import { usePickerLoad } from '../../../hooks/usePickerLoad';
 import {
   filterDeskOrdersByTab,
-  orderNeedsDeskFlagAction,
+  orderHasDeskPickerFlags,
   type DeskOrderRow,
   type DeskOrderTab,
 } from '../../../hooks/useBillingDeskOrders';
@@ -146,7 +146,7 @@ export function DeskOrdersPanel({
   const emptyDescription = pickerFilter
     ? `${pickerFilter.firstName} has no orders in this view right now.`
     : tab === 'resolve'
-      ? 'Picker flags and billing issues appear here first.'
+      ? 'Post-pick flags and billing issues appear here.'
       : tab === 'assign'
         ? 'Approved orders waiting for a picker or a nudge show here.'
         : tab === 'picking'
@@ -236,42 +236,38 @@ export function DeskOrdersPanel({
             </div>
           ) : tab === 'resolve' ? (
             filtered.map((order) => (
-              <div key={order.id} className="flex flex-col gap-1.5">
-                <DeskFlagOrderCard
-                  order={order}
-                  onReview={(o) => onSelectOrder(o, true)}
-                />
-                {order.workflow_status === 'picking' && (
-                  <DeskOrderRowCard
-                    order={order}
-                    pickers={pickers}
-                    pickerColors={pickerColors}
-                    pickProgress={pickProgressMap?.get(order.id)}
-                    progressLoading={progressLoading}
-                    onEdit={() => onSelectOrder(order, true)}
-                  />
-                )}
-              </div>
+              <DeskFlagOrderCard
+                key={order.id}
+                order={order}
+                onReview={(o) => onSelectOrder(o, true)}
+              />
             ))
           ) : (
             filtered.map((order) => (
-              <DeskOrderRowCard
-                key={order.id}
-                order={order}
-                pickers={pickers}
-                pickerColors={pickerColors}
-                pickProgress={pickProgressMap?.get(order.id)}
-                progressLoading={progressLoading}
-                isAssignExpanded={assignTarget?.id === order.id}
-                onAssignToggle={() => {
-                  setAssignTarget((prev) => (prev?.id === order.id ? null : order));
-                }}
-                showStaleActions={showStaleActions}
-                showVerifyAction={showVerifyAction}
-                onEdit={() =>
-                  onSelectOrder(order, orderNeedsDeskFlagAction(order))
-                }
-              />
+              <div key={order.id} className="flex flex-col gap-1.5">
+                {tab === 'picking' && orderHasDeskPickerFlags(order) && (
+                  <DeskFlagOrderCard
+                    order={order}
+                    onReview={(o) => onSelectOrder(o, true)}
+                  />
+                )}
+                <DeskOrderRowCard
+                  order={order}
+                  pickers={pickers}
+                  pickerColors={pickerColors}
+                  pickProgress={pickProgressMap?.get(order.id)}
+                  progressLoading={progressLoading}
+                  isAssignExpanded={assignTarget?.id === order.id}
+                  onAssignToggle={() => {
+                    setAssignTarget((prev) => (prev?.id === order.id ? null : order));
+                  }}
+                  showStaleActions={showStaleActions}
+                  showVerifyAction={showVerifyAction}
+                  onEdit={() =>
+                    onSelectOrder(order, orderHasDeskPickerFlags(order))
+                  }
+                />
+              </div>
             ))
           )}
         </div>

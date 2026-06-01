@@ -1,48 +1,36 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useClaimableOrders, type OrderWithClaimInfo } from './useClaimableOrders';
-import { useDeskPickerFlags, type DeskPickerFlagLine } from './useDeskPickerFlags';
+import { useDeskPickerFlags } from './useDeskPickerFlags';
+import type { DeskPickerFlagLine } from '../lib/billing/deskOrderQueue';
 import { PICKING_CLAIM_STALE_MS } from './usePickingClaim';
 import { supabase } from '../lib/supabase/client';
+import {
+  isDeskBillingFinalized,
+  needsDeskBillReview,
+} from '../lib/billing/deskOrderTab';
+import {
+  isAssignTabOrder,
+  orderBelongsOnDeskResolveTab,
+  type DeskOrderStatus,
+  type DeskOrderTab,
+} from '../lib/billing/deskOrderQueue';
 import type { WorkflowStatus } from '../types';
 
-export type { DeskPickerFlagLine };
-
-export type DeskOrderTab = 'resolve' | 'assign' | 'picking' | 'review' | 'completed';
-
-export type DeskOrderStatus =
-  | 'picking'
-  | 'checking'
-  | 'no_ack'
-  | 'unassigned'
-  | 'submitted'
-  | 'flagged';
+export type { DeskPickerFlagLine } from '../lib/billing/deskOrderQueue';
+export type { DeskOrderTab, DeskOrderStatus };
+export {
+  filterDeskOrdersByTab,
+  isDeskOrderStale,
+  orderBelongsOnDeskResolveTab,
+  orderHasDeskPickerFlags,
+} from '../lib/billing/deskOrderQueue';
 
 export interface DeskOrderRow extends OrderWithClaimInfo {
   deskStatus: DeskOrderStatus;
   pickingClaimStale: boolean;
   /** Lines flagged by picker — present while picking or after pick completes with issues. */
   pickerFlags: DeskPickerFlagLine[];
-}
-
-export function orderNeedsDeskFlagAction(order: Pick<DeskOrderRow, 'deskStatus' | 'pickerFlags'>): boolean {
-  return order.deskStatus === 'flagged' || order.pickerFlags.length > 0;
-}
-
-/** Orders that need billing-desk stale intervention (stuck pick / no ack — not post-pick verify). */
-export function isDeskOrderStale(order: DeskOrderRow): boolean {
-  if (order.deskStatus === 'checking') return false;
-  if (order.pickingClaimStale) return true;
-  if (order.deskStatus === 'no_ack') return true;
-  if (order.claim_info?.is_stale) return true;
-  return false;
-}
-
-function isAssignTabOrder(order: DeskOrderRow): boolean {
-  if (orderNeedsDeskFlagAction(order)) return false;
-  if (order.deskStatus === 'unassigned' || order.deskStatus === 'no_ack') return true;
-  if (order.workflow_status === 'approved' && isDeskOrderStale(order)) return true;
-  return false;
 }
 
 const MONITOR_STATUSES: WorkflowStatus[] = [
@@ -141,7 +129,7 @@ export function useBillingDeskOrders() {
   }, [monitorOrders, stalePickingIds, pickerFlagsByOrder]);
 
   const flaggedOrders = useMemo(
-    () => enriched.filter((o) => orderNeedsDeskFlagAction(o)),
+    () => enriched.filter((o) => orderBelongsOnDeskResolveTab(o)),
     [enriched],
   );
 
@@ -157,12 +145,18 @@ export function useBillingDeskOrders() {
   const reviewCount = useMemo(
     () =>
       listOrders.filter(
-        (o) => !orderNeedsDeskFlagAction(o) && o.deskStatus === 'checking',
+        (o) => !orderBelongsOnDeskResolveTab(o) && needsDeskBillReview(o),
       ).length,
     [listOrders],
   );
 
-  const completedCount = reviewCount;
+  const completedCount = useMemo(
+    () =>
+      listOrders.filter(
+        (o) => !orderBelongsOnDeskResolveTab(o) && isDeskBillingFinalized(o),
+      ).length,
+    [listOrders],
+  );
 
   return {
     isLoading,
@@ -176,27 +170,3 @@ export function useBillingDeskOrders() {
   };
 }
 
-export function filterDeskOrdersByTab(
-  orders: DeskOrderRow[],
-  tab: DeskOrderTab,
-): DeskOrderRow[] {
-  if (tab === 'resolve') {
-    return orders.filter((o) => orderNeedsDeskFlagAction(o));
-  }
-  if (tab === 'assign') {
-    return orders.filter(isAssignTabOrder);
-  }
-  if (tab === 'picking') {
-    return orders.filter(
-      (o) => !orderNeedsDeskFlagAction(o) && o.deskStatus === 'picking',
-    );
-  }
-  if (tab === 'review') {
-    return orders.filter(
-      (o) => !orderNeedsDeskFlagAction(o) && o.deskStatus === 'checking',
-    );
-  }
-  return orders.filter(
-    (o) => !orderNeedsDeskFlagAction(o) && o.deskStatus === 'checking',
-  );
-}

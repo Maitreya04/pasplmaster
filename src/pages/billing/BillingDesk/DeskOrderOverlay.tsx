@@ -1,7 +1,11 @@
-import { FileText, Flag, X } from '@phosphor-icons/react';
+import { Flag, X } from '@phosphor-icons/react';
 import { useOrderDetail } from '../../../hooks/useOrderDetail';
 import { useBillSheetEdits } from '../../../hooks/useBillSheetEdits';
-import { BillSheetView } from '../../../components/billing/BillSheetView';
+import { BillingOrderStageBody } from '../../../components/billing/BillingOrderStageBody';
+import {
+  deriveBillingOperatorStage,
+  billingStageBarIndex,
+} from '../../../lib/billing/deriveBillingOperatorStage';
 import {
   formatDeskFlagSummarySubtitle,
   summarizeDeskFlags,
@@ -62,6 +66,9 @@ function DeskOrderOverlayShell({
     orderDetail,
     flaggedMode,
     orderIdForClaim: order.id,
+    onSaved: () => {
+      onClose();
+    },
     onNotified: () => {
       window.setTimeout(() => onClose(), 1600);
     },
@@ -70,6 +77,22 @@ function DeskOrderOverlayShell({
   const flagSummary = summarizeDeskFlags(
     billSheet.flaggedItems.map((i) => i.flag_reason),
   );
+
+  const stage = deriveBillingOperatorStage({
+    workflow_status: orderDetail.workflow_status,
+    picker_name: orderDetail.picker_name,
+    reviewer_name: orderDetail.reviewer_name,
+    fulfillment_path: orderDetail.fulfillment_path ?? order.fulfillment_path,
+    stock_location_code: orderDetail.stock_location_code ?? order.stock_location_code,
+    deskStatus: order.deskStatus,
+    openPickerFlagCount: order.pickerFlags.length,
+  });
+
+  const wide =
+    billingStageBarIndex(stage) >= 3 ||
+    stage === 'review_finalise' ||
+    stage === 'resolve_flags' ||
+    stage === 'done';
 
   const resolvingFlags = billSheet.resolvingFlags;
   const headerTitle = resolvingFlags
@@ -80,42 +103,34 @@ function DeskOrderOverlayShell({
 
   const headerSubtitle = resolvingFlags
     ? formatDeskFlagSummarySubtitle(flagSummary) || 'Resolve each flagged line'
-    : 'Edit MRP · Save & Bill · Notify picker';
+    : orderDetail.customer_name;
 
   return (
     <div
-      className="w-full max-w-[540px] max-h-[628px] flex flex-col rounded-xl bg-[var(--bg-secondary)] overflow-hidden shadow-lg"
+      className={`w-full ${wide ? 'max-w-4xl' : 'max-w-[540px]'} max-h-[min(90vh,720px)] flex flex-col rounded-xl bg-[var(--bg-secondary)] overflow-hidden shadow-lg`}
       onClick={(e) => e.stopPropagation()}
       role="dialog"
       aria-modal="true"
       aria-labelledby="desk-overlay-title"
     >
       <header
-        className={`shrink-0 flex items-start gap-2.5 px-4 py-3 ${
+        className={`shrink-0 flex items-start gap-2.5 px-4 py-3 border-b border-[var(--border-faint)] ${
           flaggedMode ? 'bg-[var(--bg-warning-subtle)]' : 'bg-[var(--bg-tertiary)]'
         }`}
       >
         {flaggedMode ? (
           <Flag size={18} weight="fill" className="text-[var(--content-warning-on-light)] shrink-0 mt-0.5" />
-        ) : (
-          <FileText size={18} className="text-[var(--content-quaternary)] shrink-0 mt-0.5" />
-        )}
+        ) : null}
         <div className="flex-1 min-w-0">
           <h2
             id="desk-overlay-title"
-            className={`text-[13px] font-medium ${
-              flaggedMode ? 'text-[var(--content-warning)]' : 'text-[var(--content-primary)]'
+            className={`font-ds-prose font-semibold ${
+              flaggedMode ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-primary)]'
             }`}
           >
             {headerTitle}
           </h2>
-          <p
-            className={`text-[11px] mt-0.5 ${
-              flaggedMode ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-quaternary)]'
-            }`}
-          >
-            {headerSubtitle}
-          </p>
+          <p className="font-ds-micro mt-0.5 text-[var(--content-quaternary)]">{headerSubtitle}</p>
         </div>
         <button
           type="button"
@@ -127,14 +142,13 @@ function DeskOrderOverlayShell({
         </button>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-4">
-        <BillSheetView
+      <div className="flex-1 min-h-0 flex flex-col">
+        <BillingOrderStageBody
+          order={order}
           orderDetail={orderDetail}
           billSheet={billSheet}
-          variant="overlay"
-          mode={orderDetail.workflow_status === 'submitted' ? 'submitted' : 'post_pick'}
           flaggedMode={flaggedMode}
-          showFooter
+          onClose={onClose}
         />
       </div>
     </div>

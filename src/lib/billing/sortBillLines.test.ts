@@ -61,6 +61,13 @@ function runTests(): void {
     stubItem({ id: 1, bill_line_no: 1, item_name: 'Alpha', qty_requested: 2 }),
   ];
   assert.equal(buildBusyPasteText(pasteItems), 'Alpha\t2\nBeta\t4');
+  assert.equal(
+    buildBusyPasteText(pasteItems, {
+      includeRate: true,
+      lineEdits: { 2: { priceQuoted: 75 } },
+    }),
+    'Alpha\t2\t100\nBeta\t4\t75',
+  );
 
   const withRemoved = [
     stubItem({ id: 1, bill_line_no: 1, item_name: 'Keep', qty_requested: 1 }),

@@ -180,6 +180,9 @@
   --ds-page-pad-y: 1rem;
   --ds-stack: 1rem;
   --ds-stack-tight: 0.75rem;
+
+  /* Billing order chrome — urgency tint for stale context bar */
+  --bg-chrome-urgent: color-mix(in srgb, var(--bg-negative-subtle) 7%, var(--bg-primary));
 }
 
 .dark {
@@ -544,6 +547,74 @@ select {
   --ds-stack-tight: 0.5rem;
 }
 
+/* Billing order work surface: comfortable legibility for desk + live queue sheets. */
+.density-billing-work {
+  --ds-px: 1rem;           /* 16px */
+  --ds-py: 0.75rem;        /* 12px */
+  --ds-gap: 1rem;          /* 16px */
+  --ds-gap-sm: 0.5rem;     /*  8px */
+  --ds-radius: 0.5rem;     /*  8px */
+  --ds-row-h: 2.75rem;     /* 44px — touch-friendly line rows */
+  --ds-font-micro: 0.6875rem;  /* 11px — kbd hints floor */
+  --ds-font-label: 0.75rem;    /* 12px — column labels, stage steps */
+  --ds-font-caption: 0.8125rem; /* 13px — metadata, secondary */
+  --ds-font-body: 0.9375rem;   /* 15px — primary cell text */
+  --ds-font-prose: 0.875rem;   /* 14px — dense prose */
+  --ds-font-lead: 1.0625rem;   /* 17px — identity customer name */
+  --ds-font-stat: 1.5rem;      /* 24px — summary hero numbers */
+}
+
+/* Billing chrome + table scale inside work density */
+.density-billing-work .billing-meta-pill {
+  font-size: var(--ds-font-caption);
+  padding: 0.1875rem 0.625rem;
+}
+
+.density-billing-work .billing-chrome-nav {
+  height: 3.25rem;
+}
+
+.density-billing-work .billing-chrome-identity {
+  height: 3rem;
+  gap: 0.625rem;
+}
+
+.density-billing-work .billing-chrome-stage {
+  height: 2.375rem;
+}
+
+.density-billing-work .billing-chrome-context {
+  height: 2.625rem;
+  gap: 0.875rem;
+}
+
+.density-billing-work .billing-chrome-order-id {
+  font-size: var(--ds-font-caption);
+}
+
+.density-billing-work .billing-chrome-stage-step {
+  font-size: var(--ds-font-label);
+}
+
+.density-billing-work table.ds-table.ds-table--billing th {
+  padding: 0.5rem var(--ds-px);
+  font-size: var(--ds-font-caption);
+}
+
+.density-billing-work table.ds-table.ds-table--billing td {
+  padding: 0.625rem var(--ds-px);
+  font-size: var(--ds-font-body);
+}
+
+.density-billing-work table.ds-table.ds-table--billing td.billing-col-qty,
+.density-billing-work table.ds-table.ds-table--billing td.billing-col-rate {
+  font-size: var(--ds-font-body);
+}
+
+.density-billing-work .busy-entry-code {
+  font-size: var(--ds-font-body);
+}
+
 /* ─── B) DS Card ─── */
 .ds-card {
   background: var(--bg-secondary);
@@ -609,6 +680,24 @@ table.ds-table tbody tr.ds-row--selected {
   background: var(--bg-row-selected) !important;
 }
 
+/* Billing line left-stripe accents (BillLineRow, DeskFlaggedLineRow) */
+.ds-row--stripe-positive {
+  border-left: 3px solid var(--border-positive);
+  background: color-mix(in srgb, var(--bg-positive-subtle) 25%, transparent);
+}
+.ds-row--stripe-accent {
+  border-left: 3px solid var(--border-accent);
+  background: color-mix(in srgb, var(--bg-accent-subtle) 35%, transparent);
+}
+.ds-row--stripe-negative {
+  border-left: 3px solid var(--border-negative);
+  background: color-mix(in srgb, var(--bg-negative-subtle) 35%, transparent);
+}
+.ds-row--stripe-warning {
+  border-left: 3px solid var(--border-warning);
+  background: color-mix(in srgb, var(--bg-warning-subtle) 35%, transparent);
+}
+
 /* Optional: zebra striping — add .ds-table--zebra to the wrapper */
 .ds-table--zebra .ds-row:nth-child(even),
 table.ds-table--zebra tbody tr:nth-child(even) {
@@ -621,6 +710,74 @@ table.ds-table td {
   font-size: var(--ds-font-body);
   color: var(--content-primary);
   vertical-align: middle;
+}
+
+/* Billing order table — Linear-density: sentence-case headers, tighter rows */
+table.ds-table.ds-table--billing thead tr {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-faint);
+}
+
+table.ds-table.ds-table--billing th {
+  padding: 0.375rem var(--ds-px);
+  font-size: var(--ds-font-caption);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--content-quaternary);
+}
+
+table.ds-table.ds-table--billing td {
+  padding: 0.5rem var(--ds-px);
+  font-size: var(--ds-font-prose);
+  vertical-align: middle;
+}
+
+table.ds-table.ds-table--billing td:first-child {
+  padding-left: 0.375rem;
+  padding-right: 0.125rem;
+}
+
+table.ds-table.ds-table--billing td.billing-col-qty,
+table.ds-table.ds-table--billing td.billing-col-rate {
+  font-size: var(--ds-font-body);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+table.ds-table.ds-table--billing tbody tr {
+  border-bottom: 1px solid var(--border-faint);
+}
+
+table.ds-table.ds-table--billing tbody tr:last-child {
+  border-bottom: none;
+}
+
+/* Alias 1 — full code always visible; item column absorbs shrink */
+table.ds-table.ds-table--billing th.billing-col-alias1,
+table.ds-table.ds-table--billing td.billing-col-alias1 {
+  width: 1%;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+table.ds-table.ds-table--billing th.billing-col-item,
+table.ds-table.ds-table--billing td.billing-col-item {
+  width: auto;
+  min-width: 0;
+  max-width: 1px;
+}
+
+.busy-entry-code {
+  font-family: "Geist Mono", monospace;
+  font-size: var(--ds-font-caption);
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--content-primary);
+}
+
+.busy-entry-code--muted {
+  color: var(--content-quaternary);
 }
 
 /* ─── D) DS Form fields ─── */
@@ -799,6 +956,120 @@ table.ds-table td {
   font-size: var(--ds-font-label);
 }
 
+/* ─── Billing chrome — meta pills + band shells ─── */
+.billing-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0.1875rem 0.625rem;
+  border-radius: 0.625rem;
+  font-size: var(--ds-font-label);
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+  border: 0.5px solid transparent;
+}
+
+.billing-meta-pill--accent {
+  background: var(--bg-accent-subtle);
+  color: var(--content-accent);
+  border-color: var(--border-accent);
+}
+
+.billing-meta-pill--neutral {
+  background: var(--bg-secondary);
+  color: var(--content-secondary);
+  border-color: var(--border-opaque);
+}
+
+.billing-meta-pill--warning {
+  background: var(--bg-warning-subtle);
+  color: var(--content-warning-on-light);
+  border-color: var(--border-warning);
+}
+
+.billing-meta-pill--negative {
+  background: var(--bg-negative-subtle);
+  color: var(--content-negative);
+  border-color: var(--border-negative);
+}
+
+.billing-meta-pill--positive {
+  background: var(--bg-positive-subtle);
+  color: var(--content-positive);
+  border-color: var(--border-positive);
+}
+
+
+.billing-chrome-nav {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding-inline: 1rem;
+  border-bottom: 0.5px solid var(--border-faint);
+  height: 3rem;
+  justify-content: space-between;
+  background: var(--bg-primary);
+}
+
+.billing-chrome-identity {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding-inline: 1rem;
+  border-bottom: 0.5px solid var(--border-faint);
+  height: 2.75rem;
+  gap: 0.5rem;
+  background: var(--bg-primary);
+}
+
+.billing-chrome-stage {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding-inline: 1rem;
+  border-bottom: 0.5px solid var(--border-faint);
+  height: 2rem;
+  gap: 0;
+  overflow-x: auto;
+  background: var(--bg-secondary);
+}
+
+.billing-chrome-stage--done {
+  background: color-mix(in srgb, var(--bg-positive-subtle) 15%, var(--bg-secondary));
+}
+
+.billing-chrome-context {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding-inline: 1rem;
+  border-bottom: 0.5px solid var(--border-faint);
+  height: 2.25rem;
+  gap: 0.75rem;
+  justify-content: space-between;
+  background: var(--bg-primary);
+}
+
+.billing-chrome-context--urgent {
+  background: var(--bg-chrome-urgent);
+}
+
+.billing-chrome-order-id {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: "Geist Mono", monospace;
+  font-size: var(--ds-font-caption);
+  color: var(--content-tertiary);
+}
+
+.billing-chrome-stage-step {
+  font-size: var(--ds-font-label);
+  line-height: 1.2;
+}
+
 /* ─── Typography + scan helpers (use instead of text-[10px], text-[11px], …) ─── */
 .font-ds-micro {
   font-size: var(--ds-font-micro);
@@ -896,4 +1167,10 @@ table.ds-table td {
   0% { opacity: 1; transform: scaleX(0); transform-origin: left; }
   30% { transform: scaleX(1); transform-origin: left; }
   100% { opacity: 0; transform: scaleX(1); transform-origin: left; }
+}
+
+@keyframes checkmark-draw {
+  0% { stroke-dashoffset: 14; opacity: 0; }
+  50% { opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 1; }
 }
