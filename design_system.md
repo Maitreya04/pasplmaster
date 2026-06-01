@@ -91,6 +91,7 @@ System supports structural compression by modifying CSS variables placed on wrap
    - Gaps: Base `12px`, Tight `4px`
    - Labels: `10px` uppercase
    - Body text: `13px`
+3. **Billing work (`.density-billing-work`):** Order sheet / desk overlay — between comfortable and compact (body `14px`, caption `12px`). Used on `BillingOrderChrome` and embedded `OrderSheetView`.
 
 ---
 
@@ -106,6 +107,7 @@ Rather than relying purely on utility classes everywhere, standard blocks are pa
 - Highly semantic structural styling for list views and tables.
 - Sticky head cells (`.ds-th`) with custom tracking and uppercase micro-labels.
 - Built-in interactive row hovers (`--bg-row-hover`) and selected highlight states (`--bg-row-selected`). Supports `.ds-table--zebra`.
+- Billing line left-stripe accents: `.ds-row--stripe-positive`, `--stripe-accent`, `--stripe-negative`, `--stripe-warning` (used by `BillLineRow` / `DeskFlaggedLineRow` via `billLineRowStyle.ts`).
 
 ### 📝 DS Form Fields (`.ds-field`, `.ds-input`, `.ds-label`)
 - Field wrappers group `label` + `input` + `helper/error` cleanly.
@@ -132,7 +134,7 @@ Rather than relying purely on utility classes everywhere, standard blocks are pa
 | App meaning (backgrounds, text, borders, status) | `:root` semantic tokens |
 | Stock / scan colors (OK / low / out) | `--content-signal-ok`, `--content-signal-low`, `--content-signal-out` |
 | WhatsApp-style preview surfaces | `--embed-whatsapp*`, `--embed-whatsapp-bg` / `--embed-whatsapp-fg` (`.dark` flips bubble) |
-| Density (table rows, labels, cell padding) | `:root` `--ds-*` + **`.density-compact`** on dense shells: `LiveQueue/*` views, `QueueView`, `OrderSheetView`, `CompactQueuePage` |
+| Density (table rows, labels, cell padding) | `:root` `--ds-*` + **`.density-compact`** (queues) or **`.density-billing-work`** (order sheet chrome) |
 | Typography steps vs arbitrary `text-[Npx]` | `.font-ds-micro` … `.font-ds-lead`, **`.font-ds-stat`** (hero numbers); use Tailwind **`text-base`** (16px) / **`text-lg`** (18px) where no DS step exists |
 | Tailwind utilities | `@theme` — e.g. `text-content-signal-ok`, `text-embed-whatsapp`, `bg-embed-whatsapp-solid` |
 

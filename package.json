@@ -11,6 +11,10 @@
     "test:contrast": "node scripts/contrast-test.mjs",
     "test:bill-outcome": "npx tsx src/lib/billing/billLineOutcome.test.ts",
     "test:sort-bill-lines": "npx tsx src/lib/billing/sortBillLines.test.ts",
+    "test:busy-line-split": "npx tsx src/lib/billing/busyLineSplit.test.ts",
+    "test:derive-operator-stage": "npx tsx src/lib/billing/deriveBillingOperatorStage.test.ts",
+    "test:order-age-tier": "npx tsx src/lib/billing/orderAgeTier.test.ts",
+    "test:stage-bar-presentation": "npx tsx src/lib/billing/deriveStageBarPresentation.test.ts",
     "tokens:generate": "node scripts/generate-palette.mjs"
   },
   "dependencies": {
@@ -21,6 +25,7 @@
     "@tanstack/react-query": "^5.90.21",
     "@undecaf/zbar-wasm": "^0.11.0",
     "@vercel/analytics": "^1.6.1",
+    "lucide-react": "^1.17.0",
     "pdfjs-dist": "^4.10.38",
     "qrcode": "^1.5.4",
     "react": "^19.2.0",

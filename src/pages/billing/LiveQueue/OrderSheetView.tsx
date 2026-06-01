@@ -34,6 +34,12 @@ import {
   deriveBusyFinishAction,
 } from '../../../lib/billing/busyFinishAction';
 import {
+  busyBillableQty,
+  busyPendingQty,
+  isBusyBillableLine,
+  isFullyPendingBusyLine,
+} from '../../../lib/billing/busyLineSplit';
+import {
   markBusyEnteredIds,
   readBusyEnteredIds,
   toggleBusyEnteredId,
@@ -97,10 +103,6 @@ interface OrderSheetViewProps {
 }
 
 type CopyState = 'ready' | 'copied' | 'settled';
-
-function isSkipLine(flag: ItemFlag | undefined): boolean {
-  return flag?.type === 'no_stock' || flag?.type === 'partial';
-}
 
 function mergeLine(item: OrderItem, edit?: BillingLineEdit): OrderItem {
   if (!edit || edit.removed) return item;
@@ -245,12 +247,15 @@ export function OrderSheetView({
   );
 
   const billableRows = useMemo(
-    () => mergedVisibleRows.filter((item) => !isSkipLine(flags[item.id])),
-    [mergedVisibleRows, flags],
+    () =>
+      mergedVisibleRows.filter((item) =>
+        isBusyBillableLine(item, flags[item.id], lineEdits[item.id]),
+      ),
+    [mergedVisibleRows, flags, lineEdits],
   );
 
   const skipRowCount = useMemo(
-    () => mergedVisibleRows.filter((item) => isSkipLine(flags[item.id])).length,
+    () => mergedVisibleRows.filter((item) => isFullyPendingBusyLine(flags[item.id])).length,
     [mergedVisibleRows, flags],
   );
 
@@ -262,7 +267,7 @@ export function OrderSheetView({
     for (const item of sortedItems) {
       if (lineEdits[item.id]?.removed) {
         removed.push(item);
-      } else if (isSkipLine(flags[item.id])) {
+      } else if (isFullyPendingBusyLine(flags[item.id])) {
         skip.push(item);
       } else {
         billable.push(item);
@@ -276,7 +281,10 @@ export function OrderSheetView({
 
   const copyBillable = useCallback(() => {
     if (billableRows.length === 0) return;
-    copy(buildBusyPasteText(billableRows, { lineEdits, includeRate: true }), 'all-items');
+    copy(
+      buildBusyPasteText(billableRows, { lineEdits, flags, includeRate: true }),
+      'all-items',
+    );
     setCopyState('copied');
   }, [billableRows, lineEdits, copy]);
 
@@ -301,6 +309,8 @@ export function OrderSheetView({
   const [activeRow, setActiveRow] = useState<number | null>(null);
   const [showHints, setShowHints] = useState(false);
   const hintsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const hasLongSalesNote = trimmedNotes.length > 120 || trimmedNotes.includes('\n');
+  const [salesNoteExpanded, setSalesNoteExpanded] = useState(false);
 
   const [partialInputRow, setPartialInputRow] = useState<number | null>(null);
   const [partialQty, setPartialQty] = useState('');
@@ -383,7 +393,7 @@ export function OrderSheetView({
     [billableRows],
   );
   const pendingRows = useMemo(
-    () => mergedVisibleRows.filter((item) => isSkipLine(flags[item.id])),
+    () => mergedVisibleRows.filter((item) => isFullyPendingBusyLine(flags[item.id])),
     [mergedVisibleRows, flags],
   );
 
@@ -777,6 +787,7 @@ export function OrderSheetView({
           salesperson,
           createdAt,
           transportName,
+          salesNote: trimmedNotes || null,
           busyProgress,
           lineCount: itemCount,
           pendingCount: skipRowCount > 0 ? skipRowCount : undefined,
@@ -836,9 +847,22 @@ export function OrderSheetView({
                   </span>
                 </div>
                 <div className="min-w-0 px-4 py-3">
-                  <p className="font-ds-body-size font-semibold leading-snug text-[var(--content-primary)] whitespace-pre-wrap">
+                  <p
+                    className={`font-ds-body-size font-semibold leading-snug text-[var(--content-primary)] whitespace-pre-wrap ${
+                      hasLongSalesNote && !salesNoteExpanded ? 'line-clamp-2' : ''
+                    }`}
+                  >
                     {trimmedNotes}
                   </p>
+                  {hasLongSalesNote ? (
+                    <button
+                      type="button"
+                      onClick={() => setSalesNoteExpanded((open) => !open)}
+                      className="mt-1 font-ds-caption-size font-semibold text-[var(--content-warning-on-light)] hover:underline"
+                    >
+                      {salesNoteExpanded ? 'Show less' : 'Show full note'}
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : null}
@@ -888,31 +912,35 @@ export function OrderSheetView({
                 : 'rounded-xl border border-[var(--border-subtle)] overflow-hidden shadow-sm'
             }`}
           >
-            <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--border-faint)] bg-[var(--bg-primary)]">
-              <QueueSectionHeader
-                label="Items to enter"
-                count={billableRows.length}
-                description={
-                  skipRowCount > 0
-                    ? `${skipRowCount} pending below, not copied to Busy`
-                    : undefined
-                }
-                variant="subtle"
-                className="py-0"
-              />
-              <button
-                type="button"
-                onClick={copyBillable}
-                disabled={isClaiming || billableRows.length === 0}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 font-ds-caption-size font-semibold border transition-colors disabled:opacity-40 ${
-                  copyState === 'copied'
-                    ? 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
-                    : 'border-[var(--content-primary)] bg-[var(--content-primary)] text-[var(--bg-primary)] hover:opacity-90'
-                }`}
-                style={{ borderWidth: '0.5px' }}
-              >
-                {copyButtonLabel}
-              </button>
+            <div className="sticky top-0 z-20 border-b border-[var(--border-faint)] bg-[var(--bg-primary)]">
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                <QueueSectionHeader
+                  label="Items to enter"
+                  count={billableRows.length}
+                  description={
+                    skipRowCount > 0
+                      ? `${skipRowCount} pending below, not copied to Busy`
+                      : undefined
+                  }
+                  variant="subtle"
+                  className="py-0"
+                />
+                <div className="flex items-center gap-2 min-w-0">
+                  <button
+                    type="button"
+                    onClick={copyBillable}
+                    disabled={isClaiming || billableRows.length === 0}
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 font-ds-caption-size font-semibold border transition-colors disabled:opacity-40 ${
+                      copyState === 'copied'
+                        ? 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
+                        : 'border-[var(--content-primary)] bg-[var(--content-primary)] text-[var(--bg-primary)] hover:opacity-90'
+                    }`}
+                    style={{ borderWidth: '0.5px' }}
+                  >
+                    {copyButtonLabel}
+                  </button>
+                </div>
+              </div>
             </div>
             {showCopyHint ? (
               <BusyEntryCopyHint remaining={busyRemaining} onMarkAllEntered={markAllEntered} />
@@ -978,7 +1006,9 @@ export function OrderSheetView({
                   if (!item) return null;
 
                   const flag = flags[item.id];
-                  const isSkip = isSkipLine(flag);
+                  const isSkip = isFullyPendingBusyLine(flag);
+                  const billableQty = busyBillableQty(item, flag, lineEdits[item.id]);
+                  const pendingQty = busyPendingQty(item, flag, lineEdits[item.id]);
                   const entered = !isSkip && enteredIds.has(item.id);
 
                   const skipHeaderRow =
@@ -1040,6 +1070,8 @@ export function OrderSheetView({
                         qtyEdited={qtyEdited}
                         isPartialInput={isPartialInput}
                         partialQty={partialQty}
+                        billableQty={billableQty}
+                        pendingQty={pendingQty}
                         partialInputRef={partialInputRef}
                         rowRef={(el) => {
                           rowRefs.current[idx] = el;

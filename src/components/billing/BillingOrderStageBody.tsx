@@ -13,7 +13,11 @@ import { BillingBillHeader } from './chrome/BillingBillHeader';
 import { usePickerLoad } from '../../hooks/usePickerLoad';
 import type { BillSheetEdits } from '../../hooks/useBillSheetEdits';
 import type { DeskOrderRow } from '../../hooks/useBillingDeskOrders';
-import type { OrderWithItems, OrderItem } from '../../types';
+import type { OrderWithItems } from '../../types';
+import {
+  countBusyBillableLines,
+  countFullyPendingBusyLines,
+} from '../../lib/billing/busyLineSplit';
 import type { BillingLineEdit, ItemFlag } from '../../hooks/useBillingFlow';
 import { formatCurrencyRaw } from '../../utils/formatters';
 
@@ -33,30 +37,6 @@ interface BillingOrderStageBodyProps {
   };
 }
 
-function countBillableForBusy(
-  items: OrderItem[],
-  lineEdits: Record<number, BillingLineEdit>,
-  flags: Record<number, ItemFlag>,
-): number {
-  return items.filter((item) => {
-    if (lineEdits[item.id]?.removed) return false;
-    const flag = flags[item.id];
-    if (flag?.type === 'no_stock' || flag?.type === 'partial') return false;
-    return true;
-  }).length;
-}
-
-function countSkipForBusy(
-  items: OrderItem[],
-  lineEdits: Record<number, BillingLineEdit>,
-  flags: Record<number, ItemFlag>,
-): number {
-  return items.filter((item) => {
-    if (lineEdits[item.id]?.removed) return false;
-    const flag = flags[item.id];
-    return flag?.type === 'no_stock' || flag?.type === 'partial';
-  }).length;
-}
 
 export function BillingOrderStageBody({
   order,
@@ -86,11 +66,11 @@ export function BillingOrderStageBody({
   );
 
   const billableCount = busyPaste
-    ? countBillableForBusy(orderDetail.items, busyPaste.lineEdits, busyPaste.flags)
+    ? countBusyBillableLines(orderDetail.items, busyPaste.flags, busyPaste.lineEdits)
     : 0;
 
   const skipCount = busyPaste
-    ? countSkipForBusy(orderDetail.items, busyPaste.lineEdits, busyPaste.flags)
+    ? countFullyPendingBusyLines(orderDetail.items, busyPaste.flags, busyPaste.lineEdits)
     : 0;
 
   const editCount = billSheet.unresolvedFlagged.length;

@@ -13,6 +13,7 @@ export interface BillingOrderContext {
   pickerName?: string | null;
   transportName?: string | null;
   carrierName?: string | null;
+  salesNote?: string | null;
   deadline?: string | null;
   reviewerName?: string | null;
   priority?: string;
@@ -109,6 +110,7 @@ export function BillingOrderChrome({
           createdAt={context.createdAt}
           transportName={context.transportName}
           carrierName={context.carrierName}
+          salesNote={context.salesNote}
           deadline={context.deadline}
           pickerName={context.pickerName}
           reviewerName={context.reviewerName}

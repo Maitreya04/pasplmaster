@@ -17,6 +17,12 @@ import {
   toggleBusyEnteredId,
   writeBusyEnteredIds,
 } from '../../../lib/billing/busyEntrySession';
+import {
+  busyBillableQty,
+  busyPendingQty,
+  isBusyBillableLine,
+  isFullyPendingBusyLine,
+} from '../../../lib/billing/busyLineSplit';
 import { buildBusyPasteText, sortBillLines } from '../../../lib/billing/sortBillLines';
 import { getBookPrice, getQuotedPrice } from '../../../lib/specialPricing';
 import {
@@ -32,10 +38,6 @@ import { deriveBusyFinishAction } from '../../../lib/billing/busyFinishAction';
 
 type CopyState = 'ready' | 'copied' | 'settled';
 
-function isSkipLine(item: OrderItem, flags: Record<number, ItemFlag>): boolean {
-  const flag = flags[item.id];
-  return flag?.type === 'no_stock' || flag?.type === 'partial';
-}
 
 function billedRate(item: OrderItem, edit?: BillingLineEdit): number | null {
   if (typeof edit?.priceQuoted === 'number' && Number.isFinite(edit.priceQuoted)) {
@@ -76,16 +78,20 @@ function RateCell({
 function BusyLineChips({
   nature,
   flag,
+  pendingQty = 0,
 }: {
   nature: BusyEntryLineNature;
   flag?: ItemFlag;
+  pendingQty?: number;
 }): React.JSX.Element | null {
   const pendingLabel =
-    flag?.type === 'no_stock'
-      ? 'Out of stock'
-      : flag?.type === 'partial'
-        ? 'Partial stock'
-        : null;
+    pendingQty > 0
+      ? `${pendingQty} pending`
+      : flag?.type === 'no_stock'
+        ? 'Out of stock'
+        : flag?.type === 'partial'
+          ? 'Partial stock'
+          : null;
 
   if (nature === 'normal' && !pendingLabel) return null;
 
@@ -184,7 +190,9 @@ export function BusyPasteStage({
   const billable = useMemo(
     () =>
       sorted.filter(
-        (item) => !lineEdits[item.id]?.removed && !isSkipLine(item, flags),
+        (item) =>
+          !lineEdits[item.id]?.removed &&
+          isBusyBillableLine(item, flags[item.id], lineEdits[item.id]),
       ),
     [sorted, lineEdits, flags],
   );
@@ -192,7 +200,8 @@ export function BusyPasteStage({
   const skip = useMemo(
     () =>
       sorted.filter(
-        (item) => !lineEdits[item.id]?.removed && isSkipLine(item, flags),
+        (item) =>
+          !lineEdits[item.id]?.removed && isFullyPendingBusyLine(flags[item.id]),
       ),
     [sorted, lineEdits, flags],
   );
@@ -209,7 +218,10 @@ export function BusyPasteStage({
 
   const copyBillable = useCallback(() => {
     if (billable.length === 0) return;
-    copy(buildBusyPasteText(billable, { lineEdits, includeRate: true }), 'busy-paste');
+    copy(
+      buildBusyPasteText(billable, { lineEdits, flags, includeRate: true }),
+      'busy-paste',
+    );
     setCopyState('copied');
   }, [billable, lineEdits, copy]);
 
@@ -302,7 +314,9 @@ export function BusyPasteStage({
               const lineNo = index + 1;
               const entered = enteredIds.has(item.id);
               const edit = lineEdits[item.id];
-              const qty = edit?.qtyRequested ?? item.qty_requested;
+              const flag = flags[item.id];
+              const qty = busyBillableQty(item, flag, edit);
+              const pendingQty = busyPendingQty(item, flag, edit);
               const nature = busyEntryLineNature(item);
               const brand = busyEntryBrandLabel(item);
               const stripe =
@@ -351,11 +365,16 @@ export function BusyPasteStage({
                     >
                       {orderItemDisplayName(item)}
                     </span>
-                    <BusyLineChips nature={nature} />
+                    <BusyLineChips nature={nature} flag={flag} pendingQty={pendingQty} />
                   </div>
                   <RateCell item={item} edit={edit} />
                   <span className="w-14 shrink-0 px-2.5 text-[18px] font-medium tabular-nums text-right text-[var(--content-primary)]">
                     {qty}
+                    {pendingQty > 0 ? (
+                      <span className="block text-[9px] font-medium text-[var(--content-quaternary)]">
+                        +{pendingQty} pending
+                      </span>
+                    ) : null}
                   </span>
                 </li>
               );
@@ -403,9 +422,7 @@ export function BusyPasteStage({
                     </div>
                     <RateCell item={item} edit={edit} />
                     <span className="text-[14px] tabular-nums text-right text-[var(--content-quaternary)]">
-                      {flag?.type === 'partial' && flag.availableQty != null
-                        ? `${flag.availableQty}/${item.qty_requested}`
-                        : item.qty_requested}
+                      {busyPendingQty(item, flag, edit)}
                     </span>
                   </li>
                 );

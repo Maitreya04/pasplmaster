@@ -1,4 +1,4 @@
-import { User, Calendar, Truck, FileText } from '@phosphor-icons/react';
+import { User, Calendar, Truck, FileText, NotePencil } from '@phosphor-icons/react';
 import { PickerAttributionChip } from '../../shared/AttributionChips';
 import type { BillingOperatorStage } from '../../../lib/billing/deriveBillingOperatorStage';
 import {
@@ -14,6 +14,7 @@ export interface BillingContextBarProps {
   createdAt?: string | null;
   transportName?: string | null;
   carrierName?: string | null;
+  salesNote?: string | null;
   deadline?: string | null;
   pickerName?: string | null;
   reviewerName?: string | null;
@@ -24,6 +25,27 @@ export interface BillingContextBarProps {
   ewayNeeded?: boolean;
   completedAt?: string | null;
   onPickerClick?: () => void;
+}
+
+function SalesNoteIcon({ note }: { note: string }): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      className="group relative inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] transition-colors hover:bg-[var(--bg-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-warning)]"
+      style={{ borderWidth: '0.5px' }}
+      aria-label="Sales note"
+    >
+      <NotePencil size={15} weight="bold" aria-hidden />
+      <span className="pointer-events-none absolute right-0 top-full z-50 mt-2 hidden w-[min(28rem,70vw)] max-h-40 overflow-y-auto rounded-lg border border-[var(--border-opaque)] bg-[var(--bg-primary)] px-3 py-2 text-left shadow-lg group-hover:block group-focus-visible:block">
+        <span className="mb-1 block font-ds-micro font-semibold uppercase text-[var(--content-quaternary)]">
+          Sales note
+        </span>
+        <span className="block whitespace-pre-wrap font-ds-caption-size font-medium leading-snug text-[var(--content-primary)]">
+          {note}
+        </span>
+      </span>
+    </button>
+  );
 }
 
 const ICONS: Record<ContextBarIcon, typeof User> = {
@@ -96,6 +118,10 @@ export function BillingContextBar(props: BillingContextBarProps): React.JSX.Elem
       </div>
 
       <div className="flex items-center gap-3 shrink-0">
+        {props.salesNote?.trim() ? (
+          <SalesNoteIcon note={props.salesNote.trim()} />
+        ) : null}
+
         {slots.right.map((fact) => (
           <ContextFact key={fact.key} fact={fact} />
         ))}

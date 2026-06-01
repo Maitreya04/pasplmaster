@@ -1,10 +1,11 @@
-import { Bell, Check, Receipt } from '@phosphor-icons/react';
 import { BillLineRow, BillLineTableHeader } from './BillLineRow';
+import { CompleteHandoffStage } from './stages/CompleteHandoffStage';
 import { billLinePosition } from '../../lib/billing/sortBillLines';
 import {
   DeskFlaggedLineRow,
   DeskFlaggedSectionHeader,
 } from '../../pages/billing/BillingDesk/DeskFlaggedLineRow';
+import { QueueSectionHeader } from '../shared/QueueSectionHeader';
 import { formatCurrencyRaw } from '../../utils/formatters';
 import {
   CHANGE_REASON_OPTIONS,
@@ -26,34 +27,8 @@ export interface BillSheetViewProps {
   flaggedMode?: boolean;
   /** Hide lines already covered by PO when resolving flags (desk default). */
   hidePoSkippedFlags?: boolean;
-}
-
-function StepCircle({
-  state,
-  number,
-}: {
-  state: 'active' | 'done' | 'waiting';
-  number: number;
-}): React.JSX.Element {
-  if (state === 'done') {
-    return (
-      <span className="w-[22px] h-[22px] rounded-full flex items-center justify-center bg-[var(--bg-positive-subtle)] border border-[var(--border-positive)] text-[var(--content-positive)] shrink-0">
-        <Check size={12} weight="bold" />
-      </span>
-    );
-  }
-  if (state === 'active') {
-    return (
-      <span className="w-[22px] h-[22px] rounded-full flex items-center justify-center bg-[var(--bg-positive)] text-white text-xs font-semibold shrink-0">
-        {number}
-      </span>
-    );
-  }
-  return (
-    <span className="w-[22px] h-[22px] rounded-full flex items-center justify-center bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] text-[var(--content-quaternary)] text-xs shrink-0">
-      {number}
-    </span>
-  );
+  /** Hide customer/total strip when parent chrome owns identity + summary zones. */
+  hideOrderSummary?: boolean;
 }
 
 function isHiddenPoSkippedFlag(
@@ -95,27 +70,21 @@ function BillFulfillmentSummary({
   const hasFoc = totals.focQty > 0;
   if (!hasPo && !hasOos && !hasFoc) return null;
 
+  const skipCount = totals.salesPoQty + totals.pickerOosQty;
+
   return (
-    <div className="px-3 py-2.5 border-b border-[var(--border-faint)] bg-[var(--bg-secondary)] space-y-1.5">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--content-quaternary)]">
-        What to enter in Busy
-      </p>
-      <p className="text-xs text-[var(--content-primary)]">
-        <span className="font-semibold text-[var(--content-positive)]">
-          {totals.busyBillLines} line{totals.busyBillLines === 1 ? '' : 's'}
-        </span>
-        {' · '}
-        {totals.billTodayQty} pcs to bill today
-        {hasFoc ? ` (${totals.focQty} FOC at ₹0)` : ''}
-      </p>
-      {(hasPo || hasOos) && (
-        <p className="text-xs text-[var(--content-secondary)]">
-          Not billing today:
-          {hasPo ? ` ${totals.salesPoQty} pcs on sales PO` : ''}
-          {hasPo && hasOos ? ' ·' : ''}
-          {hasOos ? ` ${totals.pickerOosQty} pcs picker out of stock` : ''}
-        </p>
-      )}
+    <div className="px-3 py-2 border-b border-[var(--border-faint)] bg-[var(--bg-secondary)]">
+      <QueueSectionHeader
+        label="What to enter in Busy"
+        count={totals.busyBillLines}
+        tone="info"
+        description={`${totals.billTodayQty} pcs to bill today${hasFoc ? ` (${totals.focQty} FOC at ₹0)` : ''}${
+          skipCount > 0
+            ? ` · Not billing today:${hasPo ? ` ${totals.salesPoQty} pcs on sales PO` : ''}${hasPo && hasOos ? ' ·' : ''}${hasOos ? ` ${totals.pickerOosQty} pcs picker out of stock` : ''}`
+            : ''
+        }`}
+        sticky
+      />
     </div>
   );
 }
@@ -126,8 +95,8 @@ export function BillSheetView({
   variant = 'overlay',
   mode = 'submitted',
   showFooter = true,
-  flaggedMode = false,
   hidePoSkippedFlags = true,
+  hideOrderSummary = false,
 }: BillSheetViewProps): React.JSX.Element {
   const compact = variant === 'overlay';
   const {
@@ -146,8 +115,6 @@ export function BillSheetView({
     resolvedFlagged,
     resolvingFlags,
     allFlagsResolved,
-    saveBlocked,
-    notifyPickerAllowed,
     poSkippedFlagCount,
     showReasonDropdown,
     unresolvedPriceCount,
@@ -160,8 +127,6 @@ export function BillSheetView({
     removeFlaggedLine,
     undoRemove,
     patchEdit,
-    saveMutation,
-    notifyMutation,
     acceptAllLabel,
     flaggedItems,
     pendingByItemId,
@@ -242,18 +207,26 @@ export function BillSheetView({
   }
 
   return (
-    <div className={variant === 'page' ? 'space-y-3' : 'flex flex-col min-h-0 flex-1'}>
+    <div
+      className={
+        variant === 'page'
+          ? 'space-y-3'
+          : 'flex flex-col min-h-0 flex-1 h-full'
+      }
+    >
       <div
-        className={`rounded-lg border border-[var(--border-subtle)] overflow-hidden ${
+        className={`rounded-lg border border-[var(--border-subtle)] overflow-hidden flex flex-col min-h-0 flex-1 ${
           variant === 'page' ? '' : 'mx-0'
         }`}
       >
         {mode === 'post_pick' && (
-          <BillFulfillmentSummary items={visibleItems} pendingByItemId={pendingByItemId} />
+          <div className="shrink-0">
+            <BillFulfillmentSummary items={visibleItems} pendingByItemId={pendingByItemId} />
+          </div>
         )}
         {resolvingFlags && unresolvedFlagged.length > 0 && (
-          <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-[var(--border-faint)] bg-[var(--bg-tertiary)]">
-            <p className="text-[10px] text-[var(--content-quaternary)]">
+          <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2 border-b border-[var(--border-faint)] bg-[var(--bg-tertiary)]">
+            <p className="font-ds-micro text-[var(--content-quaternary)]">
               Resolve flags inline · row order matches Busy paste
             </p>
             <div className="flex shrink-0 flex-wrap justify-end gap-1">
@@ -261,7 +234,7 @@ export function BillSheetView({
                 <button
                   type="button"
                   onClick={acceptAllBoxPrices}
-                  className="h-6 px-2 rounded-md text-[9px] font-semibold bg-[var(--bg-positive)] text-white hover:opacity-95"
+                  className="h-6 px-2 rounded-md font-ds-micro font-semibold bg-[var(--bg-positive)] text-white hover:opacity-95"
                 >
                   {acceptAllLabel} ({unresolvedPriceCount})
                 </button>
@@ -270,7 +243,7 @@ export function BillSheetView({
                 <button
                   type="button"
                   onClick={removeAllOos}
-                  className="h-6 px-2 rounded-md text-[9px] font-medium border border-[var(--border-negative)] text-[var(--content-negative)] hover:bg-[var(--bg-negative-subtle)]"
+                  className="h-6 px-2 rounded-md font-ds-micro font-medium border border-[var(--border-negative)] text-[var(--content-negative)] hover:bg-[var(--bg-negative-subtle)]"
                 >
                   Remove all ({unresolvedOosCount})
                 </button>
@@ -280,48 +253,54 @@ export function BillSheetView({
         )}
 
         {poSkippedFlagCount > 0 && hidePoSkippedFlags && flaggedItems.length === 0 && (
-          <p className="px-3 py-2 text-[10px] text-[var(--content-quaternary)] border-b border-[var(--border-faint)] bg-[var(--bg-tertiary)]">
+          <p className="shrink-0 px-3 py-2 font-ds-micro text-[var(--content-quaternary)] border-b border-[var(--border-faint)] bg-[var(--bg-tertiary)]">
             {poSkippedFlagCount} flagged line{poSkippedFlagCount === 1 ? '' : 's'} already on PO — not
             shown on this bill
           </p>
         )}
 
-        {lineNodes.length > 0 && <div>{lineNodes}</div>}
+        {lineNodes.length > 0 && (
+          <div className={variant === 'overlay' ? 'flex-1 min-h-0 overflow-y-auto' : undefined}>
+            {lineNodes}
+          </div>
+        )}
 
         {resolvingFlags && allFlagsResolved && unresolvedFlagged.length === 0 && (
-          <p className="px-3 py-2 text-[11px] text-[var(--content-positive)] border-t border-[var(--border-faint)]">
+          <p className="shrink-0 px-3 py-2 text-[11px] text-[var(--content-positive)] border-t border-[var(--border-faint)]">
             All flagged lines resolved
           </p>
         )}
       </div>
 
-      <div className="rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 flex justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-[var(--content-primary)] truncate">
-            {orderDetail.customer_name}
-          </p>
-          <p className="text-[10px] text-[var(--content-quaternary)] mt-0.5">
-            {orderDetail.picker_name ? `Picker: ${orderDetail.picker_name}` : 'No picker yet'}
-            {resolvedFlagged.length > 0
-              ? ` · ${resolvedFlagged.length} resolved`
-              : ''}
-          </p>
+      {!hideOrderSummary ? (
+        <div className="shrink-0 rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 flex justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-[var(--content-primary)] truncate">
+              {orderDetail.customer_name}
+            </p>
+            <p className="font-ds-micro text-[var(--content-quaternary)] mt-0.5">
+              {orderDetail.picker_name ? `Picker: ${orderDetail.picker_name}` : 'No picker yet'}
+              {resolvedFlagged.length > 0
+                ? ` · ${resolvedFlagged.length} resolved`
+                : ''}
+            </p>
+          </div>
+          <div className="text-right shrink-0">
+            <p className={`font-medium tabular-nums ${compact ? 'text-[15px]' : 'text-lg'}`}>
+              {formatCurrencyRaw(total)}
+            </p>
+            <p className="font-ds-micro text-[var(--content-quaternary)]">
+              {visibleItems.length} items
+            </p>
+          </div>
         </div>
-        <div className="text-right shrink-0">
-          <p className={`font-medium tabular-nums ${compact ? 'text-[15px]' : 'text-lg'}`}>
-            {formatCurrencyRaw(total)}
-          </p>
-          <p className="text-[10px] text-[var(--content-quaternary)]">
-            {visibleItems.length} items
-          </p>
-        </div>
-      </div>
+      ) : null}
 
       {showReasonDropdown && (
-        <div>
+        <div className="shrink-0">
           <label
             htmlFor="bill-change-reason"
-            className="text-[10px] font-semibold uppercase tracking-wide text-[var(--content-quaternary)]"
+            className="font-ds-micro font-semibold uppercase tracking-wide text-[var(--content-quaternary)]"
           >
             Reason for any changes
           </label>
@@ -344,95 +323,21 @@ export function BillSheetView({
       )}
 
       {showFooter && (
-        <footer className="shrink-0 space-y-1.5 pt-1 border-t border-[var(--border-subtle)]">
+        <footer className="shrink-0 border-t border-[var(--border-subtle)]">
           {resolvingFlags && step === 'idle' && (
-            <p className="text-[10px] text-[var(--content-quaternary)] text-center">
+            <p className="font-ds-micro text-[var(--content-quaternary)] text-center px-3 pt-2">
               {allFlagsResolved
                 ? 'All flagged lines resolved — save to continue'
                 : `${resolvedFlagged.length} of ${flaggedItems.length} flagged lines resolved`}
             </p>
           )}
-          <div className="flex items-center gap-2.5">
-            <StepCircle state={step === 'idle' ? 'active' : 'done'} number={1} />
-            <button
-              type="button"
-              disabled={saveMutation.isPending || step !== 'idle' || saveBlocked}
-              onClick={() => saveMutation.mutate()}
-              className={`flex-1 h-10 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 ${
-                step !== 'idle'
-                  ? 'bg-[var(--bg-positive-subtle)] border border-[var(--border-positive)] text-[var(--content-positive)] cursor-default'
-                  : 'bg-[var(--bg-positive)] text-white hover:opacity-95 disabled:opacity-50'
-              }`}
-            >
-              {step !== 'idle' ? (
-                <>
-                  <Check size={16} weight="bold" />
-                  {flaggedMode ? 'Flag resolved ✓' : 'Bill saved ✓'}
-                </>
-              ) : (
-                <>
-                  <Receipt size={16} weight="bold" />
-                  {saveBlocked
-                    ? `Resolve ${unresolvedFlagged.length} flagged line${unresolvedFlagged.length === 1 ? '' : 's'} first`
-                    : flaggedMode
-                      ? 'Resolve & save'
-                      : 'Save & Bill'}
-                </>
-              )}
-            </button>
-          </div>
-          <div className="flex items-center gap-2.5">
-            <StepCircle
-              state={
-                !notifyPickerAllowed
-                  ? 'waiting'
-                  : step === 'saved'
-                    ? 'active'
-                    : step === 'notified'
-                      ? 'done'
-                      : 'waiting'
-              }
-              number={2}
-            />
-            {notifyPickerAllowed ? (
-              <button
-                type="button"
-                disabled={
-                  step === 'idle' ||
-                  step === 'notified' ||
-                  notifyMutation.isPending ||
-                  saveMutation.isPending
-                }
-                onClick={() => notifyMutation.mutate()}
-                className={`flex-1 h-10 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 ${
-                  step === 'notified'
-                    ? 'bg-[var(--bg-positive-subtle)] border border-[var(--border-positive)] text-[var(--content-positive)] cursor-default'
-                    : step === 'saved'
-                      ? 'bg-[var(--bg-positive)] text-white hover:opacity-95'
-                      : 'bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] text-[var(--content-quaternary)] cursor-not-allowed'
-                }`}
-              >
-                {step === 'notified' ? (
-                  <>
-                    <Check size={16} weight="bold" />
-                    Picker notified — on their way
-                  </>
-                ) : (
-                  <>
-                    <Bell size={16} weight="bold" />
-                    Notify picker — collect bill
-                  </>
-                )}
-              </button>
-            ) : (
-              <p className="flex-1 text-[11px] text-[var(--content-quaternary)] leading-snug">
-                {orderDetail.workflow_status === 'picking' ||
-                orderDetail.workflow_status === 'completed'
-                  ? 'Pick already started or done — no new queue alert needed.'
-                  : 'Notify picker is only for orders waiting in the pick queue.'}
-              </p>
-            )}
-          </div>
+          <CompleteHandoffStage
+            variant="bill_save"
+            orderNumber={orderDetail.order_number}
+            orderName={orderDetail.customer_name}
+            salesperson={orderDetail.salesperson_name}
+            billSheet={billSheet}
+          />
         </footer>
       )}
     </div>

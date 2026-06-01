@@ -66,7 +66,18 @@ function runTests(): void {
       includeRate: true,
       lineEdits: { 2: { priceQuoted: 75 } },
     }),
-    'Alpha\t2\t100\nBeta\t4\t75',
+    'Alpha\t2\t\t100\nBeta\t4\t\t75',
+  );
+
+  const partialPaste = [
+    stubItem({ id: 1, bill_line_no: 1, item_name: 'Split', qty_requested: 2 }),
+  ];
+  assert.equal(
+    buildBusyPasteText(partialPaste, {
+      includeRate: true,
+      flags: { 1: { type: 'partial', availableQty: 1 } },
+    }),
+    'Split\t1\t\t100',
   );
 
   const withRemoved = [

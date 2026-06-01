@@ -1,4 +1,5 @@
-import type { BillingLineEdit } from './liveQueueDraft';
+import { busyBillableQty } from './busyLineSplit';
+import type { BillingLineEdit, BillingLiveQueueFlag } from './liveQueueDraft';
 import type { OrderItem } from '../../types';
 import { getQuotedPrice } from '../specialPricing';
 import { orderItemDisplayName } from '../../utils/formatters';
@@ -19,7 +20,13 @@ export function billLinePosition(item: OrderItem, sortedItems: OrderItem[]): num
 
 export interface BuildBusyPasteTextOptions {
   lineEdits?: Record<number, BillingLineEdit>;
+  flags?: Record<number, BillingLiveQueueFlag>;
   includeRate?: boolean;
+}
+
+/** Busy item grid: Item, Qty, Unit, Price — unit left blank so Busy uses the item master. */
+function busyPasteUnit(_item: OrderItem): string {
+  return '';
 }
 
 function busyPasteRate(item: OrderItem, edit?: BillingLineEdit): number | null {
@@ -29,22 +36,29 @@ function busyPasteRate(item: OrderItem, edit?: BillingLineEdit): number | null {
   return getQuotedPrice(item);
 }
 
-/** Tab-separated lines for Busy paste: name + qty (+ rate when requested) in `bill_line_no` order. */
+/** Tab-separated lines for Busy paste in `bill_line_no` order. */
 export function buildBusyPasteText(
   items: OrderItem[],
   opts?: BuildBusyPasteTextOptions,
 ): string {
   const lineEdits = opts?.lineEdits;
+  const flags = opts?.flags;
   const rows = sortBillLines(items).filter((item) => !lineEdits?.[item.id]?.removed);
 
   return rows
     .map((item) => {
       const edit = lineEdits?.[item.id];
-      const qty = edit?.qtyRequested ?? item.qty_requested;
+      const flag = flags?.[item.id];
+      const qty = flags
+        ? busyBillableQty(item, flag, edit)
+        : edit?.qtyRequested ?? item.qty_requested;
+      if (qty <= 0) return null;
       if (!opts?.includeRate) return `${orderItemDisplayName(item)}\t${qty}`;
       const rate = busyPasteRate(item, edit);
-      return `${orderItemDisplayName(item)}\t${qty}\t${rate ?? ''}`;
+      const unit = busyPasteUnit(item);
+      return `${orderItemDisplayName(item)}\t${qty}\t${unit}\t${rate ?? ''}`;
     })
+    .filter((line): line is string => line != null)
     .join('\n');
 }
 

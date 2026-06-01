@@ -3,6 +3,14 @@ import { billLineChangeSegments } from '../../lib/billing/billLineChangeStrip';
 import { billLineIdentity } from '../../lib/billing/billLineIdentity';
 import { deriveBillLineFulfillment } from '../../lib/billing/billLineFulfillment';
 import {
+  billLineChipClasses,
+  billLineFlagChipClasses,
+  billLinePositiveChipClasses,
+  billLineRemovedStripeClasses,
+  billLineResolvedStripeClasses,
+  billLineStripeClasses,
+} from '../../lib/billing/billLineRowStyle';
+import {
   deskLineFlagAccent,
   deskLineFlagKind,
 } from '../../lib/billing/deskLineFlagKind';
@@ -19,22 +27,6 @@ import type { OverlayLineEdit } from '../../pages/billing/BillingDesk/types';
 const ROW_GRID =
   'grid grid-cols-[28px_minmax(52px,72px)_minmax(0,1fr)_32px_64px_minmax(88px,max-content)] gap-x-1.5 items-center';
 
-function accentBorderClass(accent: ReturnType<typeof deskLineFlagAccent>): string {
-  if (accent === 'red') return 'border-l-[var(--border-negative)] bg-[var(--bg-negative-subtle)]/35';
-  if (accent === 'blue') return 'border-l-[var(--border-accent)] bg-[var(--bg-accent-subtle)]/35';
-  return 'border-l-[var(--border-warning)] bg-[var(--bg-warning-subtle)]';
-}
-
-function accentChipClass(accent: ReturnType<typeof deskLineFlagAccent>): string {
-  if (accent === 'red') {
-    return 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] border-[var(--border-negative)]';
-  }
-  if (accent === 'blue') {
-    return 'bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border-[var(--border-accent)]';
-  }
-  return 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] border-[var(--border-warning)]';
-}
-
 export function BillLineTableHeader({
   compact,
 }: {
@@ -42,8 +34,8 @@ export function BillLineTableHeader({
 }): React.JSX.Element {
   return (
     <div
-      className={`${ROW_GRID} bg-[var(--bg-tertiary)] px-2.5 py-1.5 text-[9px] font-semibold uppercase text-[var(--content-quaternary)] ${
-        compact ? 'text-[8px]' : ''
+      className={`${ROW_GRID} bg-[var(--bg-tertiary)] px-2.5 py-1.5 font-ds-micro font-semibold uppercase text-[var(--content-quaternary)] ${
+        compact ? 'font-ds-label-size' : ''
       }`}
     >
       <span className="text-center">#</span>
@@ -54,22 +46,6 @@ export function BillLineTableHeader({
       <span className="text-right">Action</span>
     </div>
   );
-}
-
-function fulfillmentChipClass(tone: ReturnType<typeof deriveBillLineFulfillment>['chipTone']): string {
-  if (tone === 'green') {
-    return 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border-[var(--border-positive)]';
-  }
-  if (tone === 'blue') {
-    return 'bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border-[var(--border-accent)]';
-  }
-  if (tone === 'red') {
-    return 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] border-[var(--border-negative)]';
-  }
-  if (tone === 'amber') {
-    return 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] border-[var(--border-warning)]';
-  }
-  return 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)] border-[var(--border-subtle)]';
 }
 
 function formatQtyBreakdown(fulfillment: ReturnType<typeof deriveBillLineFulfillment>): string {
@@ -136,14 +112,14 @@ export function BillLineRow({
       ? 'Remove from order · adds to pending'
       : 'Remove line';
 
-  let rowClass = 'border-t border-[var(--border-faint)] border-l-2 px-2.5 py-2';
+  let rowClass = 'border-t border-[var(--border-faint)] border-l-[3px] px-2.5 py-2';
   if (isFlagged) {
     if (isResolved && !isRemoved) {
-      rowClass += ' border-l-[var(--border-positive)] bg-[var(--bg-positive-subtle)]/25';
+      rowClass += ` ${billLineResolvedStripeClasses()}`;
     } else if (isRemoved) {
-      rowClass += ' border-l-[var(--border-subtle)] bg-[var(--bg-tertiary)]/70 opacity-80';
+      rowClass += ` ${billLineRemovedStripeClasses()}`;
     } else {
-      rowClass += ` ${accentBorderClass(accent)}`;
+      rowClass += ` ${billLineStripeClasses(accent)}`;
     }
   } else if (isSplitChild) {
     rowClass += ' bg-[var(--bg-secondary)]/60';
@@ -187,7 +163,7 @@ export function BillLineRow({
         {changeSegments.length > 0 || fulfillment.chipLabel ? (
           <div className="mt-0.5 flex flex-wrap gap-1">
             <span
-              className={`shrink-0 text-[8px] font-semibold px-1 py-px rounded-full border whitespace-nowrap ${fulfillmentChipClass(fulfillment.chipTone)}`}
+              className={`shrink-0 font-ds-micro font-semibold px-1 py-px rounded-full border whitespace-nowrap ${billLineChipClasses(fulfillment.chipTone)}`}
               title={fulfillment.summary}
             >
               {fulfillment.chipLabel}
@@ -197,10 +173,10 @@ export function BillLineRow({
                 return (
                   <span
                     key={`${seg.label}-${i}`}
-                    className={`shrink-0 text-[8px] font-semibold px-1 py-px rounded-full border whitespace-nowrap ${
+                    className={`shrink-0 font-ds-micro font-semibold px-1 py-px rounded-full border whitespace-nowrap ${
                       seg.kind === 'resolved'
-                        ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border-[var(--border-positive)]'
-                        : accentChipClass(accent)
+                        ? billLinePositiveChipClasses()
+                        : billLineFlagChipClasses(accent)
                     }`}
                   >
                     {seg.label}

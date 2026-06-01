@@ -72,6 +72,10 @@ export interface BusyEntryLineRowProps {
   qtyEdited: boolean;
   isPartialInput: boolean;
   partialQty: string;
+  /** Qty to bill in Busy today (after partial / no-stock split). */
+  billableQty?: number;
+  /** Qty deferred to pending (remainder). */
+  pendingQty?: number;
   partialInputRef?: RefObject<HTMLInputElement | null>;
   rowRef?: (el: HTMLTableRowElement | null) => void;
   onRowClick: () => void;
@@ -148,6 +152,8 @@ export function BusyEntryLineRow({
   qtyEdited,
   isPartialInput,
   partialQty,
+  billableQty,
+  pendingQty = 0,
   partialInputRef,
   rowRef,
   onRowClick,
@@ -165,10 +171,19 @@ export function BusyEntryLineRow({
 }: BusyEntryLineRowProps): React.JSX.Element {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const effectiveStatus: LineStatus = flag?.type === 'no_stock' || flag?.type === 'partial' ? 'pending' : status;
+  const effectiveStatus: LineStatus = isSkip
+    ? flag?.type === 'no_stock' || flag?.type === 'partial'
+      ? 'pending'
+      : status
+    : status;
   const stripeColor = getStripeColor(nature, effectiveStatus);
   const rowTint = getRowTint(nature, effectiveStatus);
-  const isPending = effectiveStatus === 'pending';
+  const isPending = isSkip && effectiveStatus === 'pending';
+  const displayQty = isSkip
+    ? pendingQty > 0
+      ? pendingQty
+      : item.qty_requested
+    : billableQty ?? item.qty_requested;
   const isRemoved = effectiveStatus === 'removed';
   const billedRate = getQuotedPrice(item);
   const bookRate = getBookPrice(item);
@@ -265,6 +280,14 @@ export function BusyEntryLineRow({
               >
                 {flag?.type === 'partial' ? 'Partial stock' : 'Out of stock'}
               </button>
+            )}
+            {!isSkip && pendingQty > 0 && (
+              <span
+                className="inline-flex items-center px-1.5 py-px rounded-[5px] text-[9px] font-semibold"
+                style={{ background: '#E6F1FB', color: '#0C447C' }}
+              >
+                {pendingQty} pending
+              </span>
             )}
             {isNew && (
               <span
@@ -386,11 +409,7 @@ export function BusyEntryLineRow({
             />
           </div>
         ) : isSkip ? (
-          <span className="text-[14px] text-[var(--content-quaternary)]">
-            {flag?.type === 'partial' && flag.availableQty != null
-              ? `${flag.availableQty}/${item.qty_requested}`
-              : item.qty_requested}
-          </span>
+          <span className="text-[14px] text-[var(--content-quaternary)]">{displayQty}</span>
         ) : editingQty ? (
           <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
             <input
@@ -427,7 +446,7 @@ export function BusyEntryLineRow({
               </span>
             )}
             <span className="text-[18px] font-medium text-[var(--content-primary)]">
-              {item.qty_requested}
+              {displayQty}
             </span>
           </button>
         )}
