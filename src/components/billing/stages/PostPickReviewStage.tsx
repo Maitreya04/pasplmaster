@@ -30,7 +30,7 @@ export function PostPickReviewStage({
       if (item.state === 'flagged' && edit?.resolution == null) return false;
       return true;
     });
-    copy(buildBusyPasteText(billable, { lineEdits: edits, includeRate: true }), 'busy-final');
+    copy(buildBusyPasteText(billable, { lineEdits: edits }), 'busy-final');
   }, [visibleItems, edits, copy]);
 
   const unresolved = unresolvedFlagged.length;

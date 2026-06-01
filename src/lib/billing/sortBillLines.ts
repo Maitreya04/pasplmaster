@@ -1,7 +1,6 @@
 import { busyBillableQty } from './busyLineSplit';
 import type { BillingLineEdit, BillingLiveQueueFlag } from './liveQueueDraft';
 import type { OrderItem } from '../../types';
-import { getQuotedPrice } from '../specialPricing';
 import { orderItemDisplayName } from '../../utils/formatters';
 
 /** Stable bill sequence: `bill_line_no` when present, else legacy `id` order. */
@@ -21,22 +20,9 @@ export function billLinePosition(item: OrderItem, sortedItems: OrderItem[]): num
 export interface BuildBusyPasteTextOptions {
   lineEdits?: Record<number, BillingLineEdit>;
   flags?: Record<number, BillingLiveQueueFlag>;
-  includeRate?: boolean;
 }
 
-/** Busy item grid: Item, Qty, Unit, Price — unit left blank so Busy uses the item master. */
-function busyPasteUnit(_item: OrderItem): string {
-  return '';
-}
-
-function busyPasteRate(item: OrderItem, edit?: BillingLineEdit): number | null {
-  if (typeof edit?.priceQuoted === 'number' && Number.isFinite(edit.priceQuoted)) {
-    return edit.priceQuoted;
-  }
-  return getQuotedPrice(item);
-}
-
-/** Tab-separated lines for Busy paste in `bill_line_no` order. */
+/** Tab-separated lines for Busy paste: item name + qty in `bill_line_no` order. */
 export function buildBusyPasteText(
   items: OrderItem[],
   opts?: BuildBusyPasteTextOptions,
@@ -53,10 +39,7 @@ export function buildBusyPasteText(
         ? busyBillableQty(item, flag, edit)
         : edit?.qtyRequested ?? item.qty_requested;
       if (qty <= 0) return null;
-      if (!opts?.includeRate) return `${orderItemDisplayName(item)}\t${qty}`;
-      const rate = busyPasteRate(item, edit);
-      const unit = busyPasteUnit(item);
-      return `${orderItemDisplayName(item)}\t${qty}\t${unit}\t${rate ?? ''}`;
+      return `${orderItemDisplayName(item)}\t${qty}`;
     })
     .filter((line): line is string => line != null)
     .join('\n');

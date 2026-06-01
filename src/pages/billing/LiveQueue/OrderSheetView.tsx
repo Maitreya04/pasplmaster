@@ -282,7 +282,7 @@ export function OrderSheetView({
   const copyBillable = useCallback(() => {
     if (billableRows.length === 0) return;
     copy(
-      buildBusyPasteText(billableRows, { lineEdits, flags, includeRate: true }),
+      buildBusyPasteText(billableRows, { lineEdits, flags }),
       'all-items',
     );
     setCopyState('copied');

@@ -62,11 +62,8 @@ function runTests(): void {
   ];
   assert.equal(buildBusyPasteText(pasteItems), 'Alpha\t2\nBeta\t4');
   assert.equal(
-    buildBusyPasteText(pasteItems, {
-      includeRate: true,
-      lineEdits: { 2: { priceQuoted: 75 } },
-    }),
-    'Alpha\t2\t\t100\nBeta\t4\t\t75',
+    buildBusyPasteText(pasteItems, { lineEdits: { 2: { qtyRequested: 3 } } }),
+    'Alpha\t2\nBeta\t3',
   );
 
   const partialPaste = [
@@ -74,10 +71,9 @@ function runTests(): void {
   ];
   assert.equal(
     buildBusyPasteText(partialPaste, {
-      includeRate: true,
       flags: { 1: { type: 'partial', availableQty: 1 } },
     }),
-    'Split\t1\t\t100',
+    'Split\t1',
   );
 
   const withRemoved = [

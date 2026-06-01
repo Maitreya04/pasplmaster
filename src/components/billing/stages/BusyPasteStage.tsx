@@ -219,7 +219,7 @@ export function BusyPasteStage({
   const copyBillable = useCallback(() => {
     if (billable.length === 0) return;
     copy(
-      buildBusyPasteText(billable, { lineEdits, flags, includeRate: true }),
+      buildBusyPasteText(billable, { lineEdits, flags }),
       'busy-paste',
     );
     setCopyState('copied');
