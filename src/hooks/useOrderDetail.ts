@@ -6,6 +6,7 @@ import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
 import { isAskLine } from '../lib/picking/askBrand';
 import { isLucasLine } from '../lib/picking/lucasBrand';
 import { countPickableOrderLines } from '../lib/cartSupply';
+import { parseSalesSellingUnits } from '../lib/sales/sellingUnits';
 import type { OrderItem, OrderWithItems } from '../types';
 
 type ItemCatalogJoin = {
@@ -14,6 +15,7 @@ type ItemCatalogJoin = {
   main_group: string | null;
   parent_group: string | null;
   busy_code: number | null;
+  sales_selling_units: unknown;
 };
 
 type OrderItemRow = Omit<
@@ -23,6 +25,7 @@ type OrderItemRow = Omit<
   | 'catalog_main_group'
   | 'catalog_parent_group'
   | 'catalog_busy_code'
+  | 'catalog_sales_selling_units'
 > & {
   items?: ItemCatalogJoin | ItemCatalogJoin[] | null;
 };
@@ -49,6 +52,7 @@ function mapOrderItemsWithCatalog(rows: OrderItemRow[] | null): OrderItem[] {
       catalog_main_group: c?.main_group ?? null,
       catalog_parent_group: c?.parent_group ?? null,
       catalog_busy_code: c?.busy_code ?? null,
+      catalog_sales_selling_units: parseSalesSellingUnits(c?.sales_selling_units),
     };
   });
 }
@@ -78,7 +82,8 @@ export function useOrderDetail(orderId: number | null) {
             alias1,
             main_group,
             parent_group,
-            busy_code
+            busy_code,
+            sales_selling_units
           )
         `,
         )

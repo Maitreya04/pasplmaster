@@ -58,12 +58,18 @@ export default function SalesLayout(): React.JSX.Element | null {
           <div className="pb-[6.5rem]">
             <Outlet />
           </div>
-          <BottomNav items={NAV_ITEMS} />
+          <SalesBottomNav items={NAV_ITEMS} />
           <DevRoleSwitcher />
         </div>
       </CartProvider>
     </SalesChromeProvider>
   );
+}
+
+function SalesBottomNav({ items }: { items: BottomNavItem[] }): React.JSX.Element | null {
+  const { bottomNavHidden } = useSalesChrome();
+  if (bottomNavHidden) return null;
+  return <BottomNav items={items} />;
 }
 
 function SalesTopBar({

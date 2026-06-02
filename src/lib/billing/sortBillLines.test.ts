@@ -61,6 +61,19 @@ function runTests(): void {
     stubItem({ id: 1, bill_line_no: 1, item_name: 'Alpha', qty_requested: 2 }),
   ];
   assert.equal(buildBusyPasteText(pasteItems), 'Alpha\t2\nBeta\t4');
+
+  const withUnit = [
+    stubItem({
+      id: 1,
+      item_name: 'Widget',
+      qty_requested: 3,
+      sales_selling_unit: 'kit',
+      catalog_sales_selling_units: [
+        { id: 'kit', label: 'Kit', busy_unit: 'Kit', ea_multiplier: 1 },
+      ],
+    }),
+  ];
+  assert.equal(buildBusyPasteText(withUnit), 'Widget\t3\tKit');
   assert.equal(
     buildBusyPasteText(pasteItems, { lineEdits: { 2: { qtyRequested: 3 } } }),
     'Alpha\t2\nBeta\t3',

@@ -1,6 +1,7 @@
 import { busyBillableQty } from './busyLineSplit';
 import type { BillingLineEdit, BillingLiveQueueFlag } from './liveQueueDraft';
-import type { OrderItem } from '../../types';
+import { busyPasteUnitLabel } from '../sales/sellingUnits';
+import type { Item, OrderItem } from '../../types';
 import { orderItemDisplayName } from '../../utils/formatters';
 
 /** Stable bill sequence: `bill_line_no` when present, else legacy `id` order. */
@@ -20,15 +21,18 @@ export function billLinePosition(item: OrderItem, sortedItems: OrderItem[]): num
 export interface BuildBusyPasteTextOptions {
   lineEdits?: Record<number, BillingLineEdit>;
   flags?: Record<number, BillingLiveQueueFlag>;
+  /** item_id → catalog row for busy_unit resolution */
+  catalogByItemId?: Map<number, Pick<Item, 'sales_selling_units'>>;
 }
 
-/** Tab-separated lines for Busy paste: item name + qty in `bill_line_no` order. */
+/** Tab-separated lines for Busy paste: name + qty [+ unit] in `bill_line_no` order. */
 export function buildBusyPasteText(
   items: OrderItem[],
   opts?: BuildBusyPasteTextOptions,
 ): string {
   const lineEdits = opts?.lineEdits;
   const flags = opts?.flags;
+  const catalogByItemId = opts?.catalogByItemId;
   const rows = sortBillLines(items).filter((item) => !lineEdits?.[item.id]?.removed);
 
   return rows
@@ -39,7 +43,15 @@ export function buildBusyPasteText(
         ? busyBillableQty(item, flag, edit)
         : edit?.qtyRequested ?? item.qty_requested;
       if (qty <= 0) return null;
-      return `${orderItemDisplayName(item)}\t${qty}`;
+      const name = orderItemDisplayName(item);
+      const catalog =
+        catalogByItemId?.get(item.item_id) ??
+        (item.catalog_sales_selling_units != null
+          ? { sales_selling_units: item.catalog_sales_selling_units }
+          : null);
+      const busyUnit = busyPasteUnitLabel(item, catalog);
+      if (busyUnit) return `${name}\t${qty}\t${busyUnit}`;
+      return `${name}\t${qty}`;
     })
     .filter((line): line is string => line != null)
     .join('\n');

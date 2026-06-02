@@ -6,6 +6,9 @@ interface SalesChromeState {
   /** Hides notification bell + push gear (e.g. while New Order search is active). */
   suppressTopBarActions: boolean;
   setSuppressTopBarActions: (suppressed: boolean) => void;
+  /** Hides bottom tab bar while soft keyboard is open on sales entry. */
+  bottomNavHidden: boolean;
+  setBottomNavHidden: (hidden: boolean) => void;
 }
 
 const SalesChromeContext = createContext<SalesChromeState | null>(null);
@@ -13,6 +16,7 @@ const SalesChromeContext = createContext<SalesChromeState | null>(null);
 export function SalesChromeProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [topBarHidden, setTopBarHidden] = useState(false);
   const [suppressTopBarActions, setSuppressTopBarActions] = useState(false);
+  const [bottomNavHidden, setBottomNavHidden] = useState(false);
 
   const value = useMemo<SalesChromeState>(
     () => ({
@@ -20,8 +24,10 @@ export function SalesChromeProvider({ children }: { children: ReactNode }): Reac
       setTopBarHidden,
       suppressTopBarActions,
       setSuppressTopBarActions,
+      bottomNavHidden,
+      setBottomNavHidden,
     }),
-    [topBarHidden, suppressTopBarActions],
+    [topBarHidden, suppressTopBarActions, bottomNavHidden],
   );
 
   return <SalesChromeContext.Provider value={value}>{children}</SalesChromeContext.Provider>;

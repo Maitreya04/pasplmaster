@@ -130,6 +130,7 @@ export function SalesEditAddLineSheet({
         p_price_quoted: rate,
         p_claim_id: claimId,
         p_user_id: userId,
+        p_sales_selling_unit: 'unit',
       });
 
       if (error) throw error;

@@ -31,6 +31,7 @@ import {
 } from '../../../utils/formatters';
 import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
 import type { BillingLineEdit, ItemFlag } from '../../../hooks/useBillingFlow';
+import { unitLabel } from '../../../lib/sales/sellingUnits';
 import type { OrderItem } from '../../../types';
 import { BillingActionBar } from '../chrome/BillingActionBar';
 import { BusyEntryCopyHint } from '../busyEntry/BusyEntryCopyHint';
@@ -306,7 +307,8 @@ export function BusyPasteStage({
                 <span className="w-2 shrink-0" />
                 <span className="w-[130px] shrink-0 px-2.5">Part no.</span>
                 <span className="min-w-0 flex-1 px-2.5">Description</span>
-                <span className="w-24 shrink-0 px-2 text-right">Bill rate</span>
+                <span className="w-20 shrink-0 px-2 text-right">Bill rate</span>
+                <span className="w-12 shrink-0 px-1.5 text-right">Unit</span>
                 <span className="w-14 shrink-0 px-2.5 text-right">Qty</span>
               </li>
             ) : null}
@@ -319,6 +321,10 @@ export function BusyPasteStage({
               const pendingQty = busyPendingQty(item, flag, edit);
               const nature = busyEntryLineNature(item);
               const brand = busyEntryBrandLabel(item);
+              const unitDisplay = unitLabel(
+                { sales_selling_units: item.catalog_sales_selling_units ?? [] },
+                item.sales_selling_unit ?? 'unit',
+              );
               const stripe =
                 nature === 'foc'
                   ? '#1D9E75'
@@ -368,6 +374,12 @@ export function BusyPasteStage({
                     <BusyLineChips nature={nature} flag={flag} pendingQty={pendingQty} />
                   </div>
                   <RateCell item={item} edit={edit} />
+                  <span
+                    className="w-12 shrink-0 px-1.5 text-[11px] font-medium text-right text-[var(--content-secondary)] truncate"
+                    title={unitDisplay}
+                  >
+                    {unitDisplay}
+                  </span>
                   <span className="w-14 shrink-0 px-2.5 text-[18px] font-medium tabular-nums text-right text-[var(--content-primary)]">
                     {qty}
                     {pendingQty > 0 ? (

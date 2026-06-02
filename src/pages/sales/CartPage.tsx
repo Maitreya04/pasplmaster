@@ -47,6 +47,7 @@ import type { Customer, CartItem } from '../../types';
 
 import { formatCurrencyRaw as formatCurrency } from '../../utils/formatters';
 import { splitCartLinePaidFoc } from '../../lib/cartSupply';
+import { IMPLICIT_SALES_UNIT_ID, unitLabel } from '../../lib/sales/sellingUnits';
 import { appHaptics } from '../../lib/haptics';
 import {
   buildOrderCustomerMessage,
@@ -696,6 +697,11 @@ const BillingItemCard = memo(function BillingItemCard({
               </p>
 
               <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                {cartItem.salesSellingUnit !== IMPLICIT_SALES_UNIT_ID && (
+                  <span className="inline-flex rounded-full bg-[#E6F1FB] px-2.5 py-0.5 font-ds-micro font-semibold text-[#185FA5]">
+                    {unitLabel(cartItem.item, cartItem.salesSellingUnit)}
+                  </span>
+                )}
                 {hasSpecialRate && <SpecialRateChip />}
                 {hasFoc && <FocChip qty={focQty} />}
                 {hasSpecialRate && (
@@ -1153,12 +1159,14 @@ export default function CartPage(): React.JSX.Element | null {
           const foc = Math.max(0, ci.focQty ?? 0);
           const paid = ci.qty;
           const sys = ci.item.sales_price;
+          const unit = ci.salesSellingUnit;
           const rows: Array<{
             item_id: number;
             qty_requested: number;
             price_quoted: number;
             price_system: number;
             is_foc: boolean;
+            sales_selling_unit: string;
           }> = [];
           if (paid > 0) {
             rows.push({
@@ -1167,6 +1175,7 @@ export default function CartPage(): React.JSX.Element | null {
               price_quoted: ci.specialRate ?? sys,
               price_system: sys,
               is_foc: false,
+              sales_selling_unit: unit,
             });
           }
           if (foc > 0) {
@@ -1176,6 +1185,7 @@ export default function CartPage(): React.JSX.Element | null {
               price_quoted: 0,
               price_system: sys,
               is_foc: true,
+              sales_selling_unit: unit,
             });
           }
           return rows;
