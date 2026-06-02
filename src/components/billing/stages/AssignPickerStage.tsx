@@ -52,7 +52,6 @@ export function AssignPickerStage({
   const { selectPicker, busyPickerId, isPending } = useDeskPickerAssign(order, {
     onSuccess: () => {
       onAssigned?.();
-      onClose?.();
     },
   });
 

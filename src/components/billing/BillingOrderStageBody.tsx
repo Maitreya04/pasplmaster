@@ -194,7 +194,10 @@ export function BillingOrderStageBody({
               setShowAssign(false);
               onClose?.();
             }}
-            onAssigned={() => setShowAssign(false)}
+            onAssigned={() => {
+              setShowAssign(false);
+              onClose?.();
+            }}
             variant="overlay"
           />
         ) : null}

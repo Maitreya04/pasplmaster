@@ -261,6 +261,7 @@ export function DeskOrdersPanel({
                   onAssignToggle={() => {
                     setAssignTarget((prev) => (prev?.id === order.id ? null : order));
                   }}
+                  onAssignClose={() => setAssignTarget(null)}
                   showStaleActions={showStaleActions}
                   showVerifyAction={showVerifyAction}
                   onEdit={() =>

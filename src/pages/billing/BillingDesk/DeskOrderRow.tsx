@@ -66,6 +66,7 @@ interface DeskOrderRowCardProps {
   progressLoading?: boolean;
   isAssignExpanded?: boolean;
   onAssignToggle?: () => void;
+  onAssignClose?: () => void;
   showStaleActions?: boolean;
   showVerifyAction?: boolean;
   onEdit: () => void;
@@ -79,6 +80,7 @@ export function DeskOrderRowCard({
   progressLoading,
   isAssignExpanded = false,
   onAssignToggle,
+  onAssignClose,
   showStaleActions = false,
   showVerifyAction = false,
   onEdit,
@@ -235,7 +237,7 @@ export function DeskOrderRowCard({
           pickers={pickers}
           pickerColors={pickerColors}
           onClose={onAssignToggle}
-          onAssigned={onAssignToggle}
+          onAssigned={onAssignClose ?? onAssignToggle}
           variant="inline"
         />
       )}

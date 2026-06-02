@@ -3,11 +3,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
 import {
-  assignPickerAndNotify,
   assignPickerErrorMessage,
   billingAssignPicker,
 } from '../../../lib/billing/assignPickerToOrder';
-import { sendPickerReadyNotification } from '../../../lib/pickerPush';
+import {
+  formatInternalNotificationError,
+  sendPickerReadyNotification,
+} from '../../../lib/pickerPush';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 import type { PickerLoadInfo } from '../../../hooks/usePickerLoad';
 import { canAssignPicker, isPickerReassign } from './deskPickerAssign';
@@ -28,16 +30,33 @@ export function useDeskPickerAssign(
     queryClient.invalidateQueries({ queryKey: ['desk-picker-flags'] });
   }, [queryClient]);
 
-  const assignMutation = useMutation({
-    mutationFn: async (picker: PickerLoadInfo) => {
-      if (!order) throw new Error('No order selected');
-      if (!userId) throw new Error('Not signed in');
-      const result = await assignPickerAndNotify({
+  const notifyPickerInBackground = useCallback(
+    (picker: PickerLoadInfo) => {
+      if (!order) return;
+      void sendPickerReadyNotification({
+        eventType: 'order_ready_to_pick',
         orderId: order.id,
         orderNumber: order.order_number,
         customerName: order.customer_name,
         priority: order.priority,
         approvedAt: order.approved_at,
+        targetUserId: picker.userId,
+      }).catch((err: unknown) => {
+        console.error('[BillingDesk] picker assignment notification failed', err);
+        toast.error(
+          `Assigned to ${picker.firstName}, but notification failed: ${formatInternalNotificationError(err)}`,
+        );
+      });
+    },
+    [order, toast],
+  );
+
+  const assignMutation = useMutation({
+    mutationFn: async (picker: PickerLoadInfo) => {
+      if (!order) throw new Error('No order selected');
+      if (!userId) throw new Error('Not signed in');
+      const result = await billingAssignPicker({
+        orderId: order.id,
         pickerUserId: picker.userId,
         actorUserId: userId,
         actorName: userName,
@@ -48,9 +67,10 @@ export function useDeskPickerAssign(
       return picker;
     },
     onSuccess: (picker) => {
-      invalidate();
-      toast.success(`Assigned to ${picker.firstName} — notified`);
       options?.onSuccess?.();
+      invalidate();
+      notifyPickerInBackground(picker);
+      toast.success(`Assigned to ${picker.firstName} — notifying`);
     },
     onError: (err: unknown) => {
       toast.error(err instanceof Error ? err.message : 'Failed to assign picker');
@@ -70,21 +90,13 @@ export function useDeskPickerAssign(
       if (!result.success) {
         throw new Error(assignPickerErrorMessage(result));
       }
-      await sendPickerReadyNotification({
-        eventType: 'order_ready_to_pick',
-        orderId: order.id,
-        orderNumber: order.order_number,
-        customerName: order.customer_name,
-        priority: order.priority,
-        approvedAt: order.approved_at,
-        targetUserId: picker.userId,
-      });
       return picker;
     },
     onSuccess: (picker) => {
-      invalidate();
-      toast.success(`Re-assigned to ${picker.firstName}`);
       options?.onSuccess?.();
+      invalidate();
+      notifyPickerInBackground(picker);
+      toast.success(`Re-assigned to ${picker.firstName} — notifying`);
     },
     onError: (err: unknown) => {
       toast.error(err instanceof Error ? err.message : 'Failed to re-assign');
