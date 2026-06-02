@@ -77,24 +77,6 @@ import {
   stockAfterOrderLine,
   type StockTier,
 } from '../../lib/stockDisplay';
-import { KeyboardAccessoryBar } from '../../components/sales/KeyboardAccessoryBar';
-import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
-import {
-  ITEM_CARD_STATE,
-  useItemCardState,
-  type ConfirmedCardSnapshot,
-  type ItemCardState,
-} from '../../hooks/useItemCardState';
-import {
-  allSalesUnitsOos,
-  autoSelectUnitId,
-  cartLineEaPieces,
-  doneBadgeText,
-  IMPLICIT_SALES_UNIT_ID,
-  qtyToEa,
-  stockQtyInSalesUnit,
-  unitLabel,
-} from '../../lib/sales/sellingUnits';
 
 /** First paint of "More results" before expanding; search still returns up to MAX_RESULTS. */
 
@@ -1135,16 +1117,10 @@ interface ItemRowProps {
   result: SearchResult;
   query: string;
   onStartAdd: (item: Item) => void;
-  onConfirmAdd: (item: Item, qty: number, focQty: number, unitId: string) => void;
+  onConfirmAdd: (item: Item, qty: number, focQty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
   onCancelAdd: () => void;
-  activeItemId: number | null;
-  selectedUnit: string | null;
-  onSelectUnit: (unitId: string) => void;
-  cardState: ItemCardState;
-  confirmedSnapshot?: ConfirmedCardSnapshot;
-  onDoneBadgeTap: (item: Item) => void;
-  onDraftQtyChange?: (qty: number) => void;
+  pendingAddItemId: number | null;
   totalInOrderQty: number;
   paidQtyInCart: number;
   focQtyInCart: number;
@@ -1164,37 +1140,6 @@ function SpecialRateChip() {
     <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--bg-accent-subtle)] px-3 py-1.5 font-ds-caption-size font-semibold leading-none text-[var(--content-accent)]">
       Special rate
     </span>
-  );
-}
-
-function UnitPillDisplay({ label }: { label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-[#E6F1FB] px-[9px] py-[3px] text-[11px] font-medium text-[#185FA5]">
-      <Check size={12} weight="bold" aria-hidden />
-      {label}
-    </span>
-  );
-}
-
-function DoneBadge({
-  text,
-  onTap,
-}: {
-  text: string;
-  onTap: () => void;
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onTap();
-      }}
-      className="inline-flex items-center gap-1 rounded-full bg-[#E1F5EE] px-[9px] py-[3px] text-[11px] font-medium text-[#085041]"
-    >
-      <Check size={12} weight="bold" aria-hidden />
-      {text}
-    </button>
   );
 }
 
@@ -1526,9 +1471,6 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   mainStoreStockQty,
   jabalpurStockQty,
   hasSpecialLine,
-  selectedUnit,
-  initialQty,
-  onDraftQtyChange,
   onConfirmAdd,
   onConfirmSpecialRateAdd,
   onCancelAdd,
@@ -1546,15 +1488,12 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   mainStoreStockQty?: number | null;
   jabalpurStockQty?: number | null;
   hasSpecialLine: boolean;
-  selectedUnit: string | null;
-  initialQty?: number;
-  onDraftQtyChange?: (qty: number) => void;
-  onConfirmAdd: (item: Item, qty: number, focQty: number, unitId: string) => void;
+  onConfirmAdd: (item: Item, qty: number, focQty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
   onCancelAdd: () => void;
 }) {
   const qtyInputRef = useRef<HTMLInputElement | null>(null);
-  const [draftQtyInput, setDraftQtyInput] = useState(String(initialQty ?? 1));
+  const [draftQtyInput, setDraftQtyInput] = useState('1');
   const [focPanelOpen, setFocPanelOpen] = useState(false);
   const [committedFocQty, setCommittedFocQty] = useState(0);
   const [panelFocDraft, setPanelFocDraft] = useState(1);
@@ -1565,26 +1504,21 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
     return parsed;
   }, [draftQtyInput]);
 
-  useEffect(() => {
-    onDraftQtyChange?.(getDraftQty());
-  }, [draftQtyInput, getDraftQty, onDraftQtyChange]);
-
   useLayoutEffect(() => {
     qtyInputRef.current?.focus();
     qtyInputRef.current?.select();
   }, [item.id]);
 
   useEffect(() => {
-    setDraftQtyInput(String(initialQty ?? 1));
+    setDraftQtyInput('1');
     setFocPanelOpen(false);
     setCommittedFocQty(0);
     setPanelFocDraft(1);
-  }, [item.id, initialQty]);
+  }, [item.id]);
 
   const handleConfirmQty = useCallback(() => {
-    if (!selectedUnit) return;
-    onConfirmAdd(item, getDraftQty(), committedFocQty, selectedUnit);
-  }, [committedFocQty, getDraftQty, item, onConfirmAdd, selectedUnit]);
+    onConfirmAdd(item, getDraftQty(), committedFocQty);
+  }, [committedFocQty, getDraftQty, item, onConfirmAdd]);
 
   const handleSpecialRate = useCallback(() => {
     onConfirmSpecialRateAdd(item, getDraftQty());
@@ -1608,11 +1542,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   }, []);
 
   const draftQty = getDraftQty();
-  const piecesForStock =
-    (selectedUnit
-      ? qtyToEa(item, draftQty, selectedUnit) + (committedFocQty > 0 ? qtyToEa(item, committedFocQty, selectedUnit) : 0)
-      : draftQty + committedFocQty);
-  const canConfirm = selectedUnit !== null;
+  const piecesForStock = draftQty + committedFocQty;
   const draftGoesToPo =
     !stockResolving &&
     (
@@ -1638,9 +1568,6 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
           <p className="font-ds-body-size font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
             {highlightText(item.name, query)}
           </p>
-          {selectedUnit ? (
-            <UnitPillDisplay label={unitLabel(item, selectedUnit)} />
-          ) : null}
           <PendingItemStockLine
             stockQty={sellableStockQty}
             totalInOrderQty={totalInOrderQty}
@@ -1707,11 +1634,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
                   pattern="[0-9]*"
                   value={draftQtyInput}
                   onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => {
-                    const v = e.target.value.replace(/[^\d]/g, '');
-                    setDraftQtyInput(v);
-                  }}
-                  data-item-qty-input={item.id}
+                  onChange={(e) => setDraftQtyInput(e.target.value.replace(/[^\d]/g, ''))}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
@@ -1729,17 +1652,12 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
 
                 <button
                   type="button"
-                  disabled={!canConfirm}
                   onClick={(e) => {
                     e.stopPropagation();
                     handleConfirmQty();
                   }}
                   className={`flex h-11 w-11 items-center justify-center rounded-[14px] text-[var(--content-on-color)] hover:opacity-90 ${
-                    !canConfirm
-                      ? 'bg-[var(--bg-tertiary)] text-[var(--content-quaternary)] cursor-default'
-                      : draftGoesToPo
-                        ? 'bg-[var(--bg-warning)]'
-                        : 'bg-[var(--bg-accent)]'
+                    draftGoesToPo ? 'bg-[var(--bg-warning)]' : 'bg-[var(--bg-accent)]'
                   }`}
                   aria-label={draftGoesToPo ? `Add ${item.name} to purchase order` : `Add ${item.name}`}
                 >
@@ -1826,13 +1744,7 @@ const ItemRow = memo(function ItemRow({
   onConfirmAdd,
   onConfirmSpecialRateAdd,
   onCancelAdd,
-  activeItemId,
-  selectedUnit,
-  onSelectUnit: _onSelectUnit,
-  cardState,
-  confirmedSnapshot,
-  onDoneBadgeTap,
-  onDraftQtyChange,
+  pendingAddItemId,
   totalInOrderQty,
   paidQtyInCart,
   focQtyInCart,
@@ -1846,13 +1758,11 @@ const ItemRow = memo(function ItemRow({
   justAdded,
 }: ItemRowProps) {
   const { item, matchedField } = result;
-  const isActive = activeItemId === item.id;
-  const confirmed = confirmedSnapshot;
+  const isPendingAdd = pendingAddItemId === item.id;
   const productCode = (item.alias1 ?? item.alias ?? '').toString().trim();
   const productCodeValue = productCode || '—';
-  const showQtyEditor = isActive;
+  const showQtyEditor = isPendingAdd;
   const sellableQty = sellableStockQty == null ? null : Number(sellableStockQty);
-  const allOos = allSalesUnitsOos(sellableQty, item);
   const nextAddGoesToPo =
     !stockResolving &&
     (
@@ -1861,24 +1771,17 @@ const ItemRow = memo(function ItemRow({
       sellableQty <= totalInOrderQty
     );
 
-  const borderClass =
-    cardState === ITEM_CARD_STATE.CONFIRMED
-      ? 'border-[#1D9E75] shadow-[0_0_0_1px_color-mix(in_srgb,#1D9E75_20%,transparent)]'
-      : showQtyEditor
-        ? 'border-[var(--bg-accent)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--bg-accent)_12%,transparent)]'
-        : nextAddGoesToPo
-          ? 'border-[color-mix(in_srgb,var(--border-warning)_45%,var(--border-subtle))]'
-          : 'border-[var(--border-subtle)]';
-
   return (
     <li
-      className={`overflow-hidden rounded-2xl border bg-[var(--bg-secondary)] px-3 py-2.5 transition-[border-color,box-shadow] duration-200 ease-out cursor-pointer ${borderClass}`}
+      className={`overflow-hidden rounded-2xl border bg-[var(--bg-secondary)] px-3 py-2.5 transition-[border-color,box-shadow] duration-200 ease-out cursor-pointer ${
+        showQtyEditor
+          ? 'border-[var(--bg-accent)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--bg-accent)_12%,transparent)]'
+          : nextAddGoesToPo
+            ? 'border-[color-mix(in_srgb,var(--border-warning)_45%,var(--border-subtle))]'
+            : 'border-[var(--border-subtle)]'
+      }`}
       onClick={() => {
-        if (cardState === ITEM_CARD_STATE.CONFIRMED) {
-          onDoneBadgeTap(item);
-          return;
-        }
-        if (!isActive && !allOos) {
+        if (!isPendingAdd) {
           onStartAdd(item);
         }
       }}
@@ -1898,9 +1801,6 @@ const ItemRow = memo(function ItemRow({
           mainStoreStockQty={mainStoreStockQty}
           jabalpurStockQty={jabalpurStockQty}
           hasSpecialLine={hasSpecialLine}
-          selectedUnit={selectedUnit}
-          initialQty={confirmed?.qty}
-          onDraftQtyChange={onDraftQtyChange}
           onConfirmAdd={onConfirmAdd}
           onConfirmSpecialRateAdd={onConfirmSpecialRateAdd}
           onCancelAdd={onCancelAdd}
@@ -1923,12 +1823,6 @@ const ItemRow = memo(function ItemRow({
             <p className="font-ds-body-size font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
               {highlightText(item.name, query)}
             </p>
-            {confirmed ? (
-              <DoneBadge
-                text={doneBadgeText(confirmed.qty, item, confirmed.unitId)}
-                onTap={() => onDoneBadgeTap(item)}
-              />
-            ) : null}
 
             <ItemStockBlock
               stockQty={sellableStockQty}
@@ -1944,27 +1838,23 @@ const ItemRow = memo(function ItemRow({
             <p className="text-right font-mono font-ds-caption-size font-medium leading-none text-[var(--content-tertiary)]">
               {formatCurrency(price)}
             </p>
-            {!allOos ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onStartAdd(item);
-                }}
-                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-sm transition-all duration-200 active:scale-95 ${
-                  nextAddGoesToPo
-                    ? 'bg-[var(--bg-warning)] text-[var(--content-on-color)] hover:opacity-95'
-                    : justAdded
-                      ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] hover:opacity-95'
-                      : 'bg-[var(--bg-accent)] text-[var(--content-on-color)] hover:opacity-95'
-                }`}
-                aria-label={nextAddGoesToPo ? 'Add to purchase order' : 'Add to cart'}
-              >
-                {justAdded ? <Check size={18} weight="bold" /> : <Plus size={20} weight="bold" />}
-              </button>
-            ) : (
-              <span className="text-[10px] font-semibold text-[var(--content-negative)]">Out of stock</span>
-            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onStartAdd(item);
+              }}
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-sm transition-all duration-200 active:scale-95 ${
+                nextAddGoesToPo
+                  ? 'bg-[var(--bg-warning)] text-[var(--content-on-color)] hover:opacity-95'
+                  : justAdded
+                    ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] hover:opacity-95'
+                    : 'bg-[var(--bg-accent)] text-[var(--content-on-color)] hover:opacity-95'
+              }`}
+              aria-label={nextAddGoesToPo ? 'Add to purchase order' : 'Add to cart'}
+            >
+              {justAdded ? <Check size={18} weight="bold" /> : <Plus size={20} weight="bold" />}
+            </button>
           </div>
         </div>
       )}
@@ -1974,8 +1864,7 @@ const ItemRow = memo(function ItemRow({
   return (
     prevProps.result.item.id === nextProps.result.item.id &&
     prevProps.query === nextProps.query &&
-    prevProps.activeItemId === nextProps.activeItemId &&
-    prevProps.selectedUnit === nextProps.selectedUnit &&
+    prevProps.pendingAddItemId === nextProps.pendingAddItemId &&
     prevProps.totalInOrderQty === nextProps.totalInOrderQty &&
     prevProps.paidQtyInCart === nextProps.paidQtyInCart &&
     prevProps.focQtyInCart === nextProps.focQtyInCart &&
@@ -1986,9 +1875,7 @@ const ItemRow = memo(function ItemRow({
     prevProps.mainStoreStockQty === nextProps.mainStoreStockQty &&
     prevProps.jabalpurStockQty === nextProps.jabalpurStockQty &&
     prevProps.hasSpecialLine === nextProps.hasSpecialLine &&
-    prevProps.justAdded === nextProps.justAdded &&
-    prevProps.cardState === nextProps.cardState &&
-    prevProps.confirmedSnapshot === nextProps.confirmedSnapshot
+    prevProps.justAdded === nextProps.justAdded
   );
 });
 
@@ -2003,13 +1890,7 @@ function ResultSection({
   onConfirmAdd,
   onConfirmSpecialRateAdd,
   onCancelAdd,
-  activeItemId,
-  selectedUnit,
-  onSelectUnit,
-  cardStateFor,
-  confirmedByItemId,
-  onDoneBadgeTap,
-  onActiveDraftQtyChange,
+  pendingAddItemId,
   getTotalInOrderQty,
   getPaidQtyInCart,
   getFocQtyInCart,
@@ -2026,16 +1907,10 @@ function ResultSection({
   results: SearchResult[];
   query: string;
   onStartAdd: (item: Item) => void;
-  onConfirmAdd: (item: Item, qty: number, focQty: number, unitId: string) => void;
+  onConfirmAdd: (item: Item, qty: number, focQty: number) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
   onCancelAdd: () => void;
-  activeItemId: number | null;
-  selectedUnit: string | null;
-  onSelectUnit: (unitId: string) => void;
-  cardStateFor: (itemId: number) => ItemCardState;
-  confirmedByItemId: Record<number, ConfirmedCardSnapshot>;
-  onDoneBadgeTap: (item: Item) => void;
-  onActiveDraftQtyChange: (qty: number) => void;
+  pendingAddItemId: number | null;
   getTotalInOrderQty: (id: number) => number;
   getPaidQtyInCart: (id: number) => number;
   getFocQtyInCart: (id: number) => number;
@@ -2060,15 +1935,7 @@ function ResultSection({
             key={r.item.id}
             result={r}
             query={query}
-            activeItemId={activeItemId}
-            selectedUnit={activeItemId === r.item.id ? selectedUnit : null}
-            onSelectUnit={onSelectUnit}
-            cardState={cardStateFor(r.item.id)}
-            confirmedSnapshot={confirmedByItemId[r.item.id]}
-            onDoneBadgeTap={onDoneBadgeTap}
-            onDraftQtyChange={
-              activeItemId === r.item.id ? onActiveDraftQtyChange : undefined
-            }
+            pendingAddItemId={pendingAddItemId}
             onConfirmAdd={onConfirmAdd}
             onConfirmSpecialRateAdd={onConfirmSpecialRateAdd}
             onCancelAdd={onCancelAdd}
@@ -2128,20 +1995,8 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [rateItem, setRateItem] = useState<Item | null>(null);
   const [rateQty, setRateQty] = useState(1);
   const [rateValue, setRateValue] = useState('');
-  const {
-    activeItemId,
-    selectedUnit,
-    confirmedByItemId,
-    cardStateFor,
-    activate,
-    selectUnit,
-    resetActive,
-    markConfirmed,
-    reopenConfirmed,
-  } = useItemCardState();
-  const [rateSellingUnit, setRateSellingUnit] = useState(IMPLICIT_SALES_UNIT_ID);
+  const [pendingAddItemId, setPendingAddItemId] = useState<number | null>(null);
   const [recentlyAddedItemId, setRecentlyAddedItemId] = useState<number | null>(null);
-  const keyboardHeight = useKeyboardHeight();
   const [cartPulse, setCartPulse] = useState(false);
   const searchRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -2181,7 +2036,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const deferredQuery = useDeferredValue(effectiveQuery);
   const isStale = deferredQuery !== effectiveQuery;
   const isSearchMode = isSearchFocused || effectiveQuery.length > 0;
-  const { setSuppressTopBarActions, setBottomNavHidden } = useSalesChrome();
+  const { setSuppressTopBarActions } = useSalesChrome();
   const activeFilterCount = (selectedBrand ? 1 : 0) + (selectedGroup ? 1 : 0);
   const activeFilterSummary = [selectedBrand, selectedGroup].filter(Boolean).join(' · ');
   const wantFocusFromLocation = (
@@ -2218,11 +2073,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
     setSuppressTopBarActions(isSearchMode);
     return () => setSuppressTopBarActions(false);
   }, [isSearchMode, setSuppressTopBarActions]);
-
-  useEffect(() => {
-    setBottomNavHidden(keyboardHeight > 0);
-    return () => setBottomNavHidden(false);
-  }, [keyboardHeight, setBottomNavHidden]);
 
   useEffect(() => {
     return () => {
@@ -2335,57 +2185,11 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const cartQtyByItem = useMemo(() => {
     const totals = new Map<number, number>();
     for (const line of cartItems) {
-      const pieces = cartLineEaPieces(line);
+      const pieces = line.qty + (line.focQty ?? 0);
       totals.set(line.item.id, (totals.get(line.item.id) ?? 0) + pieces);
     }
     return totals;
   }, [cartItems]);
-
-  const activeItem = useMemo(
-    () => (activeItemId == null ? null : items.find((i) => i.id === activeItemId) ?? null),
-    [activeItemId, items],
-  );
-
-  const activeResultIndex = useMemo(() => {
-    if (activeItemId == null) return -1;
-    return searchResults.findIndex((r) => r.item.id === activeItemId);
-  }, [activeItemId, searchResults]);
-
-  const handleNavPrev = useCallback(() => {
-    if (activeResultIndex <= 0) return;
-    for (let i = activeResultIndex - 1; i >= 0; i--) {
-      const item = searchResults[i]!.item;
-      if (cardStateFor(item.id) !== ITEM_CARD_STATE.CONFIRMED) {
-        activate(item);
-        return;
-      }
-    }
-  }, [activeResultIndex, searchResults, cardStateFor, activate]);
-
-  const handleNavNext = useCallback(() => {
-    if (activeResultIndex < 0) return;
-    for (let i = activeResultIndex + 1; i < searchResults.length; i++) {
-      const item = searchResults[i]!.item;
-      if (cardStateFor(item.id) !== ITEM_CARD_STATE.CONFIRMED) {
-        activate(item);
-        return;
-      }
-    }
-  }, [activeResultIndex, searchResults, cardStateFor, activate]);
-
-  const hasNavPrev = useMemo(() => {
-    if (activeResultIndex <= 0) return false;
-    return searchResults
-      .slice(0, activeResultIndex)
-      .some((r) => cardStateFor(r.item.id) !== ITEM_CARD_STATE.CONFIRMED);
-  }, [activeResultIndex, searchResults, cardStateFor]);
-
-  const hasNavNext = useMemo(() => {
-    if (activeResultIndex < 0) return false;
-    return searchResults
-      .slice(activeResultIndex + 1)
-      .some((r) => cardStateFor(r.item.id) !== ITEM_CARD_STATE.CONFIRMED);
-  }, [activeResultIndex, searchResults, cardStateFor]);
 
   const focQtyByItem = useMemo(() => {
     const totals = new Map<number, number>();
@@ -2473,7 +2277,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
     // Keep the keyboard alive during active typing so the input doesn't blur mid-entry.
     focusGuardUntilRef.current = Date.now() + 450;
     if (value.trim()) {
-      resetActive();
+      setPendingAddItemId(null);
     }
     clearAddedFeedback();
     setQuery(value);
@@ -2484,52 +2288,24 @@ export default function NewOrderPage(): React.JSX.Element | null {
     if (recentlyAddedItemId === item.id) {
       clearAddedFeedback();
     }
-    activeDraftQtyRef.current = 1;
-    activate(item);
+    setPendingAddItemId(item.id);
   };
 
-  const activeDraftQtyRef = useRef(1);
-
-  const handleConfirmAdd = (item: Item, qty: number, focQty: number, unitId: string) => {
-    if (!unitId) return;
+  const handleConfirmAdd = (item: Item, qty: number, focQty: number) => {
     appHaptics.impactMedium();
-    addItem(item, qty, cartSpecialRateForVerified(item, billingVerifiedMrpMap), focQty, unitId);
-    markConfirmed(item.id, unitId, qty);
+    addItem(item, qty, cartSpecialRateForVerified(item, billingVerifiedMrpMap), focQty);
+    setPendingAddItemId(null);
     showAddedFeedback(item.id);
-    searchInputRef.current?.blur();
   };
-
-  const handleAccessoryConfirm = useCallback(() => {
-    if (!activeItem || !selectedUnit) return;
-    const qty = Math.max(1, activeDraftQtyRef.current);
-    handleConfirmAdd(activeItem, qty, 0, selectedUnit);
-  }, [activeItem, selectedUnit, addItem, billingVerifiedMrpMap]);
 
   const handleCancelAdd = () => {
-    resetActive();
+    setPendingAddItemId(null);
   };
-
-  const handleDoneBadgeTap = (item: Item) => {
-    const qty = reopenConfirmed(item);
-    activeDraftQtyRef.current = qty;
-  };
-
-  const handleSelectUnit = useCallback(
-    (unitId: string) => {
-      if (!activeItem) return;
-      const sellable = getSellableStockQty(activeItem);
-      const stock = stockQtyInSalesUnit(sellable, activeItem, unitId);
-      if (stock === 0) return;
-      selectUnit(unitId);
-    },
-    [activeItem, getSellableStockQty, selectUnit],
-  );
 
   const handleConfirmSpecialRateAdd = (item: Item, qty: number) => {
-    resetActive();
+    setPendingAddItemId(null);
     setRateItem(item);
     setRateQty(qty);
-    setRateSellingUnit(selectedUnit ?? autoSelectUnitId(item) ?? IMPLICIT_SALES_UNIT_ID);
     setRateValue('');
   };
 
@@ -2538,7 +2314,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
     const n = parseFloat(rateValue.replace(/,/g, ''));
     if (isNaN(n) || n < 0) return;
     appHaptics.impactMedium();
-    addItem(rateItem, rateQty, n, 0, rateSellingUnit);
+    addItem(rateItem, rateQty, n);
     showAddedFeedback(rateItem.id);
     setRateItem(null);
     setRateValue('');
@@ -2645,15 +2421,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
 
         {/* Results area */}
         <div
-          className={`space-y-4 transition-opacity duration-100 ${isStale ? 'opacity-60' : 'opacity-100'}`}
-          style={{
-            paddingBottom:
-              keyboardHeight > 0
-                ? keyboardHeight + 46 + (totalCount > 0 ? 80 : 16)
-                : totalCount > 0
-                  ? 128
-                  : 16,
-          }}
+          className={`space-y-4 transition-opacity duration-100 ${totalCount > 0 ? 'pb-32' : ''} ${isStale ? 'opacity-60' : 'opacity-100'}`}
         >
           {itemsLoading ? (
             <Skeleton variant="list" count={1} lines={6} />
@@ -2672,8 +2440,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
                     entry.item,
                     entry.qty,
                     cartSpecialRateForVerified(entry.item, billingVerifiedMrpMap),
-                    0,
-                    autoSelectUnitId(entry.item) ?? IMPLICIT_SALES_UNIT_ID,
                   );
                 }
                 goToCart();
@@ -2723,15 +2489,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
               onConfirmAdd={handleConfirmAdd}
               onConfirmSpecialRateAdd={handleConfirmSpecialRateAdd}
               onCancelAdd={handleCancelAdd}
-              activeItemId={activeItemId}
-              selectedUnit={selectedUnit}
-              onSelectUnit={handleSelectUnit}
-              cardStateFor={cardStateFor}
-              confirmedByItemId={confirmedByItemId}
-              onDoneBadgeTap={handleDoneBadgeTap}
-              onActiveDraftQtyChange={(q) => {
-                activeDraftQtyRef.current = q;
-              }}
+              pendingAddItemId={pendingAddItemId}
               getTotalInOrderQty={getTotalInOrderQty}
               getPaidQtyInCart={getPaidQtyInCart}
               getFocQtyInCart={getFocQtyInCart}
@@ -2747,18 +2505,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
           )}
         </div>
       </div>
-
-      <KeyboardAccessoryBar
-        activeItem={activeItem}
-        selectedUnit={selectedUnit}
-        onSelectUnit={handleSelectUnit}
-        onConfirm={handleAccessoryConfirm}
-        onNavPrev={handleNavPrev}
-        onNavNext={handleNavNext}
-        hasPrev={hasNavPrev}
-        hasNext={hasNavNext}
-        sellableEa={activeItem ? getSellableStockQty(activeItem) : null}
-      />
 
       {/* Cart bar */}
       {totalCount > 0 && (

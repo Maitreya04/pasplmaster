@@ -1,16 +1,6 @@
 /** Display preference only; stored qty remains EA (pieces). */
 export type ItemSellingUnit = 'piece' | 'packet' | 'box';
 
-/** Sales entry unit (kit/set/piece) — distinct from ItemSellingUnit (scan/pick). */
-export interface SalesSellingUnitDef {
-  id: string;
-  label: string;
-  /** Exact string Busy ERP expects on paste. */
-  busy_unit?: string | null;
-  /** EA pieces per one sales unit. */
-  ea_multiplier: number;
-}
-
 export interface Item {
   id: number;
   name: string;
@@ -18,8 +8,6 @@ export interface Item {
   alias1: string | null;
   busy_code?: number | null;
   selling_unit?: ItemSellingUnit | null;
-  /** JSON array of SalesSellingUnitDef; null/empty => implicit unit. */
-  sales_selling_units?: SalesSellingUnitDef[] | null;
   parent_group: string | null;
   main_group: string | null;
   item_category: string | null;
@@ -141,10 +129,6 @@ export interface OrderItem {
   catalog_busy_code?: number | null;
   rack_no: string | null;
   qty_requested: number;
-  /** Sales unit id at entry (kit/set/piece/unit). qty_requested is in this unit. */
-  sales_selling_unit?: string;
-  /** From items join — for Busy paste unit resolution. */
-  catalog_sales_selling_units?: SalesSellingUnitDef[] | null;
   /** Units to pick from on-hand stock (≤ qty_requested). Omitted on legacy rows. */
   qty_shippable?: number;
   /** PO / back-order qty. Omitted on legacy rows. */
@@ -277,12 +261,11 @@ export interface OrderWithItems extends Order {
 export interface CartItem {
   lineId: string;
   item: Item;
-  /** Billable (paid) quantity in sales_selling_unit. */
+  /** Billable (paid) quantity. */
   qty: number;
-  /** Extra same-SKU units at ₹0 (FOC), same sales unit as paid line when set. */
+  /** Extra same-SKU units at ₹0 (FOC). */
   focQty: number;
   specialRate: number | null;
-  salesSellingUnit: string;
 }
 
 export interface AuthState {

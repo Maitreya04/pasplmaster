@@ -1,20 +1,14 @@
 import type { CartItem, Customer, Transport } from '../types';
-import { IMPLICIT_SALES_UNIT_ID } from './sales/sellingUnits';
 
 function normalizeCartItem(row: CartItem): CartItem {
   const foc =
     typeof row.focQty === 'number' && Number.isFinite(row.focQty)
       ? Math.max(0, Math.floor(row.focQty))
       : 0;
-  const salesSellingUnit =
-    typeof row.salesSellingUnit === 'string' && row.salesSellingUnit.trim()
-      ? row.salesSellingUnit.trim()
-      : IMPLICIT_SALES_UNIT_ID;
-  return { ...row, focQty: foc, salesSellingUnit };
+  return { ...row, focQty: foc };
 }
 
-const DRAFT_VERSION = 2 as const;
-const LEGACY_DRAFT_VERSION = 1 as const;
+const DRAFT_VERSION = 1 as const;
 /** Drop drafts older than this (stale catalog / forgotten tabs). */
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -27,8 +21,8 @@ export interface CartDraftPayload {
   notes: string;
 }
 
-interface StoredDraft extends CartDraftPayload {
-  v: typeof DRAFT_VERSION | typeof LEGACY_DRAFT_VERSION;
+interface StoredV1 extends CartDraftPayload {
+  v: typeof DRAFT_VERSION;
   savedAt: number;
 }
 
@@ -106,10 +100,7 @@ export function readCartDraft(
   }
 
   const rec = parsed as Record<string, unknown>;
-  if (
-    (rec.v !== DRAFT_VERSION && rec.v !== LEGACY_DRAFT_VERSION) ||
-    typeof rec.savedAt !== 'number'
-  ) {
+  if (rec.v !== DRAFT_VERSION || typeof rec.savedAt !== 'number') {
     safeRemove(key);
     return null;
   }
@@ -151,7 +142,7 @@ export function writeCartDraft(
     return;
   }
 
-  const body: StoredDraft = {
+  const body: StoredV1 = {
     v: DRAFT_VERSION,
     savedAt: Date.now(),
     ...payload,

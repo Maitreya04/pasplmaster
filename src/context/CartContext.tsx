@@ -16,7 +16,6 @@ import {
   clearCartDraft,
   type CartDraftPayload,
 } from '../lib/cartDraftStorage';
-import { IMPLICIT_SALES_UNIT_ID } from '../lib/sales/sellingUnits';
 
 interface CartContextValue {
   items: CartItemType[];
@@ -25,7 +24,6 @@ interface CartContextValue {
     qty: number,
     specialRate?: number | null,
     focQty?: number,
-    salesSellingUnit?: string,
   ) => void;
   updateQty: (lineId: string, qty: number) => void;
   updateFocQty: (lineId: string, focQty: number) => void;
@@ -75,23 +73,12 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
   const [notes, setNotes] = useState(() => initialState.notes);
 
   const addItem = useCallback(
-    (
-      item: Item,
-      qty: number,
-      specialRate: number | null = null,
-      focQty: number = 0,
-      salesSellingUnit: string = IMPLICIT_SALES_UNIT_ID,
-    ) => {
+    (item: Item, qty: number, specialRate: number | null = null, focQty: number = 0) => {
       const lineId = `line-${nextLineIdRef.current++}`;
       const paid = Math.max(0, Math.floor(qty));
       const foc = Math.max(0, Math.floor(focQty));
       if (paid < 1) return;
-      const unit =
-        salesSellingUnit?.trim() || IMPLICIT_SALES_UNIT_ID;
-      setItems((prev) => [
-        ...prev,
-        { lineId, item, qty: paid, focQty: foc, specialRate, salesSellingUnit: unit },
-      ]);
+      setItems((prev) => [...prev, { lineId, item, qty: paid, focQty: foc, specialRate }]);
     },
     [],
   );

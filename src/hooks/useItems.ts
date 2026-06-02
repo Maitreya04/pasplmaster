@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase/client';
 import { queryClient } from '../lib/queryClient';
 import { idbGet, idbSet } from '../lib/idb';
 import type { Item } from '../types';
-import { parseSalesSellingUnits } from '../lib/sales/sellingUnits';
 
 /**
  * Items catalog hook.
@@ -39,15 +38,8 @@ interface SyncResult {
 
 /** Columns required by the UI + sync metadata. Keep this list narrow. */
 const ITEMS_SELECT =
-  'id,name,alias,alias1,busy_code,selling_unit,sales_selling_units,parent_group,main_group,item_category,' +
+  'id,name,alias,alias1,busy_code,selling_unit,parent_group,main_group,item_category,' +
   'sales_price,mrp,stock_qty,rack_no,updated_at,is_active';
-
-function normalizeCatalogItem(row: ItemSyncRow): ItemSyncRow {
-  return {
-    ...row,
-    sales_selling_units: parseSalesSellingUnits(row.sales_selling_units),
-  };
-}
 
 const IDB_KEY = 'items-cache-v1';
 const CACHE_VERSION = 1;
@@ -118,9 +110,8 @@ function upsertRow(row: ItemSyncRow, shouldAdvanceWatermark = true): boolean {
   }
 
   if (isActiveRow(row)) {
-    const normalized = normalizeCatalogItem(row);
     if (!existing || existing.updated_at !== row.updated_at) {
-      cachedItems.set(row.id, normalized);
+      cachedItems.set(row.id, row);
       changed = true;
     }
   } else if (cachedItems.has(row.id)) {
@@ -144,7 +135,7 @@ async function hydrateFromIdb(): Promise<void> {
     ) {
       for (const row of snapshot.items) {
         if (isActiveRow(row)) {
-          cachedItems.set(row.id, normalizeCatalogItem(row));
+          cachedItems.set(row.id, row);
         }
       }
       watermark = snapshot.watermark ?? null;
