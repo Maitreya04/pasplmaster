@@ -10,6 +10,12 @@ import { fetchLocationwiseAvailableForBusyCodes } from '../../hooks/useBillingSt
 import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseStock';
 import { formatCurrency } from '../../utils/formatters';
 import { formatSupabaseUserMessage } from '../../lib/supabase/formatUserMessage';
+import { SellAsPills } from '../../components/sales/SellAsPills';
+import {
+  autoSelectUnitId,
+  DEFAULT_SALES_UNIT_ID,
+  stockQtyInSalesUnit,
+} from '../../lib/sales/sellingUnits';
 
 const ADD_SALES_LINE_MESSAGES: Record<string, string> = {
   invalid_qty: 'Enter a valid quantity (at least 1).',
@@ -54,6 +60,7 @@ export function SalesEditAddLineSheet({
   const [selected, setSelected] = useState<Item | null>(null);
   const [qtyStr, setQtyStr] = useState('1');
   const [rateStr, setRateStr] = useState('');
+  const [selectedUnit, setSelectedUnit] = useState<string>(DEFAULT_SALES_UNIT_ID);
   const [rpcError, setRpcError] = useState<string | null>(null);
   const [liveAvailMap, setLiveAvailMap] = useState<Map<number, number>>(new Map());
 
@@ -102,6 +109,7 @@ export function SalesEditAddLineSheet({
   useEffect(() => {
     if (selected) {
       setRateStr(String(selected.sales_price ?? 0));
+      setSelectedUnit(autoSelectUnitId(selected));
     }
   }, [selected]);
 
@@ -122,6 +130,7 @@ export function SalesEditAddLineSheet({
       if (!Number.isFinite(qty) || qty < 1) throw new Error('Enter a valid qty');
       const rate = parseFloat(rateStr.replace(',', ''));
       if (!Number.isFinite(rate) || rate < 0) throw new Error('Enter a valid rate');
+      const unit = selectedUnit || autoSelectUnitId(selected);
 
       const { data, error } = await supabase.rpc('add_sales_submitted_line', {
         p_order_id: orderId,
@@ -130,7 +139,7 @@ export function SalesEditAddLineSheet({
         p_price_quoted: rate,
         p_claim_id: claimId,
         p_user_id: userId,
-        p_sales_selling_unit: 'unit',
+        p_sales_selling_unit: unit,
       });
 
       if (error) throw error;
@@ -289,6 +298,18 @@ export function SalesEditAddLineSheet({
                 {[selected.alias1, selected.alias].filter(Boolean).join(' · ') || '—'}
               </p>
             </div>
+
+            <SellAsPills
+              item={selected}
+              selectedUnit={selectedUnit}
+              onSelectUnit={(unitId) => {
+                const live = liveAvailMap.get(selected.id);
+                const stock = stockQtyInSalesUnit(live, selected, unitId);
+                if (stock === 0) return;
+                setSelectedUnit(unitId);
+              }}
+              sellableEa={liveAvailMap.get(selected.id) ?? null}
+            />
 
             <div className="grid grid-cols-2 gap-3">
               <label className="block">

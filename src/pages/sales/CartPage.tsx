@@ -46,8 +46,7 @@ import {
 import type { Customer, CartItem } from '../../types';
 
 import { formatCurrencyRaw as formatCurrency } from '../../utils/formatters';
-import { splitCartLinePaidFoc } from '../../lib/cartSupply';
-import { IMPLICIT_SALES_UNIT_ID, unitLabel } from '../../lib/sales/sellingUnits';
+import { IMPLICIT_SALES_UNIT_ID, splitCartLineInSalesUnits, unitLabel } from '../../lib/sales/sellingUnits';
 import { appHaptics } from '../../lib/haptics';
 import {
   buildOrderCustomerMessage,
@@ -725,6 +724,11 @@ const BillingItemCard = memo(function BillingItemCard({
                 <p className="mt-1 font-mono text-base font-semibold leading-none text-[var(--content-primary)]">
                   {formatCurrency(lineTotal)}
                 </p>
+                {cartItem.salesSellingUnit !== IMPLICIT_SALES_UNIT_ID && (
+                  <p className="mt-1 font-ds-micro text-[var(--content-tertiary)]">
+                    {shipQty} {unitLabel(cartItem.item, cartItem.salesSellingUnit)}
+                  </p>
+                )}
               </div>
               <div className="flex w-full justify-end">
                 <NumberStepper
@@ -908,6 +912,11 @@ const PurchaseOrderCard = memo(function PurchaseOrderCard({
               <p className="mt-1.5 font-ds-body-size font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
                 {cartItem.item.name}
               </p>
+              {cartItem.salesSellingUnit !== IMPLICIT_SALES_UNIT_ID && (
+                <span className="mt-1.5 inline-flex rounded-full bg-[#E6F1FB] px-2.5 py-0.5 font-ds-micro font-semibold text-[#185FA5]">
+                  {unitLabel(cartItem.item, cartItem.salesSellingUnit)}
+                </span>
+              )}
               {poFoc > 0 && (
                 <p className="mt-1 font-ds-micro font-medium text-[var(--content-positive)]">
                   {poPaid > 0 ? `${poPaid} paid · ` : ''}
@@ -915,7 +924,12 @@ const PurchaseOrderCard = memo(function PurchaseOrderCard({
                 </p>
               )}
             </div>
-            <div className="shrink-0">
+            <div className="shrink-0 flex flex-col items-end gap-1">
+              {cartItem.salesSellingUnit !== IMPLICIT_SALES_UNIT_ID && (
+                <p className="font-ds-micro text-[var(--content-tertiary)]">
+                  {poQty} {unitLabel(cartItem.item, cartItem.salesSellingUnit)}
+                </p>
+              )}
               <NumberStepper
                 value={poQty}
                 onChange={(q) => onChangePoQty(cartItem.lineId, q)}
@@ -1059,10 +1073,10 @@ export default function CartPage(): React.JSX.Element | null {
           stockQty = getStockQtyForLocation(locationwiseStock[busyCode], sellableLocationCode);
         }
       }
-      const split = splitCartLinePaidFoc(ci.qty, ci.focQty ?? 0, stockQty);
-      const { ship, po, shippedPaid } = split;
+      const split = splitCartLineInSalesUnits(ci, stockQty);
+      const { ship, po, shippedPaid, shipEa } = split;
       if (Number.isFinite(busyCode) && stockQty != null) {
-        remainingByBusyCode.set(busyCode, Math.max(0, stockQty - ship));
+        remainingByBusyCode.set(busyCode, Math.max(0, stockQty - shipEa));
       }
       splitByLineId.set(ci.lineId, split);
       if (ship > 0) billingSplits.push({ ci, ship, po });
@@ -1145,6 +1159,7 @@ export default function CartPage(): React.JSX.Element | null {
 
       const submittedAt = new Date();
 
+      const payloadLineUnits: string[] = [];
       const payload = {
         customer_id: customer.id,
         customer_name: customer.name,
@@ -1160,6 +1175,8 @@ export default function CartPage(): React.JSX.Element | null {
           const paid = ci.qty;
           const sys = ci.item.sales_price;
           const unit = ci.salesSellingUnit;
+          const unitLbl =
+            unit !== IMPLICIT_SALES_UNIT_ID ? unitLabel(ci.item, unit) : undefined;
           const rows: Array<{
             item_id: number;
             qty_requested: number;
@@ -1169,6 +1186,7 @@ export default function CartPage(): React.JSX.Element | null {
             sales_selling_unit: string;
           }> = [];
           if (paid > 0) {
+            if (unitLbl) payloadLineUnits.push(unitLbl);
             rows.push({
               item_id: ci.item.id,
               qty_requested: paid,
@@ -1179,6 +1197,7 @@ export default function CartPage(): React.JSX.Element | null {
             });
           }
           if (foc > 0) {
+            if (unitLbl) payloadLineUnits.push(unitLbl);
             rows.push({
               item_id: ci.item.id,
               qty_requested: foc,
@@ -1226,12 +1245,13 @@ export default function CartPage(): React.JSX.Element | null {
       const businessName =
         typeof envBiz === 'string' && envBiz.trim() !== '' ? envBiz.trim() : undefined;
 
-      const linesForMessage: OrderCustomerShareLine[] = (result.lines ?? []).map((row) => ({
+      const linesForMessage: OrderCustomerShareLine[] = (result.lines ?? []).map((row, i) => ({
         name: row.name,
         qtyRequested: row.qty_requested,
         qtyShip: row.qty_ship,
         qtyPo: row.qty_po,
         isFoc: row.is_foc ?? false,
+        unitLabel: payloadLineUnits[i],
       }));
 
       const shareTextFinal = buildOrderCustomerMessage({

@@ -77,8 +77,7 @@ import {
   stockAfterOrderLine,
   type StockTier,
 } from '../../lib/stockDisplay';
-import { KeyboardAccessoryBar } from '../../components/sales/KeyboardAccessoryBar';
-import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
+import { SellAsPills } from '../../components/sales/SellAsPills';
 import {
   ITEM_CARD_STATE,
   useItemCardState,
@@ -934,7 +933,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
                   </p>
                   <p className="text-xs text-[var(--content-tertiary)] mt-1">
                     Pending last time:{' '}
-                    <span className="font-mono font-semibold">{row.qty}</span> pcs
+                    <span className="font-mono font-semibold">{row.qty}</span> pcs on PO
                   </p>
                 </div>
                 <span className="text-xs font-semibold text-[var(--bg-accent)]">
@@ -1167,12 +1166,28 @@ function SpecialRateChip() {
   );
 }
 
-function UnitPillDisplay({ label }: { label: string }) {
+function PricePerUnit({
+  item,
+  selectedUnit,
+  price,
+  size = 'default',
+}: {
+  item: Item;
+  selectedUnit: string | null;
+  price: number;
+  size?: 'default' | 'compact';
+}) {
+  const unitId = selectedUnit ?? autoSelectUnitId(item) ?? IMPLICIT_SALES_UNIT_ID;
+  const perLabel = unitLabel(item, unitId).toLowerCase();
+  const priceClass =
+    size === 'compact'
+      ? 'font-mono font-ds-caption-size font-medium leading-none text-[var(--content-tertiary)]'
+      : 'font-mono font-ds-body-size font-semibold leading-none text-[var(--content-primary)]';
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-[#E6F1FB] px-[9px] py-[3px] text-[11px] font-medium text-[#185FA5]">
-      <Check size={12} weight="bold" aria-hidden />
-      {label}
-    </span>
+    <div className="shrink-0 text-right">
+      <p className={priceClass}>{formatCurrency(price)}</p>
+      <p className="mt-0.5 font-ds-micro text-[var(--content-tertiary)]">per {perLabel}</p>
+    </div>
   );
 }
 
@@ -1527,6 +1542,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   jabalpurStockQty,
   hasSpecialLine,
   selectedUnit,
+  onSelectUnit,
   initialQty,
   onDraftQtyChange,
   onConfirmAdd,
@@ -1547,6 +1563,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   jabalpurStockQty?: number | null;
   hasSpecialLine: boolean;
   selectedUnit: string | null;
+  onSelectUnit: (unitId: string) => void;
   initialQty?: number;
   onDraftQtyChange?: (qty: number) => void;
   onConfirmAdd: (item: Item, qty: number, focQty: number, unitId: string) => void;
@@ -1638,9 +1655,12 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
           <p className="font-ds-body-size font-semibold leading-[1.35] text-[var(--content-primary)] line-clamp-2 break-words">
             {highlightText(item.name, query)}
           </p>
-          {selectedUnit ? (
-            <UnitPillDisplay label={unitLabel(item, selectedUnit)} />
-          ) : null}
+          <SellAsPills
+            item={item}
+            selectedUnit={selectedUnit}
+            onSelectUnit={onSelectUnit}
+            sellableEa={sellableStockQty}
+          />
           <PendingItemStockLine
             stockQty={sellableStockQty}
             totalInOrderQty={totalInOrderQty}
@@ -1651,9 +1671,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
             jabalpurStockQty={jabalpurStockQty}
           />
         </div>
-        <p className="shrink-0 pt-0.5 text-right font-mono font-ds-caption-size font-medium leading-none text-[var(--content-tertiary)]">
-          {formatCurrency(price)}
-        </p>
+        <PricePerUnit item={item} selectedUnit={selectedUnit} price={price} size="compact" />
       </div>
 
       <div className="mt-2.5 grid grid-rows-[1fr] opacity-100 translate-y-0 transition-[grid-template-rows,opacity,transform,margin-top,padding-top] duration-200 ease-out">
@@ -1828,7 +1846,7 @@ const ItemRow = memo(function ItemRow({
   onCancelAdd,
   activeItemId,
   selectedUnit,
-  onSelectUnit: _onSelectUnit,
+  onSelectUnit,
   cardState,
   confirmedSnapshot,
   onDoneBadgeTap,
@@ -1853,6 +1871,8 @@ const ItemRow = memo(function ItemRow({
   const showQtyEditor = isActive;
   const sellableQty = sellableStockQty == null ? null : Number(sellableStockQty);
   const allOos = allSalesUnitsOos(sellableQty, item);
+  const idleUnitId =
+    confirmed?.unitId ?? autoSelectUnitId(item) ?? IMPLICIT_SALES_UNIT_ID;
   const nextAddGoesToPo =
     !stockResolving &&
     (
@@ -1899,6 +1919,7 @@ const ItemRow = memo(function ItemRow({
           jabalpurStockQty={jabalpurStockQty}
           hasSpecialLine={hasSpecialLine}
           selectedUnit={selectedUnit}
+          onSelectUnit={onSelectUnit}
           initialQty={confirmed?.qty}
           onDraftQtyChange={onDraftQtyChange}
           onConfirmAdd={onConfirmAdd}
@@ -1941,9 +1962,7 @@ const ItemRow = memo(function ItemRow({
           </div>
 
           <div className="flex shrink-0 flex-col items-end justify-center gap-2 self-stretch">
-            <p className="text-right font-mono font-ds-caption-size font-medium leading-none text-[var(--content-tertiary)]">
-              {formatCurrency(price)}
-            </p>
+            <PricePerUnit item={item} selectedUnit={idleUnitId} price={price} />
             {!allOos ? (
               <button
                 type="button"
@@ -2118,6 +2137,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
     totalCount,
     totalValue,
     setSelectedCustomer,
+    selectedCustomer,
   } = useCart();
 
   const [query, setQuery] = useState('');
@@ -2141,7 +2161,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
   } = useItemCardState();
   const [rateSellingUnit, setRateSellingUnit] = useState(IMPLICIT_SALES_UNIT_ID);
   const [recentlyAddedItemId, setRecentlyAddedItemId] = useState<number | null>(null);
-  const keyboardHeight = useKeyboardHeight();
   const [cartPulse, setCartPulse] = useState(false);
   const searchRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -2181,7 +2200,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const deferredQuery = useDeferredValue(effectiveQuery);
   const isStale = deferredQuery !== effectiveQuery;
   const isSearchMode = isSearchFocused || effectiveQuery.length > 0;
-  const { setSuppressTopBarActions, setBottomNavHidden } = useSalesChrome();
+  const { setSuppressTopBarActions } = useSalesChrome();
   const activeFilterCount = (selectedBrand ? 1 : 0) + (selectedGroup ? 1 : 0);
   const activeFilterSummary = [selectedBrand, selectedGroup].filter(Boolean).join(' · ');
   const wantFocusFromLocation = (
@@ -2218,11 +2237,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
     setSuppressTopBarActions(isSearchMode);
     return () => setSuppressTopBarActions(false);
   }, [isSearchMode, setSuppressTopBarActions]);
-
-  useEffect(() => {
-    setBottomNavHidden(keyboardHeight > 0);
-    return () => setBottomNavHidden(false);
-  }, [keyboardHeight, setBottomNavHidden]);
 
   useEffect(() => {
     return () => {
@@ -2331,6 +2345,22 @@ export default function NewOrderPage(): React.JSX.Element | null {
     !stockLocationLoading,
   );
 
+  const { data: customerPendingItems = [] } = usePendingItems({
+    status: 'pending',
+    customerId: selectedCustomer?.id,
+    enabled: !!selectedCustomer,
+  });
+
+  const pendingEaByItem = useMemo(() => {
+    const totals = new Map<number, number>();
+    for (const pi of customerPendingItems) {
+      if (!pi.item_id) continue;
+      const qty = Math.max(0, pi.qty_pending);
+      if (qty <= 0) continue;
+      totals.set(pi.item_id, (totals.get(pi.item_id) ?? 0) + qty);
+    }
+    return totals;
+  }, [customerPendingItems]);
 
   const cartQtyByItem = useMemo(() => {
     const totals = new Map<number, number>();
@@ -2345,47 +2375,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
     () => (activeItemId == null ? null : items.find((i) => i.id === activeItemId) ?? null),
     [activeItemId, items],
   );
-
-  const activeResultIndex = useMemo(() => {
-    if (activeItemId == null) return -1;
-    return searchResults.findIndex((r) => r.item.id === activeItemId);
-  }, [activeItemId, searchResults]);
-
-  const handleNavPrev = useCallback(() => {
-    if (activeResultIndex <= 0) return;
-    for (let i = activeResultIndex - 1; i >= 0; i--) {
-      const item = searchResults[i]!.item;
-      if (cardStateFor(item.id) !== ITEM_CARD_STATE.CONFIRMED) {
-        activate(item);
-        return;
-      }
-    }
-  }, [activeResultIndex, searchResults, cardStateFor, activate]);
-
-  const handleNavNext = useCallback(() => {
-    if (activeResultIndex < 0) return;
-    for (let i = activeResultIndex + 1; i < searchResults.length; i++) {
-      const item = searchResults[i]!.item;
-      if (cardStateFor(item.id) !== ITEM_CARD_STATE.CONFIRMED) {
-        activate(item);
-        return;
-      }
-    }
-  }, [activeResultIndex, searchResults, cardStateFor, activate]);
-
-  const hasNavPrev = useMemo(() => {
-    if (activeResultIndex <= 0) return false;
-    return searchResults
-      .slice(0, activeResultIndex)
-      .some((r) => cardStateFor(r.item.id) !== ITEM_CARD_STATE.CONFIRMED);
-  }, [activeResultIndex, searchResults, cardStateFor]);
-
-  const hasNavNext = useMemo(() => {
-    if (activeResultIndex < 0) return false;
-    return searchResults
-      .slice(activeResultIndex + 1)
-      .some((r) => cardStateFor(r.item.id) !== ITEM_CARD_STATE.CONFIRMED);
-  }, [activeResultIndex, searchResults, cardStateFor]);
 
   const focQtyByItem = useMemo(() => {
     const totals = new Map<number, number>();
@@ -2415,7 +2404,8 @@ export default function NewOrderPage(): React.JSX.Element | null {
     return ids;
   }, [cartItems]);
 
-  const getTotalInOrderQty = (id: number) => cartQtyByItem.get(id) ?? 0;
+  const getTotalInOrderQty = (id: number) =>
+    (cartQtyByItem.get(id) ?? 0) + (pendingEaByItem.get(id) ?? 0);
   const getPaidQtyInCart = (id: number) => paidQtyByItem.get(id) ?? 0;
   const getFocQtyInCart = (id: number) => focQtyByItem.get(id) ?? 0;
   const getPrice = (item: Item) => defaultSalesRateForItem(item, billingVerifiedMrpMap);
@@ -2498,12 +2488,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
     showAddedFeedback(item.id);
     searchInputRef.current?.blur();
   };
-
-  const handleAccessoryConfirm = useCallback(() => {
-    if (!activeItem || !selectedUnit) return;
-    const qty = Math.max(1, activeDraftQtyRef.current);
-    handleConfirmAdd(activeItem, qty, 0, selectedUnit);
-  }, [activeItem, selectedUnit, addItem, billingVerifiedMrpMap]);
 
   const handleCancelAdd = () => {
     resetActive();
@@ -2647,12 +2631,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
         <div
           className={`space-y-4 transition-opacity duration-100 ${isStale ? 'opacity-60' : 'opacity-100'}`}
           style={{
-            paddingBottom:
-              keyboardHeight > 0
-                ? keyboardHeight + 46 + (totalCount > 0 ? 80 : 16)
-                : totalCount > 0
-                  ? 128
-                  : 16,
+            paddingBottom: totalCount > 0 ? 128 : 16,
           }}
         >
           {itemsLoading ? (
@@ -2747,18 +2726,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
           )}
         </div>
       </div>
-
-      <KeyboardAccessoryBar
-        activeItem={activeItem}
-        selectedUnit={selectedUnit}
-        onSelectUnit={handleSelectUnit}
-        onConfirm={handleAccessoryConfirm}
-        onNavPrev={handleNavPrev}
-        onNavNext={handleNavNext}
-        hasPrev={hasNavPrev}
-        hasNext={hasNavNext}
-        sellableEa={activeItem ? getSellableStockQty(activeItem) : null}
-      />
 
       {/* Cart bar */}
       {totalCount > 0 && (
