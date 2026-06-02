@@ -1,16 +1,6 @@
-import { splitCartLinePaidFoc } from '../cartSupply';
 import type { CartItem, Item, OrderItem, SalesSellingUnitDef } from '../../types';
 
 export const IMPLICIT_SALES_UNIT_ID = 'unit';
-
-/** Default when catalog has no `sales_selling_units` — all items get Kit / Set / Nos. */
-export const DEFAULT_SALES_UNIT_ID = 'nos';
-
-export const DEFAULT_SALES_SELLING_UNITS: SalesSellingUnitDef[] = [
-  { id: 'kit', label: 'Kit', busy_unit: 'Kit', ea_multiplier: 1 },
-  { id: 'set', label: 'Set', busy_unit: 'Set', ea_multiplier: 1 },
-  { id: 'nos', label: 'Nos', busy_unit: 'Nos', ea_multiplier: 1 },
-];
 
 export function parseSalesSellingUnits(raw: unknown): SalesSellingUnitDef[] {
   if (!Array.isArray(raw)) return [];
@@ -29,11 +19,11 @@ export function parseSalesSellingUnits(raw: unknown): SalesSellingUnitDef[] {
   return out;
 }
 
-/** Units offered for this item; empty catalog => Kit / Set / Nos for every SKU. */
+/** Units offered for this item; empty => implicit single unit. */
 export function salesUnitsForItem(item: Pick<Item, 'sales_selling_units'>): SalesSellingUnitDef[] {
   const parsed = parseSalesSellingUnits(item.sales_selling_units);
   if (parsed.length > 0) return parsed;
-  return DEFAULT_SALES_SELLING_UNITS;
+  return [{ id: IMPLICIT_SALES_UNIT_ID, label: 'Unit', busy_unit: null, ea_multiplier: 1 }];
 }
 
 export function resolveSalesUnitDef(
@@ -87,13 +77,12 @@ export function allSalesUnitsOos(
   });
 }
 
-/** Default unit on card open — Nos when offered, else the only explicit unit. */
-export function autoSelectUnitId(item: Pick<Item, 'sales_selling_units'>): string {
-  const units = salesUnitsForItem(item);
-  const nos = units.find((u) => u.id === DEFAULT_SALES_UNIT_ID);
-  if (nos) return nos.id;
-  if (units.length === 1) return units[0]!.id;
-  return units[0]!.id;
+/** Auto-select on activate when 0 explicit units or exactly one. */
+export function autoSelectUnitId(item: Pick<Item, 'sales_selling_units'>): string | null {
+  const parsed = parseSalesSellingUnits(item.sales_selling_units);
+  if (parsed.length === 0) return IMPLICIT_SALES_UNIT_ID;
+  if (parsed.length === 1) return parsed[0]!.id;
+  return null;
 }
 
 export function unitLabel(item: Pick<Item, 'sales_selling_units'>, unitId: string): string {
@@ -123,43 +112,4 @@ export function cartLineEaPieces(ci: CartItem): number {
   const foc = Math.max(0, ci.focQty ?? 0);
   const focEa = foc > 0 ? qtyToEa(ci.item, foc, unit) : 0;
   return paidEa + focEa;
-}
-
-export function eaToSalesQty(
-  item: Pick<Item, 'sales_selling_units'>,
-  ea: number,
-  unitId: string | null | undefined,
-): number {
-  const mult = eaMultiplierForUnit(item, unitId);
-  if (ea <= 0 || mult <= 0) return 0;
-  return Math.floor(ea / mult);
-}
-
-/** Stock split in sales units; deducts `shipEa` from location stock. */
-export function splitCartLineInSalesUnits(
-  ci: CartItem,
-  stockQty: number | null | undefined,
-): {
-  ship: number;
-  po: number;
-  shippedPaid: number;
-  shippedFoc: number;
-  poPaid: number;
-  poFoc: number;
-  shipEa: number;
-} {
-  const unit = ci.salesSellingUnit ?? IMPLICIT_SALES_UNIT_ID;
-  const paidEa = ci.qty > 0 ? qtyToEa(ci.item, ci.qty, unit) : 0;
-  const focEa = (ci.focQty ?? 0) > 0 ? qtyToEa(ci.item, ci.focQty!, unit) : 0;
-  const splitEa = splitCartLinePaidFoc(paidEa, focEa, stockQty);
-  const toSales = (ea: number) => eaToSalesQty(ci.item, ea, unit);
-  return {
-    ship: toSales(splitEa.ship),
-    po: toSales(splitEa.po),
-    shippedPaid: toSales(splitEa.shippedPaid),
-    shippedFoc: toSales(splitEa.shippedFoc),
-    poPaid: toSales(splitEa.poPaid),
-    poFoc: toSales(splitEa.poFoc),
-    shipEa: splitEa.ship,
-  };
 }

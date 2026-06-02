@@ -7,8 +7,6 @@ export type OrderCustomerShareLine = {
   qtyUnavailable?: number;
   /** Customer-facing label for free qty rows. */
   isFoc?: boolean;
-  /** Sales unit label (Kit, Set, Piece) when not implicit. */
-  unitLabel?: string;
 };
 
 const MAX_MESSAGE_CHARS = 3800;
@@ -49,14 +47,9 @@ function ordinalDay(n: number): string {
 }
 
 /** One line: bullet, name, literal "qty" then bold number (WhatsApp-friendly). */
-function formatItemLine(
-  productName: string,
-  qty: number,
-  opts?: { foc?: boolean; unitLabel?: string },
-): string {
+function formatItemLine(productName: string, qty: number, opts?: { foc?: boolean }): string {
   const label = opts?.foc ? `${productName} (FOC)` : productName;
-  const unitSuffix = opts?.unitLabel ? ` ${opts.unitLabel}` : '';
-  return `• ${label}: qty *${qty}*${unitSuffix}`;
+  return `• ${label}: qty *${qty}*`;
 }
 
 function appendBlock(out: string[], heading: string, bullets: string[]): void {
@@ -103,11 +96,10 @@ export function buildOrderCustomerMessage(params: {
 
   for (const line of lines) {
     const foc = Boolean(line.isFoc);
-    const unitOpts = line.unitLabel ? { unitLabel: line.unitLabel } : undefined;
-    if (line.qtyShip > 0) billed.push(formatItemLine(line.name, line.qtyShip, { foc, ...unitOpts }));
-    if (line.qtyPo > 0) pending.push(formatItemLine(line.name, line.qtyPo, { foc, ...unitOpts }));
+    if (line.qtyShip > 0) billed.push(formatItemLine(line.name, line.qtyShip, { foc }));
+    if (line.qtyPo > 0) pending.push(formatItemLine(line.name, line.qtyPo, { foc }));
     const u = line.qtyUnavailable ?? 0;
-    if (u > 0) pending.push(formatItemLine(line.name, u, { foc, ...unitOpts }));
+    if (u > 0) pending.push(formatItemLine(line.name, u, { foc }));
   }
 
   appendBlock(chunks, 'Billed:', billed);

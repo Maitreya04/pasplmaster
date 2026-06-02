@@ -63,7 +63,7 @@ export function useItemCardState() {
   const reopenConfirmed = useCallback((item: Item) => {
     const snap = confirmedByItemId[item.id];
     setActiveItemId(item.id);
-    setSelectedUnit(autoSelectUnitId(item));
+    setSelectedUnit(null);
     setConfirmedByItemId((prev) => {
       const next = { ...prev };
       delete next[item.id];
