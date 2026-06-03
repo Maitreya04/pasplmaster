@@ -1,6 +1,4 @@
-function formatStatValue(value: number | string): string {
-  return typeof value === 'number' ? value.toLocaleString('en-IN') : value;
-}
+import { BillingFigure } from './BillingFigure';
 
 interface BillingWorkStatProps {
   label: string;
@@ -10,9 +8,14 @@ interface BillingWorkStatProps {
 /** Paired label + hero number — same scale for every stat in a work header. */
 export function BillingWorkStat({ label, value }: BillingWorkStatProps): React.JSX.Element {
   return (
-    <div className="billing-work-stat">
+    <div className="billing-work-stat shrink-0">
       <span className="billing-work-stat__label">{label}</span>
-      <span className="billing-work-stat__value">{formatStatValue(value)}</span>
+      <BillingFigure
+        value={value}
+        kind={typeof value === 'number' ? 'integer' : 'text'}
+        size="stat"
+        className="billing-work-stat__value"
+      />
     </div>
   );
 }

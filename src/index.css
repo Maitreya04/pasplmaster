@@ -836,6 +836,41 @@ select {
   min-height: 1em;
   font-variant-numeric: tabular-nums;
   color: var(--content-primary);
+  white-space: nowrap;
+  min-width: max-content;
+}
+
+/* Billing amounts & counts — never truncated (parent scrolls / wraps instead) */
+.density-billing-work .billing-figure {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  max-width: none;
+}
+
+.density-billing-work .billing-figure--stat {
+  font-family: "Geist Mono", monospace;
+  font-size: var(--ds-font-stat);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--content-primary);
+}
+
+.density-billing-work .billing-rate-input {
+  box-sizing: content-box;
+  width: auto;
+  min-width: 5.5rem;
+  max-width: min(14rem, 100%);
+  field-sizing: content;
+}
+
+.density-billing-work table.ds-table.ds-table--billing th.billing-col-money,
+.density-billing-work table.ds-table.ds-table--billing td.billing-col-money,
+.density-billing-work table.ds-table.ds-table--billing th.billing-col-qty,
+.density-billing-work table.ds-table.ds-table--billing td.billing-col-qty {
+  white-space: nowrap;
+  width: auto;
+  min-width: 4.5rem;
 }
 
 .density-billing-work .billing-work-header__rule {
@@ -886,16 +921,16 @@ select {
 
 .density-billing-work .billing-busy-dock__row {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 1.25rem;
   min-width: 0;
 }
 
 .density-billing-work .billing-busy-dock__leading {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.75rem 1.25rem;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 1rem;
   flex: 1;
   min-width: 0;
 }
@@ -913,11 +948,27 @@ select {
 }
 
 .density-billing-work .billing-busy-dock__chips {
-  display: flex;
-  flex-wrap: wrap;
+  display: inline-flex;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 0.5rem;
-  max-width: 100%;
+  gap: 0.375rem;
+  flex-shrink: 0;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.density-billing-work .billing-busy-dock__chips::-webkit-scrollbar {
+  display: none;
+}
+
+.density-billing-work .billing-header-chip--compact {
+  gap: 0.25rem;
+  padding-inline: 0.5rem;
+}
+
+.density-billing-work .billing-header-chip--compact .billing-header-chip__count {
+  margin-left: 0;
 }
 
 .density-billing-work .billing-busy-dock__stats {
@@ -1018,9 +1069,8 @@ select {
   }
 
   .density-billing-work .billing-busy-dock__leading {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
+    flex-wrap: wrap;
+    row-gap: 0.625rem;
   }
 
   .density-billing-work .billing-busy-dock__divider {

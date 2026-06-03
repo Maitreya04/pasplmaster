@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { ClipboardText, UserPlus, X } from '@phosphor-icons/react';
-import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
+import { formatTimeAgo } from '../../../utils/formatters';
 import type { PickLineProgress } from '../../../lib/cartSupply';
 import type { PickerLoadInfo } from '../../../hooks/usePickerLoad';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
+import { BillingFigure } from '../../../components/billing/shared/BillingFigure';
 import { AssignPickerStage } from '../../../components/billing/stages/AssignPickerStage';
 import { DeskOrderQuickActions } from './DeskOrderQuickActions';
 import { DeskPickProgress } from './DeskPickProgress';
@@ -27,7 +28,7 @@ const STATUS_PILL: Record<
   },
   checking: {
     label: 'Verify bill',
-    className: 'text-[var(--content-accent)] bg-[var(--bg-accent-subtle)]',
+    className: 'text-[var(--content-positive)] bg-[var(--bg-positive-subtle)]',
   },
   no_ack: {
     label: 'Waiting',
@@ -133,7 +134,9 @@ export function DeskOrderRowCard({
         hover:border-[var(--border-opaque)] hover:shadow-sm
         ${
           isSelected
-            ? 'border-[var(--role-primary)] ring-2 ring-[var(--role-primary)]/25 shadow-sm'
+            ? order.deskStatus === 'checking'
+              ? 'border-[var(--border-positive)] ring-2 ring-[var(--bg-positive)]/30 shadow-sm'
+              : 'border-[var(--role-primary)] ring-2 ring-[var(--role-primary)]/25 shadow-sm'
             : isAssignExpanded || completeExpanded
               ? 'border-[var(--role-primary)]/40 shadow-sm'
               : 'border-[var(--border-subtle)]'
@@ -170,8 +173,11 @@ export function DeskOrderRowCard({
               {order.customer_name}
             </p>
 
-            <p className={`${deskType.orderDetail} mt-0.5 truncate`}>
-              {order.item_count} items · {formatCurrency(order.total_value)}
+            <p className={`${deskType.orderDetail} mt-0.5 flex flex-wrap items-baseline gap-x-1`}>
+              <span>
+                {order.item_count} items ·
+              </span>
+              <BillingFigure value={order.total_value} kind="currency" size="xs" />
             </p>
 
             {!isAssignExpanded && !completeExpanded && (
@@ -237,9 +243,9 @@ export function DeskOrderRowCard({
                     e.stopPropagation();
                     onEdit();
                   }}
-                  className={`${deskBtn.action} ${deskType.btn} text-[var(--content-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-subtle)] hover:border-[var(--border-opaque)] hover:text-[var(--content-primary)]`}
+                  className={`${deskBtn.billingSecondary} ${deskType.btn}`}
                 >
-                  <ClipboardText size={14} weight="bold" />
+                  <ClipboardText size={16} weight="regular" />
                   Verify
                 </button>
               </DeskTooltip>

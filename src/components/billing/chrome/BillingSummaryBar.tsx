@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Package, Truck, Warning, type Icon } from '@phosphor-icons/react';
 import { formatCurrencyRaw } from '../../../utils/formatters';
+import { BillingFigure } from '../shared/BillingFigure';
 import { billingShell } from './billingShell';
 
 export interface BillingSummaryStat {
@@ -51,11 +52,12 @@ export function BillingSummaryBar({
             <span className="font-ds-body-size text-[var(--content-tertiary)]">
               {primary.label}
             </span>
-            <span
-              className={`font-ds-stat font-medium tabular-nums tracking-tight leading-none ${TONE_CLASS[primary.tone ?? 'default']}`}
-            >
-              {primary.value}
-            </span>
+            <BillingFigure
+              value={primary.value}
+              kind="text"
+              size="inherit"
+              className={`font-ds-stat font-medium tracking-tight leading-none ${TONE_CLASS[primary.tone ?? 'default']}`}
+            />
           </span>
         ) : null}
         {rest.length > 0 ? (
@@ -64,9 +66,12 @@ export function BillingSummaryBar({
               <span key={stat.label}>
                 {i === 0 ? null : <span className="px-1">·</span>}
                 <span className="text-[var(--content-tertiary)]">{stat.label} </span>
-                <span className={`font-medium tabular-nums ${TONE_CLASS[stat.tone ?? 'default']}`}>
-                  {stat.value}
-                </span>
+                <BillingFigure
+                  value={stat.value}
+                  kind="text"
+                  size="inherit"
+                  className={`font-medium ${TONE_CLASS[stat.tone ?? 'default']}`}
+                />
               </span>
             ))}
           </span>
@@ -86,11 +91,12 @@ export function BillingSummaryBar({
         {stats.map((stat) => (
           <div key={stat.label} className="flex flex-col gap-0.5 shrink-0">
             <span className="font-ds-caption-size text-[var(--content-tertiary)]">{stat.label}</span>
-            <span
-              className={`font-ds-prose font-semibold tabular-nums ${TONE_CLASS[stat.tone ?? 'default']}`}
-            >
-              {stat.value}
-            </span>
+            <BillingFigure
+              value={stat.value}
+              kind="text"
+              size="inherit"
+              className={`font-ds-prose font-semibold ${TONE_CLASS[stat.tone ?? 'default']}`}
+            />
           </div>
         ))}
       </div>

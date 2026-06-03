@@ -1,20 +1,10 @@
 import { useMemo, useState } from 'react';
-import {
-  CaretDown,
-  CaretRight,
-  Check,
-  Copy,
-  PencilSimple,
-  Trash,
-  Warning,
-} from '@phosphor-icons/react';
+import { CaretDown, CaretRight, Check, PencilSimple, Trash, Warning } from '@phosphor-icons/react';
+import { QueueSectionHeader } from '../shared/QueueSectionHeader';
 import {
   billableQtyForTotal,
-  deriveBillLineFulfillment,
   summarizeBillFulfillment,
 } from '../../lib/billing/billLineFulfillment';
-import { busyEntryLineNature } from '../../lib/billing/busyEntryLineNature';
-import { BusyEntryWorkHeader } from './busyEntry/BusyEntryWorkHeader';
 import { deskLineFlagKind } from '../../lib/billing/deskLineFlagKind';
 import { resolvedLabelPriceForBilling } from '../../lib/billing/labelMrpFlag';
 import {
@@ -34,7 +24,7 @@ import {
 import { orderItemConfirmedMrp } from '../../lib/billing/orderItemSplitGroups';
 import { SalesUnitBadge } from '../shared/SalesUnitBadge';
 import { effectiveSalesLineUnit } from '../../lib/salesUnit';
-import { formatCurrencyRaw } from '../../utils/formatters';
+import { BillingFigure } from './shared/BillingFigure';
 import { CHANGE_REASON_OPTIONS } from '../../pages/billing/BillingDesk/types';
 import {
   billLineChipClasses,
@@ -81,44 +71,9 @@ function summaryChipClass(tone: ReviewStatusTone): string {
   )}`;
 }
 
-function ReviewWorkHeader({
-  billSheet,
-  readOnly,
-  onCopyForBusy,
-}: {
-  billSheet: BillSheetEdits;
-  readOnly: boolean;
-  onCopyForBusy?: () => void;
-}): React.JSX.Element {
-  const { visibleItems, pendingByItemId, edits } = billSheet;
+function ReviewFulfillmentChips({ billSheet }: { billSheet: BillSheetEdits }): React.JSX.Element | null {
+  const { visibleItems, pendingByItemId } = billSheet;
   const fulfillment = summarizeBillFulfillment(visibleItems, pendingByItemId);
-
-  const copyableItems = useMemo(
-    () =>
-      visibleItems.filter((item) => {
-        const edit = edits[item.id];
-        if (edit?.removed) return false;
-        if (item.state === 'flagged' && edit?.resolution == null) return false;
-        const pending =
-          item.item_id != null ? pendingByItemId.get(item.item_id) ?? [] : [];
-        return !deriveBillLineFulfillment(item, pending).excludeFromBusyBill;
-      }),
-    [visibleItems, pendingByItemId, edits],
-  );
-
-  const specialRateCount = copyableItems.filter(
-    (item) => busyEntryLineNature(item) === 'special_rate',
-  ).length;
-  const focLineCount = copyableItems.filter(
-    (item) => busyEntryLineNature(item) === 'foc',
-  ).length;
-  const pendingLineCount = visibleItems.filter((item) => {
-    if (edits[item.id]?.removed) return false;
-    const pending =
-      item.item_id != null ? pendingByItemId.get(item.item_id) ?? [] : [];
-    const f = deriveBillLineFulfillment(item, pending);
-    return f.excludeFromBusyBill || f.qtySalesPo > 0 || f.qtyPickerOos > 0;
-  }).length;
 
   const detailChips: React.ReactNode[] = [];
   if (fulfillment.busyBillLines > 0) {
@@ -143,34 +98,11 @@ function ReviewWorkHeader({
     );
   }
 
+  if (detailChips.length === 0) return null;
+
   return (
-    <div className="overflow-hidden rounded-xl border-2 border-[var(--border-opaque)] bg-[var(--bg-secondary)]">
-      <BusyEntryWorkHeader
-        billableCount={copyableItems.length}
-        qtyTotal={fulfillment.billTodayQty}
-        specialRateCount={specialRateCount}
-        focCount={focLineCount}
-        pendingCount={pendingLineCount}
-        rightSlot={
-          !readOnly && onCopyForBusy ? (
-            <button
-              type="button"
-              onClick={onCopyForBusy}
-              disabled={copyableItems.length === 0}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--content-primary)] bg-[var(--content-primary)] px-3 font-ds-caption-size font-semibold text-[var(--bg-primary)] transition-colors hover:opacity-90 disabled:opacity-40"
-              style={{ borderWidth: '0.5px' }}
-            >
-              <Copy size={14} />
-              Copy for Busy
-            </button>
-          ) : null
-        }
-      />
-      {detailChips.length > 0 ? (
-        <div className="flex flex-wrap gap-2 border-t border-[var(--border-faint)] px-4 py-2">
-          {detailChips}
-        </div>
-      ) : null}
+    <div className="flex flex-wrap gap-2 rounded-xl border border-[var(--border-faint)] bg-[var(--bg-primary)] px-3 py-2">
+      {detailChips}
     </div>
   );
 }
@@ -184,11 +116,27 @@ function GroupHeader({
   collapsed: boolean;
   onToggle: () => void;
 }): React.JSX.Element {
+  if (group.id === 'bill') {
+    return (
+      <QueueSectionHeader
+        label="Bill into Busy"
+        count={group.lineCount}
+        description="Rate × qty = line total"
+        variant="divider"
+        tone="info"
+        rightSlot={
+          group.subtotal > 0 ? (
+            <BillingFigure value={group.subtotal} kind="currency-raw" size="sm" />
+          ) : null
+        }
+      />
+    );
+  }
+
   const barClass: Record<ReviewTableGroupId, string> = {
     flagged:
       'bg-[var(--bg-warning-subtle)] border-[var(--border-warning)] text-[var(--content-warning-on-light)]',
-    bill:
-      'bg-[var(--bg-positive-subtle)] border-[var(--border-positive)] text-[var(--content-positive)]',
+    bill: '',
     skip: 'bg-[var(--bg-tertiary)] border-[var(--border-opaque)] text-[var(--content-primary)]',
   };
 
@@ -208,14 +156,11 @@ function GroupHeader({
         <p className="text-xs font-medium opacity-80">{group.hint}</p>
       </div>
       <div className="shrink-0 text-right">
-        <p className="text-sm font-bold tabular-nums">
-          {group.lineCount} row{group.lineCount === 1 ? '' : 's'}
-        </p>
-        {group.id === 'bill' ? (
-          <p className="text-xs font-semibold tabular-nums opacity-80">
-            {formatCurrencyRaw(group.subtotal)}
-          </p>
-        ) : null}
+        <BillingFigure value={group.lineCount} kind="integer" size="sm" />
+        <span className="text-xs font-medium opacity-80">
+          {' '}
+          row{group.lineCount === 1 ? '' : 's'}
+        </span>
       </div>
     </button>
   );
@@ -241,9 +186,11 @@ function RateCell({
   if (readOnly) {
     return (
       <div>
-        <p className="text-base font-bold tabular-nums text-[var(--content-primary)]">
-          {fulfillment.role === 'foc' ? '₹0' : formatRoundedRs(edit.priceQuoted)}
-        </p>
+        <BillingFigure
+          value={fulfillment.role === 'foc' ? 0 : edit.priceQuoted}
+          kind="currency-raw"
+          size="md"
+        />
         {qty > 0 ? (
           <p className="text-[10px] font-medium tabular-nums text-[var(--content-secondary)]">
             × {qty} pcs
@@ -256,7 +203,7 @@ function RateCell({
   if (fulfillment.role === 'foc') {
     return (
       <div>
-        <p className="text-base font-bold tabular-nums text-[var(--content-accent)]">₹0</p>
+        <BillingFigure value={0} kind="currency-raw" size="md" className="text-[var(--content-accent)]" />
         <p className="font-ds-micro font-semibold uppercase text-[var(--content-accent)]">FOC rate</p>
       </div>
     );
@@ -270,7 +217,7 @@ function RateCell({
         aria-label="Bill rate"
         value={edit.priceQuoted}
         onChange={(e) => onPriceChange(parseFloat(e.target.value.replace(/,/g, '')) || 0)}
-        className={`w-full min-h-10 rounded-lg border-2 px-2.5 text-base font-bold tabular-nums ${
+        className={`billing-rate-input min-h-10 rounded-lg border-2 px-2.5 text-base font-bold tabular-nums ${
           edited
             ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-primary)]'
             : 'border-[var(--border-opaque)] bg-white text-[var(--content-primary)]'
@@ -411,10 +358,10 @@ function TableHeader({ readOnly = false }: { readOnly?: boolean }): React.JSX.El
         <th className="px-2 py-3 w-10 text-center">#</th>
         <th className="px-3 py-3 min-w-[200px]">Product</th>
         <th className="px-3 py-3 min-w-[160px] hidden lg:table-cell">Notes</th>
-        <th className="px-3 py-3 w-16 text-right">Qty</th>
+        <th className="px-3 py-3 billing-col-qty text-right">Qty</th>
         <th className="px-3 py-3 w-[5.5rem] text-right">Unit</th>
-        <th className="px-3 py-3 w-[108px]">Rate</th>
-        <th className="px-3 py-3 w-24 text-right">Line ₹</th>
+        <th className="px-3 py-3 billing-col-money">Rate</th>
+        <th className="px-3 py-3 billing-col-money text-right">Line ₹</th>
         {!readOnly ? <th className="px-3 py-3 w-28 text-right">Actions</th> : null}
       </tr>
     </thead>
@@ -483,8 +430,8 @@ function TableRow({
           <p className="mt-1 text-xs italic text-[var(--content-tertiary)]">{item.flag_notes.trim()}</p>
         ) : null}
       </td>
-      <td className="px-3 py-3 align-top text-right">
-        <span className="text-lg font-bold tabular-nums text-[var(--content-primary)]">{qty}</span>
+      <td className="px-3 py-3 align-top text-right billing-col-qty">
+        <BillingFigure value={qty} kind="integer" size="lg" />
         <p className="text-[10px] font-bold uppercase text-[var(--content-tertiary)]">
           {fulfillment.excludeFromBusyBill ? 'skip' : 'bill'}
         </p>
@@ -492,20 +439,18 @@ function TableRow({
       <td className="px-3 py-3 align-top text-right">
         <SalesUnitBadge unit={effectiveSalesLineUnit(item, edit)} />
       </td>
-      <td className="px-3 py-3 align-top">
+      <td className="px-3 py-3 align-top billing-col-money">
         <RateCell
           row={row}
           readOnly={readOnly}
           onPriceChange={(p) => billSheet.updatePrice(item.id, p, item)}
         />
       </td>
-      <td className="px-3 py-3 align-top text-right">
+      <td className="px-3 py-3 align-top text-right billing-col-money">
         {fulfillment.excludeFromBusyBill ? (
           <span className="text-sm font-semibold text-[var(--content-tertiary)]">—</span>
         ) : (
-          <span className="text-base font-bold tabular-nums text-[var(--content-primary)]">
-            {formatCurrencyRaw(lineTotal)}
-          </span>
+          <BillingFigure value={lineTotal} kind="currency-raw" size="md" />
         )}
       </td>
       {!readOnly ? (
@@ -533,11 +478,21 @@ function GroupTable({
   const { pendingRemoveId } = billSheet;
 
   return (
-    <section className="overflow-hidden rounded-xl border-2 border-[var(--border-opaque)] bg-white shadow-sm">
+    <section
+      className={
+        group.id === 'bill'
+          ? 'overflow-hidden bg-[var(--bg-primary)]'
+          : 'overflow-hidden rounded-xl border-2 border-[var(--border-opaque)] bg-white shadow-sm'
+      }
+    >
       <GroupHeader group={group} collapsed={collapsed} onToggle={onToggle} />
       {!collapsed && group.rows.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[880px] border-collapse">
+          <table
+            className={`w-full border-collapse ${
+              group.id === 'bill' ? 'ds-table ds-table--billing min-w-[880px]' : 'min-w-[880px]'
+            }`}
+          >
             <TableHeader readOnly={readOnly} />
             <tbody>
               {group.rows.map((row) => (
@@ -565,13 +520,11 @@ function GroupTable({
 export interface ReviewBillTableProps {
   billSheet: BillSheetEdits;
   readOnly?: boolean;
-  onCopyForBusy?: () => void;
 }
 
 export function ReviewBillTable({
   billSheet,
   readOnly = false,
-  onCopyForBusy,
 }: ReviewBillTableProps): React.JSX.Element {
   const {
     sortedLines,
@@ -621,11 +574,7 @@ export function ReviewBillTable({
 
   return (
     <div className="space-y-4">
-      <ReviewWorkHeader
-        billSheet={billSheet}
-        readOnly={readOnly}
-        onCopyForBusy={onCopyForBusy}
-      />
+      <ReviewFulfillmentChips billSheet={billSheet} />
 
       {!readOnly && groups.find((g) => g.id === 'flagged') && unresolvedFlagged.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border-2 border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-4 py-2">

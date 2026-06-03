@@ -1,11 +1,7 @@
 import type { BusyEntryLineNature } from '../../../lib/billing/busyEntryLineNature';
 import { getBookPrice, getQuotedPrice, isSpecialRateItem } from '../../../lib/specialPricing';
-import { formatCurrencyRaw } from '../../../utils/formatters';
+import { BillingFigure } from '../shared/BillingFigure';
 import type { OrderItem } from '../../../types';
-
-function formatRate(rate: number | null): string {
-  return rate == null ? '—' : formatCurrencyRaw(rate);
-}
 
 function resolveBilledRate(
   item: OrderItem,
@@ -36,19 +32,27 @@ export function BusyEntryRateCell({
   return (
     <span className="block text-right">
       {isSpecial && showBook ? <span className="busy-entry-rate-label">Special</span> : null}
-      <span
-        className={`busy-entry-rate-value ${
-          isSpecial && showBook ? 'text-[var(--content-accent)]' : 'text-[var(--content-primary)]'
-        }`}
-      >
-        {formatRate(billedRate)}
-      </span>
-      {showBook ? (
+      {billedRate == null ? (
+        <span className="busy-entry-rate-value text-[var(--content-tertiary)]">—</span>
+      ) : (
+        <BillingFigure
+          value={billedRate}
+          kind="currency-raw"
+          size="inherit"
+          className={`busy-entry-rate-value ${
+            isSpecial && showBook ? 'text-[var(--content-accent)]' : 'text-[var(--content-primary)]'
+          }`}
+        />
+      )}
+      {showBook && bookRate != null ? (
         <span className="busy-entry-rate-book">
           Book{' '}
-          <span className="line-through decoration-[var(--content-quaternary)]">
-            {formatRate(bookRate)}
-          </span>
+          <BillingFigure
+            value={bookRate}
+            kind="currency-raw"
+            size="xs"
+            className="line-through decoration-[var(--content-quaternary)]"
+          />
         </span>
       ) : null}
     </span>

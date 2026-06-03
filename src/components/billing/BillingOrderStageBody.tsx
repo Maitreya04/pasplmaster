@@ -1,4 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
+import { buildBusyPasteText } from '../../lib/billing/sortBillLines';
+import { deriveReviewWorkMetrics } from '../../lib/billing/deriveReviewWorkMetrics';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
 import type { RejectionKind } from '../../types';
 import { BillingRejectDialog } from './BillingRejectDialog';
 import { useRejectBillingOrder } from '../../hooks/useRejectBillingOrder';
@@ -17,6 +20,7 @@ import { CompleteHandoffStage } from './stages/CompleteHandoffStage';
 import { BillingOrderChrome } from './chrome/BillingOrderChrome';
 import { BillingBillHeader } from './chrome/BillingBillHeader';
 import { BillingBusyDock } from './busyEntry/BillingBusyDock';
+import { BillingWorkDock } from './busyEntry/BillingWorkDock';
 import { BusyPasteLineList } from './busyEntry/BusyPasteLineList';
 import { usePickerLoad } from '../../hooks/usePickerLoad';
 import type { BillSheetEdits } from '../../hooks/useBillSheetEdits';
@@ -48,13 +52,14 @@ export function BillingOrderStageBody({
   order,
   orderDetail,
   billSheet,
-  flaggedMode,
+  flaggedMode: _flaggedMode,
   embedded = false,
   deskEmbedded = false,
   onClose,
   busyPaste,
 }: BillingOrderStageBodyProps): React.JSX.Element {
   const { pickers, colors: pickerColors } = usePickerLoad();
+  const { copy, copiedId } = useCopyToClipboard();
   const [showAssign, setShowAssign] = useState(false);
   const [showReject, setShowReject] = useState(false);
   const [rejectKind, setRejectKind] = useState<RejectionKind>('account_hold');
@@ -150,6 +155,35 @@ export function BillingOrderStageBody({
     });
   }, [stage, order, orderDetail, pickProgressForStage]);
 
+  const isReviewStage = stage === 'resolve_flags' || stage === 'review_finalise';
+  const showReviewDock = isReviewStage || stage === 'done';
+  const reviewWorkMetrics = useMemo(
+    () => (showReviewDock ? deriveReviewWorkMetrics(billSheet) : null),
+    [showReviewDock, billSheet],
+  );
+
+  const copyForBusy = useCallback(() => {
+    const { visibleItems, edits } = billSheet;
+    const billable = visibleItems.filter((item) => {
+      const edit = edits[item.id];
+      if (edit?.removed) return false;
+      if (item.state === 'flagged' && edit?.resolution == null) return false;
+      return true;
+    });
+    copy(buildBusyPasteText(billable, { lineEdits: edits }), 'busy-final');
+  }, [billSheet, copy]);
+
+  const copyJustCopied = copiedId === 'busy-final';
+  const [hasCopiedForBusy, setHasCopiedForBusy] = useState(false);
+  const handleCopyForBusy = useCallback(() => {
+    copyForBusy();
+    setHasCopiedForBusy(true);
+  }, [copyForBusy]);
+
+  const unresolvedReviewCount = billSheet.unresolvedFlagged.length;
+  const finaliseBlocked =
+    unresolvedReviewCount > 0 || !billSheet.allFlagsResolved;
+
   return (
     <div className="relative flex flex-col min-h-0 flex-1">
       <BillingOrderChrome
@@ -197,17 +231,13 @@ export function BillingOrderStageBody({
               : undefined,
         }}
         summaryStats={
-          stage === 'review_finalise' ||
-          stage === 'resolve_flags' ||
+          /* Totals live in BillingWorkDock for verify/finalise — avoid duplicate summary bar */
           stage === 'done'
             ? [
                 {
                   label: 'Billable total',
                   value: formatCurrencyRaw(billSheet.total),
-                  tone:
-                    stage !== 'done' && editCount > 0
-                      ? ('warning' as const)
-                      : ('default' as const),
+                  tone: 'default' as const,
                 },
               ]
             : undefined
@@ -235,6 +265,29 @@ export function BillingOrderStageBody({
               }
               finishLoading={busyPaste.finishLoading}
             />
+          ) : showReviewDock && reviewWorkMetrics ? (
+            <BillingWorkDock
+              billableCount={reviewWorkMetrics.billableCount}
+              qtyTotal={reviewWorkMetrics.qtyTotal}
+              specialRateCount={reviewWorkMetrics.specialRateCount}
+              focCount={reviewWorkMetrics.focCount}
+              pendingCount={reviewWorkMetrics.pendingCount}
+              onCopy={handleCopyForBusy}
+              copyJustCopied={copyJustCopied}
+              hasCopiedOnce={hasCopiedForBusy}
+              {...(isReviewStage
+                ? {
+                    primaryLabel: 'Ready to finalise',
+                    onPrimary: () => billSheet.saveMutation.mutate(),
+                    primaryDisabled: finaliseBlocked,
+                    primaryLoading: billSheet.saveMutation.isPending,
+                    primaryWarning:
+                      unresolvedReviewCount > 0
+                        ? `Resolve ${unresolvedReviewCount} edit${unresolvedReviewCount === 1 ? '' : 's'} to finalise`
+                        : null,
+                  }
+                : {})}
+            />
           ) : undefined
         }
       >
@@ -255,12 +308,8 @@ export function BillingOrderStageBody({
           />
         ) : null}
 
-        {(stage === 'resolve_flags' || stage === 'review_finalise') && !showAssign ? (
-          <PostPickReviewStage
-            billSheet={billSheet}
-            flaggedMode={flaggedMode || stage === 'resolve_flags'}
-            onReadyToFinalise={() => billSheet.saveMutation.mutate()}
-          />
+        {isReviewStage && !showAssign ? (
+          <PostPickReviewStage billSheet={billSheet} />
         ) : null}
 
         {stage === 'done' && !showAssign ? (

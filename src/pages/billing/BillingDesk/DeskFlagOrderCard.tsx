@@ -4,8 +4,10 @@ import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
 import { canQuickResolveDeskFlag, resolveDeskPickerFlags } from '../../../lib/billing/deskResolveFlag';
 import { deskOrderFlagTypeLabel } from '../../../lib/billing/deskLineFlagKind';
-import { formatTimeAgo } from '../../../utils/formatters';
+import type { PickLineProgress } from '../../../lib/cartSupply';
+import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
+import { DeskPickProgress } from './DeskPickProgress';
 import { deskType } from './deskTypography';
 
 function flagDescription(order: DeskOrderRow): string {
@@ -26,11 +28,19 @@ function flagTimeSource(order: DeskOrderRow): string {
 export interface DeskFlagOrderCardProps {
   order: DeskOrderRow;
   onReview: (order: DeskOrderRow) => void;
+  isSelected?: boolean;
+  pickProgress?: PickLineProgress;
+  progressLoading?: boolean;
+  showPickProgress?: boolean;
 }
 
 export function DeskFlagOrderCard({
   order,
   onReview,
+  isSelected = false,
+  pickProgress,
+  progressLoading = false,
+  showPickProgress = false,
 }: DeskFlagOrderCardProps): React.JSX.Element {
   const { userName } = useAuth();
   const toast = useToast();
@@ -62,7 +72,13 @@ export function DeskFlagOrderCard({
   const isResolving = quickResolveMutation.isPending;
 
   return (
-    <div className="rounded-lg border border-[var(--border-warning)] bg-[var(--bg-secondary)] p-2.5 flex flex-col gap-2">
+    <div
+      className={`rounded-lg border bg-[var(--bg-secondary)] p-2.5 flex flex-col gap-2 transition-colors ${
+        isSelected
+          ? 'border-[var(--role-primary)] ring-2 ring-[var(--role-primary)]/25 shadow-sm'
+          : 'border-[var(--border-warning)]'
+      }`}
+    >
       <div className="flex items-start gap-2 min-w-0">
         <span
           className={`mt-1.5 w-[7px] h-[7px] rounded-full shrink-0 animate-pulse ${
@@ -102,11 +118,23 @@ export function DeskFlagOrderCard({
           <p className={`${deskType.orderDetail} text-[var(--content-warning-on-light)] mt-0.5 line-clamp-2`}>
             {flagDescription(order)}
           </p>
+          <p className={`${deskType.orderDetail} text-[var(--content-warning-on-light)] mt-0.5`}>
+            {order.item_count} items · {formatCurrency(order.total_value)}
+          </p>
           {order.picker_name && (
             <p className={`${deskType.orderDetail} text-[var(--content-quaternary)] mt-0.5`}>
               Flagged by {order.picker_name}
             </p>
           )}
+          {showPickProgress ? (
+            <div className="mt-1">
+              <DeskPickProgress
+                order={order}
+                progress={pickProgress}
+                isLoading={progressLoading}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
 

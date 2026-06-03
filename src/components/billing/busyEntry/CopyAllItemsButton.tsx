@@ -9,6 +9,8 @@ interface CopyAllItemsButtonProps {
   copyAgain?: boolean;
   /** Match primary dock CTA height and padding. */
   size?: 'default' | 'cta';
+  /** Idle label before first copy (default: Copy all items). */
+  label?: string;
 }
 
 export function CopyAllItemsButton({
@@ -17,10 +19,11 @@ export function CopyAllItemsButton({
   justCopied = false,
   copyAgain = false,
   size = 'default',
+  label: idleLabel = 'Copy all items',
 }: CopyAllItemsButtonProps): React.JSX.Element {
   const isCta = size === 'cta';
 
-  const label = justCopied ? 'Copied!' : copyAgain ? 'Copy again' : 'Copy all items';
+  const label = justCopied ? 'Copied!' : copyAgain ? 'Copy again' : idleLabel;
   const Icon = justCopied ? Check : Copy;
 
   if (isCta) {

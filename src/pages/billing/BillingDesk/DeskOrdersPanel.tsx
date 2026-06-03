@@ -313,35 +313,44 @@ export function DeskOrdersPanel({
               />
             </div>
           ) : (
-            filtered.map((order) => (
-              <div key={order.id} className="flex flex-col gap-1.5">
-                {(tab === 'picking' || tab === 'resolve') && orderHasDeskPickerFlags(order) && (
-                  <DeskFlagOrderCard
-                    order={order}
-                    onReview={(o) => onSelectOrder(o, true)}
-                  />
-                )}
-                <DeskOrderRowCard
-                  order={order}
-                  pickers={pickers}
-                  pickerColors={pickerColors}
-                  pickProgress={pickProgressMap?.get(order.id)}
-                  progressLoading={progressLoading}
-                  isSelected={selectedOrderId === order.id}
-                  isAssignExpanded={assignTarget?.id === order.id}
-                  onAssignToggle={() => {
-                    setAssignTarget((prev) => (prev?.id === order.id ? null : order));
-                  }}
-                  onAssignClose={() => setAssignTarget(null)}
-                  showStaleActions={showStaleActions}
-                  showVerifyAction={showVerifyAction}
-                  showCompletedFreshness={tab === 'completed'}
-                  onEdit={() =>
-                    onSelectOrder(order, orderHasDeskPickerFlags(order))
-                  }
-                />
-              </div>
-            ))
+            filtered.map((order) => {
+              const showFlagCard =
+                (tab === 'picking' || tab === 'resolve') && orderHasDeskPickerFlags(order);
+              return (
+                <div key={order.id} className="flex flex-col gap-1.5">
+                  {showFlagCard ? (
+                    <DeskFlagOrderCard
+                      order={order}
+                      isSelected={selectedOrderId === order.id}
+                      pickProgress={pickProgressMap?.get(order.id)}
+                      progressLoading={progressLoading}
+                      showPickProgress={tab === 'picking'}
+                      onReview={(o) => onSelectOrder(o, true)}
+                    />
+                  ) : (
+                    <DeskOrderRowCard
+                      order={order}
+                      pickers={pickers}
+                      pickerColors={pickerColors}
+                      pickProgress={pickProgressMap?.get(order.id)}
+                      progressLoading={progressLoading}
+                      isSelected={selectedOrderId === order.id}
+                      isAssignExpanded={assignTarget?.id === order.id}
+                      onAssignToggle={() => {
+                        setAssignTarget((prev) => (prev?.id === order.id ? null : order));
+                      }}
+                      onAssignClose={() => setAssignTarget(null)}
+                      showStaleActions={showStaleActions}
+                      showVerifyAction={showVerifyAction}
+                      showCompletedFreshness={tab === 'completed'}
+                      onEdit={() =>
+                        onSelectOrder(order, orderHasDeskPickerFlags(order))
+                      }
+                    />
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
       </div>

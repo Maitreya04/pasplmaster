@@ -1,8 +1,5 @@
-import { Gift, HourglassHigh, Tag } from '@phosphor-icons/react';
 import type { BusyFinishAction } from '../../../lib/billing/busyFinishAction';
-import { BillingHeaderChip } from '../shared/BillingHeaderChip';
-import { BillingWorkStat } from '../shared/BillingWorkStat';
-import { CopyAllItemsButton } from './CopyAllItemsButton';
+import { BillingWorkDock } from './BillingWorkDock';
 
 export interface BillingBusyDockProps {
   billableCount: number;
@@ -41,90 +38,30 @@ export function BillingBusyDock({
   hasCopiedOnce = false,
   finishLoading = false,
 }: BillingBusyDockProps): React.JSX.Element {
-  const hasNothingToBill = billableCount === 0 && skipCount > 0;
-  const hasExceptionChips =
-    specialRateCount > 0 || focCount > 0 || pendingCount > 0 || hasNothingToBill;
   const primaryBlocked = finishAction.disabled || finishLoading;
-  const gateMessage =
-    primaryBlocked && finishAction.gateWarning
-      ? finishAction.gateWarning
-      : !primaryBlocked && finishAction.hint
-        ? finishAction.hint
-        : null;
 
   return (
-    <div className="billing-busy-dock shrink-0">
-      <div className="billing-busy-dock__row">
-        <div className="billing-busy-dock__leading min-w-0">
-          {hasExceptionChips ? (
-            <>
-              <div className="billing-busy-dock__chips">
-                {hasNothingToBill ? (
-                  <span className="font-ds-caption-size text-[var(--content-tertiary)]">
-                    Nothing to bill today · {skipCount.toLocaleString('en-IN')} pending
-                  </span>
-                ) : null}
-                <BillingHeaderChip
-                  icon={Tag}
-                  label="Special rate"
-                  count={specialRateCount}
-                  tone="accent"
-                  onClick={onSpecialRateClick}
-                />
-                <BillingHeaderChip
-                  icon={Gift}
-                  label="FOC"
-                  count={focCount}
-                  tone="positive"
-                  onClick={onFocClick}
-                />
-                <BillingHeaderChip
-                  icon={HourglassHigh}
-                  label="Pending stock"
-                  count={pendingCount}
-                  tone="warning"
-                  onClick={onPendingClick}
-                />
-              </div>
-              <span className="billing-busy-dock__divider" aria-hidden />
-            </>
-          ) : null}
-
-          <div className="billing-busy-dock__stats">
-            <BillingWorkStat label="Bill these items" value={billableCount} />
-            <BillingWorkStat label="Qty total" value={qtyTotal} />
-          </div>
-        </div>
-
-        <span className="billing-busy-dock__divider billing-busy-dock__divider--actions" aria-hidden />
-
-        <div className="billing-busy-dock__actions">
-          {gateMessage ? (
-            <span className="sr-only" role="status">
-              {gateMessage}
-            </span>
-          ) : null}
-
-          <CopyAllItemsButton
-            disabled={copyDisabled || billableCount === 0}
-            onClick={onCopy}
-            justCopied={copyJustCopied}
-            copyAgain={hasCopiedOnce && !copyJustCopied}
-            size="cta"
-          />
-
-          <button
-            type="button"
-            onClick={onFinish}
-            disabled={primaryBlocked}
-            aria-disabled={primaryBlocked}
-            title={primaryBlocked ? finishAction.gateWarning ?? undefined : undefined}
-            className="billing-busy-dock__primary"
-          >
-            {finishLoading ? 'Working…' : finishAction.label}
-          </button>
-        </div>
-      </div>
-    </div>
+    <BillingWorkDock
+      billableCount={billableCount}
+      qtyTotal={qtyTotal}
+      skipCount={skipCount}
+      specialRateCount={specialRateCount}
+      focCount={focCount}
+      pendingCount={pendingCount}
+      onSpecialRateClick={onSpecialRateClick}
+      onFocClick={onFocClick}
+      onPendingClick={onPendingClick}
+      copyLabel="Copy all items"
+      onCopy={onCopy}
+      copyDisabled={copyDisabled}
+      copyJustCopied={copyJustCopied}
+      hasCopiedOnce={hasCopiedOnce}
+      primaryLabel={finishAction.label}
+      onPrimary={onFinish}
+      primaryDisabled={finishAction.disabled}
+      primaryLoading={finishLoading}
+      primaryWarning={primaryBlocked ? finishAction.gateWarning ?? null : null}
+      primaryHint={!primaryBlocked ? finishAction.hint ?? null : null}
+    />
   );
 }

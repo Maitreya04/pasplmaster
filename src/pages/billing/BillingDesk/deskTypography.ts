@@ -27,5 +27,8 @@ export const deskAvatar = {
 
 export const deskBtn = {
   action: 'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md transition-colors',
+  /** Matches billing work dock secondary CTA (verify / copy). */
+  billingSecondary:
+    'inline-flex items-center justify-center gap-1.5 min-h-10 px-4 rounded-lg border border-[var(--border-opaque)] bg-[var(--bg-primary)] font-ds-caption-size font-semibold text-[var(--content-primary)] transition-colors hover:bg-[var(--bg-tertiary)] disabled:opacity-40',
   icon: 'inline-flex items-center justify-center w-8 h-8 rounded-md transition-colors',
 } as const;
