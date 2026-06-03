@@ -38,12 +38,14 @@ export function PostPickReviewStage({
   return (
     <div className="flex flex-col min-h-0">
       <div className="flex-1 min-h-0 overflow-y-auto p-2">
-        <ReviewBillTable billSheet={billSheet} readOnly={readOnly} />
+        <ReviewBillTable
+          billSheet={billSheet}
+          readOnly={readOnly}
+          onCopyForBusy={showCopyForBusy ? copyForBusy : undefined}
+        />
       </div>
-      {!readOnly && (showCopyForBusy || onReadyToFinalise) ? (
+      {!readOnly && onReadyToFinalise ? (
         <BillingActionBar
-          secondaryCopyLabel={showCopyForBusy ? 'Copy for Busy' : undefined}
-          onSecondaryCopy={showCopyForBusy ? copyForBusy : undefined}
           warningText={
             unresolved > 0 ? `Resolve ${unresolved} edits to finalise` : null
           }

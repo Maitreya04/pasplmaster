@@ -17,7 +17,7 @@ export const billingShell = {
   /** Summary bar — 44px */
   summary: 'h-12 px-4 flex items-center gap-4 border-t border-[var(--border-faint)] bg-[var(--bg-secondary)]',
   /** Action bar — 48px */
-  actions: 'h-14 px-4 flex items-center gap-3 border-t border-[var(--border-faint)] bg-[var(--bg-primary)]',
+  actions: 'min-h-14 py-2.5 px-4 flex items-center gap-3 border-t border-[var(--border-faint)] bg-[var(--bg-primary)]',
   /** Scrollable work surface */
   body: 'px-0',
   /** Meta pill base + intent variants */

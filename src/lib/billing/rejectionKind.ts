@@ -29,6 +29,6 @@ export function accountHoldDisplayNote(notes: string | null | undefined): string
 }
 
 export function rejectKindLabel(kind: RejectionKind | null | undefined): string {
-  if (kind === 'account_hold') return 'Account hold';
+  if (kind === 'account_hold') return 'On hold';
   return 'Rejected';
 }

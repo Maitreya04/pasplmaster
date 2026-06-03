@@ -28,7 +28,7 @@ function reviewPageDeskRow(order: OrderWithItems, deskOrder?: DeskOrderRow): Des
   };
   return {
     ...claimStub,
-    deskStatus: deriveDeskOrderStatus(claimStub, false),
+    deskStatus: deriveDeskOrderStatus(claimStub, { pickingClaimStale: false }),
     pickingClaimStale: false,
     pickerFlags: [],
   };
@@ -81,6 +81,8 @@ export function ReviewBillSection({
           billHeader={
             <BillingBillHeader
               customerName={order.customer_name}
+              customerCity={order.customer_city}
+              customerAddress={order.customer_address}
               orderId={order.order_number}
               createdAt={order.created_at}
               priority={order.priority}

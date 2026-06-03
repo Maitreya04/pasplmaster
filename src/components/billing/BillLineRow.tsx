@@ -21,11 +21,13 @@ import {
   formatRoundedRs,
 } from '../../lib/billing/mrpWorkflowCopy';
 import { orderItemConfirmedMrp } from '../../lib/billing/orderItemSplitGroups';
+import { SalesUnitBadge } from '../shared/SalesUnitBadge';
+import { effectiveSalesLineUnit } from '../../lib/salesUnit';
 import type { OrderItem, PendingItem } from '../../types';
 import type { OverlayLineEdit } from '../../pages/billing/BillingDesk/types';
 
 const ROW_GRID =
-  'grid grid-cols-[28px_minmax(52px,72px)_minmax(0,1fr)_32px_64px_minmax(88px,max-content)] gap-x-1.5 items-center';
+  'grid grid-cols-[28px_minmax(52px,72px)_minmax(0,1fr)_32px_5.25rem_64px_minmax(88px,max-content)] gap-x-1.5 items-center';
 
 export function BillLineTableHeader({
   compact,
@@ -42,6 +44,7 @@ export function BillLineTableHeader({
       <span>Code</span>
       <span>Item</span>
       <span>Qty</span>
+      <span>Unit</span>
       <span>{compact ? 'MRP' : 'Bill rate'}</span>
       <span className="text-right">Action</span>
     </div>
@@ -202,6 +205,10 @@ export function BillLineRow({
       >
         {formatQtyBreakdown(fulfillment)}
       </span>
+
+      <div className="flex justify-center">
+        <SalesUnitBadge unit={effectiveSalesLineUnit(item, edit)} />
+      </div>
 
       {!isRemoved && !fulfillment.excludeFromBusyBill ? (
         <input

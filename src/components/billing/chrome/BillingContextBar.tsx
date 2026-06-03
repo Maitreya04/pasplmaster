@@ -1,4 +1,4 @@
-import { User, Calendar, Truck, FileText, NotePencil } from '@phosphor-icons/react';
+import { User, Calendar, Truck, FileText, NotePencil, Package } from '@phosphor-icons/react';
 import { PickerAttributionChip } from '../../shared/AttributionChips';
 import type { BillingOperatorStage } from '../../../lib/billing/deriveBillingOperatorStage';
 import {
@@ -19,9 +19,11 @@ export interface BillingContextBarProps {
   pickerName?: string | null;
   reviewerName?: string | null;
   busyProgress?: { entered: number; total: number };
+  pickProgress?: { done: number; total: number; flagged: number };
   lineCount?: number;
   pendingCount?: number;
   flagSummary?: string | null;
+  pickingNotStarted?: boolean;
   ewayNeeded?: boolean;
   completedAt?: string | null;
   onPickerClick?: () => void;
@@ -31,8 +33,7 @@ function SalesNoteIcon({ note }: { note: string }): React.JSX.Element {
   return (
     <button
       type="button"
-      className="group relative inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] transition-colors hover:bg-[var(--bg-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-warning)]"
-      style={{ borderWidth: '0.5px' }}
+      className="billing-context-icon-btn billing-context-icon-btn--warning group"
       aria-label="Sales note"
     >
       <NotePencil size={15} weight="bold" aria-hidden />
@@ -53,6 +54,7 @@ const ICONS: Record<ContextBarIcon, typeof User> = {
   calendar: Calendar,
   transport: Truck,
   document: FileText,
+  package: Package,
 };
 
 function pillClass(pill?: ContextBarFact['pill']): string {
@@ -80,24 +82,28 @@ function ContextFact({ fact }: { fact: ContextBarFact }): React.JSX.Element {
   }
 
   return (
-    <span className="inline-flex items-center gap-[3px] shrink-0 min-w-0">
+    <span className="billing-context-fact">
       {Icon ? (
-        <Icon size={15} className="text-[var(--content-secondary)] shrink-0" aria-hidden />
+        <span className="billing-context-fact__icon-well" aria-hidden>
+          <Icon size={15} weight="duotone" />
+        </span>
       ) : null}
-      {fact.label ? (
-        <span className="inline-flex items-baseline gap-1 min-w-0">
-          <span className="font-ds-micro font-semibold uppercase text-[var(--content-quaternary)] tracking-normal shrink-0">
-            {fact.label}
-          </span>
-          <span className="font-ds-body-size font-medium text-[var(--content-primary)] truncate">
-            {fact.text}
-          </span>
+      <span className="billing-context-fact__body">
+        {fact.label ? (
+          <span className="billing-context-fact__label">{fact.label}</span>
+        ) : null}
+        <span className="billing-context-fact__value">
+          <span className="tabular-nums">{fact.text}</span>
+          {fact.secondaryText ? (
+            <>
+              <span className="billing-context-fact__sep" aria-hidden>
+                ·
+              </span>
+              <span className="billing-context-fact__value-secondary">{fact.secondaryText}</span>
+            </>
+          ) : null}
         </span>
-      ) : (
-        <span className="font-ds-body-size font-medium text-[var(--content-primary)] truncate">
-          {fact.text}
-        </span>
-      )}
+      </span>
     </span>
   );
 }
@@ -112,6 +118,9 @@ export function BillingContextBar(props: BillingContextBarProps): React.JSX.Elem
         {slots.left.map((fact) => (
           <ContextFact key={fact.key} fact={fact} />
         ))}
+        {slots.left.length > 0 && slots.center.length > 0 ? (
+          <span className="billing-context-fact__rule" aria-hidden />
+        ) : null}
         {slots.center.map((fact) => (
           <ContextFact key={fact.key} fact={fact} />
         ))}

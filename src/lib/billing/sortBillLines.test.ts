@@ -85,6 +85,11 @@ function runTests(): void {
     'Split\t1\tKit',
   );
 
+  assert.equal(
+    buildBusyPasteText(unitPasteItems, { lineEdits: { 1: { salesUnit: 'set' } } }),
+    'Kit line\t2\tSet\nSet line\t4\tSet',
+  );
+
   const withRemoved = [
     stubItem({ id: 1, bill_line_no: 1, item_name: 'Keep', qty_requested: 1 }),
     stubItem({ id: 2, bill_line_no: 2, item_name: 'Drop', qty_requested: 9 }),

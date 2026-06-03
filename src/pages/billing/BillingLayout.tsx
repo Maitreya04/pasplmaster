@@ -68,7 +68,6 @@ export default function BillingLayout(): React.JSX.Element | null {
   const navigate = useNavigate();
   const { userId, userName, role } = useAuth();
   const push = useRolePushNotifications({ role, userId, userName });
-  const isNewOrderFlow = location.pathname.startsWith('/billing/new-order');
 
   return (
     <div className="role-billing min-h-screen lg:h-[100dvh] lg:overflow-hidden bg-[var(--bg-primary)] relative">
@@ -106,20 +105,15 @@ export default function BillingLayout(): React.JSX.Element | null {
         </aside>
 
         {/* Content */}
-        <main className="flex-1 flex flex-col min-w-0 min-h-0 lg:h-full lg:overflow-hidden pb-[6.5rem] lg:pb-0">
+        <main className="flex-1 flex flex-col min-w-0 pb-[6.5rem] lg:pb-0 lg:h-full lg:min-h-0 lg:overflow-hidden">
           {!location.pathname.startsWith('/billing/new-order') && (
             <div className="lg:hidden sticky top-0 z-30 flex items-center justify-end gap-2 px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-sm">
               <NotificationBell userId={userId} role={role} />
               <PushAlertsCompact label="Billing alerts" push={push} />
             </div>
           )}
-          <div
-            className={`flex-1 min-h-0 flex flex-col ${
-              isNewOrderFlow
-                ? 'lg:overflow-y-auto lg:overscroll-y-contain'
-                : 'overflow-y-auto overscroll-y-contain'
-            }`}
-          >
+          {/* Mobile: document scroll (same as SalesLayout). Desktop: bounded flex scrollport. */}
+          <div className="flex-1 flex flex-col lg:min-h-0 lg:overflow-y-auto lg:overscroll-y-contain">
             <Outlet />
           </div>
         </main>

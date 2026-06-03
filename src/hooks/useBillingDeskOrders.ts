@@ -5,16 +5,18 @@ import { useDeskPickerFlags } from './useDeskPickerFlags';
 import type { DeskPickerFlagLine } from '../lib/billing/deskOrderQueue';
 import { PICKING_CLAIM_STALE_MS } from './usePickingClaim';
 import { supabase } from '../lib/supabase/client';
-import {
-  isDeskBillingFinalized,
-  needsDeskBillReview,
-} from '../lib/billing/deskOrderTab';
+import { isDeskBillingFinalized } from '../lib/billing/deskOrderTab';
+import { deriveDeskOrderStatus } from '../lib/billing/deriveDeskOrderStatus';
 import {
   isAssignTabOrder,
   orderBelongsOnDeskResolveTab,
+  isPickingTabOrder,
   type DeskOrderStatus,
   type DeskOrderTab,
 } from '../lib/billing/deskOrderQueue';
+
+export { deriveDeskOrderStatus } from '../lib/billing/deriveDeskOrderStatus';
+export type { DeskOrderStatusOptions } from '../lib/billing/deriveDeskOrderStatus';
 import type { WorkflowStatus } from '../types';
 
 export type { DeskPickerFlagLine } from '../lib/billing/deskOrderQueue';
@@ -22,6 +24,7 @@ export type { DeskOrderTab, DeskOrderStatus };
 export {
   filterDeskOrdersByTab,
   isDeskOrderStale,
+  isPickingTabOrder,
   orderBelongsOnDeskResolveTab,
   orderHasDeskPickerFlags,
 } from '../lib/billing/deskOrderQueue';
@@ -40,31 +43,24 @@ const MONITOR_STATUSES: WorkflowStatus[] = [
   'flagged',
 ];
 
-export function deriveDeskOrderStatus(
-  order: OrderWithClaimInfo,
-  pickingClaimStale: boolean,
-): DeskOrderStatus {
-  if (order.workflow_status === 'flagged') return 'flagged';
-  if (order.workflow_status === 'submitted') return 'submitted';
-  if (order.workflow_status === 'picking') return 'picking';
-  if (order.workflow_status === 'completed') return 'checking';
-  if (order.workflow_status === 'approved') {
-    if (!order.picker_name) return 'unassigned';
-    if (pickingClaimStale) return 'no_ack';
-    return 'no_ack';
-  }
-  return 'unassigned';
-}
-
 export function useBillingDeskOrders() {
-  const { all, isLoading } = useClaimableOrders({
+  const { all: activePipeline, isLoading: activeLoading } = useClaimableOrders({
     stage: 'billing',
-    todayOnly: true,
+    workflowStatus: ['approved', 'picking', 'flagged'],
+  });
+
+  const { all: completedToday, isLoading: completedLoading } = useClaimableOrders({
+    stage: 'billing',
+    workflowStatus: 'completed',
+    completedTodayOnly: true,
   });
 
   const monitorOrders = useMemo(
-    () => (all ?? []).filter((o) => MONITOR_STATUSES.includes(o.workflow_status)),
-    [all],
+    () =>
+      [...(activePipeline ?? []), ...(completedToday ?? [])].filter((o) =>
+        MONITOR_STATUSES.includes(o.workflow_status),
+      ),
+    [activePipeline, completedToday],
   );
 
   const pickingOrderIds = useMemo(
@@ -78,15 +74,20 @@ export function useBillingDeskOrders() {
   const flagWatchOrderIds = useMemo(
     () =>
       monitorOrders
-        .filter((o) => o.workflow_status === 'picking' || o.workflow_status === 'flagged')
+        .filter(
+          (o) =>
+            o.workflow_status === 'picking' ||
+            o.workflow_status === 'flagged' ||
+            o.workflow_status === 'completed',
+        )
         .map((o) => o.id),
     [monitorOrders],
   );
 
   const { data: pickerFlagsByOrder } = useDeskPickerFlags(flagWatchOrderIds);
 
-  const { data: stalePickingIds } = useQuery({
-    queryKey: ['billing-desk-picking-stale', pickingOrderIds.join(',')],
+  const { data: pickingClaims } = useQuery({
+    queryKey: ['billing-desk-picking-claims', pickingOrderIds.join(',')],
     enabled: pickingOrderIds.length > 0,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -100,13 +101,17 @@ export function useBillingDeskOrders() {
 
       const now = Date.now();
       const stale = new Set<number>();
+      const active = new Set<number>();
       for (const claim of data ?? []) {
+        const orderId = Number(claim.order_id);
         const age = now - new Date(claim.last_heartbeat_at).getTime();
         if (age > PICKING_CLAIM_STALE_MS) {
-          stale.add(Number(claim.order_id));
+          stale.add(orderId);
+        } else {
+          active.add(orderId);
         }
       }
-      return stale;
+      return { stale, active };
     },
     staleTime: 0,
     refetchInterval: 30_000,
@@ -114,39 +119,41 @@ export function useBillingDeskOrders() {
   });
 
   const enriched = useMemo((): DeskOrderRow[] => {
-    const staleSet = stalePickingIds ?? new Set<number>();
+    const staleSet = pickingClaims?.stale ?? new Set<number>();
+    const activeSet = pickingClaims?.active ?? new Set<number>();
     const flagsMap = pickerFlagsByOrder ?? new Map<number, DeskPickerFlagLine[]>();
     return monitorOrders.map((order) => {
       const pickingClaimStale =
         order.workflow_status === 'picking' && staleSet.has(order.id);
+      const hasActivePickingClaim = activeSet.has(order.id);
       return {
         ...order,
         pickingClaimStale,
         pickerFlags: flagsMap.get(order.id) ?? [],
-        deskStatus: deriveDeskOrderStatus(order, pickingClaimStale),
+        deskStatus: deriveDeskOrderStatus(order, {
+          pickingClaimStale,
+          hasActivePickingClaim,
+        }),
       };
     });
-  }, [monitorOrders, stalePickingIds, pickerFlagsByOrder]);
+  }, [monitorOrders, pickingClaims, pickerFlagsByOrder]);
 
-  const flaggedOrders = useMemo(
+  const resolveOrders = useMemo(
     () => enriched.filter((o) => orderBelongsOnDeskResolveTab(o)),
     [enriched],
   );
 
   const listOrders = enriched;
 
-  const resolveCount = flaggedOrders.length;
+  const resolveCount = resolveOrders.length;
 
   const assignCount = useMemo(
     () => listOrders.filter(isAssignTabOrder).length,
     [listOrders],
   );
 
-  const reviewCount = useMemo(
-    () =>
-      listOrders.filter(
-        (o) => !orderBelongsOnDeskResolveTab(o) && needsDeskBillReview(o),
-      ).length,
+  const pickingCount = useMemo(
+    () => listOrders.filter(isPickingTabOrder).length,
     [listOrders],
   );
 
@@ -159,14 +166,13 @@ export function useBillingDeskOrders() {
   );
 
   return {
-    isLoading,
+    isLoading: activeLoading || completedLoading,
     all: enriched,
-    flaggedOrders,
+    flaggedOrders: resolveOrders,
     listOrders,
     resolveCount,
     assignCount,
-    reviewCount,
+    pickingCount,
     completedCount,
   };
 }
-

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import type { OrderItem } from '../types';
+import type { OrderItem, SalesLineUnit } from '../types';
 import { flagsFromOrderItems, type BillingLineEdit } from '../lib/billing/liveQueueDraft';
 
 export type BillingFlowState = 'queue' | 'orderSheet' | 'report';
@@ -108,6 +108,14 @@ export function useBillingFlow() {
     }));
   }, []);
 
+  const editLineSalesUnit = useCallback((orderItemId: number, salesUnit: SalesLineUnit) => {
+    draftDirtyRef.current = true;
+    setLineEdits((prev) => ({
+      ...prev,
+      [orderItemId]: { ...prev[orderItemId], salesUnit },
+    }));
+  }, []);
+
   const removeLine = useCallback((orderItemId: number) => {
     draftDirtyRef.current = true;
     setLineEdits((prev) => ({
@@ -162,7 +170,9 @@ export function useBillingFlow() {
   const editCount = Object.entries(lineEdits).filter(
     ([, e]) =>
       !e.removed &&
-      (e.qtyRequested !== undefined || e.priceQuoted !== undefined),
+      (e.qtyRequested !== undefined ||
+        e.priceQuoted !== undefined ||
+        e.salesUnit !== undefined),
   ).length;
 
   return {
@@ -189,6 +199,7 @@ export function useBillingFlow() {
     // Line edits
     editLineQty,
     editLineRate,
+    editLineSalesUnit,
     removeLine,
     restoreLine,
     pruneLineEditsForRemovedRows,

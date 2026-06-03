@@ -1,4 +1,4 @@
-import type { OrderItem } from '../../../types';
+import type { OrderItem, SalesLineUnit } from '../../../types';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 
 export interface DeskDraftLine {
@@ -49,6 +49,7 @@ export type OverlayLineResolution =
 
 export interface OverlayLineEdit {
   priceQuoted: number;
+  salesUnit: SalesLineUnit;
   removed: boolean;
   priceTouched: boolean;
   /** Set when billing resolves a flagged line via quick action or manual edit. */

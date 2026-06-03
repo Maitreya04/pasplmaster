@@ -21,6 +21,10 @@ import type { FulfillmentPath } from '../../types';
 import { formatCurrency, formatTimestamp, formatTimeAgo } from '../../utils/formatters';
 import { invalidateLocationwiseStockQueries } from '../../hooks/useLocationwiseStock';
 import {
+  formatInternalNotificationError,
+  sendInternalNotification,
+} from '../../lib/pickerPush';
+import {
   billingCompleteStalePicking,
   billingForceCompletePrePick,
   forceCompletePrePickErrorMessage,
@@ -103,13 +107,30 @@ export default function ReviewPage(): React.JSX.Element | null {
   const rejectMutation = useMutation({
     mutationFn: async () => {
       if (!order) throw new Error('No order');
+      const trimmedReason = rejectReason.trim();
+      if (!trimmedReason) throw new Error('Rejection reason is required');
+
       await supabase
         .from('orders')
         .update({
           workflow_status: 'flagged',
-          notes: rejectReason.trim() || 'Rejected by billing',
+          notes: trimmedReason,
         })
         .eq('id', order.id);
+
+      await sendInternalNotification({
+        eventType: 'order_update_for_sales',
+        orderId: order.id,
+        orderNumber: order.order_number,
+        customerName: order.customer_name,
+        salespersonName: order.salesperson_name,
+        messageBody: `Billing returned order ${order.order_number} for review. Reason: ${trimmedReason}`,
+      }).catch((e) => {
+        console.error('order_update_for_sales', e);
+        toast.error(
+          `Sales notification failed: ${formatInternalNotificationError(e)}`,
+        );
+      });
     },
     onSuccess: () => {
       setRejectSheetOpen(false);
@@ -375,7 +396,8 @@ export default function ReviewPage(): React.JSX.Element | null {
       >
         <div className="space-y-4">
           <p className="text-sm text-[var(--content-secondary)]">
-            Please provide a reason for rejecting this order.
+            Provide a reason — it will be saved on the order and sent to the
+            salesperson.
           </p>
           <textarea
             value={rejectReason}
@@ -388,6 +410,7 @@ export default function ReviewPage(): React.JSX.Element | null {
             variant="danger"
             onClick={handleReject}
             loading={rejectMutation.isPending}
+            disabled={!rejectReason.trim()}
           >
             Confirm Reject
           </BigButton>

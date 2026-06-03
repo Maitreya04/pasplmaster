@@ -90,6 +90,7 @@ function DeskOrderOverlayShell({
 
   const wide =
     billingStageBarIndex(stage) >= 3 ||
+    stage === 'picking' ||
     stage === 'review_finalise' ||
     stage === 'resolve_flags' ||
     stage === 'done';
@@ -148,6 +149,7 @@ function DeskOrderOverlayShell({
           orderDetail={orderDetail}
           billSheet={billSheet}
           flaggedMode={flaggedMode}
+          busyPaste={billSheet.busyPaste}
           onClose={onClose}
         />
       </div>

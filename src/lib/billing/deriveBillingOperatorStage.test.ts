@@ -25,7 +25,7 @@ function runTests(): void {
       picker_name: 'Raj',
       deskStatus: 'no_ack',
     }),
-    'assign_picker',
+    'picking',
   );
 
   assert.equal(

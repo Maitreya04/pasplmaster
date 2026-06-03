@@ -42,6 +42,16 @@ export function computePickerDeskStats(
   return { activeCount, completedToday };
 }
 
+export function computeEveryoneDeskStats(orders: DeskOrderRow[]): PickerDeskStats {
+  let activeCount = 0;
+  let completedToday = 0;
+  for (const order of orders) {
+    if (isPickerActiveDeskOrder(order)) activeCount++;
+    if (isPickerCompletedDeskOrder(order)) completedToday++;
+  }
+  return { activeCount, completedToday };
+}
+
 export function filterDeskOrdersByPicker(
   orders: DeskOrderRow[],
   picker: PickerLoadInfo | null,

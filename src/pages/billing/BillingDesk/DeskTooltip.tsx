@@ -21,7 +21,7 @@ export function DeskTooltip({
       : 'top-full left-1/2 -translate-x-1/2 mt-1.5';
 
   return (
-    <span className={`relative inline-flex group/dtip ${className}`}>
+    <span className={`relative inline-flex shrink-0 group/dtip ${className}`}>
       {children}
       <span
         role="tooltip"

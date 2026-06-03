@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { PickLineProgress } from '../../../lib/cartSupply';
 import type { BillingOperatorStage } from '../../../lib/billing/deriveBillingOperatorStage';
 import { BillingNavBar } from './BillingNavBar';
 import { BillingContextBar } from './BillingContextBar';
@@ -18,9 +19,11 @@ export interface BillingOrderContext {
   reviewerName?: string | null;
   priority?: string;
   busyProgress?: { entered: number; total: number };
+  pickProgress?: { done: number; total: number; flagged: number };
   lineCount?: number;
   pendingCount?: number;
   flagSummary?: string | null;
+  pickingNotStarted?: boolean;
   ewayNeeded?: boolean;
   completedAt?: string | null;
   onPickerClick?: () => void;
@@ -33,6 +36,8 @@ interface BillingOrderChromeProps {
   openFlagCount?: number;
   allLinesRemoved?: boolean;
   checkerPending?: boolean;
+  skipWarehousePick?: boolean;
+  pickProgress?: PickLineProgress;
   /** Custom header slot (replaces nav bar if provided). */
   header?: ReactNode;
   /** Bill header component. */
@@ -60,6 +65,8 @@ export function BillingOrderChrome({
   openFlagCount = 0,
   allLinesRemoved = false,
   checkerPending = false,
+  skipWarehousePick = false,
+  pickProgress,
   header,
   billHeader,
   suppressContextBar = false,
@@ -83,7 +90,7 @@ export function BillingOrderChrome({
 
   return (
     <div
-      className={`density-billing-work flex flex-col min-h-0 flex-1 bg-[var(--bg-secondary)] ${className}`}
+      className={`@container/billing-order density-billing-work flex flex-col min-h-0 flex-1 bg-[var(--bg-secondary)] ${className}`}
     >
       {header ? (
         <div className="shrink-0 bg-[var(--bg-secondary)]">{header}</div>
@@ -101,6 +108,8 @@ export function BillingOrderChrome({
         openFlagCount={openFlagCount}
         allLinesRemoved={allLinesRemoved}
         checkerPending={resolvedCheckerPending}
+        skipWarehousePick={skipWarehousePick}
+        pickProgress={pickProgress}
       />
 
       {!suppressContextBar && (
@@ -115,9 +124,11 @@ export function BillingOrderChrome({
           pickerName={context.pickerName}
           reviewerName={context.reviewerName}
           busyProgress={context.busyProgress}
+          pickProgress={context.pickProgress}
           lineCount={context.lineCount}
           pendingCount={context.pendingCount}
           flagSummary={context.flagSummary}
+          pickingNotStarted={context.pickingNotStarted}
           ewayNeeded={context.ewayNeeded}
           completedAt={context.completedAt}
           onPickerClick={context.onPickerClick}

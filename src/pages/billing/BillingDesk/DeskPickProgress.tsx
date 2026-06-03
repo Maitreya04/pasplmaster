@@ -1,5 +1,6 @@
 import type { PickLineProgress } from '../../../lib/cartSupply';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
+import { derivePickingMonitorPresentation } from '../../../lib/billing/pickingMonitorPresentation';
 import { DeskTooltip } from './DeskTooltip';
 import { deskType } from './deskTypography';
 
@@ -15,20 +16,50 @@ function progressLabel(order: DeskOrderRow, progress: PickLineProgress | undefin
   if (order.deskStatus === 'unassigned') {
     return 'Waiting for picker — use Assign on this row.';
   }
-  if (order.deskStatus === 'checking') {
-    return 'All pick lines done — at check table or dispatch.';
-  }
-  if (order.deskStatus === 'no_ack') {
-    return 'Assigned — waiting for picker to tap Start.';
-  }
   if (!progress || progress.total === 0) {
+    if (order.deskStatus === 'checking') return 'Pick complete · verify bill.';
     return order.deskStatus === 'picking' ? 'Pick started — loading line counts…' : 'No pickable lines';
   }
-  const parts = [`${progress.done}/${progress.total} lines done`];
-  if (progress.picked > 0) parts.push(`${progress.picked} picked`);
-  if (progress.flagged > 0) parts.push(`${progress.flagged} flagged`);
-  if (progress.remaining > 0) parts.push(`${progress.remaining} left`);
-  return parts.join(' · ');
+  const monitor = derivePickingMonitorPresentation({
+    deskStatus: order.deskStatus,
+    pickingClaimStale: order.pickingClaimStale,
+    pickerName: order.picker_name,
+    workflowStatus: order.workflow_status,
+    progress,
+  });
+  const pickerFirst = order.picker_name?.split(/\s+/)[0] ?? order.picker_name ?? null;
+  return monitor.progressStatusLine(progress, pickerFirst);
+}
+
+function progressInlineLabel(
+  order: DeskOrderRow,
+  progress: PickLineProgress | undefined,
+  isLoading?: boolean,
+): string {
+  if (isLoading && order.deskStatus === 'picking') return 'Loading pick progress…';
+  if (order.deskStatus === 'unassigned') return 'Awaiting picker';
+  if (order.deskStatus === 'checking') return 'Pick complete · verify bill';
+  if (progress && progress.total > 0) {
+    const monitor = derivePickingMonitorPresentation({
+      deskStatus: order.deskStatus,
+      pickingClaimStale: order.pickingClaimStale,
+      pickerName: order.picker_name,
+      workflowStatus: order.workflow_status,
+      progress,
+    });
+    if (monitor.contextNotStarted) {
+      return order.picker_name
+        ? `Assigned to ${order.picker_name.split(/\s+/)[0]}`
+        : 'Assigned';
+    }
+    return `${progress.done}/${progress.total} · ${Math.round((progress.done / progress.total) * 100)}%`;
+  }
+  if (order.deskStatus === 'no_ack') {
+    return order.picker_name
+      ? `Assigned to ${order.picker_name.split(/\s+/)[0]}`
+      : 'Assigned';
+  }
+  return 'In warehouse';
 }
 
 function progressRatio(order: DeskOrderRow, progress: PickLineProgress | undefined): number {
@@ -38,9 +69,17 @@ function progressRatio(order: DeskOrderRow, progress: PickLineProgress | undefin
   return progress.done / progress.total;
 }
 
-function barColor(order: DeskOrderRow, ratio: number): string {
+function barColor(order: DeskOrderRow, ratio: number, progress?: PickLineProgress): string {
   if (order.deskStatus === 'checking') return 'var(--bg-positive)';
-  if (order.pickingClaimStale || order.deskStatus === 'no_ack') return 'var(--bg-warning)';
+  const monitor = derivePickingMonitorPresentation({
+    deskStatus: order.deskStatus,
+    pickingClaimStale: order.pickingClaimStale,
+    pickerName: order.picker_name,
+    workflowStatus: order.workflow_status,
+    progress,
+  });
+  if (monitor.progressWarningTint && ratio === 0) return 'var(--bg-warning)';
+  if (order.pickingClaimStale) return 'var(--bg-warning)';
   if (ratio >= 0.8) return 'var(--bg-positive)';
   return 'var(--role-primary)';
 }
@@ -61,25 +100,14 @@ export function DeskPickProgress({
 
   const ratio = progressRatio(order, progress);
   const label = progressLabel(order, progress);
+  const inlineLabel = progressInlineLabel(order, progress, isLoading);
   const pct = Math.round(ratio * 100);
 
   return (
     <DeskTooltip label={label} side="bottom">
       <div className="mt-2 space-y-1 cursor-default" aria-label={label}>
         <div className={`flex items-center justify-between gap-2 ${deskType.progress}`}>
-          <span className="truncate">
-            {isLoading && order.deskStatus === 'picking'
-              ? 'Loading pick progress…'
-              : order.deskStatus === 'unassigned'
-                ? 'Awaiting picker'
-              : order.deskStatus === 'no_ack'
-                ? 'Waiting to start'
-                : order.deskStatus === 'checking'
-                  ? 'Pick complete'
-                  : progress && progress.total > 0
-                    ? `${progress.done}/${progress.total} lines`
-                    : 'In warehouse'}
-          </span>
+          <span className="truncate">{inlineLabel}</span>
           {order.deskStatus !== 'unassigned' && (
             <span className="tabular-nums shrink-0">{pct}%</span>
           )}
@@ -89,7 +117,7 @@ export function DeskPickProgress({
             className="h-full rounded-full transition-all duration-500"
             style={{
               width: `${pct}%`,
-              background: barColor(order, ratio),
+              background: barColor(order, ratio, progress),
             }}
           />
         </div>

@@ -1,3 +1,4 @@
+import { MapPin } from '@phosphor-icons/react';
 import {
   customerNameSizeClass,
   orderAgePill,
@@ -6,6 +7,9 @@ import { billingShell } from './billingShell';
 
 interface BillingBillHeaderProps {
   customerName: string;
+  /** Station / city label shown before the local address. */
+  customerCity?: string | null;
+  customerAddress?: string | null;
   orderId?: string | number | null;
   createdAt?: string | null;
   priority?: string;
@@ -64,31 +68,58 @@ function OrderAgePill({ createdAt }: { createdAt: string }): React.JSX.Element |
 
 export function BillingBillHeader({
   customerName,
+  customerCity,
+  customerAddress,
   orderId,
   createdAt,
   priority,
   transportName,
   carrierName,
 }: BillingBillHeaderProps): React.JSX.Element {
+  const station = customerCity?.trim() ?? '';
+  const address = customerAddress?.trim() ?? '';
+  const locationLine = [station, address].filter(Boolean).join(' · ');
+
   return (
     <header className={billingShell.header}>
-      <h1
-        className={`${customerNameSizeClass(customerName)} font-medium text-[var(--content-primary)] truncate min-w-0 shrink`}
-      >
-        {customerName}
-      </h1>
+      <div className="min-w-0 shrink">
+        <h1
+          className={`${customerNameSizeClass(customerName)} font-medium leading-tight text-[var(--content-primary)] truncate min-w-0`}
+        >
+          {customerName}
+        </h1>
+        {locationLine ? (
+          <p
+            className="mt-0.5 flex min-w-0 items-center gap-1 truncate font-ds-caption-size leading-tight text-[var(--content-tertiary)]"
+            title={locationLine}
+          >
+            <MapPin size={13} className="shrink-0 text-[var(--content-quaternary)]" />
+            <span className="min-w-0 truncate">
+              {station ? (
+                <span className="font-medium text-[var(--content-secondary)]">{station}</span>
+              ) : null}
+              {station && address ? (
+                <span className="px-1 text-[var(--content-quaternary)]">·</span>
+              ) : null}
+              {address ? <span>{address}</span> : null}
+            </span>
+          </p>
+        ) : null}
+      </div>
 
-      <OrderTypePill
-        priority={priority}
-        transportName={transportName}
-        carrierName={carrierName}
-      />
-
-      {createdAt ? <OrderAgePill createdAt={createdAt} /> : null}
-
-      {orderId ? (
-        <span className={billingShell.orderId}>#{orderId}</span>
-      ) : null}
+      <div className="ml-auto flex min-w-0 shrink-0 flex-col items-end gap-1.5">
+        {orderId ? (
+          <span className={billingShell.orderId}>#{orderId}</span>
+        ) : null}
+        <div className="flex items-center justify-end gap-2">
+          <OrderTypePill
+            priority={priority}
+            transportName={transportName}
+            carrierName={carrierName}
+          />
+          {createdAt ? <OrderAgePill createdAt={createdAt} /> : null}
+        </div>
+      </div>
     </header>
   );
 }

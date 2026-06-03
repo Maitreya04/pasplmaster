@@ -31,11 +31,6 @@ import {
   isLocationwiseStockResolving,
   useLocationwiseStock,
 } from '../../hooks/useLocationwiseStock';
-import { useBillingVerifiedLabelMrpMap } from '../../hooks/useBillingVerifiedLabelMrpMap';
-import {
-  cartSpecialRateForVerified,
-  defaultSalesRateForItem,
-} from '../../lib/billing/billingVerifiedMrp';
 import { useUserStockLocation } from '../../hooks/useUserStockLocation';
 import { useCart } from '../../context/CartContext';
 import { appHaptics } from '../../lib/haptics';
@@ -71,7 +66,8 @@ import {
 } from '../../components/shared';
 import { useSalesChrome } from './SalesChromeContext';
 import type { CartItem, Item, Customer, SalesLineUnit, StockLocationCode } from '../../types';
-import { SALES_LINE_UNITS, normalizeSalesLineUnit, salesLineUnitLabel } from '../../lib/salesUnit';
+import { SalesUnitRail } from '../../components/shared/SalesUnitRail';
+import { normalizeSalesLineUnit, salesLineUnitLabel } from '../../lib/salesUnit';
 import {
   formatStockQty,
   getStockTier,
@@ -1151,48 +1147,6 @@ function FocChip({ qty }: { qty: number }) {
       <Gift size={11} weight="fill" aria-hidden />
       FOC ×{qty}
     </span>
-  );
-}
-
-function SalesUnitRail({
-  value,
-  onChange,
-}: {
-  value: SalesLineUnit;
-  onChange: (value: SalesLineUnit) => void;
-}) {
-  return (
-    <div
-      className="flex min-w-0 items-center gap-2.5"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <span className="shrink-0 font-ds-micro font-semibold uppercase text-[var(--content-tertiary)]">
-        Sell as
-      </span>
-      <div className="grid h-10 w-[180px] max-w-[calc(100%-60px)] shrink grid-cols-3 rounded-[12px] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-0.5">
-        {SALES_LINE_UNITS.map((unit) => {
-          const selected = unit === value;
-          return (
-            <button
-              key={unit}
-              type="button"
-              onClick={() => {
-                appHaptics.selection();
-                onChange(unit);
-              }}
-              className={`min-w-0 rounded-[10px] px-1.5 text-center font-ds-caption-size font-semibold leading-none transition-[background-color,color,box-shadow] duration-150 ${
-                selected
-                  ? 'bg-[var(--bg-accent)] text-[var(--content-on-color)] shadow-[0_1px_5px_color-mix(in_srgb,var(--bg-accent)_20%,transparent)]'
-                  : 'text-[var(--content-secondary)] hover:bg-[var(--bg-secondary)]'
-              }`}
-              aria-pressed={selected}
-            >
-              {salesLineUnitLabel(unit)}
-            </button>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 
@@ -2396,13 +2350,6 @@ export default function NewOrderPage(): React.JSX.Element | null {
     isFetching: locationwiseStockFetching,
   } = useLocationwiseStock(visibleBusyCodes);
 
-  const { data: billingVerifiedMrpMap } = useBillingVerifiedLabelMrpMap(
-    visibleBusyCodes,
-    sellableLocationCode,
-    !stockLocationLoading,
-  );
-
-
   const cartQtyByItem = useMemo(() => {
     const totals = new Map<number, number>();
     for (const line of cartItems) {
@@ -2443,7 +2390,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const getTotalInOrderQty = (id: number) => cartQtyByItem.get(id) ?? 0;
   const getCartLines = (id: number) => cartLinesByItem.get(id) ?? [];
   const getFocQtyInCart = (id: number) => focQtyByItem.get(id) ?? 0;
-  const getPrice = (item: Item) => defaultSalesRateForItem(item, billingVerifiedMrpMap);
+  const getPrice = (item: Item) => item.sales_price;
   const editingCartLines = useMemo(
     () => (editingCartItemId == null ? [] : cartLinesByItem.get(editingCartItemId) ?? []),
     [cartLinesByItem, editingCartItemId],
@@ -2531,7 +2478,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
 
   const handleConfirmAdd = (item: Item, qty: number, focQty: number, salesUnit: SalesLineUnit) => {
     appHaptics.impactMedium();
-    addItem(item, qty, cartSpecialRateForVerified(item, billingVerifiedMrpMap), focQty, salesUnit);
+    addItem(item, qty, null, focQty, salesUnit);
     setPendingAddItemId(null);
     showAddedFeedback(item.id);
   };
@@ -2694,11 +2641,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
                   setSelectedCustomer(customer);
                 }
                 for (const entry of entries) {
-                  addItem(
-                    entry.item,
-                    entry.qty,
-                    cartSpecialRateForVerified(entry.item, billingVerifiedMrpMap),
-                  );
+                  addItem(entry.item, entry.qty);
                 }
                 goToCart();
               }}

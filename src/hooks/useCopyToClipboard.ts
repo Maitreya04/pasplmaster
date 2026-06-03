@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-const RESET_DELAY_MS = 1500;
+const RESET_DELAY_MS = 2000;
 
 /**
  * One-tap clipboard copy with visual confirmation.

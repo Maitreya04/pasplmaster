@@ -1,13 +1,15 @@
 import type { BillingOperatorStage } from './deriveBillingOperatorStage';
 import { isOrderAgeUrgent } from './orderAgeTier';
 
-export type ContextBarIcon = 'user' | 'calendar' | 'transport' | 'document';
+export type ContextBarIcon = 'user' | 'calendar' | 'transport' | 'document' | 'package';
 
 export interface ContextBarFact {
   key: string;
   icon?: ContextBarIcon;
   label?: string;
   text: string;
+  /** Muted suffix on the value line — e.g. "2 pending". */
+  secondaryText?: string;
   pill?: 'positive' | 'warning' | 'negative';
 }
 
@@ -21,9 +23,11 @@ export interface ContextBarInput {
   pickerName?: string | null;
   reviewerName?: string | null;
   busyProgress?: { entered: number; total: number };
+  pickProgress?: { done: number; total: number; flagged: number };
   lineCount?: number;
   pendingCount?: number;
   flagSummary?: string | null;
+  pickingNotStarted?: boolean;
   ewayNeeded?: boolean;
   completedAt?: string | null;
 }
@@ -51,20 +55,6 @@ function transportShortLabel(input: ContextBarInput): string {
   return carrier ? `${input.transportName} · ${carrier}` : input.transportName;
 }
 
-function busyProgressFact(
-  busyProgress: { entered: number; total: number },
-): ContextBarFact {
-  const complete =
-    busyProgress.total > 0 && busyProgress.entered >= busyProgress.total;
-  return {
-    key: 'busy-progress',
-    text: complete
-      ? `All ${busyProgress.total} entered`
-      : `${busyProgress.entered} of ${busyProgress.total} entered`,
-    pill: complete ? 'positive' : 'warning',
-  };
-}
-
 function lineCountFact(lineCount?: number, pendingCount?: number): ContextBarFact | null {
   if (lineCount == null) return null;
   const pending =
@@ -72,6 +62,18 @@ function lineCountFact(lineCount?: number, pendingCount?: number): ContextBarFac
   return {
     key: 'line-count',
     text: `${lineCount} lines${pending}`,
+  };
+}
+
+function itemCountFact(lineCount?: number, pendingCount?: number): ContextBarFact | null {
+  if (lineCount == null) return null;
+  return {
+    key: 'item-count',
+    icon: 'package',
+    label: 'Items',
+    text: String(lineCount),
+    secondaryText:
+      pendingCount != null && pendingCount > 0 ? `${pendingCount} pending` : undefined,
   };
 }
 
@@ -84,6 +86,17 @@ function formatCompletedTime(value: string): string {
     hour12: false,
   });
   return `Completed ${time}`;
+}
+
+function formatSubmittedLabel(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  const date = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  const time = d.toLocaleTimeString('en-IN', {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  return `${date}, ${time}`;
 }
 
 export function deriveContextBarSlots(input: ContextBarInput): ContextBarSlots {
@@ -105,8 +118,8 @@ export function deriveContextBarSlots(input: ContextBarInput): ContextBarSlots {
         left.push({
           key: 'created',
           icon: 'calendar',
-          label: 'Arrived',
-          text: formatShortDateLabel(input.createdAt),
+          label: 'Submitted',
+          text: formatSubmittedLabel(input.createdAt),
         });
       }
       right.push({
@@ -115,8 +128,9 @@ export function deriveContextBarSlots(input: ContextBarInput): ContextBarSlots {
         label: 'Transport',
         text: transportShortLabel(input),
       });
-      if (input.busyProgress) {
-        center.push(busyProgressFact(input.busyProgress));
+      {
+        const lines = itemCountFact(input.lineCount, input.pendingCount);
+        if (lines) right.push(lines);
       }
       break;
     }
@@ -128,8 +142,8 @@ export function deriveContextBarSlots(input: ContextBarInput): ContextBarSlots {
         left.push({
           key: 'created',
           icon: 'calendar',
-          label: 'Arrived',
-          text: formatShortDateLabel(input.createdAt),
+          label: 'Submitted',
+          text: formatSubmittedLabel(input.createdAt),
         });
       }
       const lines = lineCountFact(input.lineCount, input.pendingCount);
@@ -137,12 +151,22 @@ export function deriveContextBarSlots(input: ContextBarInput): ContextBarSlots {
       break;
     }
     case 'picking': {
-      if (input.createdAt) {
-        left.push({
-          key: 'created',
-          icon: 'calendar',
-          label: 'Arrived',
-          text: formatShortDateLabel(input.createdAt),
+      if (input.flagSummary) {
+        center.push({
+          key: 'flags',
+          text: input.flagSummary,
+          pill: 'warning',
+        });
+      } else if (input.pickingNotStarted) {
+        center.push({
+          key: 'pick-wait',
+          text: 'Waiting for picker to start',
+          pill: 'warning',
+        });
+      } else if (input.pickProgress && input.pickProgress.total > 0) {
+        center.push({
+          key: 'pick-progress',
+          text: `${input.pickProgress.done}/${input.pickProgress.total} lines picked`,
         });
       }
       showPicker = Boolean(input.pickerName);
@@ -187,10 +211,4 @@ export function deriveContextBarSlots(input: ContextBarInput): ContextBarSlots {
   }
 
   return { urgentTint, left, center, right, showPicker, pickerActive };
-}
-
-function formatShortDateLabel(value: string): string {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }

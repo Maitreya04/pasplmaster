@@ -1,5 +1,6 @@
 import type { BillingOperatorStage } from './deriveBillingOperatorStage';
 import { billingStageBarIndex } from './deriveBillingOperatorStage';
+import type { PickLineProgress } from '../cartSupply';
 
 export type StageBarModifier = 'neutral' | 'warning' | 'critical';
 
@@ -8,8 +9,11 @@ export interface StageBarPresentationInput {
   editCount?: number;
   openFlagCount?: number;
   busyProgress?: { entered: number; total: number };
+  pickProgress?: PickLineProgress;
   allLinesRemoved?: boolean;
   checkerPending?: boolean;
+  /** Busy entry preview: no billable lines, so assign/pick steps won't run. */
+  skipWarehousePick?: boolean;
 }
 
 export interface StageStepPresentation {
@@ -17,6 +21,7 @@ export interface StageStepPresentation {
   label: string;
   isDone: boolean;
   isActive: boolean;
+  isSkipped?: boolean;
   modifier: StageBarModifier;
 }
 
@@ -51,21 +56,22 @@ function activeLabel(
 
   switch (stepId) {
     case 'busy_entry': {
-      const { busyProgress } = input;
-      if (!busyProgress || busyProgress.total <= 0) {
-        return { label: base, modifier: 'neutral' };
+      if (input.skipWarehousePick) {
+        return { label: `${base} · no pick`, modifier: 'neutral' };
       }
-      const complete =
-        busyProgress.entered >= busyProgress.total && busyProgress.total > 0;
-      const suffix = complete ? ' ✓' : '';
-      return {
-        label: `${base} · ${busyProgress.entered}/${busyProgress.total}${suffix}`,
-        modifier: complete ? 'neutral' : 'warning',
-      };
+      return { label: base, modifier: 'neutral' };
     }
     case 'picking': {
       if (input.allLinesRemoved) {
         return { label: `${base} · all removed`, modifier: 'critical' };
+      }
+      const pp = input.pickProgress;
+      if (pp && pp.total > 0) {
+        const flagSuffix = pp.flagged > 0 ? ` · ${pp.flagged} flagged` : '';
+        return {
+          label: `${base} · ${pp.done}/${pp.total}${flagSuffix}`,
+          modifier: pp.flagged > 0 ? 'warning' : 'neutral',
+        };
       }
       if (input.editCount && input.editCount > 0) {
         const edits = input.editCount === 1 ? 'edit' : 'edits';
@@ -103,13 +109,31 @@ export function deriveStageBarPresentation(
   const activeIdx = billingStageBarIndex(input.stage);
   const barDoneTint = input.stage === 'done';
 
+  const warehousePickStepIds = new Set(['assign_picker', 'picking']);
+
   const steps: StageStepPresentation[] = STEP_IDS.map((stepId, idx) => {
     const isDone = idx < activeIdx || input.stage === 'done';
     const isActive = idx === activeIdx && input.stage !== 'done';
+    const isSkipped =
+      input.skipWarehousePick &&
+      input.stage === 'busy_entry' &&
+      idx > activeIdx &&
+      warehousePickStepIds.has(stepId);
 
     if (isActive) {
       const { label, modifier } = activeLabel(stepId, input);
       return { id: stepId, label, isDone: false, isActive: true, modifier };
+    }
+
+    if (isSkipped) {
+      return {
+        id: stepId,
+        label: BASE_LABELS[stepId] ?? stepId,
+        isDone: false,
+        isActive: false,
+        isSkipped: true,
+        modifier: 'neutral',
+      };
     }
 
     return {

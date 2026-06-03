@@ -7,16 +7,12 @@ import { useOrderDetail } from '../../../hooks/useOrderDetail';
 import { useWorkClaim } from '../../../hooks/useWorkClaim';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
-import {
-  formatInternalNotificationError,
-  sendInternalNotification,
-  sendPickerReadyNotification,
-} from '../../../lib/pickerPush';
+import { sendPickerReadyNotification } from '../../../lib/pickerPush';
 import { applyBillingApprove } from '../../../lib/billing/applyBillingApprove';
 import { completeBillingWithClaim } from '../../../lib/billing/completeBilling';
 import { shouldNotifyPickers } from '../../../lib/billing/fulfillmentPath';
-import { ACCOUNT_HOLD_NOTE } from '../../../lib/billing/rejectionKind';
-import type { FulfillmentPath, RejectionKind } from '../../../types';
+import type { FulfillmentPath } from '../../../types';
+import { useRejectBillingOrder } from '../../../hooks/useRejectBillingOrder';
 import { formatSupabaseUserMessage } from '../../../lib/supabase/formatUserMessage';
 import {
   captureBillingLiveQueueBaseline,
@@ -592,90 +588,8 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
     },
   });
 
-  const rejectMutation = useMutation({
-    mutationFn: async ({
-      kind,
-      reason,
-    }: {
-      kind: RejectionKind;
-      reason: string;
-    }) => {
-      if (!order) throw new Error('No order selected');
-      if (!userId) throw new Error('Not signed in');
-
-      const trimmedReason = reason.trim();
-      if (kind === 'terminal' && !trimmedReason) {
-        throw new Error('Rejection reason is required');
-      }
-
-      if (kind === 'account_hold') {
-        const { data, error } = await supabase.rpc('hold_order_for_account_lock', {
-          p_order_id: order.id,
-          p_actor_user_id: userId,
-          p_actor_name: userName ?? 'Billing',
-          p_notes: trimmedReason || ACCOUNT_HOLD_NOTE,
-        });
-        if (error) throw error;
-        const payload = data as { success?: boolean; error?: string };
-        if (!payload?.success) {
-          throw new Error(payload.error ?? 'hold_failed');
-        }
-      } else {
-        const { error: updateError } = await supabase
-          .from('orders')
-          .update({
-            workflow_status: 'rejected',
-            rejection_kind: 'terminal',
-            notes: trimmedReason,
-          })
-          .eq('id', order.id);
-
-        if (updateError) throw updateError;
-      }
-
-      const notifyReason =
-        kind === 'account_hold'
-          ? trimmedReason || ACCOUNT_HOLD_NOTE
-          : trimmedReason;
-
-      await sendInternalNotification({
-        eventType: 'order_update_for_sales',
-        orderId: order.id,
-        orderNumber: order.order_number,
-        customerName: order.customer_name,
-        salespersonName: order.salesperson_name,
-        messageBody:
-          kind === 'account_hold'
-            ? `Billing placed order ${order.order_number} on hold (account locked). ${notifyReason}`
-            : `Billing rejected order ${order.order_number}. Reason: ${notifyReason}`,
-      }).catch((e) => {
-        console.error('order_update_for_sales', e);
-        toast.error(
-          `Sales notification failed: ${formatInternalNotificationError(e)}`,
-        );
-      });
-
-      return kind;
-    },
-    onSuccess: (kind) => {
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-      queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-      void invalidateLocationwiseStockQueries(queryClient);
-      if (order) {
-        queryClient.invalidateQueries({ queryKey: ['order', order.id] });
-      }
-      toast.success(
-        kind === 'account_hold'
-          ? 'Order on hold (account locked) — sales notified'
-          : 'Order rejected and salesperson notified',
-      );
-      void handleSkip();
-    },
-    onError: (err: unknown) => {
-      const msg =
-        err instanceof Error && err.message ? err.message : 'Failed to reject order';
-      toast.error(msg);
-    },
+  const rejectMutation = useRejectBillingOrder(order, () => {
+    void handleSkip();
   });
 
   // ── Urgent interrupt banner ──

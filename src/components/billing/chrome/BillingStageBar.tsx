@@ -7,6 +7,7 @@ import {
   UserPlus,
   type Icon,
 } from '@phosphor-icons/react';
+import type { PickLineProgress } from '../../../lib/cartSupply';
 import type { BillingOperatorStage } from '../../../lib/billing/deriveBillingOperatorStage';
 import {
   deriveStageBarPresentation,
@@ -39,9 +40,11 @@ interface BillingStageBarProps {
   editCount?: number;
   compact?: boolean;
   busyProgress?: { entered: number; total: number };
+  pickProgress?: PickLineProgress;
   openFlagCount?: number;
   allLinesRemoved?: boolean;
   checkerPending?: boolean;
+  skipWarehousePick?: boolean;
 }
 
 export function BillingStageBar({
@@ -49,17 +52,21 @@ export function BillingStageBar({
   editCount = 0,
   compact = false,
   busyProgress,
+  pickProgress,
   openFlagCount = 0,
   allLinesRemoved = false,
   checkerPending = false,
+  skipWarehousePick = false,
 }: BillingStageBarProps): React.JSX.Element {
   const { steps, barDoneTint } = deriveStageBarPresentation({
     stage,
     editCount,
     busyProgress,
+    pickProgress,
     openFlagCount,
     allLinesRemoved,
     checkerPending,
+    skipWarehousePick,
   });
 
   return (
@@ -94,6 +101,13 @@ export function BillingStageBar({
               ) : step.isDone ? (
                 <span className="billing-chrome-stage-step inline-flex items-center gap-1 px-1 whitespace-nowrap text-[var(--content-positive)]">
                   <CheckCircle size={13} weight="fill" />
+                  {displayLabel}
+                </span>
+              ) : step.isSkipped ? (
+                <span
+                  className="billing-chrome-stage-step inline-flex items-center px-1 whitespace-nowrap text-[var(--content-quaternary)] opacity-50 line-through decoration-[var(--content-quaternary)]/50"
+                  aria-label={`${displayLabel} skipped`}
+                >
                   {displayLabel}
                 </span>
               ) : (

@@ -1,23 +1,27 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import type { RejectionKind } from '../../types';
+import { BillingRejectDialog } from './BillingRejectDialog';
+import { useRejectBillingOrder } from '../../hooks/useRejectBillingOrder';
+import { computePickLineProgress } from '../../lib/cartSupply';
 import { deriveBillingOperatorStage } from '../../lib/billing/deriveBillingOperatorStage';
+import { derivePickingMonitorPresentation } from '../../lib/billing/pickingMonitorPresentation';
 import {
   formatDeskFlagSummarySubtitle,
   summarizeDeskFlags,
 } from '../../lib/billing/deskLineFlagKind';
-import { busyPasteProgress, BusyPasteStage } from './stages/BusyPasteStage';
+import { useBusyPasteModel } from '../../lib/billing/useBusyPasteModel';
 import { AssignPickerStage } from './stages/AssignPickerStage';
 import { PostPickReviewStage } from './stages/PostPickReviewStage';
+import { PickingBillStage } from './stages/PickingBillStage';
 import { CompleteHandoffStage } from './stages/CompleteHandoffStage';
 import { BillingOrderChrome } from './chrome/BillingOrderChrome';
 import { BillingBillHeader } from './chrome/BillingBillHeader';
+import { BillingBusyDock } from './busyEntry/BillingBusyDock';
+import { BusyPasteLineList } from './busyEntry/BusyPasteLineList';
 import { usePickerLoad } from '../../hooks/usePickerLoad';
 import type { BillSheetEdits } from '../../hooks/useBillSheetEdits';
 import type { DeskOrderRow } from '../../hooks/useBillingDeskOrders';
 import type { OrderWithItems } from '../../types';
-import {
-  countBusyBillableLines,
-  countFullyPendingBusyLines,
-} from '../../lib/billing/busyLineSplit';
 import type { BillingLineEdit, ItemFlag } from '../../hooks/useBillingFlow';
 import { formatCurrencyRaw } from '../../utils/formatters';
 
@@ -27,6 +31,8 @@ interface BillingOrderStageBodyProps {
   billSheet: BillSheetEdits;
   flaggedMode: boolean;
   embedded?: boolean;
+  /** Desk left pane: show bill header and inline assign while embedded. */
+  deskEmbedded?: boolean;
   onClose?: () => void;
   /** Submitted-order busy paste (live queue / review pre-approve). */
   busyPaste?: {
@@ -44,11 +50,28 @@ export function BillingOrderStageBody({
   billSheet,
   flaggedMode,
   embedded = false,
+  deskEmbedded = false,
   onClose,
   busyPaste,
 }: BillingOrderStageBodyProps): React.JSX.Element {
   const { pickers, colors: pickerColors } = usePickerLoad();
   const [showAssign, setShowAssign] = useState(false);
+  const [showReject, setShowReject] = useState(false);
+  const [rejectKind, setRejectKind] = useState<RejectionKind>('account_hold');
+  const [rejectReason, setRejectReason] = useState('');
+
+  const canReject = orderDetail.workflow_status === 'submitted';
+  const rejectMutation = useRejectBillingOrder(
+    canReject ? orderDetail : null,
+    () => onClose?.(),
+  );
+
+  const handleRejectConfirm = useCallback(() => {
+    if (rejectMutation.isPending) return;
+    const trimmedReason = rejectReason.trim();
+    if (!trimmedReason) return;
+    rejectMutation.mutate({ kind: rejectKind, reason: trimmedReason });
+  }, [rejectKind, rejectReason, rejectMutation]);
 
   const stage = useMemo(
     () =>
@@ -65,13 +88,17 @@ export function BillingOrderStageBody({
     [orderDetail, order],
   );
 
-  const billableCount = busyPaste
-    ? countBusyBillableLines(orderDetail.items, busyPaste.flags, busyPaste.lineEdits)
-    : 0;
+  const busyPasteModel = useBusyPasteModel({
+    orderId: order.id,
+    items: orderDetail.items,
+    lineEdits: busyPaste?.lineEdits ?? {},
+    flags: busyPaste?.flags ?? {},
+    enabled: Boolean(busyPaste),
+    finishLoading: busyPaste?.finishLoading,
+  });
 
-  const skipCount = busyPaste
-    ? countFullyPendingBusyLines(orderDetail.items, busyPaste.flags, busyPaste.lineEdits)
-    : 0;
+  const skipWarehousePick =
+    stage === 'busy_entry' && busyPasteModel.billableCount === 0 && busyPasteModel.skipCount > 0;
 
   const editCount = billSheet.unresolvedFlagged.length;
 
@@ -88,8 +115,40 @@ export function BillingOrderStageBody({
     billSheet.visibleItems.length === 0;
 
   const busyProgressForContext = busyPaste
-    ? { entered: busyPasteProgress(order.id, billableCount).entered, total: billableCount }
+    ? { entered: busyPasteModel.enteredCount, total: busyPasteModel.billableCount }
     : undefined;
+
+  const pickProgressForStage = useMemo(() => {
+    if (stage !== 'picking') return undefined;
+    return computePickLineProgress(
+      orderDetail.items.map((item) => ({
+        state: item.state,
+        qty_requested: item.qty_requested,
+        qty_shippable: item.qty_shippable,
+        qty_po: item.qty_po,
+        qty_approved: item.qty_approved,
+        split_from_id: item.split_from_id,
+      })),
+    );
+  }, [stage, orderDetail.items]);
+
+  const pickingFlagSummary = useMemo(() => {
+    if (stage !== 'picking' || pickProgressForStage?.flagged === 0) return null;
+    const flagged = orderDetail.items.filter((i) => i.state === 'flagged');
+    const counts = summarizeDeskFlags(flagged.map((i) => i.flag_reason));
+    return formatDeskFlagSummarySubtitle(counts) || `${pickProgressForStage?.flagged} flagged`;
+  }, [stage, orderDetail.items, pickProgressForStage?.flagged]);
+
+  const pickingMonitor = useMemo(() => {
+    if (stage !== 'picking') return null;
+    return derivePickingMonitorPresentation({
+      deskStatus: order.deskStatus,
+      pickingClaimStale: order.pickingClaimStale,
+      pickerName: orderDetail.picker_name,
+      workflowStatus: orderDetail.workflow_status,
+      progress: pickProgressForStage,
+    });
+  }, [stage, order, orderDetail, pickProgressForStage]);
 
   return (
     <div className="relative flex flex-col min-h-0 flex-1">
@@ -99,18 +158,24 @@ export function BillingOrderStageBody({
         editCount={editCount}
         openFlagCount={order.pickerFlags.length}
         allLinesRemoved={allLinesRemoved}
-        showNavBar={!embedded && !!onClose}
+        skipWarehousePick={skipWarehousePick}
+        pickProgress={pickProgressForStage}
+        showNavBar={(deskEmbedded || (!embedded && !!onClose)) && Boolean(onClose)}
         onBack={onClose}
+        onReject={canReject ? () => setShowReject(true) : undefined}
+        rejectDisabled={rejectMutation.isPending}
         billHeader={
-          embedded ? undefined : (
+          !embedded || deskEmbedded ? (
             <BillingBillHeader
               customerName={orderDetail.customer_name}
+              customerCity={orderDetail.customer_city}
+              customerAddress={orderDetail.customer_address}
               orderId={orderDetail.order_number}
               createdAt={orderDetail.created_at}
               priority={order.priority}
               transportName={orderDetail.transport_name}
             />
-          )
+          ) : undefined
         }
         context={{
           salesperson: orderDetail.salesperson_name,
@@ -119,12 +184,17 @@ export function BillingOrderStageBody({
           pickerName: orderDetail.picker_name,
           reviewerName: orderDetail.reviewer_name,
           busyProgress: busyProgressForContext,
+          pickProgress: pickProgressForStage,
           lineCount: orderDetail.items.length,
-          pendingCount: skipCount > 0 ? skipCount : undefined,
-          flagSummary,
+          pendingCount: busyPasteModel.skipCount > 0 ? busyPasteModel.skipCount : undefined,
+          flagSummary: stage === 'picking' ? pickingFlagSummary : flagSummary,
+          pickingNotStarted: pickingMonitor?.contextNotStarted ?? false,
           ewayNeeded: stage === 'review_finalise' && Boolean(orderDetail.transport_name),
           completedAt: orderDetail.completed_at,
-          onPickerClick: () => setShowAssign(true),
+          onPickerClick:
+            stage === 'picking' || stage === 'assign_picker'
+              ? () => setShowAssign(true)
+              : undefined,
         }}
         summaryStats={
           stage === 'review_finalise' ||
@@ -142,24 +212,47 @@ export function BillingOrderStageBody({
               ]
             : undefined
         }
+        actions={
+          stage === 'busy_entry' && busyPaste ? (
+            <BillingBusyDock
+              billableCount={busyPasteModel.billableCount}
+              qtyTotal={busyPasteModel.billableQtyTotal}
+              skipCount={busyPasteModel.skipCount}
+              specialRateCount={busyPasteModel.specialRateCount}
+              focCount={busyPasteModel.focCount}
+              pendingCount={busyPasteModel.pendingCount}
+              finishAction={busyPasteModel.finishAction}
+              onCopy={busyPasteModel.copyBillable}
+              copyJustCopied={busyPasteModel.copyJustCopied}
+              hasCopiedOnce={busyPasteModel.hasCopiedOnce}
+              onFinish={busyPaste.onFinish}
+              onSpecialRateClick={() =>
+                busyPasteModel.scrollToLine(busyPasteModel.firstSpecialRateLineId)
+              }
+              onFocClick={() => busyPasteModel.scrollToLine(busyPasteModel.firstFocLineId)}
+              onPendingClick={() =>
+                busyPasteModel.scrollToLine(busyPasteModel.firstPendingLineId)
+              }
+              finishLoading={busyPaste.finishLoading}
+            />
+          ) : undefined
+        }
       >
         {stage === 'busy_entry' && busyPaste ? (
-          <BusyPasteStage
-            orderId={order.id}
-            items={orderDetail.items}
+          <BusyPasteLineList
+            model={busyPasteModel}
             lineEdits={busyPaste.lineEdits}
             flags={busyPaste.flags}
-            onFinish={busyPaste.onFinish}
-            finishLoading={busyPaste.finishLoading}
           />
         ) : null}
 
         {stage === 'picking' && !showAssign ? (
-          <div className="p-4 font-ds-caption-size text-[var(--content-secondary)]">
-            Pick in progress
-            {orderDetail.picker_name ? ` · ${orderDetail.picker_name}` : ''}. Monitor on the
-            Picking tab — bill actions unlock when the pick completes.
-          </div>
+          <PickingBillStage
+            order={order}
+            orderDetail={orderDetail}
+            items={billSheet.sortedLines}
+            pendingByItemId={billSheet.pendingByItemId}
+          />
         ) : null}
 
         {(stage === 'resolve_flags' || stage === 'review_finalise') && !showAssign ? (
@@ -185,23 +278,45 @@ export function BillingOrderStageBody({
           </>
         ) : null}
 
-        {(stage === 'assign_picker' || showAssign) ? (
+        {stage === 'assign_picker' && !showAssign ? (
           <AssignPickerStage
             order={order}
             pickers={pickers}
             pickerColors={pickerColors}
-            onClose={() => {
-              setShowAssign(false);
-              onClose?.();
-            }}
-            onAssigned={() => {
-              setShowAssign(false);
-              onClose?.();
-            }}
+            onClose={onClose}
+            onAssigned={() => onClose?.()}
+            variant={deskEmbedded ? 'inline' : 'overlay'}
+          />
+        ) : null}
+
+        {showAssign ? (
+          <AssignPickerStage
+            order={order}
+            pickers={pickers}
+            pickerColors={pickerColors}
+            onClose={() => setShowAssign(false)}
+            onAssigned={() => setShowAssign(false)}
             variant="overlay"
           />
         ) : null}
       </BillingOrderChrome>
+
+      {showReject ? (
+        <BillingRejectDialog
+          customerName={orderDetail.customer_name}
+          rejectKind={rejectKind}
+          rejectReason={rejectReason}
+          isSubmitting={rejectMutation.isPending}
+          onRejectKindChange={setRejectKind}
+          onRejectReasonChange={setRejectReason}
+          onCancel={() => {
+            setShowReject(false);
+            setRejectReason('');
+            setRejectKind('account_hold');
+          }}
+          onConfirm={handleRejectConfirm}
+        />
+      ) : null}
     </div>
   );
 }

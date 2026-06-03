@@ -4,7 +4,7 @@ import {
 } from './deskOrderTab';
 import type { FulfillmentPath, StockLocationCode, WorkflowStatus } from '../../types';
 
-export type DeskOrderTab = 'resolve' | 'assign' | 'picking' | 'review' | 'completed';
+export type DeskOrderTab = 'assign' | 'picking' | 'resolve' | 'completed';
 
 export type DeskOrderStatus =
   | 'picking'
@@ -39,12 +39,23 @@ export function orderHasDeskPickerFlags(
   return order.deskStatus === 'flagged' || order.pickerFlags.length > 0;
 }
 
-/** Resolve queue — post-pick flags and flagged orders; active picks stay on Picking. */
+/** Resolve queue — completed picks waiting for billing action; active picks stay on Picking. */
 export function orderBelongsOnDeskResolveTab(
-  order: Pick<DeskQueueOrder, 'deskStatus' | 'pickerFlags' | 'workflow_status'>,
+  order: Pick<
+    DeskQueueOrder,
+    | 'deskStatus'
+    | 'pickerFlags'
+    | 'workflow_status'
+    | 'reviewer_name'
+    | 'fulfillment_path'
+    | 'stock_location_code'
+  >,
 ): boolean {
-  if (!orderHasDeskPickerFlags(order)) return false;
-  return order.workflow_status !== 'picking';
+  if (order.workflow_status === 'picking') return false;
+  if (order.workflow_status === 'flagged') return true;
+  if (order.workflow_status !== 'completed') return false;
+  if (orderHasDeskPickerFlags(order)) return true;
+  return needsDeskBillReview(order);
 }
 
 export function isDeskOrderStale(order: DeskQueueOrder): boolean {
@@ -57,9 +68,13 @@ export function isDeskOrderStale(order: DeskQueueOrder): boolean {
 
 export function isAssignTabOrder(order: DeskQueueOrder): boolean {
   if (orderBelongsOnDeskResolveTab(order)) return false;
-  if (order.deskStatus === 'unassigned' || order.deskStatus === 'no_ack') return true;
-  if (order.workflow_status === 'approved' && isDeskOrderStale(order)) return true;
-  return false;
+  return order.workflow_status === 'approved' && !order.picker_name?.trim();
+}
+
+export function isPickingTabOrder(order: DeskQueueOrder): boolean {
+  if (orderBelongsOnDeskResolveTab(order)) return false;
+  if (order.workflow_status === 'picking') return true;
+  return order.workflow_status === 'approved' && Boolean(order.picker_name?.trim());
 }
 
 export function filterDeskOrdersByTab<T extends DeskQueueOrder>(
@@ -73,12 +88,7 @@ export function filterDeskOrdersByTab<T extends DeskQueueOrder>(
     return orders.filter(isAssignTabOrder);
   }
   if (tab === 'picking') {
-    return orders.filter((o) => o.deskStatus === 'picking');
-  }
-  if (tab === 'review') {
-    return orders.filter(
-      (o) => !orderBelongsOnDeskResolveTab(o) && needsDeskBillReview(o),
-    );
+    return orders.filter(isPickingTabOrder);
   }
   return orders.filter(
     (o) => !orderBelongsOnDeskResolveTab(o) && isDeskBillingFinalized(o),

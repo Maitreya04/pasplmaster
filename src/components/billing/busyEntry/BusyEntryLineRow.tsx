@@ -5,37 +5,38 @@ import type { BusyEntryLineNature } from '../../../lib/billing/busyEntryLineNatu
 import { BusyEntryCheckbox, BusyEntryCheckboxHeader } from './BusyEntryCheckbox';
 import { BusyEntryCode } from './BusyEntryCode';
 import type { BillingFreshnessRow } from '../../../hooks/useBillingStockFreshness';
-import {
-  billingFreshnessChipLabel,
-  billingFreshnessChipTitle,
-} from '../../../hooks/useBillingStockFreshness';
-import { salesLineUnitLabel } from '../../../lib/salesUnit';
-import { getBookPrice, getQuotedPrice } from '../../../lib/specialPricing';
+import { SalesUnitBadge } from '../../shared/SalesUnitBadge';
+import { effectiveSalesLineUnit, salesLineUnitLabel } from '../../../lib/salesUnit';
+import type { BillingLineEdit } from '../../../lib/billing/liveQueueDraft';
 import type { ItemFlag } from '../../../hooks/useBillingFlow';
 import type { OrderItem } from '../../../types';
-import { formatCurrencyRaw, orderItemReadableName } from '../../../utils/formatters';
+import { orderItemReadableName } from '../../../utils/formatters';
+import { BusyEntryLineChips } from './BusyEntryLineChips';
+import { BusyEntryRateCell } from './BusyEntryRateCell';
+import { BusyEntryQtyUnit } from './BusyEntryQtyUnit';
 
 export type LineNature = BusyEntryLineNature;
 export type LineStatus = 'active' | 'pending' | 'removed';
 
 const STRIPE_COLORS: Record<BusyEntryLineNature, string> = {
-  normal: 'var(--border-opaque)',
-  foc: '#1D9E75',
-  special_rate: '#7F77DD',
+  normal: 'transparent',
+  foc: 'var(--content-positive)',
+  special_rate: 'var(--content-accent)',
   scheme: '#EF9F27',
 };
 
 const ROW_TINTS: Record<BusyEntryLineNature, string> = {
   normal: 'transparent',
-  foc: 'color-mix(in srgb, #EAF3DE 4%, transparent)',
-  special_rate: 'color-mix(in srgb, #EEEDFE 4%, transparent)',
+  foc: 'color-mix(in srgb, var(--bg-positive-subtle) 18%, transparent)',
+  special_rate: 'color-mix(in srgb, var(--bg-accent-subtle) 18%, transparent)',
   scheme: 'transparent',
 };
 
-function getStripeColor(nature: LineNature, status: LineStatus): string {
-  if (status === 'pending') return 'color-mix(in srgb, #378ADD 45%, transparent)';
+function getAccentColor(nature: LineNature, status: LineStatus): string | null {
+  if (status === 'pending') return 'var(--border-warning)';
   if (status === 'removed') return 'color-mix(in srgb, #E24B4A 50%, transparent)';
-  return STRIPE_COLORS[nature];
+  const color = STRIPE_COLORS[nature];
+  return color === 'transparent' ? null : color;
 }
 
 function getRowTint(nature: LineNature, status: LineStatus): string {
@@ -44,13 +45,8 @@ function getRowTint(nature: LineNature, status: LineStatus): string {
   return ROW_TINTS[nature];
 }
 
-function formatRate(rate: number | null): string {
-  return rate == null ? '—' : formatCurrencyRaw(rate);
-}
-
 export interface BusyEntryLineRowProps {
   item: OrderItem;
-  lineNo: number;
   isActive: boolean;
   isSkip: boolean;
   entered: boolean;
@@ -91,6 +87,7 @@ export interface BusyEntryLineRowProps {
   onPartialCancel: () => void;
   onPartialQtyChange: (value: string) => void;
   onApplyLiveStock?: () => void;
+  lineEdit?: Pick<BillingLineEdit, 'salesUnit'> | null;
 }
 
 interface BusyEntryTableHeaderProps {
@@ -112,24 +109,23 @@ export function BusyEntryTableHeader({
           totalCount={totalCount}
           onToggleAll={onToggleAll}
         />
-        <th className="w-2 p-0" style={{ padding: 0, width: '8px', minWidth: '8px' }} aria-hidden />
         <th
-          className="w-[148px] px-2.5 text-left font-ds-caption-size font-medium text-[var(--content-tertiary)]"
+          className="billing-col-alias1 w-[148px] px-3 text-left busy-entry-col-header"
           style={{ borderRight: '0.5px solid var(--border-opaque)' }}
         >
           Part no.
         </th>
-        <th className="min-w-0 px-2.5 text-left font-ds-caption-size font-medium text-[var(--content-tertiary)]">
+        <th className="billing-col-item min-w-0 px-2.5 text-left busy-entry-col-header">
           Description
         </th>
-        <th className="w-24 px-2.5 text-right font-ds-caption-size font-medium text-[var(--content-tertiary)]">
+        <th className="billing-col-rate w-24 px-2.5 text-right busy-entry-col-header">
           Bill rate
         </th>
-        <th className="w-16 px-2.5 text-right font-ds-caption-size font-medium text-[var(--content-tertiary)]">
-          Qty
-        </th>
-        <th className="w-16 px-2.5 text-center font-ds-caption-size font-medium text-[var(--content-tertiary)]">
+        <th className="billing-col-unit w-[5.25rem] px-2.5 text-right busy-entry-col-header">
           Unit
+        </th>
+        <th className="billing-col-qty w-[4.5rem] px-2.5 text-right busy-entry-col-header">
+          Qty
         </th>
       </tr>
     </thead>
@@ -138,7 +134,6 @@ export function BusyEntryTableHeader({
 
 export function BusyEntryLineRow({
   item,
-  lineNo,
   isActive,
   isSkip,
   entered,
@@ -172,7 +167,9 @@ export function BusyEntryLineRow({
   onPartialCancel,
   onPartialQtyChange,
   onApplyLiveStock,
+  lineEdit,
 }: BusyEntryLineRowProps): React.JSX.Element {
+  const unit = effectiveSalesLineUnit(item, lineEdit);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const effectiveStatus: LineStatus = isSkip
@@ -180,7 +177,7 @@ export function BusyEntryLineRow({
       ? 'pending'
       : status
     : status;
-  const stripeColor = getStripeColor(nature, effectiveStatus);
+  const accentColor = getAccentColor(nature, effectiveStatus);
   const rowTint = getRowTint(nature, effectiveStatus);
   const isPending = isSkip && effectiveStatus === 'pending';
   const displayQty = isSkip
@@ -189,9 +186,6 @@ export function BusyEntryLineRow({
       : item.qty_requested
     : billableQty ?? item.qty_requested;
   const isRemoved = effectiveStatus === 'removed';
-  const billedRate = getQuotedPrice(item);
-  const bookRate = getBookPrice(item);
-  const showOriginal = bookRate != null && billedRate != null && bookRate !== billedRate;
 
   const rowOpacity = isRemoved ? 0.75 : isPending ? 0.65 : 1;
   return (
@@ -206,6 +200,7 @@ export function BusyEntryLineRow({
           ? 'color-mix(in srgb, var(--bg-positive-subtle) 16%, var(--bg-secondary))'
           : rowTint,
         opacity: rowOpacity,
+        boxShadow: accentColor ? `inset 3px 0 0 ${accentColor}` : undefined,
       }}
     >
       <td className="w-10 px-0 text-center align-middle">
@@ -213,7 +208,6 @@ export function BusyEntryLineRow({
           <BusyEntryCheckbox
             entered={entered}
             itemName={orderItemReadableName(item)}
-            lineNo={lineNo}
             forceVisible={isActive}
             onToggle={onToggleEntered}
           />
@@ -221,117 +215,38 @@ export function BusyEntryLineRow({
       </td>
 
       <td
-        className="w-2 align-middle text-center"
-        style={{ padding: 0, width: '8px', minWidth: '8px' }}
-        aria-hidden
-      >
-        <span
-          className="mx-auto block h-8 w-[2px] rounded-full"
-          style={{ background: stripeColor }}
-        />
-      </td>
-
-      <td
-        className="w-[130px] px-2.5 align-middle"
+        className="billing-col-alias1 w-[148px] px-3 align-middle"
         style={{ borderRight: '0.5px solid var(--border-opaque)' }}
       >
         <div className="flex flex-col gap-0.5">
           <BusyEntryCode item={item} muted={isSkip || isPending} />
           {brandName && (
-            <span className="font-ds-caption-size truncate text-[var(--content-tertiary)]">
-              {brandName}
-            </span>
+            <span className="busy-entry-brand truncate">{brandName}</span>
           )}
         </div>
       </td>
 
-      <td className="min-w-0 py-2 px-2.5 align-middle relative">
+      <td className="billing-col-item min-w-0 py-2 px-2.5 align-middle relative">
         <div className="flex flex-col gap-0.5 min-w-0">
           <p
-            className="font-ds-body-size font-medium truncate leading-snug text-[var(--content-primary)]"
+            className="busy-entry-desc truncate leading-snug"
             title={orderItemReadableName(item)}
           >
             {isSplitSibling ? '↳ ' : ''}
             {orderItemReadableName(item)}
           </p>
-          <div className="flex flex-wrap items-center gap-1 mt-0.5">
-            {nature === 'foc' && (
-              <span
-                className="inline-flex items-center px-1.5 py-px rounded-[5px] text-[9px] font-medium"
-                style={{ background: '#EAF3DE', color: '#27500A' }}
-              >
-                FOC
-              </span>
-            )}
-            {nature === 'special_rate' && (
-              <span
-                className="inline-flex items-center px-1.5 py-px rounded-[5px] text-[9px] font-medium"
-                style={{ background: '#EEEDFE', color: '#3C3489' }}
-              >
-                Special rate
-              </span>
-            )}
-            {isPending && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onUndoFlag();
-                }}
-                title="Undo pending flag — bill this line instead (S)"
-                className="inline-flex items-center px-1.5 py-px rounded-[5px] text-[9px] font-medium hover:opacity-80"
-                style={{ background: '#E6F1FB', color: '#0C447C' }}
-              >
-                {flag?.type === 'partial' ? 'Partial stock' : 'Out of stock'}
-              </button>
-            )}
-            {!isSkip && pendingQty > 0 && (
-              <span
-                className="inline-flex items-center px-1.5 py-px rounded-[5px] text-[9px] font-semibold"
-                style={{ background: '#E6F1FB', color: '#0C447C' }}
-              >
-                {pendingQty} pending
-              </span>
-            )}
-            {isNew && (
-              <span
-                className="inline-flex items-center px-1.5 py-px rounded-[5px] text-[9px] font-medium"
-                style={{ background: 'var(--bg-positive-subtle)', color: 'var(--content-positive)' }}
-              >
-                New
-              </span>
-            )}
-            {isEdited && (
-              <span
-                className="inline-flex items-center px-1.5 py-px rounded-[5px] text-[9px] font-medium"
-                style={{ background: 'var(--bg-accent-subtle)', color: 'var(--content-accent)' }}
-              >
-                Edited
-              </span>
-            )}
-            {fresh?.isStale && fresh.liveCapacity != null ? (
-              fresh.canApplyLive ? (
-                <button
-                  type="button"
-                  className="ds-chip ds-chip--sm bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border-[var(--border-accent)]"
-                  title={billingFreshnessChipTitle(fresh)}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onApplyLiveStock?.();
-                  }}
-                >
-                  {billingFreshnessChipLabel(fresh)}
-                </button>
-              ) : (
-                <span
-                  className="ds-chip ds-chip--sm bg-[var(--bg-tertiary)] text-[var(--content-tertiary)]"
-                  title={billingFreshnessChipTitle(fresh)}
-                >
-                  {billingFreshnessChipLabel(fresh)}
-                </span>
-              )
-            ) : null}
-          </div>
+          <BusyEntryLineChips
+            nature={nature}
+            flag={flag}
+            pendingQty={pendingQty}
+            isPending={isPending}
+            isSkip={isSkip}
+            isNew={isNew}
+            isEdited={isEdited}
+            fresh={fresh}
+            onUndoFlag={onUndoFlag}
+            onApplyLiveStock={onApplyLiveStock}
+          />
         </div>
 
         {!isSkip && !showDeleteConfirm && (
@@ -375,20 +290,19 @@ export function BusyEntryLineRow({
         )}
       </td>
 
-      <td className="w-24 px-2.5 text-right align-middle tabular-nums">
-        <span className="block text-[13px] font-semibold text-[var(--content-primary)]">
-          {formatRate(billedRate)}
-        </span>
-        {showOriginal ? (
-          <span className="block text-[9px] leading-tight text-[var(--content-quaternary)]">
-            Orig {formatRate(bookRate)}
-          </span>
-        ) : null}
+      <td className="billing-col-rate w-24 px-2.5 text-right align-middle">
+        <BusyEntryRateCell item={item} nature={nature} />
       </td>
 
-      <td className="w-14 px-2.5 text-right align-middle tabular-nums">
+      <td className="billing-col-unit w-[5.25rem] px-2.5 text-right align-middle">
+        <div className="flex justify-end">
+          <SalesUnitBadge unit={unit} />
+        </div>
+      </td>
+
+      <td className="billing-col-qty w-[4.5rem] px-2.5 text-right align-middle">
         {isPartialInput ? (
-          <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+          <div className="inline-flex items-baseline justify-end gap-1" onClick={(e) => e.stopPropagation()}>
             <input
               ref={partialInputRef}
               type="number"
@@ -411,11 +325,12 @@ export function BusyEntryLineRow({
               max={item.qty_requested}
               className="ds-input w-12 text-right text-sm font-mono py-1 px-1"
             />
+            <span className="busy-entry-unit">{salesLineUnitLabel(unit)}</span>
           </div>
         ) : isSkip ? (
-          <span className="text-[14px] text-[var(--content-quaternary)]">{displayQty}</span>
+          <BusyEntryQtyUnit item={item} lineEdit={lineEdit} qty={displayQty} muted />
         ) : editingQty ? (
-          <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+          <div className="inline-flex items-baseline justify-end gap-1" onClick={(e) => e.stopPropagation()}>
             <input
               type="number"
               min={1}
@@ -434,35 +349,30 @@ export function BusyEntryLineRow({
               }}
               className="ds-input w-14 text-right text-sm font-mono py-1 px-2"
             />
+            <span className="busy-entry-unit">{salesLineUnitLabel(unit)}</span>
           </div>
         ) : (
           <button
             type="button"
-            className="inline-flex flex-col items-end"
+            className="inline-flex flex-col items-end text-right"
             onClick={(e) => {
               e.stopPropagation();
               onQtyEditStart();
             }}
           >
-            {qtyEdited && (
+            {qtyEdited ? (
               <span className="font-ds-caption-size line-through text-[var(--content-quaternary)] tabular-nums">
                 {serverQty}
               </span>
-            )}
-            <span className="text-[18px] font-medium text-[var(--content-primary)]">
-              {displayQty}
-            </span>
+            ) : null}
+            <BusyEntryQtyUnit
+              item={item}
+              lineEdit={lineEdit}
+              qty={displayQty}
+              pendingQty={pendingQty}
+            />
           </button>
         )}
-      </td>
-      <td className="w-16 px-2.5 text-center align-middle">
-        <span
-          className={`font-ds-caption-size font-semibold ${
-            isSkip || isPending ? 'text-[var(--content-quaternary)]' : 'text-[var(--content-secondary)]'
-          }`}
-        >
-          {salesLineUnitLabel(item.sales_unit)}
-        </span>
       </td>
     </tr>
   );

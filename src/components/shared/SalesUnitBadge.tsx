@@ -1,0 +1,33 @@
+import { normalizeSalesLineUnit, salesLineUnitLabel } from '../../lib/salesUnit';
+import type { SalesLineUnit } from '../../types';
+
+export interface SalesUnitBadgeProps {
+  unit: SalesLineUnit | unknown;
+  /** Emphasize non-pcs units (Kit / Set). */
+  emphasizeNonPcs?: boolean;
+  className?: string;
+}
+
+/** Read-only Pcs / Kit / Set label for cart review and billing display. */
+export function SalesUnitBadge({
+  unit,
+  emphasizeNonPcs = true,
+  className = '',
+}: SalesUnitBadgeProps): React.JSX.Element {
+  const normalized = normalizeSalesLineUnit(unit);
+  const label = salesLineUnitLabel(normalized);
+  const highlighted = emphasizeNonPcs && normalized !== 'pcs';
+
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 font-ds-caption-size font-bold leading-none tabular-nums ${
+        highlighted
+          ? 'border-[color-mix(in_srgb,var(--bg-accent)_35%,var(--border-subtle))] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+          : 'border-[var(--border-faint)] bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
+      } ${className}`.trim()}
+      title={`Selling as ${label}`}
+    >
+      {label}
+    </span>
+  );
+}

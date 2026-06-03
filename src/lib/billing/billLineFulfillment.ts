@@ -147,17 +147,22 @@ export function deriveBillLineFulfillment(
     };
   }
 
-  const qtyBill =
-    item.state === 'picked' || item.state === 'overridden' ? qtyOrdered : pickTarget;
+  const isWarehousePicked =
+    item.state === 'picked' || item.state === 'overridden';
+  const qtyBill = isWarehousePicked ? qtyOrdered : pickTarget;
 
   return {
     ...base,
     role: 'ship_today',
     chipLabel: isMrpSplit ? 'Bill · batch' : 'Bill today',
     chipTone: 'green',
-    summary: isMrpSplit
-      ? `${qtyBill} pcs picked (MRP batch) — enter in Busy`
-      : `${qtyBill} pcs picked — enter in Busy`,
+    summary: isWarehousePicked
+      ? isMrpSplit
+        ? `${qtyBill} pcs picked (MRP batch) — enter in Busy`
+        : `${qtyBill} pcs picked — enter in Busy`
+      : isMrpSplit
+        ? `${qtyBill} pcs to pick (MRP batch) when scanned`
+        : `${qtyBill} pcs to pick today — not scanned yet`,
     qtyBillToday: qtyBill,
     qtySalesPo: 0,
     qtyPickerOos: 0,

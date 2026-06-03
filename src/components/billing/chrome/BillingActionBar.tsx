@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Copy, Warning } from '@phosphor-icons/react';
+import { Copy } from '@phosphor-icons/react';
 import { billingShell } from './billingShell';
 
 interface BillingActionBarProps {
@@ -22,7 +22,7 @@ interface BillingActionBarProps {
 export function BillingActionBar({
   left,
   gateWarning,
-  primaryHint: _primaryHint,
+  primaryHint,
   warningText: legacyWarning,
   primaryLabel,
   primaryDisabled = false,
@@ -84,11 +84,16 @@ export function BillingActionBar({
 
         {warningMessage && primaryBlocked ? (
           <span
-            className="inline-flex items-center gap-1 font-ds-caption-size text-[var(--content-warning-on-light)]"
+            className="font-ds-caption-size leading-normal text-[var(--content-warning-on-light)]"
             role="status"
           >
-            <Warning size={13} weight="fill" />
             {warningMessage}
+          </span>
+        ) : null}
+
+        {primaryHint && !primaryBlocked ? (
+          <span className="hidden sm:inline font-ds-caption-size text-[var(--content-quaternary)] max-w-[14rem] text-right leading-snug">
+            {primaryHint}
           </span>
         ) : null}
 

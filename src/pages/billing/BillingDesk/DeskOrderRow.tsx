@@ -47,7 +47,8 @@ const STATUS_PILL: Record<
   },
 };
 
-function statusLabel(order: DeskOrderRow): string {
+function statusLabel(order: DeskOrderRow, completedView: boolean): string {
+  if (completedView) return 'Completed';
   const base = STATUS_PILL[order.deskStatus];
   if (
     (order.deskStatus === 'picking' || order.deskStatus === 'no_ack') &&
@@ -58,17 +59,26 @@ function statusLabel(order: DeskOrderRow): string {
   return base.label;
 }
 
+function isRecentlyCompleted(order: DeskOrderRow): boolean {
+  if (!order.completed_at) return false;
+  const completedMs = new Date(order.completed_at).getTime();
+  if (!Number.isFinite(completedMs)) return false;
+  return Date.now() - completedMs < 30 * 60 * 1000;
+}
+
 interface DeskOrderRowCardProps {
   order: DeskOrderRow;
   pickers: PickerLoadInfo[];
   pickerColors: Array<{ bg: string; text: string }>;
   pickProgress?: PickLineProgress;
   progressLoading?: boolean;
+  isSelected?: boolean;
   isAssignExpanded?: boolean;
   onAssignToggle?: () => void;
   onAssignClose?: () => void;
   showStaleActions?: boolean;
   showVerifyAction?: boolean;
+  showCompletedFreshness?: boolean;
   onEdit: () => void;
 }
 
@@ -78,11 +88,13 @@ export function DeskOrderRowCard({
   pickerColors,
   pickProgress,
   progressLoading,
+  isSelected = false,
   isAssignExpanded = false,
   onAssignToggle,
   onAssignClose,
   showStaleActions = false,
   showVerifyAction = false,
+  showCompletedFreshness = false,
   onEdit,
 }: DeskOrderRowCardProps): React.JSX.Element {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -91,7 +103,13 @@ export function DeskOrderRowCard({
   const timeSource = order.approved_at ?? order.picked_at ?? order.created_at;
   const showAssignAction = needsPickerAssignStrip(order);
   const reassign = isPickerReassign(order);
-  const needsAttention = order.pickingClaimStale || order.deskStatus === 'no_ack';
+  const statusPillClass = showCompletedFreshness
+    ? 'text-[var(--content-positive)] bg-[var(--bg-positive-subtle)]'
+    : pill.className;
+  const freshCompleted = showCompletedFreshness && isRecentlyCompleted(order);
+  const statusTooltip = showCompletedFreshness
+    ? 'Bill saved — billing handoff complete.'
+    : DESK_STATUS_TOOLTIPS[order.deskStatus];
 
   useEffect(() => {
     if (!isAssignExpanded || !cardRef.current) return;
@@ -113,8 +131,13 @@ export function DeskOrderRowCard({
       className={`
         rounded-lg border bg-[var(--bg-primary)] transition-colors overflow-hidden
         hover:border-[var(--border-opaque)] hover:shadow-sm
-        ${isAssignExpanded || completeExpanded ? 'border-[var(--role-primary)]/40 shadow-sm' : 'border-[var(--border-subtle)]'}
-        ${needsAttention && !isAssignExpanded && !completeExpanded ? 'border-l-2 border-l-[var(--border-warning)]' : ''}
+        ${
+          isSelected
+            ? 'border-[var(--role-primary)] ring-2 ring-[var(--role-primary)]/25 shadow-sm'
+            : isAssignExpanded || completeExpanded
+              ? 'border-[var(--role-primary)]/40 shadow-sm'
+              : 'border-[var(--border-subtle)]'
+        }
       `}
     >
       <div className="px-3 pt-2.5 pb-2.5">
@@ -129,16 +152,21 @@ export function DeskOrderRowCard({
               <span className={`${deskType.orderMeta} truncate`}>
                 {order.order_number} · {formatTimeAgo(timeSource)}
               </span>
-              <DeskTooltip label={DESK_STATUS_TOOLTIPS[order.deskStatus]} side="bottom">
+              <DeskTooltip label={statusTooltip} side="bottom">
                 <span
-                  className={`shrink-0 ${deskType.pill} px-2 py-0.5 rounded-full cursor-default ${pill.className}`}
+                  className={`shrink-0 ${deskType.pill} px-2 py-0.5 rounded-full cursor-default ${statusPillClass}`}
                 >
-                  {statusLabel(order)}
+                  {statusLabel(order, showCompletedFreshness)}
                 </span>
               </DeskTooltip>
+              {freshCompleted && (
+                <span className={`${deskType.pill} shrink-0 px-2 py-0.5 rounded-full bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]`}>
+                  Just completed
+                </span>
+              )}
             </div>
 
-            <p className={`${deskType.orderTitle} truncate mt-1`}>
+            <p className={`${deskType.orderTitle} line-clamp-2 mt-1`} title={order.customer_name}>
               {order.customer_name}
             </p>
 

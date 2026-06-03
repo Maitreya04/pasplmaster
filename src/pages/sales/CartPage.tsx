@@ -44,7 +44,10 @@ import {
   SearchableTransportDropdown,
 } from '../../components/shared';
 import type { Customer, CartItem } from '../../types';
-import { normalizeSalesLineUnit } from '../../lib/salesUnit';
+import { SalesUnitBadge } from '../../components/shared/SalesUnitBadge';
+import { SalesUnitRail } from '../../components/shared/SalesUnitRail';
+import { normalizeSalesLineUnit, salesLineUnitLabel } from '../../lib/salesUnit';
+import type { SalesLineUnit } from '../../types';
 
 import { formatCurrencyRaw as formatCurrency } from '../../utils/formatters';
 import { splitCartLinePaidFoc } from '../../lib/cartSupply';
@@ -541,6 +544,7 @@ interface BillingItemCardProps {
   onChangeShipQty: (lineId: string, newShipQty: number) => void;
   onRatePress: (item: CartItem) => void;
   onDeletePress: (item: CartItem) => void;
+  onUpdateSalesUnit: (lineId: string, unit: SalesLineUnit) => void;
   previewOnMount?: boolean;
 }
 
@@ -558,8 +562,10 @@ const BillingItemCard = memo(function BillingItemCard({
   onChangeShipQty,
   onRatePress,
   onDeletePress,
+  onUpdateSalesUnit,
   previewOnMount = false,
 }: BillingItemCardProps) {
+  const salesUnit = normalizeSalesLineUnit(cartItem.salesUnit);
   const [offset, setOffset] = useState(isOpen ? SWIPE_ACTION_WIDTH : 0);
   const [isDragging, setIsDragging] = useState(false);
   const [previewOffset, setPreviewOffset] = useState(0);
@@ -697,6 +703,7 @@ const BillingItemCard = memo(function BillingItemCard({
               </p>
 
               <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                <SalesUnitBadge unit={salesUnit} />
                 {hasSpecialRate && <SpecialRateChip />}
                 {hasFoc && <FocChip qty={focQty} />}
                 {hasSpecialRate && (
@@ -710,6 +717,19 @@ const BillingItemCard = memo(function BillingItemCard({
                   Includes {shippedFoc} FOC from stock (₹0)
                 </p>
               )}
+              <div
+                className="mt-3 max-w-[220px]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p className="mb-1.5 font-ds-micro font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+                  Sell as
+                </p>
+                <SalesUnitRail
+                  value={salesUnit}
+                  showLabel={false}
+                  onChange={(unit) => onUpdateSalesUnit(cartItem.lineId, unit)}
+                />
+              </div>
             </div>
 
             <div className="shrink-0 flex min-w-[142px] flex-col items-end gap-3.5 pl-4">
@@ -721,7 +741,7 @@ const BillingItemCard = memo(function BillingItemCard({
                   {formatCurrency(lineTotal)}
                 </p>
               </div>
-              <div className="flex w-full justify-end">
+              <div className="flex w-full flex-col items-end gap-1">
                 <NumberStepper
                   value={shipQty}
                   onChange={(newShipQty) => onChangeShipQty(cartItem.lineId, newShipQty)}
@@ -731,6 +751,9 @@ const BillingItemCard = memo(function BillingItemCard({
                   showRemoveAtMin={poQty === 0}
                   onRemove={poQty === 0 ? () => onDeletePress(cartItem) : undefined}
                 />
+                <p className="font-ds-micro font-semibold uppercase text-[var(--content-tertiary)]">
+                  ×{shipQty} {salesLineUnitLabel(salesUnit)}
+                </p>
               </div>
             </div>
           </div>
@@ -774,6 +797,7 @@ interface PurchaseOrderCardProps {
   onChangePoQty: (lineId: string, newPoQty: number) => void;
   onRatePress: (item: CartItem) => void;
   onDeletePress: (item: CartItem) => void;
+  onUpdateSalesUnit: (lineId: string, unit: SalesLineUnit) => void;
 }
 
 const PurchaseOrderCard = memo(function PurchaseOrderCard({
@@ -790,7 +814,9 @@ const PurchaseOrderCard = memo(function PurchaseOrderCard({
   onChangePoQty,
   onRatePress,
   onDeletePress,
+  onUpdateSalesUnit,
 }: PurchaseOrderCardProps) {
+  const salesUnit = normalizeSalesLineUnit(cartItem.salesUnit);
   const [offset, setOffset] = useState(isOpen ? SWIPE_ACTION_WIDTH : 0);
   const [isDragging, setIsDragging] = useState(false);
   const startXRef = useRef<number | null>(null);
@@ -909,6 +935,19 @@ const PurchaseOrderCard = memo(function PurchaseOrderCard({
                   {poFoc} FOC on PO (₹0)
                 </p>
               )}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <SalesUnitBadge unit={salesUnit} />
+              </div>
+              <div
+                className="mt-2 max-w-[220px]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <SalesUnitRail
+                  value={salesUnit}
+                  showLabel={false}
+                  onChange={(unit) => onUpdateSalesUnit(cartItem.lineId, unit)}
+                />
+              </div>
             </div>
             <div className="shrink-0">
               <NumberStepper
@@ -959,6 +998,7 @@ export default function CartPage(): React.JSX.Element | null {
     items,
     updateQty,
     updateFocQty,
+    updateSalesUnit,
     removeItem,
     setSpecialRate,
     clearCart,
@@ -1465,6 +1505,7 @@ export default function CartPage(): React.JSX.Element | null {
                         onChangeShipQty={handleShipQtyChange}
                         onRatePress={openRateSheet}
                         onDeletePress={openDeleteSheet}
+                        onUpdateSalesUnit={updateSalesUnit}
                         previewOnMount={row === billingSplits[0]}
                       />
                     );
@@ -1515,6 +1556,7 @@ export default function CartPage(): React.JSX.Element | null {
                       onChangePoQty={handlePoQtyChange}
                       onRatePress={openRateSheet}
                       onDeletePress={openDeleteSheet}
+                      onUpdateSalesUnit={updateSalesUnit}
                     />
                   ))}
                 </ul>
@@ -1685,8 +1727,12 @@ export default function CartPage(): React.JSX.Element | null {
                           )}
                         </div>
                         <div className="text-right font-mono">
+                          <p className="mb-0.5">
+                            <SalesUnitBadge unit={ci.salesUnit} className="ml-auto" />
+                          </p>
                           <p>
-                            {formatCurrency(price)} × {ship}
+                            {formatCurrency(price)} × {ship}{' '}
+                            {salesLineUnitLabel(ci.salesUnit)}
                           </p>
                           <p className="font-semibold text-[var(--content-primary)]">
                             = {formatCurrency(lineTotal)}

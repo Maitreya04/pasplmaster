@@ -4,20 +4,20 @@ import {
   XCircle,
   Plus,
   NotePencil,
-  ListChecks,
-  Tag,
-  Gift,
-  ClockCounterClockwise,
 } from '@phosphor-icons/react';
-import { ACCOUNT_HOLD_NOTE } from '../../../lib/billing/rejectionKind';
-import type { FulfillmentPath, OrderItem, RejectionKind, StockLocationCode } from '../../../types';
+import { BillingRejectDialog } from '../../../components/billing/BillingRejectDialog';
+import type {
+  FulfillmentPath,
+  OrderItem,
+  RejectionKind,
+  StockLocationCode,
+} from '../../../types';
 import { countEffectivePickLinesAfterBilling } from '../../../lib/billing/billLineOutcome';
 import type { BillingLiveQueueFlag } from '../../../lib/billing/liveQueueDraft';
 import { defaultFulfillmentPath } from '../../../lib/billing/fulfillmentPath';
 import { FulfillmentPathSelector } from '../../../components/billing/FulfillmentPathSelector';
 import type { BillingLineEdit, ItemFlag } from '../../../hooks/useBillingFlow';
 import type { BillingFreshnessRow } from '../../../hooks/useBillingStockFreshness';
-import { useCopyToClipboard } from '../../../hooks/useCopyToClipboard';
 import { getQuotedPrice } from '../../../lib/specialPricing';
 import {
   formatCurrency,
@@ -25,29 +25,17 @@ import {
   orderItemProductCode,
 } from '../../../utils/formatters';
 import { orderItemConfirmedMrp } from '../../../lib/billing/orderItemSplitGroups';
-import {
-  buildBusyPasteText,
-  sortBillLines,
-  sortFlagsByBillLine,
-} from '../../../lib/billing/sortBillLines';
-import {
-  deriveBusyFinishAction,
-} from '../../../lib/billing/busyFinishAction';
+import { sortBillLines, sortFlagsByBillLine } from '../../../lib/billing/sortBillLines';
+import { isSkipWarehousePick } from '../../../lib/billing/busyFinishAction';
 import {
   busyBillableQty,
   busyPendingQty,
-  isBusyBillableLine,
   isFullyPendingBusyLine,
 } from '../../../lib/billing/busyLineSplit';
-import {
-  markBusyEnteredIds,
-  readBusyEnteredIds,
-  toggleBusyEnteredId,
-  writeBusyEnteredIds,
-} from '../../../lib/billing/busyEntrySession';
-import { BillingActionBar } from '../../../components/billing/chrome/BillingActionBar';
+import { useBusyPasteModel } from '../../../lib/billing/useBusyPasteModel';
 import { BillingBillHeader } from '../../../components/billing/chrome/BillingBillHeader';
 import { BillingOrderChrome } from '../../../components/billing/chrome/BillingOrderChrome';
+import { BillingBusyDock } from '../../../components/billing/busyEntry/BillingBusyDock';
 import {
   busyEntryBrandLabel,
   busyEntryLineNature,
@@ -56,7 +44,7 @@ import {
   BusyEntryLineRow,
   BusyEntryTableHeader,
 } from '../../../components/billing/busyEntry/BusyEntryLineRow';
-import { BusyEntryCopyHint } from '../../../components/billing/busyEntry/BusyEntryCopyHint';
+import { BusyBillableEmptyState } from '../../../components/billing/busyEntry/BusyBillableEmptyState';
 import { QueueSectionHeader } from '../../../components/shared/QueueSectionHeader';
 
 /** UI labels for billing (Windows-first). Finish still works with Cmd+Enter on Mac. */
@@ -102,62 +90,14 @@ interface OrderSheetViewProps {
   onSkip: () => void;
 }
 
-type CopyState = 'ready' | 'copied' | 'settled';
-
 function mergeLine(item: OrderItem, edit?: BillingLineEdit): OrderItem {
   if (!edit || edit.removed) return item;
   return {
     ...item,
     qty_requested: edit.qtyRequested ?? item.qty_requested,
     price_quoted: edit.priceQuoted ?? item.price_quoted,
+    sales_unit: edit.salesUnit ?? item.sales_unit,
   };
-}
-
-type WorkSummaryTone = 'default' | 'warning' | 'positive' | 'info';
-
-function workSummaryToneClass(tone: WorkSummaryTone): string {
-  switch (tone) {
-    case 'warning':
-      return 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]';
-    case 'positive':
-      return 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]';
-    case 'info':
-      return 'border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]';
-    default:
-      return 'border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)]';
-  }
-}
-
-function WorkSummaryButton({
-  icon,
-  label,
-  count,
-  tone = 'default',
-  disabled = false,
-  onClick,
-}: {
-  icon: ReactElement;
-  label: string;
-  count: number;
-  tone?: WorkSummaryTone;
-  disabled?: boolean;
-  onClick: () => void;
-}): ReactElement {
-  return (
-    <button
-      type="button"
-      disabled={disabled || count === 0}
-      onClick={onClick}
-      className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 font-ds-caption-size font-semibold tabular-nums transition-colors ${
-        workSummaryToneClass(tone)
-      } disabled:cursor-default disabled:opacity-45 enabled:hover:brightness-[0.98]`}
-      style={{ borderWidth: '0.5px' }}
-    >
-      {icon}
-      <span>{label}</span>
-      <span className="font-ds-body-size">{count}</span>
-    </button>
-  );
 }
 
 export function OrderSheetView({
@@ -167,9 +107,9 @@ export function OrderSheetView({
   orderNumber,
   salesperson,
   transportName,
-  customerAddress: _customerAddress,
+  customerAddress,
   notes,
-  city: _city,
+  city,
   itemCount,
   totalValue: _totalValue,
   priority,
@@ -197,7 +137,6 @@ export function OrderSheetView({
   onReject,
   onSkip,
 }: OrderSheetViewProps): ReactElement {
-  const { copy } = useCopyToClipboard();
   const trimmedNotes = notes?.trim() ?? '';
 
   const sortedItems = useMemo(() => sortBillLines(items), [items]);
@@ -236,28 +175,28 @@ export function OrderSheetView({
   }
   const fulfillmentPath = manualFulfillmentPath ?? autoFulfillmentPath;
 
-  const [copyState, setCopyState] = useState<CopyState>('ready');
-  const [enteredIds, setEnteredIds] = useState(() => readBusyEnteredIds(orderId));
+  const busyModel = useBusyPasteModel({
+    orderId,
+    items,
+    lineEdits,
+    flags,
+    isClaiming,
+    isApproving,
+    isRejecting,
+    hasVisibleRows: mergedVisibleRows.length > 0,
+    copySessionId: 'all-items',
+  });
 
-  const toggleEntered = useCallback(
-    (lineId: number) => {
-      setEnteredIds(toggleBusyEnteredId(orderId, lineId));
-    },
-    [orderId],
-  );
-
-  const billableRows = useMemo(
-    () =>
-      mergedVisibleRows.filter((item) =>
-        isBusyBillableLine(item, flags[item.id], lineEdits[item.id]),
-      ),
-    [mergedVisibleRows, flags, lineEdits],
-  );
-
-  const skipRowCount = useMemo(
-    () => mergedVisibleRows.filter((item) => isFullyPendingBusyLine(flags[item.id])).length,
-    [mergedVisibleRows, flags],
-  );
+  const skipRowCount = busyModel.skipCount;
+  const enteredIds = busyModel.enteredIds;
+  const toggleEntered = busyModel.toggleEntered;
+  const toggleAllEntered = busyModel.toggleAllEntered;
+  const copyBillable = busyModel.copyBillable;
+  const copyAllItems = busyModel.copyBillable;
+  const enteredCount = busyModel.enteredCount;
+  const billableForBusyCount = busyModel.billableCount;
+  const billableQtyTotal = busyModel.billableQtyTotal;
+  const finishAction = busyModel.finishAction;
 
   /** Billable lines first, then skip/pending — avoids in-sort-order items appearing under skip header. */
   const tableItemOrder = useMemo(() => {
@@ -278,33 +217,6 @@ export function OrderSheetView({
       skipSectionStartId: skip[0]?.id ?? null,
     };
   }, [sortedItems, lineEdits, flags]);
-
-  const copyBillable = useCallback(() => {
-    if (billableRows.length === 0) return;
-    copy(
-      buildBusyPasteText(billableRows, { lineEdits, flags }),
-      'all-items',
-    );
-    setCopyState('copied');
-  }, [billableRows, lineEdits, copy]);
-
-  const markAllEntered = useCallback(() => {
-    if (billableRows.length === 0) return;
-    setEnteredIds(markBusyEnteredIds(orderId, billableRows.map((row) => row.id)));
-  }, [billableRows, orderId]);
-
-  const toggleAllEntered = useCallback(() => {
-    if (billableRows.length === 0) return;
-    const next = readBusyEnteredIds(orderId);
-    const allEntered = billableRows.every((row) => next.has(row.id));
-    if (allEntered) {
-      for (const row of billableRows) next.delete(row.id);
-    } else {
-      for (const row of billableRows) next.add(row.id);
-    }
-    writeBusyEnteredIds(orderId, next);
-    setEnteredIds(next);
-  }, [billableRows, orderId]);
 
   const [activeRow, setActiveRow] = useState<number | null>(null);
   const [showHints, setShowHints] = useState(false);
@@ -384,18 +296,6 @@ export function OrderSheetView({
   }, [lastRemoved, lineEdits, items]);
 
   const flagCount = Object.keys(flags).length;
-  const specialRateRows = useMemo(
-    () => billableRows.filter((item) => busyEntryLineNature(item) === 'special_rate'),
-    [billableRows],
-  );
-  const focRows = useMemo(
-    () => billableRows.filter((item) => busyEntryLineNature(item) === 'foc'),
-    [billableRows],
-  );
-  const pendingRows = useMemo(
-    () => mergedVisibleRows.filter((item) => isFullyPendingBusyLine(flags[item.id])),
-    [mergedVisibleRows, flags],
-  );
 
   const removedCount = items.filter((i) => lineEdits[i.id]?.removed).length;
   const editCount = Object.entries(lineEdits).filter(
@@ -429,15 +329,6 @@ export function OrderSheetView({
       setTimeout(() => partialInputRef.current?.focus(), 50);
     }
   }, [partialInputRow]);
-
-  useEffect(() => {
-    if (copyState === 'copied') {
-      const t = setTimeout(() => setCopyState('settled'), 1500);
-      return () => clearTimeout(t);
-    }
-  }, [copyState]);
-
-  const copyAllItems = copyBillable;
 
   const sortedFlagEntries = useMemo(
     () => sortFlagsByBillLine(flags, items),
@@ -710,49 +601,19 @@ export function OrderSheetView({
   const handleRejectConfirm = useCallback(() => {
     if (isRejecting) return;
     const trimmedReason = rejectReason.trim();
-    if (rejectKind === 'terminal' && !trimmedReason) return;
-    onReject({
-      kind: rejectKind,
-      reason: rejectKind === 'account_hold' ? trimmedReason || ACCOUNT_HOLD_NOTE : trimmedReason,
-    });
+    if (!trimmedReason) return;
+    onReject({ kind: rejectKind, reason: trimmedReason });
   }, [rejectKind, rejectReason, isRejecting, onReject]);
 
   const billedNormalCount = mergedVisibleRows.filter((it) => !flags[it.id]).length;
 
-  const billableForBusyCount = billableRows.length;
-  const enteredCount = billableRows.filter((item) => enteredIds.has(item.id)).length;
   const busyProgress = {
     entered: enteredCount,
     total: billableForBusyCount,
     skipCount: skipRowCount,
   };
-  const finishAction = deriveBusyFinishAction({
-    billableCount: billableForBusyCount,
-    enteredCount,
-    skipCount: skipRowCount,
-    isClaiming,
-    isApproving,
-    isRejecting,
-    hasVisibleRows: mergedVisibleRows.length > 0,
-    enabledLabel: 'Done — assign picker',
-  });
 
-  const linesToEnterTone =
-    billableForBusyCount > 0 && enteredCount >= billableForBusyCount
-      ? ('positive' as const)
-      : ('warning' as const);
-
-  const busyRemaining = Math.max(0, billableForBusyCount - enteredCount);
-  const showCopyHint = copyState !== 'ready' && busyRemaining > 0;
-
-  const billableTotal = useMemo(
-    () =>
-      billableRows.reduce((sum, item) => {
-        const price = getQuotedPrice(item) ?? item.price_system ?? 0;
-        return sum + price * item.qty_requested;
-      }, 0),
-    [billableRows],
-  );
+  const skipWarehousePick = isSkipWarehousePick(billableForBusyCount, skipRowCount);
 
   const shellClass = embedded
     ? 'density-billing-work h-full min-h-0 bg-[var(--bg-secondary)] flex flex-col animate-slide-up overflow-hidden'
@@ -763,15 +624,8 @@ export function OrderSheetView({
     : 'ds-table ds-table--billing w-full max-w-3xl mx-auto';
 
   const bodyWrapClass = embedded
-    ? 'flex flex-col min-h-0 gap-3 p-3'
-    : 'max-w-3xl mx-auto px-4 lg:px-6 py-4 space-y-3';
-
-  const copyButtonLabel =
-    copyState === 'copied'
-      ? 'Copied'
-      : copyState === 'settled'
-        ? 'Copy all items again'
-        : 'Copy all items';
+    ? 'flex flex-col min-h-0 gap-2 p-3'
+    : 'max-w-3xl mx-auto px-4 lg:px-6 py-4 space-y-2';
 
   return (
     <div className={shellClass}>
@@ -779,6 +633,7 @@ export function OrderSheetView({
         stage="busy_entry"
         embedded={embedded}
         className="flex-1 min-h-0"
+        skipWarehousePick={skipWarehousePick}
         showNavBar
         onBack={onSkip}
         onReject={() => setShowReject(true)}
@@ -795,50 +650,38 @@ export function OrderSheetView({
         billHeader={
           <BillingBillHeader
             customerName={orderName}
+            customerCity={city}
+            customerAddress={customerAddress}
             orderId={orderNumber}
             createdAt={createdAt}
             priority={priority}
             transportName={transportName}
           />
         }
-        summaryStats={[
-          {
-            label: 'Billable total',
-            value: formatCurrency(billableTotal),
-          },
-          {
-            label: 'Lines to enter',
-            value: `${enteredCount} of ${billableForBusyCount}`,
-            tone: linesToEnterTone,
-          },
-          ...(skipRowCount > 0
-            ? [
-                {
-                  label: 'Pending',
-                  value: `${skipRowCount} skipped`,
-                  tone: 'info' as const,
-                },
-              ]
-            : []),
-        ]}
         actions={
-          <BillingActionBar
-            secondaryCopyLabel="Copy all items"
-            onSecondaryCopy={copyBillable}
-            secondaryCopyDisabled={isClaiming || billableRows.length === 0}
-            ghostLabel="Mark all entered"
-            onGhostClick={markAllEntered}
-            gateWarning={finishAction.gateWarning}
-            primaryLabel={finishAction.label}
-            primaryDisabled={finishAction.disabled}
-            primaryLoading={isClaiming || isApproving}
-            onPrimary={handleFinishAttempt}
+          <BillingBusyDock
+            billableCount={billableForBusyCount}
+            qtyTotal={billableQtyTotal}
+            skipCount={skipRowCount}
+            specialRateCount={busyModel.specialRateCount}
+            focCount={busyModel.focCount}
+            pendingCount={busyModel.pendingCount}
+            finishAction={finishAction}
+            onCopy={copyBillable}
+            copyJustCopied={busyModel.copyJustCopied}
+            hasCopiedOnce={busyModel.hasCopiedOnce}
+            onFinish={handleFinishAttempt}
+            onSpecialRateClick={() => focusLineById(busyModel.firstSpecialRateLineId)}
+            onFocClick={() => focusLineById(busyModel.firstFocLineId)}
+            onPendingClick={() => focusLineById(busyModel.firstPendingLineId)}
+            copyDisabled={isClaiming}
+            finishLoading={isClaiming || isApproving}
           />
         }
       >
         <div className={bodyWrapClass}>
-          <section className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] overflow-hidden">
-            {trimmedNotes ? (
+          {trimmedNotes ? (
+            <section className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] overflow-hidden">
               <div className="grid grid-cols-[124px_minmax(0,1fr)] border-b border-[var(--border-faint)]">
                 <div className="flex items-center gap-2 border-r border-[var(--border-faint)] bg-[var(--bg-secondary)] px-3 py-3">
                   <NotePencil size={16} weight="bold" className="text-[var(--content-warning-on-light)]" />
@@ -865,45 +708,8 @@ export function OrderSheetView({
                   ) : null}
                 </div>
               </div>
-            ) : null}
-
-            <div className="grid grid-cols-[124px_minmax(0,1fr)]">
-              <div className="flex items-center border-r border-[var(--border-faint)] bg-[var(--bg-secondary)] px-3 py-3">
-                <span className="font-ds-micro font-semibold uppercase text-[var(--content-quaternary)]">
-                  Bill focus
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 px-4 py-3">
-                <WorkSummaryButton
-                  icon={<ListChecks size={14} weight="bold" />}
-                  label="Billable"
-                  count={billableForBusyCount}
-                  onClick={() => focusLineById(billableRows[0]?.id)}
-                />
-                <WorkSummaryButton
-                  icon={<Tag size={14} weight="bold" />}
-                  label="Special rate"
-                  count={specialRateRows.length}
-                  tone="warning"
-                  onClick={() => focusLineById(specialRateRows[0]?.id)}
-                />
-                <WorkSummaryButton
-                  icon={<Gift size={14} weight="bold" />}
-                  label="FOC"
-                  count={focRows.length}
-                  tone="positive"
-                  onClick={() => focusLineById(focRows[0]?.id)}
-                />
-                <WorkSummaryButton
-                  icon={<ClockCounterClockwise size={14} weight="bold" />}
-                  label="Pending"
-                  count={pendingRows.length}
-                  tone="info"
-                  onClick={() => focusLineById(pendingRows[0]?.id)}
-                />
-              </div>
-            </div>
-          </section>
+            </section>
+          ) : null}
 
           <section
             className={`flex flex-col min-h-0 bg-[var(--bg-secondary)] ${
@@ -912,46 +718,18 @@ export function OrderSheetView({
                 : 'rounded-xl border border-[var(--border-subtle)] overflow-hidden shadow-sm'
             }`}
           >
-            <div className="sticky top-0 z-20 border-b border-[var(--border-faint)] bg-[var(--bg-primary)]">
-              <div className="flex items-center justify-between gap-3 px-4 py-2.5">
-                <QueueSectionHeader
-                  label="Items to enter"
-                  count={billableRows.length}
-                  description={
-                    skipRowCount > 0
-                      ? `${skipRowCount} pending below, not copied to Busy`
-                      : undefined
-                  }
-                  variant="subtle"
-                  className="py-0"
-                />
-                <div className="flex items-center gap-2 min-w-0">
-                  <button
-                    type="button"
-                    onClick={copyBillable}
-                    disabled={isClaiming || billableRows.length === 0}
-                    className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 font-ds-caption-size font-semibold border transition-colors disabled:opacity-40 ${
-                      copyState === 'copied'
-                        ? 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] text-[var(--content-positive)]'
-                        : 'border-[var(--content-primary)] bg-[var(--content-primary)] text-[var(--bg-primary)] hover:opacity-90'
-                    }`}
-                    style={{ borderWidth: '0.5px' }}
-                  >
-                    {copyButtonLabel}
-                  </button>
-                </div>
-              </div>
-            </div>
-            {showCopyHint ? (
-              <BusyEntryCopyHint remaining={busyRemaining} onMarkAllEntered={markAllEntered} />
-            ) : null}
             <div className="overflow-x-auto min-w-0">
+            {billableForBusyCount === 0 && skipRowCount > 0 ? (
+              <BusyBillableEmptyState skipCount={skipRowCount} />
+            ) : null}
             <table className={tableClass}>
-              <BusyEntryTableHeader
-                enteredCount={enteredCount}
-                totalCount={billableForBusyCount}
-                onToggleAll={toggleAllEntered}
-              />
+              {billableForBusyCount > 0 ? (
+                <BusyEntryTableHeader
+                  enteredCount={enteredCount}
+                  totalCount={billableForBusyCount}
+                  onToggleAll={toggleAllEntered}
+                />
+              ) : null}
               <tbody>
                 {tableItemOrder.items.map((serverItem) => {
                   const removed = !!lineEdits[serverItem.id]?.removed;
@@ -965,7 +743,7 @@ export function OrderSheetView({
                         key={`removed-${serverItem.id}`}
                         className="bg-[var(--bg-tertiary)]"
                       >
-                        <td colSpan={6} className="py-2.5 px-3">
+                        <td colSpan={5} className="py-2.5 px-3">
                           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2">
                             <div className="min-w-0 flex items-start gap-2">
                               <span className="ds-chip ds-chip--sm shrink-0 mt-0.5 bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] border-[var(--border-negative)]">
@@ -1016,9 +794,9 @@ export function OrderSheetView({
                     skipRowCount > 0 &&
                     serverItem.id === tableItemOrder.skipSectionStartId ? (
                       <tr key="skip-section-header">
-                        <td colSpan={6} className="p-0 border-t border-[var(--border-opaque)]">
+                        <td colSpan={5} className="p-0 border-t border-[var(--border-opaque)]">
                           <QueueSectionHeader
-                            label="Skip — pending"
+                            label="Pending stock"
                             count={skipRowCount}
                             variant="divider"
                             description="out of stock · not billed today"
@@ -1028,9 +806,6 @@ export function OrderSheetView({
                     ) : null;
 
                   const isActive = activeRow === idx;
-                  const billableLineNo = isSkip
-                    ? item.bill_line_no ?? idx + 1
-                    : billableRows.findIndex((row) => row.id === item.id) + 1;
                   const isPartialInput = partialInputRow === idx;
                   const fresh = freshnessMap?.[item.id];
                   const serverQty = serverItem.qty_requested;
@@ -1052,7 +827,6 @@ export function OrderSheetView({
                       <BusyEntryLineRow
                         key={item.id}
                         item={item}
-                        lineNo={billableLineNo > 0 ? billableLineNo : idx + 1}
                         isActive={isActive}
                         isSkip={isSkip}
                         entered={entered}
@@ -1100,6 +874,7 @@ export function OrderSheetView({
                           setPartialQty('');
                         }}
                         onPartialQtyChange={setPartialQty}
+                        lineEdit={lineEdits[item.id]}
                         onApplyLiveStock={
                           fresh?.canApplyLive && fresh.liveCapacity != null
                             ? () => void onApplyLiveStock(item.id, fresh.liveCapacity!)
@@ -1346,101 +1121,22 @@ export function OrderSheetView({
         </div>
       )}
 
-      {showReject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div
-            className="ds-card p-6 max-w-md w-full shadow-xl animate-slide-up"
-            role="dialog"
-            aria-modal="true"
-          >
-            <h3 className="text-base font-bold text-[var(--content-primary)] mb-2">
-              Reject {orderName}?
-            </h3>
-            <p className="text-sm text-[var(--content-secondary)] mb-4">
-              Choose why billing cannot process this order. Sales will be notified.
-            </p>
-            <div className="space-y-2 mb-4">
-              <label className="flex items-start gap-3 rounded-xl border border-[var(--border-opaque)] p-3 cursor-pointer has-[:checked]:border-[var(--border-warning)] has-[:checked]:bg-[var(--bg-warning-subtle)]">
-                <input
-                  type="radio"
-                  name="reject-kind"
-                  value="account_hold"
-                  checked={rejectKind === 'account_hold'}
-                  onChange={() => setRejectKind('account_hold')}
-                  className="mt-1"
-                />
-                <span>
-                  <span className="block text-sm font-semibold text-[var(--content-primary)]">
-                    Account locked
-                  </span>
-                  <span className="block text-xs text-[var(--content-secondary)] mt-0.5">
-                    On hold until the account is unlocked. Can be revived from History.
-                  </span>
-                </span>
-              </label>
-              <label className="flex items-start gap-3 rounded-xl border border-[var(--border-opaque)] p-3 cursor-pointer has-[:checked]:border-[var(--border-negative)] has-[:checked]:bg-[var(--bg-negative-subtle)]">
-                <input
-                  type="radio"
-                  name="reject-kind"
-                  value="terminal"
-                  checked={rejectKind === 'terminal'}
-                  onChange={() => setRejectKind('terminal')}
-                  className="mt-1"
-                />
-                <span>
-                  <span className="block text-sm font-semibold text-[var(--content-primary)]">
-                    Other reason
-                  </span>
-                  <span className="block text-xs text-[var(--content-secondary)] mt-0.5">
-                    Final rejection — not returned to the billing queue.
-                  </span>
-                </span>
-              </label>
-            </div>
-            {rejectKind === 'account_hold' ? (
-              <p className="text-xs text-[var(--content-tertiary)] mb-3 rounded-lg bg-[var(--bg-secondary)] px-3 py-2">
-                {ACCOUNT_HOLD_NOTE}
-              </p>
-            ) : (
-              <textarea
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="e.g. Pricing mismatch, customer requested change..."
-                className="w-full h-28 px-3 py-2 rounded-xl border border-[var(--border-opaque)] text-sm text-[var(--content-primary)] bg-[var(--bg-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--role-primary)]"
-                autoFocus
-              />
-            )}
-            <div className="mt-4 flex gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowReject(false);
-                  setRejectReason('');
-                  setRejectKind('account_hold');
-                }}
-                disabled={isRejecting}
-                className="flex-1 h-11 rounded-xl border border-[var(--border-opaque)] text-sm font-semibold text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleRejectConfirm}
-                disabled={
-                  isRejecting || (rejectKind === 'terminal' && !rejectReason.trim())
-                }
-                className="flex-1 h-11 rounded-xl bg-[var(--bg-negative)] text-white text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
-              >
-                {isRejecting
-                  ? 'Saving...'
-                  : rejectKind === 'account_hold'
-                    ? 'Place on hold'
-                    : 'Confirm reject'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showReject ? (
+        <BillingRejectDialog
+          customerName={orderName}
+          rejectKind={rejectKind}
+          rejectReason={rejectReason}
+          isSubmitting={isRejecting}
+          onRejectKindChange={setRejectKind}
+          onRejectReasonChange={setRejectReason}
+          onCancel={() => {
+            setShowReject(false);
+            setRejectReason('');
+            setRejectKind('account_hold');
+          }}
+          onConfirm={handleRejectConfirm}
+        />
+      ) : null}
     </div>
   );
 }

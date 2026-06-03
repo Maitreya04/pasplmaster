@@ -3,7 +3,6 @@ import { Check, Minus } from '@phosphor-icons/react';
 interface BusyEntryCheckboxProps {
   entered: boolean;
   itemName: string;
-  lineNo: number;
   forceVisible?: boolean;
   onToggle: () => void;
 }
@@ -12,8 +11,6 @@ interface BusyEntryCheckboxProps {
 export function BusyEntryCheckbox({
   entered,
   itemName,
-  lineNo,
-  forceVisible = false,
   onToggle,
 }: BusyEntryCheckboxProps): React.JSX.Element {
   const ariaLabel = entered
@@ -32,25 +29,14 @@ export function BusyEntryCheckbox({
       }}
       className="group/chk relative flex items-center justify-center w-10 h-full shrink-0 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-accent)] focus-visible:ring-offset-1"
       style={{
-        borderRight: '0.5px solid var(--border-opaque)',
-        background: 'var(--bg-secondary)',
+        background: 'transparent',
       }}
     >
-      <span
-        className={`absolute inset-0 flex items-center justify-center font-ds-caption-size tabular-nums text-[var(--content-quaternary)] transition-opacity duration-100 ${
-          entered || forceVisible
-            ? 'opacity-0'
-            : 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0'
-        }`}
-        aria-hidden
-      >
-        {lineNo}
-      </span>
       <span
         className={`flex size-4 items-center justify-center rounded transition-all duration-[120ms] ease-out ${
           entered
             ? 'opacity-100 bg-[var(--content-positive)] border-[var(--content-positive)] text-white'
-            : `${forceVisible ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'} border-[1.5px] border-[var(--border-opaque)] bg-[var(--bg-primary)] group-hover/chk:border-[var(--content-quaternary)] group-active/chk:scale-95`
+            : 'opacity-100 border-[1.5px] border-[var(--border-opaque)] bg-[var(--bg-primary)] group-hover/chk:border-[var(--content-quaternary)] group-active/chk:scale-95'
         }`}
       >
         {entered ? <Check size={10} weight="bold" /> : null}
@@ -82,8 +68,8 @@ export function BusyEntryMasterCheckbox({
       aria-checked={allEntered ? true : partiallyEntered ? 'mixed' : false}
       aria-label={
         allEntered
-          ? 'Mark all billable lines not entered'
-          : 'Mark all billable lines entered'
+          ? 'Mark all billable items not entered'
+          : 'Mark all billable items entered'
       }
       disabled={totalCount === 0 || !onToggleAll}
       onClick={(e) => {
@@ -124,7 +110,6 @@ export function BusyEntryCheckboxHeader({
         padding: 0,
         width: '40px',
         minWidth: '40px',
-        borderRight: '0.5px solid var(--border-opaque)',
         background: 'var(--bg-secondary)',
       }}
     >

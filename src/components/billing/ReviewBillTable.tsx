@@ -3,14 +3,18 @@ import {
   CaretDown,
   CaretRight,
   Check,
+  Copy,
   PencilSimple,
   Trash,
   Warning,
 } from '@phosphor-icons/react';
 import {
   billableQtyForTotal,
+  deriveBillLineFulfillment,
   summarizeBillFulfillment,
 } from '../../lib/billing/billLineFulfillment';
+import { busyEntryLineNature } from '../../lib/billing/busyEntryLineNature';
+import { BusyEntryWorkHeader } from './busyEntry/BusyEntryWorkHeader';
 import { deskLineFlagKind } from '../../lib/billing/deskLineFlagKind';
 import { resolvedLabelPriceForBilling } from '../../lib/billing/labelMrpFlag';
 import {
@@ -28,6 +32,8 @@ import {
   type ReviewTableRow,
 } from '../../lib/billing/reviewBillTableRows';
 import { orderItemConfirmedMrp } from '../../lib/billing/orderItemSplitGroups';
+import { SalesUnitBadge } from '../shared/SalesUnitBadge';
+import { effectiveSalesLineUnit } from '../../lib/salesUnit';
 import { formatCurrencyRaw } from '../../utils/formatters';
 import { CHANGE_REASON_OPTIONS } from '../../pages/billing/BillingDesk/types';
 import {
@@ -75,44 +81,96 @@ function summaryChipClass(tone: ReviewStatusTone): string {
   )}`;
 }
 
-function ReviewToolbar({
+function ReviewWorkHeader({
   billSheet,
+  readOnly,
+  onCopyForBusy,
 }: {
   billSheet: BillSheetEdits;
+  readOnly: boolean;
+  onCopyForBusy?: () => void;
 }): React.JSX.Element {
-  const { visibleItems, pendingByItemId, total } = billSheet;
-  const t = summarizeBillFulfillment(visibleItems, pendingByItemId);
+  const { visibleItems, pendingByItemId, edits } = billSheet;
+  const fulfillment = summarizeBillFulfillment(visibleItems, pendingByItemId);
+
+  const copyableItems = useMemo(
+    () =>
+      visibleItems.filter((item) => {
+        const edit = edits[item.id];
+        if (edit?.removed) return false;
+        if (item.state === 'flagged' && edit?.resolution == null) return false;
+        const pending =
+          item.item_id != null ? pendingByItemId.get(item.item_id) ?? [] : [];
+        return !deriveBillLineFulfillment(item, pending).excludeFromBusyBill;
+      }),
+    [visibleItems, pendingByItemId, edits],
+  );
+
+  const specialRateCount = copyableItems.filter(
+    (item) => busyEntryLineNature(item) === 'special_rate',
+  ).length;
+  const focLineCount = copyableItems.filter(
+    (item) => busyEntryLineNature(item) === 'foc',
+  ).length;
+  const pendingLineCount = visibleItems.filter((item) => {
+    if (edits[item.id]?.removed) return false;
+    const pending =
+      item.item_id != null ? pendingByItemId.get(item.item_id) ?? [] : [];
+    const f = deriveBillLineFulfillment(item, pending);
+    return f.excludeFromBusyBill || f.qtySalesPo > 0 || f.qtyPickerOos > 0;
+  }).length;
+
+  const detailChips: React.ReactNode[] = [];
+  if (fulfillment.busyBillLines > 0) {
+    detailChips.push(
+      <span key="bill-lines" className={summaryChipClass('bill')}>
+        {fulfillment.busyBillLines} bill lines
+      </span>,
+    );
+  }
+  if (fulfillment.salesPoQty > 0) {
+    detailChips.push(
+      <span key="sales-po" className={summaryChipClass('po')}>
+        {fulfillment.salesPoQty} sales PO
+      </span>,
+    );
+  }
+  if (fulfillment.pickerOosQty > 0) {
+    detailChips.push(
+      <span key="picker-oos" className={summaryChipClass('oos')}>
+        {fulfillment.pickerOosQty} picker OOS
+      </span>,
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-xl border-2 border-[var(--border-opaque)] bg-[var(--bg-secondary)] px-4 py-3">
-      <div>
-        <p className="text-xs font-bold uppercase tracking-widest text-[var(--content-secondary)]">
-          Busy invoice total
-        </p>
-        <p className="text-2xl font-bold tabular-nums text-[var(--content-primary)]">
-          {formatCurrencyRaw(total)}
-        </p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <span className={summaryChipClass('bill')}>
-          {t.busyBillLines} bill lines
-        </span>
-        {t.focQty > 0 ? (
-          <span className={summaryChipClass('foc')}>
-            {t.focQty} FOC pcs
-          </span>
-        ) : null}
-        {t.salesPoQty > 0 ? (
-          <span className={summaryChipClass('po')}>
-            {t.salesPoQty} sales PO
-          </span>
-        ) : null}
-        {t.pickerOosQty > 0 ? (
-          <span className={summaryChipClass('oos')}>
-            {t.pickerOosQty} picker OOS
-          </span>
-        ) : null}
-      </div>
+    <div className="overflow-hidden rounded-xl border-2 border-[var(--border-opaque)] bg-[var(--bg-secondary)]">
+      <BusyEntryWorkHeader
+        billableCount={copyableItems.length}
+        qtyTotal={fulfillment.billTodayQty}
+        specialRateCount={specialRateCount}
+        focCount={focLineCount}
+        pendingCount={pendingLineCount}
+        rightSlot={
+          !readOnly && onCopyForBusy ? (
+            <button
+              type="button"
+              onClick={onCopyForBusy}
+              disabled={copyableItems.length === 0}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--content-primary)] bg-[var(--content-primary)] px-3 font-ds-caption-size font-semibold text-[var(--bg-primary)] transition-colors hover:opacity-90 disabled:opacity-40"
+              style={{ borderWidth: '0.5px' }}
+            >
+              <Copy size={14} />
+              Copy for Busy
+            </button>
+          ) : null
+        }
+      />
+      {detailChips.length > 0 ? (
+        <div className="flex flex-wrap gap-2 border-t border-[var(--border-faint)] px-4 py-2">
+          {detailChips}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -354,6 +412,7 @@ function TableHeader({ readOnly = false }: { readOnly?: boolean }): React.JSX.El
         <th className="px-3 py-3 min-w-[200px]">Product</th>
         <th className="px-3 py-3 min-w-[160px] hidden lg:table-cell">Notes</th>
         <th className="px-3 py-3 w-16 text-right">Qty</th>
+        <th className="px-3 py-3 w-[5.5rem] text-right">Unit</th>
         <th className="px-3 py-3 w-[108px]">Rate</th>
         <th className="px-3 py-3 w-24 text-right">Line ₹</th>
         {!readOnly ? <th className="px-3 py-3 w-28 text-right">Actions</th> : null}
@@ -373,7 +432,8 @@ function TableRow({
   pendingRemoveId: number | null;
   readOnly?: boolean;
 }): React.JSX.Element {
-  const { item, fulfillment, lineTotal, samePartAsPrevious } = row;
+  const { item, edit } = row;
+  const { fulfillment, lineTotal, samePartAsPrevious } = row;
   const product = reviewProductLabel(row);
   const notes = reviewStatusLabel(row).long;
   const labelMrp = orderItemConfirmedMrp(item);
@@ -428,6 +488,9 @@ function TableRow({
         <p className="text-[10px] font-bold uppercase text-[var(--content-tertiary)]">
           {fulfillment.excludeFromBusyBill ? 'skip' : 'bill'}
         </p>
+      </td>
+      <td className="px-3 py-3 align-top text-right">
+        <SalesUnitBadge unit={effectiveSalesLineUnit(item, edit)} />
       </td>
       <td className="px-3 py-3 align-top">
         <RateCell
@@ -502,11 +565,13 @@ function GroupTable({
 export interface ReviewBillTableProps {
   billSheet: BillSheetEdits;
   readOnly?: boolean;
+  onCopyForBusy?: () => void;
 }
 
 export function ReviewBillTable({
   billSheet,
   readOnly = false,
+  onCopyForBusy,
 }: ReviewBillTableProps): React.JSX.Element {
   const {
     sortedLines,
@@ -556,7 +621,11 @@ export function ReviewBillTable({
 
   return (
     <div className="space-y-4">
-      <ReviewToolbar billSheet={billSheet} />
+      <ReviewWorkHeader
+        billSheet={billSheet}
+        readOnly={readOnly}
+        onCopyForBusy={onCopyForBusy}
+      />
 
       {!readOnly && groups.find((g) => g.id === 'flagged') && unresolvedFlagged.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border-2 border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-4 py-2">

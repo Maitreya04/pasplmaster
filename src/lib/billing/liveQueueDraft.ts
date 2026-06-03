@@ -1,5 +1,6 @@
 import { supabase } from '../supabase/client';
-import type { OrderItem } from '../../types';
+import { normalizeSalesLineUnit } from '../salesUnit';
+import type { OrderItem, SalesLineUnit } from '../../types';
 
 /** Matches live-queue sheet flags (no stock / partial Busy qty). Keyed by `order_items.id`. */
 export type BillingLiveQueueFlag = {
@@ -11,6 +12,7 @@ export type BillingLiveQueueFlag = {
 export type BillingLineEdit = {
   qtyRequested?: number;
   priceQuoted?: number;
+  salesUnit?: SalesLineUnit;
   removed?: boolean;
 };
 
@@ -131,6 +133,13 @@ export function computeOrderItemPersistPatch(args: {
 
   if (priceCandidate != null && curPQ !== priceCandidate) {
     patch.price_quoted = priceCandidate;
+  }
+
+  const salesUnitCandidate =
+    ed?.salesUnit != null ? normalizeSalesLineUnit(ed.salesUnit) : null;
+  const curUnit = normalizeSalesLineUnit(item.sales_unit);
+  if (salesUnitCandidate != null && salesUnitCandidate !== curUnit) {
+    patch.sales_unit = salesUnitCandidate;
   }
 
   return Object.keys(patch).length > 0 ? patch : null;

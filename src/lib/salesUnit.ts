@@ -1,4 +1,4 @@
-import type { SalesLineUnit } from '../types';
+import type { OrderItem, SalesLineUnit } from '../types';
 
 export const SALES_LINE_UNITS: readonly SalesLineUnit[] = ['pcs', 'kit', 'set'] as const;
 
@@ -14,4 +14,13 @@ export function normalizeSalesLineUnit(value: unknown): SalesLineUnit {
 
 export function salesLineUnitLabel(value: unknown): string {
   return SALES_UNIT_LABELS[normalizeSalesLineUnit(value)];
+}
+
+/** Order line unit with optional billing draft override (live queue / busy paste). */
+export function effectiveSalesLineUnit(
+  item: Pick<OrderItem, 'sales_unit'>,
+  lineEdit?: { salesUnit?: SalesLineUnit } | null,
+): SalesLineUnit {
+  if (lineEdit?.salesUnit != null) return normalizeSalesLineUnit(lineEdit.salesUnit);
+  return normalizeSalesLineUnit(item.sales_unit);
 }

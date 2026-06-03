@@ -30,6 +30,7 @@ function stubItem(partial: Partial<OrderItem>): OrderItem {
 function stubEdit(partial: Partial<OverlayLineEdit> = {}): OverlayLineEdit {
   return {
     priceQuoted: 237,
+    salesUnit: 'pcs',
     removed: false,
     priceTouched: false,
     resolution: null,

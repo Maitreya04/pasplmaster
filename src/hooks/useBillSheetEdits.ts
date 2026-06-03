@@ -28,7 +28,11 @@ import { shouldNotifyPickers } from '../lib/billing/fulfillmentPath';
 import { canBroadcastReadyToPick } from '../lib/billing/pickerNotifyPolicy';
 import { pickQuantityTarget } from '../lib/cartSupply';
 import { sendPickerReadyNotification } from '../lib/pickerPush';
+import { flagsFromOrderItems } from '../lib/billing/liveQueueDraft';
+import type { BillingLineEdit } from '../lib/billing/liveQueueDraft';
 import { sortBillLines } from '../lib/billing/sortBillLines';
+import { normalizeSalesLineUnit } from '../lib/salesUnit';
+import type { ItemFlag } from './useBillingFlow';
 import { resolvedLabelPriceForBilling } from '../lib/billing/labelMrpFlag';
 import { promoteBillingVerifiedLabelMrp } from '../lib/picking/recordPickerLabelMrp';
 import { BILLING_ACCEPT_ALL_LABEL } from '../lib/billing/mrpWorkflowCopy';
@@ -83,6 +87,7 @@ function initEdits(items: OrderItem[]): Record<number, OverlayLineEdit> {
   for (const item of items) {
     edits[item.id] = {
       priceQuoted: item.price_quoted ?? item.price_system ?? 0,
+      salesUnit: normalizeSalesLineUnit(item.sales_unit),
       removed: false,
       priceTouched: false,
       resolution: null,
@@ -144,6 +149,7 @@ export function useBillSheetEdits({
   const [step, setStep] = useState<OverlayStep>('idle');
   const [undoRemoveId, setUndoRemoveId] = useState<number | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [busyLineEdits, setBusyLineEdits] = useState<Record<number, BillingLineEdit>>({});
 
   const resetKey = `${orderDetail.id}:${items.map((item) => item.id).join(',')}`;
   const [boundResetKey, setBoundResetKey] = useState(resetKey);
@@ -155,6 +161,7 @@ export function useBillSheetEdits({
     setPendingRemoveId(null);
     setStep('idle');
     setUndoRemoveId(null);
+    setBusyLineEdits({});
   }
 
   const claimAutoAttemptedRef = useRef<number | null>(null);
@@ -253,6 +260,11 @@ export function useBillSheetEdits({
       [itemId]: { ...prev[itemId]!, ...patch },
     }));
   }, []);
+
+  const busyFlags = useMemo(
+    () => flagsFromOrderItems(items) as Record<number, ItemFlag>,
+    [items],
+  );
 
   const updatePrice = useCallback(
     (itemId: number, price: number, item: OrderItem) => {
@@ -405,6 +417,11 @@ export function useBillSheetEdits({
         const patch: Record<string, unknown> = {
           price_quoted: edit.priceQuoted,
         };
+
+        const nextSalesUnit = normalizeSalesLineUnit(edit.salesUnit ?? item.sales_unit);
+        if (nextSalesUnit !== normalizeSalesLineUnit(item.sales_unit)) {
+          patch.sales_unit = nextSalesUnit;
+        }
 
         if (resolvingFlags && item.state === 'flagged') {
           patch.state = 'picked';
@@ -602,6 +619,15 @@ export function useBillSheetEdits({
     notifyMutation,
     acceptAllLabel: BILLING_ACCEPT_ALL_LABEL,
     pendingByItemId,
+    busyPaste:
+      orderDetail.workflow_status === 'submitted'
+        ? {
+            lineEdits: busyLineEdits,
+            flags: busyFlags,
+            onFinish: () => saveMutation.mutate(),
+            finishLoading: saveMutation.isPending,
+          }
+        : undefined,
   };
 }
 

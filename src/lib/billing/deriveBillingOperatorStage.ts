@@ -46,11 +46,7 @@ export function deriveBillingOperatorStage(
   if (workflow_status === 'picking') return 'picking';
 
   if (workflow_status === 'approved') {
-    if (
-      !picker_name ||
-      deskStatus === 'unassigned' ||
-      deskStatus === 'no_ack'
-    ) {
+    if (!picker_name?.trim() || deskStatus === 'unassigned') {
       return 'assign_picker';
     }
     return 'picking';
