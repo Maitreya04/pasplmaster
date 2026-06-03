@@ -8,7 +8,8 @@ import {
   useEffect,
   type ReactNode,
 } from 'react';
-import type { CartItem as CartItemType, Customer, Item, Transport } from '../types';
+import type { CartItem as CartItemType, Customer, Item, SalesLineUnit, Transport } from '../types';
+import { normalizeSalesLineUnit } from '../lib/salesUnit';
 import { useOrderAuthor } from './OrderAuthorContext';
 import {
   readCartDraft,
@@ -24,9 +25,11 @@ interface CartContextValue {
     qty: number,
     specialRate?: number | null,
     focQty?: number,
+    salesUnit?: SalesLineUnit,
   ) => void;
   updateQty: (lineId: string, qty: number) => void;
   updateFocQty: (lineId: string, focQty: number) => void;
+  updateSalesUnit: (lineId: string, salesUnit: SalesLineUnit) => void;
   setSpecialRate: (lineId: string, rate: number | null) => void;
   removeItem: (lineId: string) => void;
   clearCart: () => void;
@@ -73,12 +76,28 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
   const [notes, setNotes] = useState(() => initialState.notes);
 
   const addItem = useCallback(
-    (item: Item, qty: number, specialRate: number | null = null, focQty: number = 0) => {
+    (
+      item: Item,
+      qty: number,
+      specialRate: number | null = null,
+      focQty: number = 0,
+      salesUnit: SalesLineUnit = 'pcs',
+    ) => {
       const lineId = `line-${nextLineIdRef.current++}`;
       const paid = Math.max(0, Math.floor(qty));
       const foc = Math.max(0, Math.floor(focQty));
       if (paid < 1) return;
-      setItems((prev) => [...prev, { lineId, item, qty: paid, focQty: foc, specialRate }]);
+      setItems((prev) => [
+        ...prev,
+        {
+          lineId,
+          item,
+          salesUnit: normalizeSalesLineUnit(salesUnit),
+          qty: paid,
+          focQty: foc,
+          specialRate,
+        },
+      ]);
     },
     [],
   );
@@ -98,6 +117,14 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
     const foc = Math.max(0, Math.floor(focQty));
     setItems((prev) =>
       prev.map((c) => (c.lineId === lineId ? { ...c, focQty: foc } : c)),
+    );
+  }, []);
+
+  const updateSalesUnit = useCallback((lineId: string, salesUnit: SalesLineUnit) => {
+    setItems((prev) =>
+      prev.map((c) =>
+        c.lineId === lineId ? { ...c, salesUnit: normalizeSalesLineUnit(salesUnit) } : c,
+      ),
     );
   }, []);
 
@@ -163,6 +190,7 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
       addItem,
       updateQty,
       updateFocQty,
+      updateSalesUnit,
       setSpecialRate,
       removeItem,
       clearCart,
@@ -182,6 +210,7 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
       addItem,
       updateQty,
       updateFocQty,
+      updateSalesUnit,
       setSpecialRate,
       removeItem,
       clearCart,

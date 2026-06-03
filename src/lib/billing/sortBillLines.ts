@@ -1,6 +1,7 @@
 import { busyBillableQty } from './busyLineSplit';
 import type { BillingLineEdit, BillingLiveQueueFlag } from './liveQueueDraft';
 import type { OrderItem } from '../../types';
+import { salesLineUnitLabel } from '../salesUnit';
 import { orderItemDisplayName } from '../../utils/formatters';
 
 /** Stable bill sequence: `bill_line_no` when present, else legacy `id` order. */
@@ -22,7 +23,7 @@ export interface BuildBusyPasteTextOptions {
   flags?: Record<number, BillingLiveQueueFlag>;
 }
 
-/** Tab-separated lines for Busy paste: item name + qty in `bill_line_no` order. */
+/** Tab-separated lines for Busy paste: item name + qty + sales-selected unit in `bill_line_no` order. */
 export function buildBusyPasteText(
   items: OrderItem[],
   opts?: BuildBusyPasteTextOptions,
@@ -39,7 +40,7 @@ export function buildBusyPasteText(
         ? busyBillableQty(item, flag, edit)
         : edit?.qtyRequested ?? item.qty_requested;
       if (qty <= 0) return null;
-      return `${orderItemDisplayName(item)}\t${qty}`;
+      return `${orderItemDisplayName(item)}\t${qty}\t${salesLineUnitLabel(item.sales_unit)}`;
     })
     .filter((line): line is string => line != null)
     .join('\n');

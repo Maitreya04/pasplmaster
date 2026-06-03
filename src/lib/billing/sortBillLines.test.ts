@@ -60,20 +60,29 @@ function runTests(): void {
     stubItem({ id: 2, bill_line_no: 2, item_name: 'Beta', qty_requested: 4 }),
     stubItem({ id: 1, bill_line_no: 1, item_name: 'Alpha', qty_requested: 2 }),
   ];
-  assert.equal(buildBusyPasteText(pasteItems), 'Alpha\t2\nBeta\t4');
+  assert.equal(buildBusyPasteText(pasteItems), 'Alpha\t2\tPcs\nBeta\t4\tPcs');
   assert.equal(
     buildBusyPasteText(pasteItems, { lineEdits: { 2: { qtyRequested: 3 } } }),
-    'Alpha\t2\nBeta\t3',
+    'Alpha\t2\tPcs\nBeta\t3\tPcs',
+  );
+
+  const unitPasteItems = [
+    stubItem({ id: 2, bill_line_no: 2, item_name: 'Set line', qty_requested: 4, sales_unit: 'set' }),
+    stubItem({ id: 1, bill_line_no: 1, item_name: 'Kit line', qty_requested: 2, sales_unit: 'kit' }),
+  ];
+  assert.equal(
+    buildBusyPasteText(unitPasteItems),
+    'Kit line\t2\tKit\nSet line\t4\tSet',
   );
 
   const partialPaste = [
-    stubItem({ id: 1, bill_line_no: 1, item_name: 'Split', qty_requested: 2 }),
+    stubItem({ id: 1, bill_line_no: 1, item_name: 'Split', qty_requested: 2, sales_unit: 'kit' }),
   ];
   assert.equal(
     buildBusyPasteText(partialPaste, {
       flags: { 1: { type: 'partial', availableQty: 1 } },
     }),
-    'Split\t1',
+    'Split\t1\tKit',
   );
 
   const withRemoved = [
@@ -83,7 +92,7 @@ function runTests(): void {
   ];
   assert.equal(
     buildBusyPasteText(withRemoved, { lineEdits: { 2: { removed: true } } }),
-    'Keep\t1\nAlso keep\t3',
+    'Keep\t1\tPcs\nAlso keep\t3\tPcs',
   );
 
   const flagItems = [

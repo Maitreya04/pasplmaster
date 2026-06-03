@@ -70,7 +70,8 @@ import {
   NumberStepper,
 } from '../../components/shared';
 import { useSalesChrome } from './SalesChromeContext';
-import type { Item, Customer, StockLocationCode } from '../../types';
+import type { CartItem, Item, Customer, SalesLineUnit, StockLocationCode } from '../../types';
+import { SALES_LINE_UNITS, normalizeSalesLineUnit, salesLineUnitLabel } from '../../lib/salesUnit';
 import {
   formatStockQty,
   getStockTier,
@@ -1117,12 +1118,13 @@ interface ItemRowProps {
   result: SearchResult;
   query: string;
   onStartAdd: (item: Item) => void;
-  onConfirmAdd: (item: Item, qty: number, focQty: number) => void;
-  onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
+  onEditCartLines: (itemId: number) => void;
+  onConfirmAdd: (item: Item, qty: number, focQty: number, salesUnit: SalesLineUnit) => void;
+  onConfirmSpecialRateAdd: (item: Item, qty: number, salesUnit: SalesLineUnit) => void;
   onCancelAdd: () => void;
   pendingAddItemId: number | null;
   totalInOrderQty: number;
-  paidQtyInCart: number;
+  cartLines: CartItem[];
   focQtyInCart: number;
   price: number;
   sellableStockQty?: number | null;
@@ -1152,15 +1154,87 @@ function FocChip({ qty }: { qty: number }) {
   );
 }
 
-/** Billable qty already in cart — compact ×N format, soft blue tint. */
-function CartPaidQtyChip({ qty }: { qty: number }) {
+function SalesUnitRail({
+  value,
+  onChange,
+}: {
+  value: SalesLineUnit;
+  onChange: (value: SalesLineUnit) => void;
+}) {
   return (
-    <span
-      className="inline-flex shrink-0 items-center rounded-full border border-[color-mix(in_srgb,var(--bg-accent)_45%,var(--border-subtle))] bg-[var(--bg-accent-subtle)] px-3 py-1.5 font-mono font-ds-caption-size font-semibold tracking-[0.04em] text-[var(--content-accent)]"
-      aria-label={`×${qty} in cart (billable qty)`}
+    <div
+      className="flex min-w-0 items-center gap-2.5"
+      onClick={(e) => e.stopPropagation()}
     >
-      ×{qty}
-    </span>
+      <span className="shrink-0 font-ds-micro font-semibold uppercase text-[var(--content-tertiary)]">
+        Sell as
+      </span>
+      <div className="grid h-10 w-[180px] max-w-[calc(100%-60px)] shrink grid-cols-3 rounded-[12px] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-0.5">
+        {SALES_LINE_UNITS.map((unit) => {
+          const selected = unit === value;
+          return (
+            <button
+              key={unit}
+              type="button"
+              onClick={() => {
+                appHaptics.selection();
+                onChange(unit);
+              }}
+              className={`min-w-0 rounded-[10px] px-1.5 text-center font-ds-caption-size font-semibold leading-none transition-[background-color,color,box-shadow] duration-150 ${
+                selected
+                  ? 'bg-[var(--bg-accent)] text-[var(--content-on-color)] shadow-[0_1px_5px_color-mix(in_srgb,var(--bg-accent)_20%,transparent)]'
+                  : 'text-[var(--content-secondary)] hover:bg-[var(--bg-secondary)]'
+              }`}
+              aria-pressed={selected}
+            >
+              {salesLineUnitLabel(unit)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function cartLineChipText(lines: CartItem[]): string {
+  if (lines.length === 0) return '';
+  if (lines.length === 1) {
+    const [line] = lines;
+    return `×${line.qty} ${salesLineUnitLabel(line.salesUnit)}`;
+  }
+
+  const firstUnit = normalizeSalesLineUnit(lines[0].salesUnit);
+  const sameUnit = lines.every((line) => normalizeSalesLineUnit(line.salesUnit) === firstUnit);
+  const paidTotal = lines.reduce((sum, line) => sum + Math.max(0, line.qty), 0);
+  return sameUnit
+    ? `${lines.length} lines · ×${paidTotal} ${salesLineUnitLabel(firstUnit)}`
+    : `${lines.length} lines · ×${paidTotal}`;
+}
+
+/** Billable qty already in cart — opens the existing line instead of adding another one. */
+function CartPaidQtyChip({
+  lines,
+  onClick,
+}: {
+  lines: CartItem[];
+  onClick: () => void;
+}) {
+  const label = cartLineChipText(lines);
+  if (!label) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        appHaptics.selection();
+        onClick();
+      }}
+      className="inline-flex min-h-8 shrink-0 items-center rounded-full border border-[color-mix(in_srgb,var(--bg-accent)_45%,var(--border-subtle))] bg-[var(--bg-accent-subtle)] px-3 py-1.5 font-mono font-ds-caption-size font-semibold tracking-[0.04em] text-[var(--content-accent)] transition-colors hover:bg-[color-mix(in_srgb,var(--bg-accent-subtle)_70%,var(--bg-secondary))] active:scale-[0.98]"
+      aria-label={`${label} in cart. Edit cart line.`}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -1421,20 +1495,10 @@ function ItemStockBlock({
       ? stockAfterOrderLine(Number(stockQty), totalInOrderQty, tier)
       : null;
 
-  const inlineSuffix = secondary?.variant === 'line' ? secondary.text : undefined;
-
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
-      <LocationStockLine
-        label="Main Store"
-        stockQty={mainStoreStockQty}
-        suffix={sellableLocationCode === 'main_store' ? inlineSuffix : undefined}
-      />
-      <LocationStockLine
-        label="Jabalpur"
-        stockQty={jabalpurStockQty}
-        suffix={sellableLocationCode === 'jabalpur' ? inlineSuffix : undefined}
-      />
+      <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} />
+      <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
       {stockResolving && (
         <p className="pl-3 font-ds-label-size font-medium leading-[1.35] text-[var(--content-secondary)]">
           Checking {stockLocationLabel(sellableLocationCode)} stock...
@@ -1488,8 +1552,8 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   mainStoreStockQty?: number | null;
   jabalpurStockQty?: number | null;
   hasSpecialLine: boolean;
-  onConfirmAdd: (item: Item, qty: number, focQty: number) => void;
-  onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
+  onConfirmAdd: (item: Item, qty: number, focQty: number, salesUnit: SalesLineUnit) => void;
+  onConfirmSpecialRateAdd: (item: Item, qty: number, salesUnit: SalesLineUnit) => void;
   onCancelAdd: () => void;
 }) {
   const qtyInputRef = useRef<HTMLInputElement | null>(null);
@@ -1497,6 +1561,7 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   const [focPanelOpen, setFocPanelOpen] = useState(false);
   const [committedFocQty, setCommittedFocQty] = useState(0);
   const [panelFocDraft, setPanelFocDraft] = useState(1);
+  const [salesUnit, setSalesUnit] = useState<SalesLineUnit>('pcs');
 
   const getDraftQty = useCallback(() => {
     const parsed = parseInt(draftQtyInput.trim(), 10);
@@ -1509,20 +1574,13 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
     qtyInputRef.current?.select();
   }, [item.id]);
 
-  useEffect(() => {
-    setDraftQtyInput('1');
-    setFocPanelOpen(false);
-    setCommittedFocQty(0);
-    setPanelFocDraft(1);
-  }, [item.id]);
-
   const handleConfirmQty = useCallback(() => {
-    onConfirmAdd(item, getDraftQty(), committedFocQty);
-  }, [committedFocQty, getDraftQty, item, onConfirmAdd]);
+    onConfirmAdd(item, getDraftQty(), committedFocQty, salesUnit);
+  }, [committedFocQty, getDraftQty, item, onConfirmAdd, salesUnit]);
 
   const handleSpecialRate = useCallback(() => {
-    onConfirmSpecialRateAdd(item, getDraftQty());
-  }, [getDraftQty, item, onConfirmSpecialRateAdd]);
+    onConfirmSpecialRateAdd(item, getDraftQty(), salesUnit);
+  }, [getDraftQty, item, onConfirmSpecialRateAdd, salesUnit]);
 
   const openFocPanel = useCallback(() => {
     appHaptics.impactLight();
@@ -1586,7 +1644,8 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
       <div className="mt-2.5 grid grid-rows-[1fr] opacity-100 translate-y-0 transition-[grid-template-rows,opacity,transform,margin-top,padding-top] duration-200 ease-out">
         <div className="overflow-hidden">
           <div className="border-t border-[var(--border-subtle)] pt-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <SalesUnitRail value={salesUnit} onChange={setSalesUnit} />
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
               <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
                 <button
                   type="button"
@@ -1627,28 +1686,33 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
                   <Trash size={18} />
                 </button>
 
-                <input
-                  ref={qtyInputRef}
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={draftQtyInput}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => setDraftQtyInput(e.target.value.replace(/[^\d]/g, ''))}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleConfirmQty();
-                    } else if (e.key === 'Escape') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onCancelAdd();
-                    }
-                  }}
-                  aria-label="Paid quantity"
-                  className="h-11 w-14 rounded-[14px] border border-[var(--bg-accent)] bg-[var(--bg-secondary)] text-center font-mono text-lg font-semibold text-[var(--content-primary)] outline-none focus:ring-1 focus:ring-[var(--bg-accent)]"
-                />
+                <div className="flex h-11 items-center overflow-hidden rounded-[14px] border border-[var(--bg-accent)] bg-[var(--bg-secondary)] focus-within:ring-1 focus-within:ring-[var(--bg-accent)]">
+                  <input
+                    ref={qtyInputRef}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={draftQtyInput}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => setDraftQtyInput(e.target.value.replace(/[^\d]/g, ''))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleConfirmQty();
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onCancelAdd();
+                      }
+                    }}
+                    aria-label={`Paid quantity in ${salesLineUnitLabel(salesUnit)}`}
+                    className="h-full w-12 bg-transparent text-center font-mono text-lg font-semibold text-[var(--content-primary)] outline-none"
+                  />
+                  <span className="flex h-full min-w-10 items-center border-l border-[var(--border-subtle)] px-2 font-ds-caption-size font-semibold text-[var(--content-tertiary)]">
+                    {salesLineUnitLabel(salesUnit)}
+                  </span>
+                </div>
 
                 <button
                   type="button"
@@ -1741,12 +1805,13 @@ const ItemRow = memo(function ItemRow({
   result,
   query,
   onStartAdd,
+  onEditCartLines,
   onConfirmAdd,
   onConfirmSpecialRateAdd,
   onCancelAdd,
   pendingAddItemId,
   totalInOrderQty,
-  paidQtyInCart,
+  cartLines,
   focQtyInCart,
   price,
   sellableStockQty,
@@ -1815,7 +1880,9 @@ const ItemRow = memo(function ItemRow({
                 matchedField={matchedField}
                 placeholder={!productCode}
               />
-              {paidQtyInCart > 0 && <CartPaidQtyChip qty={paidQtyInCart} />}
+              {cartLines.length > 0 && (
+                <CartPaidQtyChip lines={cartLines} onClick={() => onEditCartLines(item.id)} />
+              )}
               {hasSpecialLine && <SpecialRateChip />}
               {focQtyInCart > 0 && <FocChip qty={focQtyInCart} />}
             </div>
@@ -1866,7 +1933,7 @@ const ItemRow = memo(function ItemRow({
     prevProps.query === nextProps.query &&
     prevProps.pendingAddItemId === nextProps.pendingAddItemId &&
     prevProps.totalInOrderQty === nextProps.totalInOrderQty &&
-    prevProps.paidQtyInCart === nextProps.paidQtyInCart &&
+    prevProps.cartLines === nextProps.cartLines &&
     prevProps.focQtyInCart === nextProps.focQtyInCart &&
     prevProps.price === nextProps.price &&
     prevProps.sellableStockQty === nextProps.sellableStockQty &&
@@ -1887,12 +1954,13 @@ function ResultSection({
   results,
   query,
   onStartAdd,
+  onEditCartLines,
   onConfirmAdd,
   onConfirmSpecialRateAdd,
   onCancelAdd,
   pendingAddItemId,
   getTotalInOrderQty,
-  getPaidQtyInCart,
+  getCartLines,
   getFocQtyInCart,
   getPrice,
   getSellableStockQty,
@@ -1907,12 +1975,13 @@ function ResultSection({
   results: SearchResult[];
   query: string;
   onStartAdd: (item: Item) => void;
-  onConfirmAdd: (item: Item, qty: number, focQty: number) => void;
-  onConfirmSpecialRateAdd: (item: Item, qty: number) => void;
+  onEditCartLines: (itemId: number) => void;
+  onConfirmAdd: (item: Item, qty: number, focQty: number, salesUnit: SalesLineUnit) => void;
+  onConfirmSpecialRateAdd: (item: Item, qty: number, salesUnit: SalesLineUnit) => void;
   onCancelAdd: () => void;
   pendingAddItemId: number | null;
   getTotalInOrderQty: (id: number) => number;
-  getPaidQtyInCart: (id: number) => number;
+  getCartLines: (id: number) => CartItem[];
   getFocQtyInCart: (id: number) => number;
   getPrice: (item: Item) => number;
   getSellableStockQty: (item: Item) => number | null | undefined;
@@ -1936,11 +2005,12 @@ function ResultSection({
             result={r}
             query={query}
             pendingAddItemId={pendingAddItemId}
+            onEditCartLines={onEditCartLines}
             onConfirmAdd={onConfirmAdd}
             onConfirmSpecialRateAdd={onConfirmSpecialRateAdd}
             onCancelAdd={onCancelAdd}
             totalInOrderQty={getTotalInOrderQty(r.item.id)}
-            paidQtyInCart={getPaidQtyInCart(r.item.id)}
+            cartLines={getCartLines(r.item.id)}
             focQtyInCart={getFocQtyInCart(r.item.id)}
             price={getPrice(r.item)}
             sellableStockQty={getSellableStockQty(r.item)}
@@ -1955,6 +2025,150 @@ function ResultSection({
         ))}
       </ul>
     </div>
+  );
+}
+
+function CartLineEditSheet({
+  isOpen,
+  itemName,
+  lines,
+  selectedLineId,
+  onSelectLine,
+  onClose,
+  onUpdateQty,
+  onUpdateFocQty,
+  onUpdateSalesUnit,
+  onRemove,
+}: {
+  isOpen: boolean;
+  itemName: string;
+  lines: CartItem[];
+  selectedLineId: string | null;
+  onSelectLine: (lineId: string) => void;
+  onClose: () => void;
+  onUpdateQty: (lineId: string, qty: number) => void;
+  onUpdateFocQty: (lineId: string, focQty: number) => void;
+  onUpdateSalesUnit: (lineId: string, salesUnit: SalesLineUnit) => void;
+  onRemove: (lineId: string) => void;
+}) {
+  const activeLine =
+    lines.find((line) => line.lineId === selectedLineId) ?? lines[0] ?? null;
+  const activeLineIndex = activeLine
+    ? lines.findIndex((line) => line.lineId === activeLine.lineId)
+    : -1;
+
+  return (
+    <BottomSheet
+      isOpen={isOpen && !!activeLine}
+      onClose={onClose}
+      title="Edit cart line"
+      sheetClassName="max-h-[min(78dvh,78vh)]"
+    >
+      {activeLine && (
+        <div className="space-y-4">
+          <div className="min-w-0">
+            <p className="font-ds-label-size font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+              {lines.length > 1 ? `Line ${activeLineIndex + 1} of ${lines.length}` : 'Cart line'}
+            </p>
+            <p className="mt-1 text-base font-semibold leading-snug text-[var(--content-primary)] line-clamp-2">
+              {itemName}
+            </p>
+          </div>
+
+          {lines.length > 1 && (
+            <div className="grid gap-2">
+              {lines.map((line, index) => {
+                const selected = line.lineId === activeLine.lineId;
+                const price = line.specialRate ?? line.item.sales_price;
+                return (
+                  <button
+                    key={line.lineId}
+                    type="button"
+                    onClick={() => {
+                      appHaptics.selection();
+                      onSelectLine(line.lineId);
+                    }}
+                    className={`rounded-2xl border px-3 py-2.5 text-left transition-colors ${
+                      selected
+                        ? 'border-[color-mix(in_srgb,var(--bg-accent)_42%,var(--border-subtle))] bg-[var(--bg-accent-subtle)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--bg-tertiary)]'
+                    }`}
+                    aria-pressed={selected}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[var(--content-primary)]">
+                          Line {index + 1} · ×{line.qty} {salesLineUnitLabel(line.salesUnit)}
+                        </p>
+                        <p className="mt-0.5 font-ds-label-size text-[var(--content-tertiary)]">
+                          {line.focQty > 0 ? `FOC ×${line.focQty} · ` : ''}
+                          {formatCurrency(price)}
+                        </p>
+                      </div>
+                      {selected && <Check size={18} weight="bold" className="shrink-0 text-[var(--content-accent)]" />}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-3 py-3">
+            <SalesUnitRail
+              value={normalizeSalesLineUnit(activeLine.salesUnit)}
+              onChange={(unit) => onUpdateSalesUnit(activeLine.lineId, unit)}
+            />
+          </div>
+
+          <div className="grid gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3">
+              <div>
+                <p className="text-sm font-semibold text-[var(--content-primary)]">Paid qty</p>
+                <p className="mt-0.5 font-ds-label-size text-[var(--content-tertiary)]">
+                  {salesLineUnitLabel(activeLine.salesUnit)}
+                </p>
+              </div>
+              <NumberStepper
+                value={activeLine.qty}
+                min={1}
+                presets={[]}
+                variant="compact"
+                showRemoveAtMin
+                onChange={(qty) => onUpdateQty(activeLine.lineId, qty)}
+                onRemove={() => onRemove(activeLine.lineId)}
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] px-3 py-3">
+              <div>
+                <p className="text-sm font-semibold text-[var(--content-positive)]">FOC qty</p>
+                <p className="mt-0.5 font-ds-label-size text-[var(--content-tertiary)]">Free units</p>
+              </div>
+              <NumberStepper
+                value={activeLine.focQty ?? 0}
+                min={0}
+                presets={[]}
+                variant="compact"
+                colorScheme="positive"
+                onChange={(qty) => onUpdateFocQty(activeLine.lineId, qty)}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3">
+            <div>
+              <p className="font-ds-label-size font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+                Rate
+              </p>
+              <p className="mt-1 font-mono text-base font-semibold text-[var(--content-primary)]">
+                {formatCurrency(activeLine.specialRate ?? activeLine.item.sales_price)}
+              </p>
+            </div>
+            {activeLine.specialRate !== null && <SpecialRateChip />}
+          </div>
+        </div>
+      )}
+    </BottomSheet>
   );
 }
 
@@ -1982,6 +2196,10 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const {
     items: cartItems,
     addItem,
+    updateQty,
+    updateFocQty,
+    updateSalesUnit,
+    removeItem,
     totalCount,
     totalValue,
     setSelectedCustomer,
@@ -1994,9 +2212,12 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [rateItem, setRateItem] = useState<Item | null>(null);
   const [rateQty, setRateQty] = useState(1);
+  const [rateUnit, setRateUnit] = useState<SalesLineUnit>('pcs');
   const [rateValue, setRateValue] = useState('');
   const [pendingAddItemId, setPendingAddItemId] = useState<number | null>(null);
   const [recentlyAddedItemId, setRecentlyAddedItemId] = useState<number | null>(null);
+  const [editingCartItemId, setEditingCartItemId] = useState<number | null>(null);
+  const [editingCartLineId, setEditingCartLineId] = useState<string | null>(null);
   const [cartPulse, setCartPulse] = useState(false);
   const searchRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -2191,22 +2412,22 @@ export default function NewOrderPage(): React.JSX.Element | null {
     return totals;
   }, [cartItems]);
 
+  const cartLinesByItem = useMemo(() => {
+    const lines = new Map<number, CartItem[]>();
+    for (const line of cartItems) {
+      const group = lines.get(line.item.id) ?? [];
+      group.push(line);
+      lines.set(line.item.id, group);
+    }
+    return lines;
+  }, [cartItems]);
+
   const focQtyByItem = useMemo(() => {
     const totals = new Map<number, number>();
     for (const line of cartItems) {
       const foc = Math.max(0, line.focQty ?? 0);
       if (foc <= 0) continue;
       totals.set(line.item.id, (totals.get(line.item.id) ?? 0) + foc);
-    }
-    return totals;
-  }, [cartItems]);
-
-  const paidQtyByItem = useMemo(() => {
-    const totals = new Map<number, number>();
-    for (const line of cartItems) {
-      const paid = Math.max(0, line.qty);
-      if (paid <= 0) continue;
-      totals.set(line.item.id, (totals.get(line.item.id) ?? 0) + paid);
     }
     return totals;
   }, [cartItems]);
@@ -2220,9 +2441,14 @@ export default function NewOrderPage(): React.JSX.Element | null {
   }, [cartItems]);
 
   const getTotalInOrderQty = (id: number) => cartQtyByItem.get(id) ?? 0;
-  const getPaidQtyInCart = (id: number) => paidQtyByItem.get(id) ?? 0;
+  const getCartLines = (id: number) => cartLinesByItem.get(id) ?? [];
   const getFocQtyInCart = (id: number) => focQtyByItem.get(id) ?? 0;
   const getPrice = (item: Item) => defaultSalesRateForItem(item, billingVerifiedMrpMap);
+  const editingCartLines = useMemo(
+    () => (editingCartItemId == null ? [] : cartLinesByItem.get(editingCartItemId) ?? []),
+    [cartLinesByItem, editingCartItemId],
+  );
+  const editingCartItemName = editingCartLines[0]?.item.name ?? '';
   const getMainStoreStockQty = (item: Item) => {
     const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
     if (!Number.isFinite(busyCode)) return null;
@@ -2288,12 +2514,24 @@ export default function NewOrderPage(): React.JSX.Element | null {
     if (recentlyAddedItemId === item.id) {
       clearAddedFeedback();
     }
+    setEditingCartItemId(null);
+    setEditingCartLineId(null);
     setPendingAddItemId(item.id);
   };
 
-  const handleConfirmAdd = (item: Item, qty: number, focQty: number) => {
+  const handleEditCartLines = (itemId: number) => {
+    const lines = getCartLines(itemId);
+    if (lines.length === 0) return;
+    setPendingAddItemId(null);
+    setEditingCartItemId(itemId);
+    setEditingCartLineId((current) =>
+      current && lines.some((line) => line.lineId === current) ? current : lines[0].lineId,
+    );
+  };
+
+  const handleConfirmAdd = (item: Item, qty: number, focQty: number, salesUnit: SalesLineUnit) => {
     appHaptics.impactMedium();
-    addItem(item, qty, cartSpecialRateForVerified(item, billingVerifiedMrpMap), focQty);
+    addItem(item, qty, cartSpecialRateForVerified(item, billingVerifiedMrpMap), focQty, salesUnit);
     setPendingAddItemId(null);
     showAddedFeedback(item.id);
   };
@@ -2302,10 +2540,29 @@ export default function NewOrderPage(): React.JSX.Element | null {
     setPendingAddItemId(null);
   };
 
-  const handleConfirmSpecialRateAdd = (item: Item, qty: number) => {
+  const closeCartLineEditor = useCallback(() => {
+    setEditingCartItemId(null);
+    setEditingCartLineId(null);
+  }, []);
+
+  const handleRemoveEditedCartLine = useCallback(
+    (lineId: string) => {
+      const nextLines = editingCartLines.filter((line) => line.lineId !== lineId);
+      removeItem(lineId);
+      if (nextLines.length === 0) {
+        closeCartLineEditor();
+        return;
+      }
+      setEditingCartLineId(nextLines[0].lineId);
+    },
+    [closeCartLineEditor, editingCartLines, removeItem],
+  );
+
+  const handleConfirmSpecialRateAdd = (item: Item, qty: number, salesUnit: SalesLineUnit) => {
     setPendingAddItemId(null);
     setRateItem(item);
     setRateQty(qty);
+    setRateUnit(salesUnit);
     setRateValue('');
   };
 
@@ -2314,9 +2571,10 @@ export default function NewOrderPage(): React.JSX.Element | null {
     const n = parseFloat(rateValue.replace(/,/g, ''));
     if (isNaN(n) || n < 0) return;
     appHaptics.impactMedium();
-    addItem(rateItem, rateQty, n);
+    addItem(rateItem, rateQty, n, 0, rateUnit);
     showAddedFeedback(rateItem.id);
     setRateItem(null);
+    setRateUnit('pcs');
     setRateValue('');
     focusSearchInput(60);
   };
@@ -2486,12 +2744,13 @@ export default function NewOrderPage(): React.JSX.Element | null {
               results={searchResults}
               query={effectiveQuery}
               onStartAdd={handleStartAdd}
+              onEditCartLines={handleEditCartLines}
               onConfirmAdd={handleConfirmAdd}
               onConfirmSpecialRateAdd={handleConfirmSpecialRateAdd}
               onCancelAdd={handleCancelAdd}
               pendingAddItemId={pendingAddItemId}
               getTotalInOrderQty={getTotalInOrderQty}
-              getPaidQtyInCart={getPaidQtyInCart}
+              getCartLines={getCartLines}
               getFocQtyInCart={getFocQtyInCart}
               getPrice={getPrice}
               getSellableStockQty={getSellableStockQty}
@@ -2530,11 +2789,25 @@ export default function NewOrderPage(): React.JSX.Element | null {
         </div>
       )}
 
+      <CartLineEditSheet
+        isOpen={editingCartItemId !== null}
+        itemName={editingCartItemName}
+        lines={editingCartLines}
+        selectedLineId={editingCartLineId}
+        onSelectLine={setEditingCartLineId}
+        onClose={closeCartLineEditor}
+        onUpdateQty={updateQty}
+        onUpdateFocQty={updateFocQty}
+        onUpdateSalesUnit={updateSalesUnit}
+        onRemove={handleRemoveEditedCartLine}
+      />
+
       {/* Special rate sheet */}
       <BottomSheet
         isOpen={!!rateItem}
         onClose={() => {
           setRateItem(null);
+          setRateUnit('pcs');
           focusSearchInput(60);
         }}
         title={rateItem ? `Special rate: ${rateItem.name}` : ''}
@@ -2542,7 +2815,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
         {rateItem && (
           <div className="space-y-4">
             <p className="text-sm text-[var(--content-tertiary)]">
-              Qty: <span className="font-mono">{rateQty}</span> · Default: {formatCurrency(getPrice(rateItem))}
+              Qty: <span className="font-mono">{rateQty}</span> {salesLineUnitLabel(rateUnit)} · Default: {formatCurrency(getPrice(rateItem))}
             </p>
             <input
               type="text"

@@ -41,6 +41,13 @@ export function assignPickerErrorMessage(result: AssignPickerResult): string {
     const who = result.claimed_by ? ` (${result.claimed_by})` : '';
     return `Another picker is already on this order${who}.`;
   }
+  if (result.reason === 'locked_by_sales_edit') {
+    const who =
+      typeof (result as { locked_by_name?: string }).locked_by_name === 'string'
+        ? ` (${(result as { locked_by_name?: string }).locked_by_name})`
+        : '';
+    return `Sales is editing this order${who}. Try again when they finish.`;
+  }
   if (result.reason === 'picker_not_found') {
     return 'Picker not found or inactive.';
   }

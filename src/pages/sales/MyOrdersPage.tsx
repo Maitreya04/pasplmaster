@@ -28,12 +28,18 @@ import {
 } from '../../lib/pendingRecovery';
 import { supabase } from '../../lib/supabase/client';
 import { BILLING_OOS_FLAG_REASON } from '../../lib/billing/applyBillingApprove';
+import {
+  orderAllowsSalesLineEdit,
+  salesLineEditHint,
+} from '../../lib/sales/orderAllowsSalesLineEdit';
 import { SalesEditAddLineSheet } from './SalesEditAddLineSheet';
 
 const SALES_CLAIM_MESSAGES: Record<string, string> = {
   locked_by_billing: 'Billing is reviewing this order. Try again when they finish.',
   not_owner: 'Only the salesperson on this order can edit lines.',
-  not_submitted: 'This order is no longer in submitted status.',
+  not_submitted: 'This order can no longer be edited.',
+  picker_assigned: 'A picker is assigned — editing is closed.',
+  not_editable: 'This order can no longer be edited.',
   already_claimed: 'Another session holds this order.',
   'User not found or inactive': 'Your session is invalid. Sign in again.',
   'Order not found': 'Order could not be found.',
@@ -46,6 +52,8 @@ const REMOVE_SALES_LINE_MESSAGES: Record<string, string> = {
   line_order_mismatch: 'That line does not belong to this order.',
   order_not_found: 'Order could not be found.',
   not_submitted: 'This order cannot be edited anymore.',
+  picker_assigned: 'A picker is assigned — this line cannot be removed.',
+  not_editable: 'This order cannot be edited anymore.',
   not_owner: 'You cannot remove lines on this order.',
   invalid_salesperson: 'Your user cannot edit orders.',
   last_line: 'Cannot remove the last line — ask billing to reject the order instead.',
@@ -676,14 +684,12 @@ function OrderDetailSheet({
     toast.success('Finished editing');
   }, [releaseSalesEdit, queryClient, orderId, toast]);
 
-  const canEditLines = useMemo(() => {
-    if (!order || userId == null) return false;
-    return (
-      order.workflow_status === 'submitted' &&
-      order.salesperson_user_id != null &&
-      order.salesperson_user_id === userId
-    );
-  }, [order, userId]);
+  const canEditLines = useMemo(
+    () => orderAllowsSalesLineEdit(order, userId),
+    [order, userId],
+  );
+  const salesEditHint = useMemo(() => salesLineEditHint(order), [order]);
+  const editPausedBilling = order?.workflow_status === 'submitted';
 
   if (!isOpen) return null;
 
@@ -733,17 +739,27 @@ function OrderDetailSheet({
                 Edit order lines
               </button>
               <p className="mt-1.5 text-center text-xs text-[var(--content-tertiary)]">
-                Pauses billing until you tap Done editing
+                {editPausedBilling
+                  ? 'Pauses billing until you tap Done editing'
+                  : 'You can edit until a picker is assigned'}
               </p>
             </div>
+          )}
+
+          {!canEditLines && salesEditHint && (
+            <p className="mb-4 text-center text-xs text-[var(--content-tertiary)]">{salesEditHint}</p>
           )}
 
           {editMode && (
             <div className="mb-4 space-y-3">
               <div className="rounded-xl border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-3 py-2">
-                <p className="text-sm font-semibold text-[var(--content-accent)]">Live Queue paused</p>
+                <p className="text-sm font-semibold text-[var(--content-accent)]">
+                  {editPausedBilling ? 'Live Queue paused' : 'Editing open order'}
+                </p>
                 <p className="mt-0.5 text-xs text-[var(--content-secondary)]">
-                  Billing cannot claim this order while you edit lines.
+                  {editPausedBilling
+                    ? 'Billing cannot claim this order while you edit lines.'
+                    : 'Billing has approved this order. Finish editing before a picker is assigned.'}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">

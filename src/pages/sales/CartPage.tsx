@@ -44,6 +44,7 @@ import {
   SearchableTransportDropdown,
 } from '../../components/shared';
 import type { Customer, CartItem } from '../../types';
+import { normalizeSalesLineUnit } from '../../lib/salesUnit';
 
 import { formatCurrencyRaw as formatCurrency } from '../../utils/formatters';
 import { splitCartLinePaidFoc } from '../../lib/cartSupply';
@@ -1153,9 +1154,11 @@ export default function CartPage(): React.JSX.Element | null {
           const foc = Math.max(0, ci.focQty ?? 0);
           const paid = ci.qty;
           const sys = ci.item.sales_price;
+          const salesUnit = normalizeSalesLineUnit(ci.salesUnit);
           const rows: Array<{
             item_id: number;
             qty_requested: number;
+            sales_unit: string;
             price_quoted: number;
             price_system: number;
             is_foc: boolean;
@@ -1164,6 +1167,7 @@ export default function CartPage(): React.JSX.Element | null {
             rows.push({
               item_id: ci.item.id,
               qty_requested: paid,
+              sales_unit: salesUnit,
               price_quoted: ci.specialRate ?? sys,
               price_system: sys,
               is_foc: false,
@@ -1173,6 +1177,7 @@ export default function CartPage(): React.JSX.Element | null {
             rows.push({
               item_id: ci.item.id,
               qty_requested: foc,
+              sales_unit: salesUnit,
               price_quoted: 0,
               price_system: sys,
               is_foc: true,

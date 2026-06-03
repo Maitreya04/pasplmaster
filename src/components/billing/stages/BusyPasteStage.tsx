@@ -25,6 +25,7 @@ import {
 } from '../../../lib/billing/busyLineSplit';
 import { buildBusyPasteText, sortBillLines } from '../../../lib/billing/sortBillLines';
 import { getBookPrice, getQuotedPrice } from '../../../lib/specialPricing';
+import { salesLineUnitLabel } from '../../../lib/salesUnit';
 import {
   formatCurrencyRaw,
   orderItemDisplayName,
@@ -71,6 +72,18 @@ function RateCell({
           Orig {formatRate(bookRate)}
         </span>
       ) : null}
+    </span>
+  );
+}
+
+function UnitCell({ item, muted = false }: { item: OrderItem; muted?: boolean }): React.JSX.Element {
+  return (
+    <span
+      className={`w-14 shrink-0 px-2 text-center font-ds-caption-size font-semibold ${
+        muted ? 'text-[var(--content-quaternary)]' : 'text-[var(--content-secondary)]'
+      }`}
+    >
+      {salesLineUnitLabel(item.sales_unit)}
     </span>
   );
 }
@@ -308,6 +321,7 @@ export function BusyPasteStage({
                 <span className="min-w-0 flex-1 px-2.5">Description</span>
                 <span className="w-24 shrink-0 px-2 text-right">Bill rate</span>
                 <span className="w-14 shrink-0 px-2.5 text-right">Qty</span>
+                <span className="w-14 shrink-0 px-2 text-center">Unit</span>
               </li>
             ) : null}
             {billable.map((item, index) => {
@@ -376,6 +390,7 @@ export function BusyPasteStage({
                       </span>
                     ) : null}
                   </span>
+                  <UnitCell item={item} />
                 </li>
               );
             })}
@@ -400,7 +415,7 @@ export function BusyPasteStage({
                 return (
                   <li
                     key={item.id}
-                    className="grid grid-cols-[auto_minmax(0,1fr)_96px_56px] gap-x-3 items-center px-2.5 py-2.5 opacity-70"
+                    className="grid grid-cols-[auto_minmax(0,1fr)_96px_56px_56px] gap-x-3 items-center px-2.5 py-2.5 opacity-70"
                     style={{
                       borderBottom: '0.5px dashed var(--border-opaque)',
                       background: 'var(--bg-secondary)',
@@ -424,6 +439,7 @@ export function BusyPasteStage({
                     <span className="text-[14px] tabular-nums text-right text-[var(--content-quaternary)]">
                       {busyPendingQty(item, flag, edit)}
                     </span>
+                    <UnitCell item={item} muted />
                   </li>
                 );
               })}

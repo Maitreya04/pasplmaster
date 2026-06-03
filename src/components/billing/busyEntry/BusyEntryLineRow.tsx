@@ -9,6 +9,7 @@ import {
   billingFreshnessChipLabel,
   billingFreshnessChipTitle,
 } from '../../../hooks/useBillingStockFreshness';
+import { salesLineUnitLabel } from '../../../lib/salesUnit';
 import { getBookPrice, getQuotedPrice } from '../../../lib/specialPricing';
 import type { ItemFlag } from '../../../hooks/useBillingFlow';
 import type { OrderItem } from '../../../types';
@@ -126,6 +127,9 @@ export function BusyEntryTableHeader({
         </th>
         <th className="w-16 px-2.5 text-right font-ds-caption-size font-medium text-[var(--content-tertiary)]">
           Qty
+        </th>
+        <th className="w-16 px-2.5 text-center font-ds-caption-size font-medium text-[var(--content-tertiary)]">
+          Unit
         </th>
       </tr>
     </thead>
@@ -450,6 +454,15 @@ export function BusyEntryLineRow({
             </span>
           </button>
         )}
+      </td>
+      <td className="w-16 px-2.5 text-center align-middle">
+        <span
+          className={`font-ds-caption-size font-semibold ${
+            isSkip || isPending ? 'text-[var(--content-quaternary)]' : 'text-[var(--content-secondary)]'
+          }`}
+        >
+          {salesLineUnitLabel(item.sales_unit)}
+        </span>
       </td>
     </tr>
   );

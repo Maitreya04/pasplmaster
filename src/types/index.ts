@@ -1,5 +1,7 @@
 /** Display preference only; stored qty remains EA (pieces). */
 export type ItemSellingUnit = 'piece' | 'packet' | 'box';
+/** Sales-selected Busy unit label. Qty remains the typed count; no piece conversion. */
+export type SalesLineUnit = 'pcs' | 'kit' | 'set';
 
 export interface Item {
   id: number;
@@ -128,6 +130,8 @@ export interface OrderItem {
   /** From `items` join — Busy ERP code for location-wise stock lookups. */
   catalog_busy_code?: number | null;
   rack_no: string | null;
+  /** Sales-selected unit copied to Busy. Qty remains unchanged. */
+  sales_unit?: SalesLineUnit | null;
   qty_requested: number;
   /** Units to pick from on-hand stock (≤ qty_requested). Omitted on legacy rows. */
   qty_shippable?: number;
@@ -261,6 +265,7 @@ export interface OrderWithItems extends Order {
 export interface CartItem {
   lineId: string;
   item: Item;
+  salesUnit: SalesLineUnit;
   /** Billable (paid) quantity. */
   qty: number;
   /** Extra same-SKU units at ₹0 (FOC). */

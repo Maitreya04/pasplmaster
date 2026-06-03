@@ -1,11 +1,12 @@
 import type { CartItem, Customer, Transport } from '../types';
+import { normalizeSalesLineUnit } from './salesUnit';
 
 function normalizeCartItem(row: CartItem): CartItem {
   const foc =
     typeof row.focQty === 'number' && Number.isFinite(row.focQty)
       ? Math.max(0, Math.floor(row.focQty))
       : 0;
-  return { ...row, focQty: foc };
+  return { ...row, focQty: foc, salesUnit: normalizeSalesLineUnit(row.salesUnit) };
 }
 
 const DRAFT_VERSION = 1 as const;
