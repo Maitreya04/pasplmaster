@@ -285,7 +285,7 @@ BEGIN
     picker_name = NULL,
     picked_at = NULL,
     completed_at = NULL,
-    fulfillment_path = NULL
+    fulfillment_path = COALESCE(v_order.fulfillment_path, 'warehouse_pick')
   WHERE id = p_order_id;
 
   INSERT INTO public.order_events (order_id, event_type, actor_user_id, stage, payload)
