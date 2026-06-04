@@ -6,7 +6,7 @@ import { BusyEntryCheckbox, BusyEntryCheckboxHeader } from './BusyEntryCheckbox'
 import { BusyEntryCode } from './BusyEntryCode';
 import type { BillingFreshnessRow } from '../../../hooks/useBillingStockFreshness';
 import { SalesUnitBadge } from '../../shared/SalesUnitBadge';
-import { effectiveSalesLineUnit, salesLineUnitLabel } from '../../../lib/salesUnit';
+import { busyPasteUnitLabel, effectiveSalesLineUnit } from '../../../lib/salesUnit';
 import type { BillingLineEdit } from '../../../lib/billing/liveQueueDraft';
 import type { ItemFlag } from '../../../hooks/useBillingFlow';
 import type { OrderItem } from '../../../types';
@@ -170,6 +170,7 @@ export function BusyEntryLineRow({
   lineEdit,
 }: BusyEntryLineRowProps): React.JSX.Element {
   const unit = effectiveSalesLineUnit(item, lineEdit);
+  const unitLabel = busyPasteUnitLabel(unit);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const effectiveStatus: LineStatus = isSkip
@@ -325,7 +326,7 @@ export function BusyEntryLineRow({
               max={item.qty_requested}
               className="ds-input w-12 text-right text-sm font-mono py-1 px-1"
             />
-            <span className="busy-entry-unit">{salesLineUnitLabel(unit)}</span>
+            {unitLabel ? <span className="busy-entry-unit">{unitLabel}</span> : null}
           </div>
         ) : isSkip ? (
           <BusyEntryQtyUnit item={item} lineEdit={lineEdit} qty={displayQty} muted />
@@ -349,7 +350,7 @@ export function BusyEntryLineRow({
               }}
               className="ds-input w-14 text-right text-sm font-mono py-1 px-2"
             />
-            <span className="busy-entry-unit">{salesLineUnitLabel(unit)}</span>
+            {unitLabel ? <span className="busy-entry-unit">{unitLabel}</span> : null}
           </div>
         ) : (
           <button

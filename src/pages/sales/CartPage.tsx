@@ -46,7 +46,7 @@ import {
 import type { Customer, CartItem } from '../../types';
 import { SalesUnitBadge } from '../../components/shared/SalesUnitBadge';
 import { SalesUnitRail } from '../../components/shared/SalesUnitRail';
-import { normalizeSalesLineUnit, salesLineUnitLabel } from '../../lib/salesUnit';
+import { normalizeSalesLineUnit, salesLineUnitSuffix } from '../../lib/salesUnit';
 import type { SalesLineUnit } from '../../types';
 
 import { formatCurrencyRaw as formatCurrency } from '../../utils/formatters';
@@ -752,7 +752,7 @@ const BillingItemCard = memo(function BillingItemCard({
                   onRemove={poQty === 0 ? () => onDeletePress(cartItem) : undefined}
                 />
                 <p className="font-ds-micro font-semibold uppercase text-[var(--content-tertiary)]">
-                  ×{shipQty} {salesLineUnitLabel(salesUnit)}
+                  ×{shipQty}{salesLineUnitSuffix(salesUnit)}
                 </p>
               </div>
             </div>
@@ -1731,8 +1731,7 @@ export default function CartPage(): React.JSX.Element | null {
                             <SalesUnitBadge unit={ci.salesUnit} className="ml-auto" />
                           </p>
                           <p>
-                            {formatCurrency(price)} × {ship}{' '}
-                            {salesLineUnitLabel(ci.salesUnit)}
+                            {formatCurrency(price)} × {ship}{salesLineUnitSuffix(ci.salesUnit)}
                           </p>
                           <p className="font-semibold text-[var(--content-primary)]">
                             = {formatCurrency(lineTotal)}

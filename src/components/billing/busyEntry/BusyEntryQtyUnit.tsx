@@ -1,4 +1,4 @@
-import { effectiveSalesLineUnit, salesLineUnitLabel } from '../../../lib/salesUnit';
+import { busyPasteUnitLabel, effectiveSalesLineUnit } from '../../../lib/salesUnit';
 import type { BillingLineEdit } from '../../../lib/billing/liveQueueDraft';
 import type { OrderItem } from '../../../types';
 
@@ -18,13 +18,13 @@ export function BusyEntryQtyUnit({
   pendingQty = 0,
   muted = false,
 }: BusyEntryQtyUnitProps): React.JSX.Element {
-  const unit = salesLineUnitLabel(effectiveSalesLineUnit(item, lineEdit));
+  const unit = busyPasteUnitLabel(effectiveSalesLineUnit(item, lineEdit));
 
   return (
     <span className="block text-right tabular-nums">
       <span className="inline-flex items-baseline justify-end gap-1">
         <span className={`busy-entry-qty ${muted ? 'busy-entry-qty--muted' : ''}`}>{qty}</span>
-        <span className="busy-entry-unit">{unit}</span>
+        {unit ? <span className="busy-entry-unit">{unit}</span> : null}
       </span>
       {pendingQty > 0 ? (
         <span className="busy-entry-pending-qty">+{pendingQty} pending</span>

@@ -1,5 +1,5 @@
 import { appHaptics } from '../../lib/haptics';
-import { SALES_LINE_UNITS, salesLineUnitLabel } from '../../lib/salesUnit';
+import { SALES_SELECTABLE_UNITS, salesLineUnitLabel } from '../../lib/salesUnit';
 import type { SalesLineUnit } from '../../types';
 
 export interface SalesUnitRailProps {
@@ -26,8 +26,8 @@ export function SalesUnitRail({
           Sell as
         </span>
       ) : null}
-      <div className="grid h-10 w-[180px] max-w-[calc(100%-60px)] shrink grid-cols-3 rounded-[12px] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-0.5">
-        {SALES_LINE_UNITS.map((unit) => {
+      <div className="grid h-10 w-[120px] max-w-[calc(100%-60px)] shrink grid-cols-2 rounded-[12px] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-0.5">
+        {SALES_SELECTABLE_UNITS.map((unit) => {
           const selected = unit === value;
           return (
             <button
@@ -35,7 +35,7 @@ export function SalesUnitRail({
               type="button"
               onClick={() => {
                 appHaptics.selection();
-                onChange(unit);
+                onChange(selected ? 'pcs' : unit);
               }}
               className={`min-w-0 rounded-[10px] px-1.5 text-center font-ds-caption-size font-semibold leading-none transition-[background-color,color,box-shadow] duration-150 ${
                 selected

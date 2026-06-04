@@ -5,11 +5,15 @@ import { Prohibit } from '@phosphor-icons/react';
 import { useOrders } from '../../hooks/useOrders';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { supabase } from '../../lib/supabase/client';
 import {
   formatInternalNotificationError,
   sendInternalNotification,
 } from '../../lib/pickerPush';
+import {
+  formatReviveBillingOrderError,
+  reviveBillingOrder,
+  reviveSuccessToast,
+} from '../../lib/billing/reviveBillingOrder';
 import {
   canRevive,
   accountHoldDisplayNote,
@@ -146,33 +150,12 @@ export default function RejectedPage(): React.JSX.Element | null {
   const reviveMutation = useMutation({
     mutationFn: async (target: Order) => {
       if (!userId) throw new Error('Not signed in');
-      const { data, error: rpcError } = await supabase.rpc('revive_billing_order', {
-        p_order_id: target.id,
-        p_actor_user_id: userId,
-        p_actor_name: userName ?? 'Billing',
+      const { warnings } = await reviveBillingOrder({
+        orderId: target.id,
+        actorUserId: userId,
+        actorName: userName ?? 'Billing',
       });
-      if (rpcError) throw rpcError;
-      const payload = data as {
-        success?: boolean;
-        error?: string;
-        lines?: Array<{ item_name?: string }>;
-        warnings?: unknown[];
-      };
-      if (!payload?.success) {
-        if (payload.error === 'insufficient_stock' && Array.isArray(payload.lines)) {
-          const names = payload.lines
-            .map((line) => line.item_name)
-            .filter(Boolean)
-            .join(', ');
-          throw new Error(
-            names
-              ? `Insufficient stock for: ${names}`
-              : 'Insufficient stock to revive this order',
-          );
-        }
-        throw new Error(payload.error ?? 'revive_failed');
-      }
-      return { target, warnings: payload.warnings };
+      return { target, warnings };
     },
     onSuccess: async ({ target, warnings }) => {
       setReviveTarget(null);
@@ -195,15 +178,10 @@ export default function RejectedPage(): React.JSX.Element | null {
         );
       });
 
-      const warningCount = Array.isArray(warnings) ? warnings.length : 0;
-      toast.success(
-        warningCount > 0
-          ? `Order revived with ${warningCount} line qty adjustment${warningCount === 1 ? '' : 's'}`
-          : 'Order returned to billing queue',
-      );
+      toast.success(reviveSuccessToast(target, warnings));
     },
     onError: (err: unknown) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to revive order');
+      toast.error(formatReviveBillingOrderError(err));
     },
   });
 

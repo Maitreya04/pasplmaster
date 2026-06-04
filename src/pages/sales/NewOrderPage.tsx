@@ -67,7 +67,7 @@ import {
 import { useSalesChrome } from './SalesChromeContext';
 import type { CartItem, Item, Customer, SalesLineUnit, StockLocationCode } from '../../types';
 import { SalesUnitRail } from '../../components/shared/SalesUnitRail';
-import { normalizeSalesLineUnit, salesLineUnitLabel } from '../../lib/salesUnit';
+import { normalizeSalesLineUnit, salesLineUnitSuffix } from '../../lib/salesUnit';
 import {
   formatStockQty,
   getStockTier,
@@ -1154,14 +1154,15 @@ function cartLineChipText(lines: CartItem[]): string {
   if (lines.length === 0) return '';
   if (lines.length === 1) {
     const [line] = lines;
-    return `×${line.qty} ${salesLineUnitLabel(line.salesUnit)}`;
+    return `×${line.qty}${salesLineUnitSuffix(line.salesUnit)}`;
   }
 
   const firstUnit = normalizeSalesLineUnit(lines[0].salesUnit);
   const sameUnit = lines.every((line) => normalizeSalesLineUnit(line.salesUnit) === firstUnit);
   const paidTotal = lines.reduce((sum, line) => sum + Math.max(0, line.qty), 0);
-  return sameUnit
-    ? `${lines.length} lines · ×${paidTotal} ${salesLineUnitLabel(firstUnit)}`
+  const unitSuffix = sameUnit ? salesLineUnitSuffix(firstUnit) : '';
+  return sameUnit && unitSuffix
+    ? `${lines.length} lines · ×${paidTotal}${unitSuffix}`
     : `${lines.length} lines · ×${paidTotal}`;
 }
 
@@ -1660,12 +1661,14 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
                         onCancelAdd();
                       }
                     }}
-                    aria-label={`Paid quantity in ${salesLineUnitLabel(salesUnit)}`}
+                    aria-label={`Paid quantity${salesLineUnitSuffix(salesUnit) || ''}`}
                     className="h-full w-12 bg-transparent text-center font-mono text-lg font-semibold text-[var(--content-primary)] outline-none"
                   />
-                  <span className="flex h-full min-w-10 items-center border-l border-[var(--border-subtle)] px-2 font-ds-caption-size font-semibold text-[var(--content-tertiary)]">
-                    {salesLineUnitLabel(salesUnit)}
-                  </span>
+                  {salesLineUnitSuffix(salesUnit) ? (
+                    <span className="flex h-full min-w-10 items-center border-l border-[var(--border-subtle)] px-2 font-ds-caption-size font-semibold text-[var(--content-tertiary)]">
+                      {salesLineUnitSuffix(salesUnit).trim()}
+                    </span>
+                  ) : null}
                 </div>
 
                 <button
@@ -2052,7 +2055,7 @@ function CartLineEditSheet({
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-[var(--content-primary)]">
-                          Line {index + 1} · ×{line.qty} {salesLineUnitLabel(line.salesUnit)}
+                          Line {index + 1} · ×{line.qty}{salesLineUnitSuffix(line.salesUnit)}
                         </p>
                         <p className="mt-0.5 font-ds-label-size text-[var(--content-tertiary)]">
                           {line.focQty > 0 ? `FOC ×${line.focQty} · ` : ''}
@@ -2079,7 +2082,7 @@ function CartLineEditSheet({
               <div>
                 <p className="text-sm font-semibold text-[var(--content-primary)]">Paid qty</p>
                 <p className="mt-0.5 font-ds-label-size text-[var(--content-tertiary)]">
-                  {salesLineUnitLabel(activeLine.salesUnit)}
+                  {salesLineUnitSuffix(activeLine.salesUnit).trim() || 'Default unit'}
                 </p>
               </div>
               <NumberStepper
@@ -2758,7 +2761,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
         {rateItem && (
           <div className="space-y-4">
             <p className="text-sm text-[var(--content-tertiary)]">
-              Qty: <span className="font-mono">{rateQty}</span> {salesLineUnitLabel(rateUnit)} · Default: {formatCurrency(getPrice(rateItem))}
+              Qty: <span className="font-mono">{rateQty}</span>{salesLineUnitSuffix(rateUnit)} · Default: {formatCurrency(getPrice(rateItem))}
             </p>
             <input
               type="text"
