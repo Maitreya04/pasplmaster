@@ -32,6 +32,16 @@ export const PICKER_MRP_MISMATCH_BADGE = 'Label differs from suggestion';
 export const PICKER_MRP_TAP_TO_CONFIRM = 'Tap to confirm label price';
 export const PICKER_MRP_VS_QUOTED_HINT = (label: number, quoted: number) =>
   `Label ₹${label} ≠ quoted ₹${quoted} — billing will review when you pick`;
+export const PICKER_MRP_VS_BILL = (label: number, bill: number) =>
+  `Label ₹${label} · bill ₹${bill}`;
+export const PICKER_MRP_BILL_REVIEW = (label: number, bill: number) =>
+  `Label ₹${label} ≠ bill ₹${bill} — billing will review`;
+export const PICKER_MRP_LABEL_ON_PRODUCT = (mrp: number) => `On label · ₹${mrp}`;
+export const PICKER_MRP_STOCK_SUGGESTS = (mrp: number) => `Shelf ₹${mrp}`;
+export const PICKER_MRP_BILL_RATE_CHIP = (bill: number) => `Bill ₹${bill}`;
+export const PICKER_MRP_STOCK_CHIP = (stock: number) => `Stock ₹${stock}`;
+export const PICKER_MRP_SPLIT_PICKED_AT = (qty: number, label: number, goal: number) =>
+  `${qty} of ${goal} pcs @ label ₹${label}`;
 
 export const PICKER_MRP_SPLIT_BANNER_TITLE = (mrpCount: number) =>
   `${mrpCount} MRPs in stock · pick batch by batch`;
@@ -61,9 +71,19 @@ export const BILLING_ACCEPT_LABEL = 'Bill at label';
 export const BILLING_ACCEPT_ALL_LABEL = 'Bill all at label';
 export const BILLING_KEEP_QUOTED = 'Keep quoted';
 export const BILLING_PRICE_SUMMARY = (label: number, quoted: number) =>
-  `Label ₹${label.toLocaleString('en-IN')} · quoted ₹${quoted.toLocaleString('en-IN')}`;
+  `Label ₹${label.toLocaleString('en-IN')} · bill rate ₹${quoted.toLocaleString('en-IN')}`;
 export const BILLING_LABEL_CHIP = (mrp: number) =>
   `Label ₹${Math.round(mrp).toLocaleString('en-IN')}`;
+
+export const BILLING_PICK_MRP_LABEL = 'Label at pick';
+export const BILLING_PICK_MRP_BILL_RATE = 'Bill rate';
+export const BILLING_PICK_MRP_STOCK_SUGGESTED = 'Stock suggested';
+export const BILLING_PICK_MRP_PICKER_FLAG = 'Picker flagged label ≠ stock';
+export const BILLING_PICK_MRP_MIX = 'Pick mix';
+export const BILLING_PICK_MRP_LABEL_VS_BILL = (label: number, bill: number) =>
+  `Label ${formatRoundedRs(label)} · bill ${formatRoundedRs(bill)}`;
+export const BILLING_PICK_MRP_LABEL_VS_STOCK = (label: number, stock: number) =>
+  `Label ${formatRoundedRs(label)} · stock ${formatRoundedRs(stock)}`;
 
 export function formatRoundedRs(value: number): string {
   return `₹${Math.round(value).toLocaleString('en-IN')}`;

@@ -248,8 +248,14 @@ export interface ScanResult {
   };
   /** Picker v10: MRP confirmed on physical label at pick time. */
   confirmedMrp?: number | null;
-  /** True when confirmed MRP differs from latest stock_mrpwise band. */
+  /** True when picker label MRP ≠ stock suggestion at pick time. */
   mrpFlagged?: boolean;
+  /** Order bill rate (quoted → system) frozen at pick for billing display. */
+  billingRateAtPick?: number | null;
+  /** Stock / overlay suggestion frozen when the picker confirmed label MRP. */
+  suggestedMrpAtPick?: number | null;
+  /** @deprecated Use suggestedMrpAtPick — kept for older scan_result rows. */
+  stockMrpAtPick?: number | null;
   /** Where confirmed MRP came from: history band, custom entry, or items fallback. */
   mrpSource?: 'stock_mrpwise' | 'custom' | 'items_fallback' | null;
   mrpHistoryCount?: number;

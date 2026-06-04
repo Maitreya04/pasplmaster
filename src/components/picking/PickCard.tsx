@@ -23,6 +23,7 @@ import {
   splitNeedsNextBatch,
 } from '../../lib/picking/pickLineMrp';
 import type { PickLineMrpState } from '../../lib/picking/pickLineMrp';
+import { pickLineBillingRate } from '../../lib/picking/pickMrpDisplay';
 
 export interface PickCardProps {
   orderItem: OrderItem;
@@ -114,6 +115,7 @@ export const PickCard = memo(function PickCard({
   onResetSplitLine,
   activeBatchQty = 0,
 }: PickCardProps): React.JSX.Element {
+  const billingRate = pickLineBillingRate(orderItem);
   const splitInProgress = isSplitInProgress(lineMrp, targetQty);
   const splitActive = isSplitMode(lineMrp);
   const splitRemaining = pickLineSplitRemaining(lineMrp, targetQty);
@@ -250,6 +252,7 @@ export const PickCard = memo(function PickCard({
           <PickMrpSplitProgress
             lineMrp={lineMrp}
             targetQty={targetQty}
+            billingRate={billingRate}
             idleHint={splitCommittedQty === 0 && getActiveSegment(lineMrp) == null}
             onUndoLastSegment={onUndoLastSegment}
             onResetSplitLine={onResetSplitLine}
@@ -263,6 +266,7 @@ export const PickCard = memo(function PickCard({
             pickedQty={effectivePickedQty}
             mrpHistory={mrpHistory}
             mrpLoading={mrpHistoryLoading}
+            billingRate={billingRate}
             confirmedMrp={lineMrp?.confirmedMrp ?? null}
             customMrp={lineMrp?.customMrp ?? null}
             lineMrp={lineMrp}

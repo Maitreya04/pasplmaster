@@ -105,6 +105,7 @@ import {
   writePickLineMrpMap,
   type PickLineMrpState,
 } from '../../lib/picking/pickLineMrp';
+import { pickLineBillingRate } from '../../lib/picking/pickMrpDisplay';
 import { commitPickMrpSegment, undoPickMrpSegment } from '../../lib/picking/splitMrpSegment';
 import {
   revertPickLine,
@@ -961,9 +962,12 @@ export function PickFlowPanel({
           },
         },
         lineMrpMap.get(itemId),
+        pickLineBillingRate(orderItem),
         itemId === mrpFocusItem?.id ? (mrpHistoryData?.latest_mrp ?? null) : null,
         itemId === mrpFocusItem?.id ? (mrpHistoryData?.history.length ?? 0) : 0,
         mrpHistoryData?.source === 'empty' ? null : (mrpHistoryData?.source ?? 'stock_mrpwise'),
+        undefined,
+        orderItem,
       );
       itemTransitionMutation.mutate(
         {
@@ -1585,9 +1589,12 @@ export function PickFlowPanel({
           },
         },
         lineMrpMap.get(itemId),
+        pickLineBillingRate(orderItem),
         itemId === mrpFocusItem?.id ? (mrpHistoryData?.latest_mrp ?? null) : null,
         itemId === mrpFocusItem?.id ? (mrpHistoryData?.history.length ?? 0) : 0,
         mrpHistoryData?.source === 'empty' ? null : (mrpHistoryData?.source ?? 'stock_mrpwise'),
+        undefined,
+        orderItem,
       );
       itemTransitionMutation.mutate({
         transition: {
@@ -1717,7 +1724,7 @@ export function PickFlowPanel({
           ocrExtracted: { partNumber: null, mrp: segmentMrp },
           method: 'manual',
           timestamp: new Date().toISOString(),
-          reason: `MRP split batch · ₹${Math.round(segmentMrp)} × ${qty}`,
+          reason: `MRP split batch · label ₹${Math.round(segmentMrp)} × ${qty}`,
           progress: {
             pickedQty: committedCount,
             remainingQty: Math.max(0, goal - committedCount),
@@ -1730,10 +1737,12 @@ export function PickFlowPanel({
           },
         },
         lineMrp,
+        pickLineBillingRate(orderItem),
         latestMrp,
         historyCount,
         mrpSource,
         segmentMrp,
+        orderItem,
       );
 
       let orderItemId = rootId;

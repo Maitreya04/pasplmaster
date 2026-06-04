@@ -1,4 +1,6 @@
 import type { OrderItem, ScanResult } from '../../types';
+import { billingRateForLabelMrpCompare, roundBillingRupee } from '../billing/labelMrpFlag';
+import { pickMrpNeedsBillingReview } from './pickMrpDisplay';
 import { primaryBusyCodeForOrderItem } from '../wms/binLayers';
 
 export type PickMrpSegment = {
@@ -130,23 +132,24 @@ export function pickLineMrpLookup(orderItem: OrderItem): {
     fromCandidates ??
     (fromCatalog != null && Number.isFinite(fromCatalog) && fromCatalog > 0 ? fromCatalog : null);
   const itemsMrpFallback =
-    orderItem.price_system != null && orderItem.price_system > 0
-      ? orderItem.price_system
-      : orderItem.price_quoted != null && orderItem.price_quoted > 0
-        ? orderItem.price_quoted
+    orderItem.price_quoted != null && orderItem.price_quoted > 0
+      ? orderItem.price_quoted
+      : orderItem.price_system != null && orderItem.price_system > 0
+        ? orderItem.price_system
         : null;
   return { busyCode, itemsMrpFallback };
 }
 
+/** Label MRP at pick differs from stock suggestion (picker → billing input). */
 export function isPickLineMrpFlagged(
   state: PickLineMrpState | undefined,
-  latestMrp: number | null,
+  stockMrp: number | null,
   segmentMrp?: number | null,
 ): boolean {
-  const final = segmentMrp ?? pickLineMrpFinal(state);
-  if (final == null || latestMrp == null) return false;
-  return final !== latestMrp;
+  return pickMrpNeedsBillingReview(state, stockMrp, segmentMrp);
 }
+
+export { pickMrpMergeInputs } from './pickMrpDisplay';
 
 export function enterSplitMode(
   state: PickLineMrpState | undefined,
@@ -284,13 +287,26 @@ export function writePickLineMrpMap(
 export function mergeMrpIntoScanResult(
   scanResult: ScanResult,
   state: PickLineMrpState | undefined,
-  latestMrp: number | null,
+  billingRate: number | null,
+  stockMrp: number | null,
   historyCount: number,
   mrpSource: ScanResult['mrpSource'],
   segmentMrp?: number | null,
+  orderItem?: Pick<OrderItem, 'price_quoted' | 'price_system'>,
 ): ScanResult {
   const finalMrp = segmentMrp ?? pickLineMrpFinal(state);
   if (finalMrp == null) return scanResult;
+
+  const resolvedBilling =
+    billingRate != null && billingRate > 0
+      ? billingRate
+      : orderItem != null
+        ? billingRateForLabelMrpCompare(orderItem) || null
+        : null;
+  const stockRounded =
+    stockMrp != null && stockMrp > 0 ? roundBillingRupee(stockMrp) : null;
+  const labelRounded = roundBillingRupee(finalMrp);
+  const mrpFlagged = isPickLineMrpFlagged(state, stockRounded, labelRounded);
 
   const mrpSegments =
     state && isSplitMode(state)
@@ -307,13 +323,18 @@ export function mergeMrpIntoScanResult(
     ...scanResult,
     ocrExtracted: {
       ...scanResult.ocrExtracted,
-      mrp: finalMrp,
+      mrp: labelRounded,
     },
-    confirmedMrp: finalMrp,
-    mrpFlagged: isPickLineMrpFlagged(state, latestMrp, finalMrp),
+    confirmedMrp: labelRounded,
+    mrpFlagged,
     mrpSource: finalMrp != null ? mrpSource : null,
     mrpHistoryCount: historyCount,
     mrpSegments,
     splitFromId: state?.rootOrderItemId ?? undefined,
+    billingRateAtPick:
+      resolvedBilling != null && resolvedBilling > 0 ? resolvedBilling : undefined,
+    suggestedMrpAtPick: stockRounded ?? undefined,
+    stockMrpAtPick: stockRounded ?? undefined,
   };
 }
+

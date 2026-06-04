@@ -1,10 +1,10 @@
 import { deskLineFlagChipLabel, deskLineFlagKind } from './deskLineFlagKind';
 import { resolvedLabelPriceForBilling } from './labelMrpFlag';
+import { formatRoundedRs } from './mrpWorkflowCopy';
 import {
-  BILLING_LABEL_CHIP,
-  BILLING_PRICE_SUMMARY,
-  formatRoundedRs,
-} from './mrpWorkflowCopy';
+  pickMrpQtyBreakdownForItem,
+  readPickMrpSnapshot,
+} from './pickMrpBillingContext';
 import { orderItemConfirmedMrp } from './orderItemSplitGroups';
 import type { OrderItem } from '../../types';
 import type { OverlayLineEdit, OverlayLineResolution } from '../../pages/billing/BillingDesk/types';
@@ -26,9 +26,11 @@ function resolutionLabel(resolution: OverlayLineResolution | null): string | nul
 export function billLineChangeSegments(
   item: OrderItem,
   edit?: OverlayLineEdit,
+  allItems?: OrderItem[],
 ): BillLineChangeSegment[] {
   const segments: BillLineChangeSegment[] = [];
-  const labelMrp = orderItemConfirmedMrp(item);
+  const snapshot = readPickMrpSnapshot(item);
+  const labelMrp = snapshot.labelMrp ?? orderItemConfirmedMrp(item);
   const quoted = item.price_quoted ?? item.price_system ?? 0;
   const labelPrice = resolvedLabelPriceForBilling(item, labelMrp);
   const flagKind = deskLineFlagKind(item.flag_reason);
@@ -43,16 +45,31 @@ export function billLineChangeSegments(
     });
   }
 
-  if (flagKind === 'price' && labelPrice != null && !edit?.removed) {
-    segments.push({ kind: 'text', text: BILLING_PRICE_SUMMARY(labelPrice, quoted) });
-  } else if (labelMrp != null && flagKind !== 'price' && !edit?.removed) {
-    segments.push({ kind: 'text', text: BILLING_LABEL_CHIP(labelMrp) });
-  }
-
-  if (item.split_from_id != null && labelMrp != null && !edit?.removed) {
+  if (labelMrp != null && !edit?.removed) {
+    const bill = snapshot.billingRateAtPick ?? quoted;
     segments.push({
       kind: 'text',
-      text: `↳ Batch · Label MRP ${formatRoundedRs(labelMrp)}`,
+      text: `Label ${formatRoundedRs(labelMrp)} · bill ${formatRoundedRs(bill)}`,
+    });
+    if (
+      snapshot.suggestedMrpAtPick != null &&
+      snapshot.suggestedMrpAtPick !== labelMrp
+    ) {
+      segments.push({
+        kind: 'text',
+        text: `Stock ${formatRoundedRs(snapshot.suggestedMrpAtPick)} at pick`,
+      });
+    }
+    if (allItems?.length) {
+      const mix = pickMrpQtyBreakdownForItem(item, allItems);
+      if (mix) segments.push({ kind: 'text', text: `Picker · ${mix}` });
+    }
+  }
+
+  if (flagKind === 'price' && labelPrice != null && !edit?.removed) {
+    segments.push({
+      kind: 'text',
+      text: `Bill at label ${formatRoundedRs(labelPrice)} · quoted ${formatRoundedRs(quoted)}`,
     });
   }
 

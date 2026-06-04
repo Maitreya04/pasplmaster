@@ -68,7 +68,10 @@ export function PickerV10Flow({
 
   const latestMrp = mrpHistory[0]?.mrp ?? fetchedMrp?.latest_mrp ?? null;
   const finalMrp = customMrp ?? confirmedMrp;
-  const mrpFlagged = finalMrp != null && latestMrp != null && finalMrp !== latestMrp;
+  const mrpFlagged =
+    finalMrp != null &&
+    latestMrp != null &&
+    Math.round(finalMrp) !== Math.round(latestMrp);
   const dispQty = outOfStock ? 0 : (editedQty ?? item.qty);
   const canDone =
     verified && (outOfStock || (finalMrp != null && dispQty > 0));

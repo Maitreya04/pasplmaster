@@ -2,16 +2,24 @@ import type { StockMrpHistoryEntry } from '../../types';
 import type { PickLineMrpState } from '../../lib/picking/pickLineMrp';
 import {
   MRP_METRIC_LABEL,
-  PICKER_MRP_BILLING_REVIEW,
+  PICKER_MRP_BILL_RATE_CHIP,
+  PICKER_MRP_BILL_REVIEW,
   PICKER_MRP_CONFIRMED,
+  PICKER_MRP_LABEL_ON_PRODUCT,
+  PICKER_MRP_STOCK_CHIP,
+  PICKER_MRP_STOCK_SUGGESTS,
   PICKER_MRP_TAP_TO_CONFIRM,
-  PICKER_MRP_VS_SUGGESTED,
+  PICKER_MRP_VS_BILL,
 } from '../../lib/billing/mrpWorkflowCopy';
 import {
   getActiveSegmentMrp,
   isSplitMode,
   pickLineSegmentsCommittedQty,
 } from '../../lib/picking/pickLineMrp';
+import {
+  isPickLabelVsBillingMismatch,
+  pickMetricMrpFlagged,
+} from '../../lib/picking/pickMrpDisplay';
 
 export interface PickMetricRowProps {
   /** Pieces left to pick on this line. */
@@ -20,6 +28,8 @@ export interface PickMetricRowProps {
   pickedQty: number;
   mrpHistory: StockMrpHistoryEntry[];
   mrpLoading?: boolean;
+  /** Order billing rate (quoted → system). */
+  billingRate?: number | null;
   confirmedMrp: number | null;
   customMrp: number | null;
   lineMrp?: PickLineMrpState;
@@ -33,6 +43,80 @@ export interface PickMetricRowProps {
   onUndoQty?: () => void;
 }
 
+function PickMrpPriceContext({
+  labelMrp,
+  billingRate,
+  stockMrp,
+  billingMismatch,
+  stockMismatch,
+}: {
+  labelMrp: number;
+  billingRate: number | null;
+  stockMrp: number | null;
+  billingMismatch: boolean;
+  stockMismatch: boolean;
+}): React.JSX.Element {
+  const warn = billingMismatch || stockMismatch;
+  return (
+    <div
+      className={`mx-2.5 mb-2.5 rounded-lg border px-2.5 py-2 sm:mx-3 sm:mb-3 ${
+        warn
+          ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]'
+          : 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)]'
+      }`}
+    >
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span
+          className={`inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-bold tabular-nums ${
+            billingMismatch
+              ? 'border-[var(--border-warning)] text-[var(--content-warning-on-light)]'
+              : 'border-[var(--border-subtle)] text-[var(--content-primary)]'
+          }`}
+        >
+          {PICKER_MRP_LABEL_ON_PRODUCT(labelMrp)}
+        </span>
+        {billingRate != null ? (
+          <span
+            className={`inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold tabular-nums ${
+              billingMismatch
+                ? 'border-[var(--border-warning)] bg-[var(--bg-secondary)] text-[var(--content-warning-on-light)]'
+                : 'border-[var(--border-subtle)] text-[var(--content-secondary)]'
+            }`}
+          >
+            {PICKER_MRP_BILL_RATE_CHIP(billingRate)}
+          </span>
+        ) : null}
+        {stockMrp != null ? (
+          <span
+            className={`inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-semibold tabular-nums ${
+              stockMismatch
+                ? 'border-[var(--border-warning)] bg-[var(--bg-secondary)] text-[var(--content-warning-on-light)]'
+                : 'border-[var(--border-subtle)] text-[var(--content-secondary)]'
+            }`}
+          >
+            {PICKER_MRP_STOCK_CHIP(stockMrp)}
+          </span>
+        ) : null}
+      </div>
+      <p
+        className={`mt-1.5 text-[10px] font-semibold leading-snug sm:text-[11px] ${
+          billingMismatch
+            ? 'text-[var(--content-warning-on-light)]'
+            : stockMismatch
+              ? 'text-[var(--content-warning-on-light)]'
+              : 'text-[var(--content-positive)]'
+        }`}
+      >
+        {stockMismatch && stockMrp != null
+          ? `Label ₹${labelMrp} · shelf ₹${stockMrp} — billing will review`
+          : billingMismatch && billingRate != null
+            ? PICKER_MRP_BILL_REVIEW(labelMrp, billingRate)
+            : PICKER_MRP_CONFIRMED(labelMrp)}
+      </p>
+    </div>
+  );
+}
+
 /**
  * Tap-to-edit qty + MRP cells. Sits below the rack/code hero — does not compete with that hierarchy.
  */
@@ -42,6 +126,7 @@ export function PickMetricRow({
   pickedQty,
   mrpHistory,
   mrpLoading = false,
+  billingRate = null,
   confirmedMrp,
   customMrp,
   lineMrp,
@@ -54,9 +139,13 @@ export function PickMetricRow({
 }: PickMetricRowProps): React.JSX.Element {
   const splitActive = splitActiveProp || isSplitMode(lineMrp);
   const activeMrp = splitActive ? getActiveSegmentMrp(lineMrp) : null;
-  const latestMrp = mrpHistory[0]?.mrp ?? null;
-  const finalMrp = splitActive ? activeMrp : (customMrp ?? confirmedMrp);
-  const mrpFlagged = finalMrp != null && latestMrp != null && finalMrp !== latestMrp;
+  const stockMrp = mrpHistory[0]?.mrp ?? null;
+  const rawLabelMrp = splitActive ? activeMrp : (customMrp ?? confirmedMrp);
+  const finalMrp = rawLabelMrp != null ? Math.round(rawLabelMrp) : null;
+  const stockRounded = stockMrp != null ? Math.round(stockMrp) : null;
+  const billingMismatch = isPickLabelVsBillingMismatch(finalMrp, billingRate ?? null);
+  const mrpNeedsReview = pickMetricMrpFlagged(finalMrp, stockRounded);
+  const stockMismatch = mrpNeedsReview;
   const isMultiMrp = mrpHistory.length > 1;
   const isPartialQty = pickedQty > 0 && pickedQty < targetQty;
   const splitCommitted = splitActive ? pickLineSegmentsCommittedQty(lineMrp) : 0;
@@ -113,7 +202,7 @@ export function PickMetricRow({
           }`}
         >
           <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
-            {splitActive ? 'Batch MRP' : MRP_METRIC_LABEL}
+            {splitActive ? 'Label on batch' : MRP_METRIC_LABEL}
           </p>
 
           {mrpLoading ? (
@@ -122,27 +211,27 @@ export function PickMetricRow({
             <>
               <p
                 className={`pick-metric-value mt-1 font-mono font-extrabold tracking-tight ${
-                  mrpFlagged ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-positive)]'
+                  mrpNeedsReview ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-positive)]'
                 }`}
               >
-                ₹{Math.round(finalMrp)}
+                ₹{finalMrp}
               </p>
               <p
                 className={`text-[9px] font-semibold ${
-                  mrpFlagged ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-positive)]'
+                  mrpNeedsReview ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-positive)]'
                 }`}
               >
                 {splitActive
-                  ? 'this batch'
-                  : mrpFlagged
-                    ? PICKER_MRP_VS_SUGGESTED(Math.round(finalMrp), Math.round(latestMrp ?? 0))
-                    : 'matches suggestion ✓'}
+                  ? PICKER_MRP_LABEL_ON_PRODUCT(finalMrp)
+                  : billingMismatch && billingRate != null
+                    ? PICKER_MRP_VS_BILL(finalMrp, billingRate)
+                    : 'on label ✓'}
               </p>
             </>
           ) : splitActive ? (
             <>
               <p className="mt-1.5 text-xs font-bold text-[var(--content-warning-on-light)]">
-                Choose batch MRP
+                Enter label price
               </p>
               <p className="text-[10px] leading-snug text-[var(--content-tertiary)]">
                 Tap or use dock below
@@ -151,67 +240,61 @@ export function PickMetricRow({
           ) : isMultiMrp ? (
             <>
               <p className="mt-1.5 text-xs font-bold text-[var(--content-warning-on-light)]">
-                {mrpHistory.length} in stock
+                {mrpHistory.length} on shelf
               </p>
               <p className="text-[10px] leading-snug text-[var(--content-tertiary)] line-clamp-2 break-words">
                 {mrpHistory.map((h) => `₹${Math.round(h.mrp)}`).join(' · ')}
               </p>
             </>
-          ) : latestMrp != null ? (
+          ) : stockMrp != null ? (
             <>
-              <p className="pick-metric-value mt-1 font-mono font-extrabold tracking-tight text-[var(--content-warning-on-light)]">
-                ₹{Math.round(latestMrp)}
-              </p>
-              <p className="text-[9px] font-medium text-[var(--content-warning-on-light)]">
+              <p className="mt-1.5 text-xs font-bold text-[var(--content-warning-on-light)]">
                 {PICKER_MRP_TAP_TO_CONFIRM}
+              </p>
+              <p className="pick-metric-value mt-0.5 font-mono text-lg font-extrabold tracking-tight text-[var(--content-tertiary)]">
+                {PICKER_MRP_STOCK_SUGGESTS(Math.round(stockMrp))}
               </p>
             </>
           ) : (
-            <p className="mt-2 text-xs text-[var(--content-tertiary)]">Tap to enter</p>
+            <p className="mt-2 text-xs text-[var(--content-tertiary)]">Tap to enter label price</p>
           )}
 
           <span
             className={`absolute right-2.5 top-2.5 text-[10px] ${
               finalMrp != null
-                ? mrpFlagged
+                ? mrpNeedsReview
                   ? 'text-[var(--border-warning)]'
                   : 'text-[var(--border-positive)]'
-                : latestMrp != null || splitActive
+                : stockMrp != null || splitActive
                   ? 'text-[var(--border-warning)]'
                   : 'text-[var(--border-opaque)]'
             }`}
           >
-            {finalMrp != null ? (mrpFlagged ? '⚠' : '✓') : '✎'}
+            {finalMrp != null ? (mrpNeedsReview ? '⚠' : '✓') : '✎'}
           </span>
         </button>
       </div>
 
+      {finalMrp != null ? (
+        <PickMrpPriceContext
+          labelMrp={finalMrp}
+          billingRate={billingRate ?? null}
+          stockMrp={stockMrp != null ? Math.round(stockMrp) : null}
+          billingMismatch={billingMismatch}
+          stockMismatch={stockMismatch}
+        />
+      ) : null}
+
       {finalMrp != null && !splitActive && (
-        <div
-          className={`mx-2.5 mb-2.5 flex min-w-0 items-center gap-2 rounded-lg border px-2 py-1.5 sm:mx-3 sm:mb-3 sm:px-2.5 sm:py-2 ${
-            mrpFlagged
-              ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]'
-              : 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)]'
-          }`}
-        >
-          <span className="shrink-0 text-xs">{mrpFlagged ? '⚠' : '✓'}</span>
-          <p
-            className={`min-w-0 flex-1 text-[10px] font-semibold leading-snug sm:text-[11px] ${
-              mrpFlagged ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-positive)]'
-            }`}
-          >
-            {mrpFlagged
-              ? `${PICKER_MRP_VS_SUGGESTED(Math.round(finalMrp), Math.round(latestMrp ?? 0))} · ${PICKER_MRP_BILLING_REVIEW.toLowerCase()}`
-              : PICKER_MRP_CONFIRMED(Math.round(finalMrp))}
-          </p>
-          <button type="button" onClick={onEditMrp} className="shrink-0 text-[10px] font-semibold opacity-80 pick-pressable">
-            Change
+        <div className="mx-2.5 mb-2.5 flex justify-end gap-2 sm:mx-3 sm:mb-3">
+          <button type="button" onClick={onEditMrp} className="text-[10px] font-semibold opacity-80 pick-pressable">
+            Change label
           </button>
           {onUndoPick ? (
             <button
               type="button"
               onClick={onUndoPick}
-              className="shrink-0 text-[10px] font-semibold text-[var(--content-secondary)] pick-pressable"
+              className="text-[10px] font-semibold text-[var(--content-secondary)] pick-pressable"
             >
               Undo
             </button>

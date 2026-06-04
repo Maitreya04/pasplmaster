@@ -5,6 +5,7 @@ import {
   DeskFlaggedLineRow,
   DeskFlaggedSectionHeader,
 } from '../../pages/billing/BillingDesk/DeskFlaggedLineRow';
+import { MrpSplitGroupRow } from './MrpSplitGroupRow';
 import { QueueSectionHeader } from '../shared/QueueSectionHeader';
 import { formatCurrencyRaw } from '../../utils/formatters';
 import {
@@ -13,6 +14,8 @@ import {
 } from '../../pages/billing/BillingDesk/types';
 import type { BillSheetEdits } from '../../hooks/useBillSheetEdits';
 import { summarizeBillFulfillment } from '../../lib/billing/billLineFulfillment';
+import { pickMrpQtyBreakdownForItem } from '../../lib/billing/pickMrpBillingContext';
+import { groupOrderItemsForDisplay } from '../../lib/billing/orderItemSplitGroups';
 import type { OrderItem, OrderWithItems } from '../../types';
 
 export type BillSheetVariant = 'overlay' | 'page';
@@ -143,11 +146,55 @@ export function BillSheetView({
       )
     : sortedLines;
 
+  // Pre-compute split groups where ANY batch has an unresolved flag.
+  // These groups are rendered as a single unified MrpSplitGroupRow so the
+  // billing person always sees the full pick (e.g. "10 pcs: 6 × ₹1,000 ✓ + 4 × ₹900 ⚠")
+  // rather than two disconnected rows in different sections.
+  const allGroups = groupOrderItemsForDisplay(displayLines);
+  const groupedItemIds = new Set<number>();
+  const flaggedGroupsToRender: typeof allGroups = [];
+
+  for (const group of allGroups) {
+    if (group.siblings.length === 0) continue;
+    const allInGroup = [group.root, ...group.siblings];
+    const anyUnresolvedFlag = allInGroup.some((l) =>
+      isUnresolvedPickerFlag(l, edits[l.id], flaggedItemIds),
+    );
+    if (anyUnresolvedFlag) {
+      flaggedGroupsToRender.push(group);
+      allInGroup.forEach((l) => groupedItemIds.add(l.id));
+    }
+  }
+
   const lineNodes: React.ReactNode[] = [];
   let billHeaderShown = false;
   let flaggedHeaderShown = false;
 
+  // Render unified split groups first in the flagged section
+  if (flaggedGroupsToRender.length > 0) {
+    lineNodes.push(<DeskFlaggedSectionHeader key="flagged-header" />);
+    flaggedHeaderShown = true;
+    for (const group of flaggedGroupsToRender) {
+      lineNodes.push(
+        <MrpSplitGroupRow
+          key={`group-${group.root.id}`}
+          group={group}
+          edits={edits}
+          flaggedItemIds={flaggedItemIds}
+          undoRemoveId={undoRemoveId}
+          onAcceptPrice={(item) => acceptBoxPrice(item)}
+          onKeepQuoted={(item) => keepQuoted(item)}
+          onRemoveFlagged={(item) => removeFlaggedLine(item)}
+          onUndoRemove={(itemId) => undoRemove(itemId)}
+        />,
+      );
+    }
+  }
+
   for (const item of displayLines) {
+    // Already rendered as part of a unified split group
+    if (groupedItemIds.has(item.id)) continue;
+
     const edit = edits[item.id];
     if (!edit) continue;
     if (isHiddenPoSkippedFlag(item, hidePoSkippedFlags, flaggedItemIds)) continue;
@@ -162,6 +209,7 @@ export function BillSheetView({
           key={item.id}
           item={item}
           edit={edit}
+          splitHint={pickMrpQtyBreakdownForItem(item, sortedLines) ?? undefined}
           onAcceptPrice={() => acceptBoxPrice(item)}
           onKeepQuoted={() => keepQuoted(item)}
           onRemove={() => removeFlaggedLine(item)}
@@ -189,6 +237,7 @@ export function BillSheetView({
         item={item}
         edit={edit}
         pendingRows={item.item_id != null ? pendingByItemId.get(item.item_id) ?? [] : []}
+        allOrderItems={sortedLines}
         isSplitChild={item.split_from_id != null}
         pendingRemoveId={pendingRemoveId}
         showUndoRemove={undoRemoveId === item.id}

@@ -1,5 +1,9 @@
 import type { OrderItem } from '../../types';
-import { orderItemConfirmedMrp } from './orderItemSplitGroups';
+import {
+  billingRateForOrderItem,
+  readPickMrpSnapshot,
+  roundPickMrp,
+} from './pickMrpBillingContext';
 import { isFocOrderItem } from '../specialPricing';
 
 /** Billing auto-flag notes prefix — must match SQL migration. */
@@ -8,21 +12,31 @@ export const LABEL_MRP_FLAG_NOTES_PREFIX = 'Label MRP at pick';
 const OOS_FLAG_REASONS = new Set(['Out of Stock', 'Out of Stock (Billing)']);
 
 export function roundBillingRupee(value: number): number {
-  return Math.round(value);
+  return roundPickMrp(value);
 }
 
 export function billingRateForLabelMrpCompare(
   item: Pick<OrderItem, 'price_quoted' | 'price_system'>,
 ): number {
-  return roundBillingRupee(item.price_quoted ?? item.price_system ?? 0);
+  return billingRateForOrderItem(item);
 }
 
 export function isAutoLabelMrpFlagNotes(notes: string | null | undefined): boolean {
   return (notes ?? '').trim().startsWith(LABEL_MRP_FLAG_NOTES_PREFIX);
 }
 
-export function buildLabelMrpFlagNotes(labelMrp: number, billingRate: number): string {
-  return `${LABEL_MRP_FLAG_NOTES_PREFIX} (₹${roundBillingRupee(labelMrp)} vs billing ₹${billingRate})`;
+export function buildLabelMrpFlagNotes(
+  labelMrp: number,
+  billingRate: number,
+  suggestedMrp: number | null,
+): string {
+  const label = roundBillingRupee(labelMrp);
+  const bill = roundBillingRupee(billingRate);
+  if (suggestedMrp != null) {
+    const stock = roundBillingRupee(suggestedMrp);
+    return `${LABEL_MRP_FLAG_NOTES_PREFIX} · label ₹${label} · bill ₹${bill} · stock ₹${stock}`;
+  }
+  return `${LABEL_MRP_FLAG_NOTES_PREFIX} · label ₹${label} · bill ₹${bill}`;
 }
 
 export function shouldUseLabelMrpAcceptLabel(
@@ -81,7 +95,9 @@ export function planLabelMrpBillingFlag(
     return { action: 'skip', reason: 'foc' };
   }
 
-  const labelMrp = orderItemConfirmedMrp(item as OrderItem);
+  const snapshot = readPickMrpSnapshot(item as OrderItem);
+  const labelMrp = snapshot.labelMrp;
+
   if (labelMrp == null) {
     if (
       item.state === 'flagged' &&
@@ -93,10 +109,9 @@ export function planLabelMrpBillingFlag(
     return { action: 'skip', reason: 'no_label' };
   }
 
-  const billingRate = billingRateForLabelMrpCompare(item);
-  const labelRounded = roundBillingRupee(labelMrp);
+  const billingRate = snapshot.billingRateAtPick ?? billingRateForLabelMrpCompare(item);
 
-  if (labelRounded === billingRate) {
+  if (!snapshot.mrpFlagged) {
     if (
       item.state === 'flagged' &&
       item.flag_reason === 'Price Mismatch' &&
@@ -130,8 +145,12 @@ export function planLabelMrpBillingFlag(
   return {
     action: 'apply',
     flagReason: 'Price Mismatch',
-    flagBoxPrice: labelRounded,
-    flagNotes: buildLabelMrpFlagNotes(labelRounded, billingRate),
+    flagBoxPrice: labelMrp,
+    flagNotes: buildLabelMrpFlagNotes(
+      labelMrp,
+      billingRate,
+      snapshot.suggestedMrpAtPick,
+    ),
     setStateFlagged: !preserveOos && item.state === 'picked',
     preserveOosReason: preserveOos,
   };

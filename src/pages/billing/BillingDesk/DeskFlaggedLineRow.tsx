@@ -10,16 +10,17 @@ import {
   deskLineFlagChipLabel,
   deskLineFlagKind,
 } from '../../../lib/billing/deskLineFlagKind';
+import { PickMrpBillingDetail } from '../../../components/billing/PickMrpBillingDetail';
 import { resolvedLabelPriceForBilling } from '../../../lib/billing/labelMrpFlag';
+import {
+  readPickMrpSnapshot,
+} from '../../../lib/billing/pickMrpBillingContext';
 import {
   BILLING_ACCEPT_LABEL,
   BILLING_KEEP_QUOTED,
-  BILLING_LABEL_CHIP,
-  BILLING_PRICE_SUMMARY,
   formatRoundedRs,
 } from '../../../lib/billing/mrpWorkflowCopy';
 import { orderItemDisplayName } from '../../../utils/formatters';
-import { orderItemConfirmedMrp } from '../../../lib/billing/orderItemSplitGroups';
 import type { OrderItem } from '../../../types';
 import type { OverlayLineEdit, OverlayLineResolution } from './types';
 
@@ -76,8 +77,9 @@ export function DeskFlaggedLineRow({
   const accent = deskLineFlagAccent(item.flag_reason);
   const isResolved = edit.resolution != null;
   const isRemoved = edit.resolution === 'removed' || edit.removed;
-  const labelMrp = orderItemConfirmedMrp(item);
-  const quoted = item.price_quoted ?? item.price_system ?? 0;
+  const pickMrp = readPickMrpSnapshot(item);
+  const labelMrp = pickMrp.labelMrp;
+  const quoted = pickMrp.billingRateAtPick ?? item.price_quoted ?? item.price_system ?? 0;
   const labelPrice = resolvedLabelPriceForBilling(item, labelMrp);
   const showPriceAccept =
     !isResolved && kind === 'price' && labelPrice != null;
@@ -122,20 +124,8 @@ export function DeskFlaggedLineRow({
         {splitHint ? (
           <p className="text-[9px] text-[var(--content-quaternary)] truncate mt-0.5">{splitHint}</p>
         ) : null}
-        {kind === 'price' && labelPrice != null && !isRemoved ? (
-          <p className="text-[9px] text-[var(--content-secondary)] truncate mt-0.5">
-            {BILLING_PRICE_SUMMARY(labelPrice, quoted)}
-          </p>
-        ) : null}
-        {labelMrp != null && kind !== 'price' && !isRemoved ? (
-          <p className="text-[9px] text-[var(--content-quaternary)] truncate mt-0.5">
-            {BILLING_LABEL_CHIP(labelMrp)}
-          </p>
-        ) : null}
-        {item.flag_notes ? (
-          <p className="text-[9px] text-[var(--content-quaternary)] italic truncate mt-0.5">
-            {item.flag_notes}
-          </p>
+        {!isRemoved && labelMrp != null ? (
+          <PickMrpBillingDetail snapshot={pickMrp} qtyBreakdown={splitHint} compact />
         ) : null}
       </div>
 
@@ -251,7 +241,7 @@ export function DeskNormalLineRow({
   onConfirmRemove,
 }: DeskNormalLineRowProps): React.JSX.Element | null {
   if (edit.removed) return null;
-  const labelMrp = orderItemConfirmedMrp(item);
+  const pickMrp = readPickMrpSnapshot(item);
 
   return (
     <div
@@ -264,13 +254,14 @@ export function DeskNormalLineRow({
           {indent ? '↳ ' : ''}
           {orderItemDisplayName(item)}
         </p>
-        {splitHint ? (
+        {pickMrp.labelMrp != null ? (
+          <PickMrpBillingDetail
+            snapshot={pickMrp}
+            qtyBreakdown={splitHint}
+            compact
+          />
+        ) : splitHint ? (
           <span className="mt-0.5 block text-[9px] text-[var(--content-quaternary)]">{splitHint}</span>
-        ) : null}
-        {labelMrp != null ? (
-          <span className="mt-0.5 block text-[9px] font-medium text-[var(--content-secondary)]">
-            {BILLING_LABEL_CHIP(labelMrp)}
-          </span>
         ) : null}
       </div>
       <span className="text-xs text-[var(--content-quaternary)] tabular-nums">

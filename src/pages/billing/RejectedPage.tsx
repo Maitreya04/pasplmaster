@@ -96,7 +96,7 @@ function OrderCard({
               onRevive();
             }}
             disabled={isReviving}
-            className="mt-1 w-full min-h-11 rounded-xl bg-[var(--role-primary)] text-sm font-semibold text-[var(--role-content)] disabled:opacity-50"
+            className="mt-1 w-full min-h-11 rounded-xl bg-[var(--role-primary)] text-sm font-semibold text-white hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
           >
             {isReviving ? 'Reviving…' : 'Return to billing queue'}
           </button>
@@ -342,7 +342,7 @@ export default function RejectedPage(): React.JSX.Element | null {
                 type="button"
                 onClick={handleConfirmRevive}
                 disabled={reviveMutation.isPending}
-                className="flex-1 h-11 rounded-xl bg-[var(--role-primary)] text-sm font-semibold text-[var(--role-content)] disabled:opacity-50"
+                className="flex-1 h-11 rounded-xl bg-[var(--role-primary)] text-sm font-semibold text-white hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
               >
                 {reviveMutation.isPending ? 'Reviving…' : 'Confirm revive'}
               </button>

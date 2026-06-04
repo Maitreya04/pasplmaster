@@ -48,7 +48,10 @@ export function PickItemCard({
 }: PickItemCardProps): React.JSX.Element {
   const latestMrp = mrpHistory[0]?.mrp ?? null;
   const finalMrp = customMrp ?? confirmedMrp;
-  const mrpFlagged = finalMrp != null && latestMrp != null && finalMrp !== latestMrp;
+  const mrpFlagged =
+    finalMrp != null &&
+    latestMrp != null &&
+    Math.round(finalMrp) !== Math.round(latestMrp);
   const isMultiMrp = mrpHistory.length > 1;
   const dispQty = outOfStock ? 0 : (editedQty ?? item.qty);
 

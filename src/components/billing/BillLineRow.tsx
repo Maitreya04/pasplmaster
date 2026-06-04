@@ -14,13 +14,17 @@ import {
   deskLineFlagAccent,
   deskLineFlagKind,
 } from '../../lib/billing/deskLineFlagKind';
+import { PickMrpBillingDetail } from './PickMrpBillingDetail';
 import { resolvedLabelPriceForBilling } from '../../lib/billing/labelMrpFlag';
+import {
+  pickMrpQtyBreakdownForItem,
+  readPickMrpSnapshot,
+} from '../../lib/billing/pickMrpBillingContext';
 import {
   BILLING_ACCEPT_LABEL,
   BILLING_KEEP_QUOTED,
   formatRoundedRs,
 } from '../../lib/billing/mrpWorkflowCopy';
-import { orderItemConfirmedMrp } from '../../lib/billing/orderItemSplitGroups';
 import { SalesUnitBadge } from '../shared/SalesUnitBadge';
 import { effectiveSalesLineUnit } from '../../lib/salesUnit';
 import type { OrderItem, PendingItem } from '../../types';
@@ -65,6 +69,8 @@ export interface BillLineRowProps {
   item: OrderItem;
   edit: OverlayLineEdit;
   pendingRows?: PendingItem[];
+  /** All order lines — used for MRP split qty breakdown on the root row. */
+  allOrderItems?: OrderItem[];
   isSplitChild?: boolean;
   pendingRemoveId: number | null;
   showUndoRemove?: boolean;
@@ -82,6 +88,7 @@ export function BillLineRow({
   item,
   edit,
   pendingRows = [],
+  allOrderItems = [],
   isSplitChild,
   pendingRemoveId,
   showUndoRemove,
@@ -97,15 +104,20 @@ export function BillLineRow({
 
   const fulfillment = deriveBillLineFulfillment(item, pendingRows);
   const identity = billLineIdentity(item);
-  const changeSegments = billLineChangeSegments(item, edit);
+  const changeSegments = billLineChangeSegments(item, edit, allOrderItems);
   const isFlagged = item.state === 'flagged';
   const kind = deskLineFlagKind(item.flag_reason);
   const accent = deskLineFlagAccent(item.flag_reason);
   const isResolved = edit.resolution != null;
   const isRemoved = edit.resolution === 'removed' || edit.removed;
-  const labelMrp = orderItemConfirmedMrp(item);
-  const quoted = item.price_quoted ?? item.price_system ?? 0;
+  const pickMrp = readPickMrpSnapshot(item);
+  const labelMrp = pickMrp.labelMrp;
+  const quoted = pickMrp.billingRateAtPick ?? item.price_quoted ?? item.price_system ?? 0;
   const labelPrice = resolvedLabelPriceForBilling(item, labelMrp);
+  const mrpQtyBreakdown =
+    !isSplitChild && allOrderItems.length > 0
+      ? pickMrpQtyBreakdownForItem(item, allOrderItems)
+      : null;
   const showPriceAccept = !isResolved && isFlagged && kind === 'price' && labelPrice != null;
   const showOosKeep = !isResolved && isFlagged && kind === 'oos';
   const showNormalRemove = !isFlagged && !isRemoved;
@@ -163,6 +175,13 @@ export function BillLineRow({
           {isSplitChild ? '↳ ' : ''}
           {identity.description}
         </p>
+        {labelMrp != null && !isRemoved ? (
+          <PickMrpBillingDetail
+            snapshot={pickMrp}
+            qtyBreakdown={mrpQtyBreakdown}
+            compact
+          />
+        ) : null}
         {changeSegments.length > 0 || fulfillment.chipLabel ? (
           <div className="mt-0.5 flex flex-wrap gap-1">
             <span
