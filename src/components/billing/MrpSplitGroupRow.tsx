@@ -10,13 +10,9 @@ import {
   readPickMrpSnapshot,
   labelDiffersFromBillingRate,
   pickMrpQtyBandsForGroup,
-  roundPickMrp,
   formatPickMrpQtyBreakdown,
 } from '../../lib/billing/pickMrpBillingContext';
-import {
-  orderItemConfirmedMrp,
-  type OrderItemDisplayGroup,
-} from '../../lib/billing/orderItemSplitGroups';
+import type { OrderItemDisplayGroup } from '../../lib/billing/orderItemSplitGroups';
 import {
   BILLING_ACCEPT_LABEL,
   BILLING_KEEP_QUOTED,
