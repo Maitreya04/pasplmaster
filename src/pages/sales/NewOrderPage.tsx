@@ -26,6 +26,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
 import {
+  getStockDeviceSyncedAtForLocation,
   getStockQtyForLocation,
   stockLocationLabel,
   isLocationwiseStockResolving,
@@ -1128,6 +1129,8 @@ interface ItemRowProps {
   stockResolving: boolean;
   mainStoreStockQty?: number | null;
   jabalpurStockQty?: number | null;
+  mainStoreDeviceSyncedAt?: string | null;
+  jabalpurDeviceSyncedAt?: string | null;
   hasSpecialLine: boolean;
   justAdded: boolean;
 }
@@ -1276,6 +1279,13 @@ function LocationStockLine({
   );
 }
 
+function formatStockSyncedAt(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return `Synced ${date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`;
+}
+
 /** Single-line stock while editing qty: avoids duplicating “X in stock” + a separate red warning. */
 function PendingItemStockLine({
   stockQty,
@@ -1285,6 +1295,8 @@ function PendingItemStockLine({
   stockResolving,
   mainStoreStockQty,
   jabalpurStockQty,
+  mainStoreDeviceSyncedAt,
+  jabalpurDeviceSyncedAt,
 }: {
   stockQty: number | null | undefined;
   totalInOrderQty: number;
@@ -1293,14 +1305,18 @@ function PendingItemStockLine({
   stockResolving: boolean;
   mainStoreStockQty?: number | null;
   jabalpurStockQty?: number | null;
+  mainStoreDeviceSyncedAt?: string | null;
+  jabalpurDeviceSyncedAt?: string | null;
 }) {
   const tier = getStockTier(stockQty);
+  const mainStoreSyncedLabel = formatStockSyncedAt(mainStoreDeviceSyncedAt);
+  const jabalpurSyncedLabel = formatStockSyncedAt(jabalpurDeviceSyncedAt);
 
   if (stockResolving) {
     return (
       <div className="flex min-w-0 flex-col gap-0.5">
-        <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} />
-        <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
+        <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} suffix={mainStoreSyncedLabel ?? undefined} />
+        <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} suffix={jabalpurSyncedLabel ?? undefined} />
         <p className="pl-3 font-ds-label-size font-medium leading-[1.35] text-[var(--content-secondary)]">
           Checking {stockLocationLabel(sellableLocationCode)} stock...
         </p>
@@ -1318,12 +1334,12 @@ function PendingItemStockLine({
           <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 font-ds-caption-size font-semibold leading-snug">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--bg-warning)]" aria-hidden />
             <span className="min-w-0 text-[var(--content-warning)]">
-              No {stockLocationLabel(sellableLocationCode)} stock available · {formatStockQty(draftQty)} in this add goes to PO
+              Stock not synced on this device · server will validate on sync
             </span>
           </p>
         </div>
-        <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} />
-        <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
+        <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} suffix={mainStoreSyncedLabel ?? undefined} />
+        <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} suffix={jabalpurSyncedLabel ?? undefined} />
       </div>
     );
   }
@@ -1354,8 +1370,8 @@ function PendingItemStockLine({
             {body}
           </p>
         </div>
-        <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} />
-        <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
+        <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} suffix={mainStoreSyncedLabel ?? undefined} />
+        <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} suffix={jabalpurSyncedLabel ?? undefined} />
       </div>
     );
   }
@@ -1412,16 +1428,16 @@ function PendingItemStockLine({
             {body}
           </p>
         </div>
-        <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} />
-        <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
+        <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} suffix={mainStoreSyncedLabel ?? undefined} />
+        <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} suffix={jabalpurSyncedLabel ?? undefined} />
       </div>
     );
   }
 
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
-      <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} />
-      <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
+      <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} suffix={mainStoreSyncedLabel ?? undefined} />
+      <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} suffix={jabalpurSyncedLabel ?? undefined} />
       <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 pt-0.5 font-ds-label-size font-medium leading-snug text-[var(--content-secondary)]">
         {body}
       </p>
@@ -1436,6 +1452,8 @@ function ItemStockBlock({
   stockResolving,
   mainStoreStockQty,
   jabalpurStockQty,
+  mainStoreDeviceSyncedAt,
+  jabalpurDeviceSyncedAt,
 }: {
   stockQty: number | null | undefined;
   totalInOrderQty: number;
@@ -1443,8 +1461,12 @@ function ItemStockBlock({
   stockResolving: boolean;
   mainStoreStockQty?: number | null;
   jabalpurStockQty?: number | null;
+  mainStoreDeviceSyncedAt?: string | null;
+  jabalpurDeviceSyncedAt?: string | null;
 }) {
   const tier = getStockTier(stockQty);
+  const mainStoreSyncedLabel = formatStockSyncedAt(mainStoreDeviceSyncedAt);
+  const jabalpurSyncedLabel = formatStockSyncedAt(jabalpurDeviceSyncedAt);
   const secondary =
     tier !== 'unknown' && tier !== 'out' && stockQty != null && Number.isFinite(Number(stockQty))
       ? stockAfterOrderLine(Number(stockQty), totalInOrderQty, tier)
@@ -1452,8 +1474,8 @@ function ItemStockBlock({
 
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
-      <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} />
-      <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} />
+      <LocationStockLine label="Main Store" stockQty={mainStoreStockQty} suffix={mainStoreSyncedLabel ?? undefined} />
+      <LocationStockLine label="Jabalpur" stockQty={jabalpurStockQty} suffix={jabalpurSyncedLabel ?? undefined} />
       {stockResolving && (
         <p className="pl-3 font-ds-label-size font-medium leading-[1.35] text-[var(--content-secondary)]">
           Checking {stockLocationLabel(sellableLocationCode)} stock...
@@ -1462,7 +1484,7 @@ function ItemStockBlock({
       {!stockResolving && tier === 'unknown' && (
         <div className="mt-1 rounded-lg border border-[color-mix(in_srgb,var(--border-warning)_40%,var(--border-subtle))] bg-[var(--bg-warning-subtle)] px-2 py-1.5">
           <p className="font-ds-caption-size font-semibold leading-snug text-[var(--content-warning)]">
-            No {stockLocationLabel(sellableLocationCode)} stock available · add goes to PO
+            Stock not synced on this device
           </p>
         </div>
       )}
@@ -1489,6 +1511,8 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   stockResolving,
   mainStoreStockQty,
   jabalpurStockQty,
+  mainStoreDeviceSyncedAt,
+  jabalpurDeviceSyncedAt,
   hasSpecialLine,
   onConfirmAdd,
   onConfirmSpecialRateAdd,
@@ -1506,6 +1530,8 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   stockResolving: boolean;
   mainStoreStockQty?: number | null;
   jabalpurStockQty?: number | null;
+  mainStoreDeviceSyncedAt?: string | null;
+  jabalpurDeviceSyncedAt?: string | null;
   hasSpecialLine: boolean;
   onConfirmAdd: (item: Item, qty: number, focQty: number, salesUnit: SalesLineUnit) => void;
   onConfirmSpecialRateAdd: (item: Item, qty: number, salesUnit: SalesLineUnit) => void;
@@ -1558,11 +1584,9 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
   const piecesForStock = draftQty + committedFocQty;
   const draftGoesToPo =
     !stockResolving &&
-    (
-      sellableStockQty == null ||
-      !Number.isFinite(Number(sellableStockQty)) ||
-      totalInOrderQty + piecesForStock > Number(sellableStockQty)
-    );
+    sellableStockQty != null &&
+    Number.isFinite(Number(sellableStockQty)) &&
+    totalInOrderQty + piecesForStock > Number(sellableStockQty);
 
   return (
     <div className="min-w-0">
@@ -1589,6 +1613,8 @@ const ItemRowPendingAddContent = memo(function ItemRowPendingAddContent({
             stockResolving={stockResolving}
             mainStoreStockQty={mainStoreStockQty}
             jabalpurStockQty={jabalpurStockQty}
+            mainStoreDeviceSyncedAt={mainStoreDeviceSyncedAt}
+            jabalpurDeviceSyncedAt={jabalpurDeviceSyncedAt}
           />
         </div>
         <p className="shrink-0 pt-0.5 text-right font-mono font-ds-caption-size font-medium leading-none text-[var(--content-tertiary)]">
@@ -1776,6 +1802,8 @@ const ItemRow = memo(function ItemRow({
   stockResolving,
   mainStoreStockQty,
   jabalpurStockQty,
+  mainStoreDeviceSyncedAt,
+  jabalpurDeviceSyncedAt,
   hasSpecialLine,
   justAdded,
 }: ItemRowProps) {
@@ -1787,11 +1815,9 @@ const ItemRow = memo(function ItemRow({
   const sellableQty = sellableStockQty == null ? null : Number(sellableStockQty);
   const nextAddGoesToPo =
     !stockResolving &&
-    (
-      sellableQty == null ||
-      !Number.isFinite(sellableQty) ||
-      sellableQty <= totalInOrderQty
-    );
+    sellableQty != null &&
+    Number.isFinite(sellableQty) &&
+    sellableQty <= totalInOrderQty;
 
   return (
     <li
@@ -1822,6 +1848,8 @@ const ItemRow = memo(function ItemRow({
           stockResolving={stockResolving}
           mainStoreStockQty={mainStoreStockQty}
           jabalpurStockQty={jabalpurStockQty}
+          mainStoreDeviceSyncedAt={mainStoreDeviceSyncedAt}
+          jabalpurDeviceSyncedAt={jabalpurDeviceSyncedAt}
           hasSpecialLine={hasSpecialLine}
           onConfirmAdd={onConfirmAdd}
           onConfirmSpecialRateAdd={onConfirmSpecialRateAdd}
@@ -1855,6 +1883,8 @@ const ItemRow = memo(function ItemRow({
               stockResolving={stockResolving}
               mainStoreStockQty={mainStoreStockQty}
               jabalpurStockQty={jabalpurStockQty}
+              mainStoreDeviceSyncedAt={mainStoreDeviceSyncedAt}
+              jabalpurDeviceSyncedAt={jabalpurDeviceSyncedAt}
             />
           </div>
 
@@ -1898,6 +1928,8 @@ const ItemRow = memo(function ItemRow({
     prevProps.stockResolving === nextProps.stockResolving &&
     prevProps.mainStoreStockQty === nextProps.mainStoreStockQty &&
     prevProps.jabalpurStockQty === nextProps.jabalpurStockQty &&
+    prevProps.mainStoreDeviceSyncedAt === nextProps.mainStoreDeviceSyncedAt &&
+    prevProps.jabalpurDeviceSyncedAt === nextProps.jabalpurDeviceSyncedAt &&
     prevProps.hasSpecialLine === nextProps.hasSpecialLine &&
     prevProps.justAdded === nextProps.justAdded
   );
@@ -1925,6 +1957,8 @@ function ResultSection({
   sellableLocationCode,
   getMainStoreStockQty,
   getJabalpurStockQty,
+  getMainStoreDeviceSyncedAt,
+  getJabalpurDeviceSyncedAt,
   hasSpecialLine,
   isJustAdded,
 }: {
@@ -1946,6 +1980,8 @@ function ResultSection({
   sellableLocationCode: StockLocationCode;
   getMainStoreStockQty: (item: Item) => number | null | undefined;
   getJabalpurStockQty: (item: Item) => number | null | undefined;
+  getMainStoreDeviceSyncedAt: (item: Item) => string | null;
+  getJabalpurDeviceSyncedAt: (item: Item) => string | null;
   hasSpecialLine: (id: number) => boolean;
   isJustAdded: (id: number) => boolean;
 }) {
@@ -1975,6 +2011,8 @@ function ResultSection({
             stockResolving={getStockResolving(r.item)}
             mainStoreStockQty={getMainStoreStockQty(r.item)}
             jabalpurStockQty={getJabalpurStockQty(r.item)}
+            mainStoreDeviceSyncedAt={getMainStoreDeviceSyncedAt(r.item)}
+            jabalpurDeviceSyncedAt={getJabalpurDeviceSyncedAt(r.item)}
             hasSpecialLine={hasSpecialLine(r.item.id)}
             justAdded={isJustAdded(r.item.id)}
             onStartAdd={onStartAdd}
@@ -2401,31 +2439,31 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const editingCartItemName = editingCartLines[0]?.item.name ?? '';
   const getMainStoreStockQty = (item: Item) => {
     const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
-    const catalogStock = Number.isFinite(Number(item.stock_qty)) ? Number(item.stock_qty) : null;
-    if (!Number.isFinite(busyCode)) return catalogStock;
-    return locationwiseStock[busyCode]?.mainStoreStockQty ?? catalogStock;
+    if (!Number.isFinite(busyCode)) return null;
+    return locationwiseStock[busyCode]?.mainStoreStockQty ?? null;
   };
   const getJabalpurStockQty = (item: Item) => {
     const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
     if (!Number.isFinite(busyCode)) return null;
     return locationwiseStock[busyCode]?.jabalpurStockQty ?? null;
   };
+  const getMainStoreDeviceSyncedAt = (item: Item) => {
+    const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
+    if (!Number.isFinite(busyCode)) return null;
+    return getStockDeviceSyncedAtForLocation(locationwiseStock[busyCode], 'main_store');
+  };
+  const getJabalpurDeviceSyncedAt = (item: Item) => {
+    const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
+    if (!Number.isFinite(busyCode)) return null;
+    return getStockDeviceSyncedAtForLocation(locationwiseStock[busyCode], 'jabalpur');
+  };
   const getSellableStockQty = (item: Item) => {
     const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
-    const catalogStock = Number.isFinite(Number(item.stock_qty)) ? Number(item.stock_qty) : null;
-    if (!Number.isFinite(busyCode)) {
-      return sellableLocationCode === 'main_store' ? catalogStock : null;
-    }
-    return (
-      getStockQtyForLocation(locationwiseStock[busyCode], sellableLocationCode) ??
-      (sellableLocationCode === 'main_store' ? catalogStock : null)
-    );
+    if (!Number.isFinite(busyCode)) return null;
+    return getStockQtyForLocation(locationwiseStock[busyCode], sellableLocationCode);
   };
   const getStockResolving = (item: Item) => {
     const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
-    const hasFallback =
-      sellableLocationCode === 'main_store' && Number.isFinite(Number(item.stock_qty));
-    if (hasFallback && locationwiseStock[busyCode]?.mainStoreStockQty == null) return false;
     return stockLocationLoading || isLocationwiseStockResolving(busyCode, locationwiseStockFetching);
   };
   const hasSpecialLine = (id: number) => specialLineItemIds.has(id);
@@ -2714,6 +2752,8 @@ export default function NewOrderPage(): React.JSX.Element | null {
               sellableLocationCode={sellableLocationCode}
               getMainStoreStockQty={getMainStoreStockQty}
               getJabalpurStockQty={getJabalpurStockQty}
+              getMainStoreDeviceSyncedAt={getMainStoreDeviceSyncedAt}
+              getJabalpurDeviceSyncedAt={getJabalpurDeviceSyncedAt}
               hasSpecialLine={hasSpecialLine}
               isJustAdded={isJustAdded}
             />

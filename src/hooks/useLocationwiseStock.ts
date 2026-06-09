@@ -11,6 +11,10 @@ export interface ItemLocationStock {
   mainStorePhysicalQty: number | null;
   jabalpurReservedQty: number | null;
   mainStoreReservedQty: number | null;
+  jabalpurSourceUpdatedAt: string | null;
+  mainStoreSourceUpdatedAt: string | null;
+  jabalpurDeviceSyncedAt: string | null;
+  mainStoreDeviceSyncedAt: string | null;
 }
 
 export type StockLocationRow = {
@@ -19,11 +23,13 @@ export type StockLocationRow = {
   available_qty: number | null;
   physical_qty: number | null;
   reserved_qty: number | null;
+  latest_stock_updated_at?: string | null;
 };
 
 const POLL_INTERVAL_MS = 30_000;
 const IDB_KEY = 'locationwise-stock-cache-v1';
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
+const WARMUP_CHUNK_SIZE = 200;
 
 interface PersistedLocationwiseStockCache {
   version: number;
@@ -35,6 +41,7 @@ const stockByBusyCodeCache = new Map<number, { stock: ItemLocationStock; fetched
 let hydratedFromIdb = false;
 let hydratePromise: Promise<void> | null = null;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let warmupPromise: Promise<void> | null = null;
 
 function emptyItemLocationStock(): ItemLocationStock {
   return {
@@ -44,6 +51,10 @@ function emptyItemLocationStock(): ItemLocationStock {
     mainStorePhysicalQty: null,
     jabalpurReservedQty: null,
     mainStoreReservedQty: null,
+    jabalpurSourceUpdatedAt: null,
+    mainStoreSourceUpdatedAt: null,
+    jabalpurDeviceSyncedAt: null,
+    mainStoreDeviceSyncedAt: null,
   };
 }
 
@@ -70,10 +81,17 @@ async function hydrateLocationwiseStockCache(): Promise<void> {
 
   hydratePromise = (async () => {
     const snapshot = await idbGet<PersistedLocationwiseStockCache>(IDB_KEY);
-    if (snapshot?.version === CACHE_VERSION && Array.isArray(snapshot.rows)) {
+    if (
+      snapshot &&
+      (snapshot.version === CACHE_VERSION || snapshot.version === 1) &&
+      Array.isArray(snapshot.rows)
+    ) {
       for (const [code, entry] of snapshot.rows) {
         if (Number.isFinite(code) && entry?.stock) {
-          stockByBusyCodeCache.set(Number(code), entry);
+          stockByBusyCodeCache.set(Number(code), {
+            fetchedAt: entry.fetchedAt,
+            stock: normalizeHydratedStock(entry.stock, entry.fetchedAt),
+          });
         }
       }
     }
@@ -83,6 +101,20 @@ async function hydrateLocationwiseStockCache(): Promise<void> {
   });
 
   return hydratePromise;
+}
+
+function normalizeHydratedStock(stock: ItemLocationStock, fetchedAt: number): ItemLocationStock {
+  const syncedAt = Number.isFinite(fetchedAt) ? new Date(fetchedAt).toISOString() : null;
+  return {
+    ...emptyItemLocationStock(),
+    ...stock,
+    mainStoreDeviceSyncedAt:
+      stock.mainStoreDeviceSyncedAt ?? (stock.mainStoreStockQty != null ? syncedAt : null),
+    jabalpurDeviceSyncedAt:
+      stock.jabalpurDeviceSyncedAt ?? (stock.jabalpurStockQty != null ? syncedAt : null),
+    mainStoreSourceUpdatedAt: stock.mainStoreSourceUpdatedAt ?? null,
+    jabalpurSourceUpdatedAt: stock.jabalpurSourceUpdatedAt ?? null,
+  };
 }
 
 function schedulePersistLocationwiseStockCache(): void {
@@ -129,6 +161,7 @@ export function snapshotLocationwiseStockFromCache(busyCodes: number[]): Record<
 function applyStockRow(
   stockByBusyCode: Record<number, ItemLocationStock>,
   row: StockLocationRow,
+  deviceSyncedAt: string,
 ): void {
   const busyCode = row.busy_code == null ? NaN : Number(row.busy_code);
   if (!Number.isFinite(busyCode)) return;
@@ -143,17 +176,24 @@ function applyStockRow(
     ? null
     : Number(row.reserved_qty);
 
-  const existing = stockByBusyCode[busyCode] ?? emptyItemLocationStock();
+  const existing =
+    stockByBusyCode[busyCode] ??
+    stockByBusyCodeCache.get(busyCode)?.stock ??
+    emptyItemLocationStock();
 
   if (row.stock_location_code === 'jabalpur') {
     existing.jabalpurStockQty = stockQty;
     existing.jabalpurPhysicalQty = physicalQty;
     existing.jabalpurReservedQty = reservedQty;
+    existing.jabalpurSourceUpdatedAt = row.latest_stock_updated_at ?? null;
+    existing.jabalpurDeviceSyncedAt = deviceSyncedAt;
   }
   if (row.stock_location_code === 'main_store') {
     existing.mainStoreStockQty = stockQty;
     existing.mainStorePhysicalQty = physicalQty;
     existing.mainStoreReservedQty = reservedQty;
+    existing.mainStoreSourceUpdatedAt = row.latest_stock_updated_at ?? null;
+    existing.mainStoreDeviceSyncedAt = deviceSyncedAt;
   }
 
   stockByBusyCode[busyCode] = existing;
@@ -161,8 +201,9 @@ function applyStockRow(
 
 function writeCacheFromRows(rows: StockLocationRow[], fetchedAt: number): Record<number, ItemLocationStock> {
   const batch: Record<number, ItemLocationStock> = {};
+  const deviceSyncedAt = new Date(fetchedAt).toISOString();
   for (const row of rows) {
-    applyStockRow(batch, row);
+    applyStockRow(batch, row, deviceSyncedAt);
   }
   for (const [code, stock] of Object.entries(batch)) {
     stockByBusyCodeCache.set(Number(code), { stock, fetchedAt });
@@ -200,6 +241,15 @@ export function getStockQtyForLocation(
     : stock?.mainStoreStockQty ?? null;
 }
 
+export function getStockDeviceSyncedAtForLocation(
+  stock: ItemLocationStock | undefined,
+  stockLocationCode: StockLocationCode,
+): string | null {
+  return stockLocationCode === 'jabalpur'
+    ? stock?.jabalpurDeviceSyncedAt ?? null
+    : stock?.mainStoreDeviceSyncedAt ?? null;
+}
+
 /**
  * Fetches sellable location-wise stock only for SKUs that are missing or stale
  * in the in-memory cache; returns a snapshot for the requested busy_codes.
@@ -224,6 +274,31 @@ export async function fetchLocationwiseStock(
   }
 
   return snapshotLocationwiseStockFromCache(busyCodes);
+}
+
+export async function prefetchLocationwiseStockForItems(
+  items: Array<{ busy_code?: number | null }>,
+): Promise<void> {
+  if (warmupPromise) return warmupPromise;
+  const busyCodes = normalizeBusyCodes(items.map((item) => item.busy_code));
+  if (busyCodes.length === 0) return;
+
+  warmupPromise = (async () => {
+    await hydrateLocationwiseStockCache();
+    for (let i = 0; i < busyCodes.length; i += WARMUP_CHUNK_SIZE) {
+      const chunk = busyCodes.slice(i, i + WARMUP_CHUNK_SIZE);
+      try {
+        await fetchLocationwiseStock(chunk);
+      } catch (err) {
+        console.warn('[stock_locationwise] warmup failed', err);
+        break;
+      }
+    }
+  })().finally(() => {
+    warmupPromise = null;
+  });
+
+  return warmupPromise;
 }
 
 /** True while we have no fresh cached qty for this SKU (not the whole batch). */

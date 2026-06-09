@@ -1053,17 +1053,6 @@ export default function CartPage(): React.JSX.Element | null {
     () => visibleBusyCodes.some((code) => code != null && Number.isFinite(Number(code))),
     [visibleBusyCodes],
   );
-  const fallbackStockBusyCodes = useMemo(() => {
-    const set = new Set<number>();
-    if (sellableLocationCode !== 'main_store') return set;
-    for (const ci of items) {
-      const busyCode = ci.item.busy_code == null ? NaN : Number(ci.item.busy_code);
-      if (Number.isFinite(busyCode) && Number.isFinite(Number(ci.item.stock_qty))) {
-        set.add(busyCode);
-      }
-    }
-    return set;
-  }, [items, sellableLocationCode]);
   const normalizedVisibleBusyCodes = useMemo(
     () => normalizeBusyCodes(visibleBusyCodes),
     [visibleBusyCodes],
@@ -1076,7 +1065,6 @@ export default function CartPage(): React.JSX.Element | null {
     stockLocationLoading ||
     (hasLocationwiseLines &&
       normalizedVisibleBusyCodes.some((code) =>
-        !fallbackStockBusyCodes.has(code) &&
         isLocationwiseStockResolving(code, locationwiseStockFetching),
       ));
 
@@ -1113,15 +1101,15 @@ export default function CartPage(): React.JSX.Element | null {
         if (remainingByBusyCode.has(busyCode)) {
           stockQty = remainingByBusyCode.get(busyCode) ?? null;
         } else {
-          const catalogStock = Number.isFinite(Number(ci.item.stock_qty))
-            ? Number(ci.item.stock_qty)
-            : null;
-          stockQty =
-            getStockQtyForLocation(locationwiseStock[busyCode], sellableLocationCode) ??
-            (sellableLocationCode === 'main_store' ? catalogStock : null);
+          stockQty = getStockQtyForLocation(locationwiseStock[busyCode], sellableLocationCode);
         }
       }
-      const split = splitCartLinePaidFoc(ci.qty, ci.focQty ?? 0, stockQty);
+      const totalPieces = ci.qty + (ci.focQty ?? 0);
+      const split = splitCartLinePaidFoc(
+        ci.qty,
+        ci.focQty ?? 0,
+        stockQty == null ? totalPieces : stockQty,
+      );
       const { ship, po, shippedPaid } = split;
       if (Number.isFinite(busyCode) && stockQty != null) {
         remainingByBusyCode.set(busyCode, Math.max(0, stockQty - ship));

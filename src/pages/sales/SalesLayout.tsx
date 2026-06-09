@@ -5,9 +5,10 @@ import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
 import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
 import { CartProvider } from '../../context/CartContext';
-import { prefetchItems } from '../../hooks/useItems';
+import { fetchAllItems, prefetchItems } from '../../hooks/useItems';
 import { prefetchCustomers } from '../../hooks/useCustomers';
 import { prefetchTransports } from '../../hooks/useTransports';
+import { prefetchLocationwiseStockForItems } from '../../hooks/useLocationwiseStock';
 import {
   useOfflineSalesOrderStats,
   useOfflineSalesOrderSync,
@@ -51,6 +52,11 @@ const NAV_ITEMS: BottomNavItem[] = [
 export default function SalesLayout(): React.JSX.Element | null {
   useEffect(() => {
     prefetchItems();
+    void fetchAllItems()
+      .then(prefetchLocationwiseStockForItems)
+      .catch((err) => {
+        console.warn('[sales] stock snapshot warmup skipped', err);
+      });
     void prefetchCustomers();
     void prefetchTransports();
   }, []);
