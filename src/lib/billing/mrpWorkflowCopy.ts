@@ -48,18 +48,18 @@ export const PICKER_MRP_SPLIT_BANNER_TITLE = (mrpCount: number) =>
 export const PICKER_MRP_SPLIT_BANNER_HINT =
   'Pick one MRP batch at a time. Billing will get separate lines.';
 export const PICKER_MRP_SPLIT_CHOOSER_HEADING = (qty: number) =>
-  `Picking ${qty} pcs · how many label prices?`;
+  `Need ${qty} pcs · record label batches`;
 export const PICKER_MRP_SPLIT_CHOOSER_AUTO_STOCK = (prices: string) =>
   `Stock: ${prices}`;
 export const PICKER_MRP_SPLIT_CHOOSER_MANUAL_STOCK = (price: string) =>
   `Stock shows ${price} — split if labels differ`;
-export const PICKER_MRP_SPLIT_CHOOSER_SPLIT_LABEL = 'Split by label MRP';
+export const PICKER_MRP_SPLIT_CHOOSER_SPLIT_LABEL = 'Record label batches';
 export const PICKER_MRP_SPLIT_CHOOSER_SPLIT_HINT =
-  'Pick one price batch at a time · enter manually if needed';
+  'Enter price and qty together';
 export const PICKER_MRP_SPLIT_CHOOSER_SINGLE_HINT =
   'One MRP on every piece — normal pick';
 export const PICKER_MRP_SPLIT_PROGRESS_IDLE =
-  'Tap the dock below to choose MRP for batch 1';
+  'Add the first label batch below';
 export const MRP_SHEET_SUBHEADING_BATCH_MANUAL =
   'Type the price on this batch. Repeat for each different label on the shelf.';
 export const MRP_SHEET_BATCH_STEP = (n: number) => `Batch ${n}`;

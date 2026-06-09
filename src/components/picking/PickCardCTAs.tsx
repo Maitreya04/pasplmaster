@@ -76,7 +76,7 @@ export function PickCardCTAs({
       <div className="border-t border-[var(--border-faint)] bg-[var(--bg-secondary)]">
         <div className="p-2.5 sm:p-3">
           <p className="mb-2 text-center text-[10px] font-medium text-[var(--content-tertiary)]">
-            Choose split or same price above to continue
+            Record label batches or confirm one price above
           </p>
           <button
             type="button"
@@ -144,7 +144,7 @@ export function PickCardCTAs({
             onClick={onPickNextMrp}
             className="flex w-full min-h-[52px] items-center justify-center gap-2 rounded-2xl bg-[var(--bg-inverse-primary)] px-4 font-extrabold text-white pick-pressable active:scale-[0.99] disabled:opacity-40 sm:min-h-[56px]"
           >
-            Next batch MRP · {splitRemaining} pcs left
+            Add next batch · {splitRemaining} pcs left
           </button>
           {onFinishShort ? (
             <button

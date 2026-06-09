@@ -84,6 +84,7 @@ import {
 } from '../../lib/wms/binLayers';
 import { MrpHistorySheet } from '../../components/picker-v10/MrpHistorySheet';
 import { PickQtySheet } from '../../components/picking/PickQtySheet';
+import { PickMrpBatchSheet } from '../../components/picking/PickMrpBatchSheet';
 import { useStockMrpHistory } from '../../hooks/useStockMrpHistory';
 import { STOCK_MRP_HISTORY_QUERY_KEY } from '../../lib/stockMrpwise';
 import {
@@ -107,6 +108,10 @@ import {
 } from '../../lib/picking/pickLineMrp';
 import { pickLineBillingRate } from '../../lib/picking/pickMrpDisplay';
 import { commitPickMrpSegment, undoPickMrpSegment } from '../../lib/picking/splitMrpSegment';
+import {
+  isPickNoLongerActiveError,
+  pickNoLongerActiveMessage,
+} from '../../lib/picking/pickSessionErrors';
 import {
   revertPickLine,
   type RevertPickLineMode,
@@ -274,13 +279,26 @@ export function PickFlowPanel({
     : defaultPickItemTransitionAdapter;
 
   const { data: order, isLoading, error } = useOrderDetail(orderId);
+  const closedPickToastShownRef = useRef(false);
 
   useEffect(() => {
     if (isLab || !orderId || !order) return;
     if (order.workflow_status === 'approved') {
       navigate(`/picking/preview/${orderId}?source=assigned`, { replace: true });
+      return;
     }
-  }, [isLab, navigate, order, orderId]);
+    if (order.workflow_status !== 'picking') {
+      if (!closedPickToastShownRef.current) {
+        closedPickToastShownRef.current = true;
+        toast.info(pickNoLongerActiveMessage(
+          order.workflow_status === 'completed' || order.workflow_status === 'flagged'
+            ? 'already_finalised'
+            : 'not_picking',
+        ));
+      }
+      navigate('/picking', { replace: true });
+    }
+  }, [isLab, navigate, order, orderId, toast]);
 
   const workClaim = useWorkClaim(isLab ? null : orderId, 'picking');
   const claimId = isLab ? null : workClaim.claimId;
@@ -348,8 +366,7 @@ export function PickFlowPanel({
   const [fifoOverrideReason, setFifoOverrideReason] = useState('');
   const [lineMrpMap, setLineMrpMap] = useState<Map<number, PickLineMrpState>>(() => new Map());
   const [mrpSheetItemId, setMrpSheetItemId] = useState<number | null>(null);
-  /** Avoid stale lineMrpMap when opening the sheet right after enterSplitMode. */
-  const [mrpSheetBatchMode, setMrpSheetBatchMode] = useState(false);
+  const [mrpBatchSheetItemId, setMrpBatchSheetItemId] = useState<number | null>(null);
   const [revertConfirm, setRevertConfirm] = useState<{
     itemId: number;
     mode: RevertPickLineMode;
@@ -475,6 +492,7 @@ export function PickFlowPanel({
       flagSheetOpen ||
       queueSheetOpen ||
       manualQtyTargetItemId !== null ||
+      mrpBatchSheetItemId !== null ||
       pendingPackConfirmation !== null ||
       fifoOverrideSheet !== null
     ) {
@@ -484,6 +502,7 @@ export function PickFlowPanel({
     flagSheetOpen,
     queueSheetOpen,
     manualQtyTargetItemId,
+    mrpBatchSheetItemId,
     pendingPackConfirmation,
     fifoOverrideSheet,
   ]);
@@ -700,10 +719,10 @@ export function PickFlowPanel({
   });
 
   const mrpFocusItem = useMemo(() => {
-    const focusId = mrpSheetItemId ?? currentDeckItem?.orderItem.id ?? null;
+    const focusId = mrpSheetItemId ?? mrpBatchSheetItemId ?? currentDeckItem?.orderItem.id ?? null;
     if (!focusId || !order?.items) return null;
     return order.items.find((i) => i.id === focusId) ?? null;
-  }, [currentDeckItem?.orderItem.id, mrpSheetItemId, order?.items]);
+  }, [currentDeckItem?.orderItem.id, mrpBatchSheetItemId, mrpSheetItemId, order?.items]);
 
   const mrpFocusLookup = useMemo(
     () => (mrpFocusItem ? pickLineMrpLookup(mrpFocusItem) : null),
@@ -712,7 +731,9 @@ export function PickFlowPanel({
 
   const mrpFocusRackVerified =
     mrpFocusItem != null &&
-    (rackVerifiedIds.has(mrpFocusItem.id) || mrpSheetItemId === mrpFocusItem.id);
+    (rackVerifiedIds.has(mrpFocusItem.id) ||
+      mrpSheetItemId === mrpFocusItem.id ||
+      mrpBatchSheetItemId === mrpFocusItem.id);
 
   const { data: mrpHistoryData, isLoading: mrpHistoryLoading } = useStockMrpHistory(
     mrpFocusLookup?.busyCode,
@@ -743,23 +764,13 @@ export function PickFlowPanel({
     });
   }, []);
 
-  const openMrpSheet = useCallback((itemId: number, batchMode = false) => {
-    setMrpSheetBatchMode(batchMode);
+  const openMrpSheet = useCallback((itemId: number) => {
     setMrpSheetItemId(itemId);
   }, []);
 
   const closeMrpSheet = useCallback(() => {
-    setMrpSheetBatchMode(false);
     setMrpSheetItemId(null);
   }, []);
-
-  const mrpSheetUsesBatchMode = useCallback(
-    (itemId: number): boolean => {
-      if (mrpSheetBatchMode) return true;
-      return isSplitMode(lineMrpMap.get(itemId));
-    },
-    [lineMrpMap, mrpSheetBatchMode],
-  );
 
   const ensureSplitLineMrp = useCallback(
     (itemId: number, targetQty: number): PickLineMrpState => {
@@ -855,6 +866,13 @@ export function PickFlowPanel({
       return { itemId, previous };
     },
     onError: (_err, vars) => {
+      const message = _err instanceof Error ? _err.message : null;
+      if (isPickNoLongerActiveError(message)) {
+        toast.info(pickNoLongerActiveMessage(message));
+        void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+        navigate('/picking', { replace: true });
+        return;
+      }
       const itemId = vars.transition.itemId;
       const previous = localItems.get(itemId);
       updateLocalItem(itemId, { uiState: previous?.uiState ?? 'pending' });
@@ -901,22 +919,28 @@ export function PickFlowPanel({
       if (res.reason === 'override_reason_required') {
         return 'override_blocked';
       }
+      if (isPickNoLongerActiveError(res.reason)) {
+        toast.info(pickNoLongerActiveMessage(res.reason));
+        void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+        navigate('/picking', { replace: true });
+        return 'abort';
+      }
       if (res.reason === 'insufficient_layer_stock') {
-        toast.warning('Shelf MRP layers short — pick still recorded. Reconcile stock if needed.');
+        toast.warning('Stock record was short — batch saved. Reconcile stock if needed.');
         return 'ok';
       }
       toast.error(res.reason);
       return 'abort';
     },
-    [isLab, preferredPickLayer, queryClient, toast, userId],
+    [isLab, navigate, orderId, preferredPickLayer, queryClient, toast, userId],
   );
 
   const openManualQty = useCallback((orderItem: OrderItem) => {
     appHaptics.selection();
     const lineMrp = lineMrpMap.get(orderItem.id);
     if (isSplitMode(lineMrp) && !getActiveSegment(lineMrp)) {
-      toast.info('Choose MRP for this batch first.');
-      openMrpSheet(orderItem.id, true);
+      toast.info('Add the label batch first.');
+      setMrpBatchSheetItemId(orderItem.id);
       return;
     }
     const local = localItems.get(orderItem.id);
@@ -934,7 +958,7 @@ export function PickFlowPanel({
     setManualQtyTargetItemId(orderItem.id);
     setManualQtyInitial(remaining);
     setScannerHint(null);
-  }, [lineMrpMap, localItems, openMrpSheet, toast]);
+  }, [lineMrpMap, localItems, toast]);
 
   const flagOutOfStock = useCallback(
     (itemId: number) => {
@@ -1671,14 +1695,18 @@ export function PickFlowPanel({
   );
 
   const applySegmentPick = useCallback(
-    async (itemId: number, segmentQty: number) => {
-      if (!order || !userId) return;
+    async (
+      itemId: number,
+      segmentQty: number,
+      lineMrpOverride?: PickLineMrpState,
+    ): Promise<boolean> => {
+      if (!order || !userId) return false;
       const orderItem = order.items.find((oi) => oi.id === itemId);
-      if (!orderItem) return;
+      if (!orderItem) return false;
 
-      const lineMrp = lineMrpMap.get(itemId);
+      const lineMrp = lineMrpOverride ?? lineMrpMap.get(itemId);
       const active = getActiveSegment(lineMrp);
-      if (!lineMrp || !active || segmentQty <= 0) return;
+      if (!lineMrp || !active || segmentQty <= 0) return false;
 
       const rootId = lineMrp.rootOrderItemId ?? itemId;
       const goal = lineMrp.originalTargetQty ?? pickQuantityTarget(orderItem);
@@ -1686,7 +1714,7 @@ export function PickFlowPanel({
       const qty = Math.min(segmentQty, remaining);
       if (qty <= 0) {
         toast.error('No qty left on this line.');
-        return;
+        return false;
       }
 
       const isFirstSegment = lineMrp.segments.filter((s) => s.committed).length === 0;
@@ -1697,15 +1725,16 @@ export function PickFlowPanel({
 
       const inv = await tryConsumeShelfStock(orderItem, qty);
       if (inv === 'override_blocked') {
+        setMrpBatchSheetItemId(null);
         setFifoOverrideSheet({
           orderItemId: itemId,
           qtyDelta: qty,
           qtyToApply: qty,
           resume: 'manual',
         });
-        return;
+        return false;
       }
-      if (inv === 'abort') return;
+      if (inv === 'abort') return false;
 
       const segmentMrp = active.mrp;
       const latestMrp = mrpHistoryData?.latest_mrp ?? null;
@@ -1762,8 +1791,14 @@ export function PickFlowPanel({
         });
 
         if (!rpcResult.success) {
+          if (isPickNoLongerActiveError(rpcResult.error)) {
+            toast.info(pickNoLongerActiveMessage(rpcResult.error));
+            await queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+            navigate('/picking', { replace: true });
+            return false;
+          }
           toast.error(rpcResult.error ?? 'Failed to save MRP batch');
-          return;
+          return false;
         }
 
         orderItemId = rpcResult.order_item_id ?? rootId;
@@ -1791,6 +1826,7 @@ export function PickFlowPanel({
         updateLocalItem(itemId, { uiState: 'matched', scanResult });
         toast.info(`Batch saved · ${nextRemaining} pcs left`);
       }
+      return true;
     },
     [
       beginLineOutcome,
@@ -1799,6 +1835,7 @@ export function PickFlowPanel({
       lineMrpMap,
       markRackVerified,
       mrpHistoryData,
+      navigate,
       order,
       orderId,
       queryClient,
@@ -1819,22 +1856,40 @@ export function PickFlowPanel({
         orderItem.id,
         enterSplitMode(lineMrpMap.get(orderItem.id), orderItem.id, targetQty),
       );
-      openMrpSheet(orderItem.id, true);
+      setMrpBatchSheetItemId(orderItem.id);
     },
-    [lineMrpMap, openMrpSheet, updateLineMrp],
+    [lineMrpMap, updateLineMrp],
   );
 
   const handlePickNextMrp = useCallback(
     (orderItem: OrderItem) => {
-      openMrpSheet(orderItem.id, true);
+      setMrpBatchSheetItemId(orderItem.id);
     },
-    [openMrpSheet],
+    [],
+  );
+
+  const handleSaveMrpBatch = useCallback(
+    async (
+      orderItem: OrderItem,
+      batch: { mrp: number; qty: number; custom: boolean },
+    ): Promise<boolean> => {
+      const targetQty = pickQuantityTarget(orderItem);
+      const splitState = ensureSplitLineMrp(orderItem.id, targetQty);
+      const committedState: PickLineMrpState = {
+        ...splitState,
+        activeSegmentIndex: null,
+        segments: splitState.segments.filter((segment) => segment.committed),
+      };
+      const activeState = startActiveSegment(committedState, batch.mrp, batch.custom);
+      return applySegmentPick(orderItem.id, batch.qty, activeState);
+    },
+    [applySegmentPick, ensureSplitLineMrp],
   );
 
   const handleAllSameMrp = useCallback(
     (orderItem: OrderItem) => {
       updateLineMrp(orderItem.id, enterSingleModeFromSplit(lineMrpMap.get(orderItem.id)));
-      openMrpSheet(orderItem.id, false);
+      openMrpSheet(orderItem.id);
     },
     [lineMrpMap, openMrpSheet, updateLineMrp],
   );
@@ -2082,6 +2137,24 @@ export function PickFlowPanel({
     if (!manualQtyOrderItem) return null;
     return getActiveSegment(lineMrpMap.get(manualQtyOrderItem.id))?.mrp ?? null;
   }, [lineMrpMap, manualQtyOrderItem]);
+
+  const mrpBatchSheetOrderItem = useMemo(() => {
+    if (mrpBatchSheetItemId == null || !order?.items) return null;
+    return order.items.find((oi) => oi.id === mrpBatchSheetItemId) ?? null;
+  }, [mrpBatchSheetItemId, order?.items]);
+
+  const mrpBatchSheetPicked = useMemo(() => {
+    if (!mrpBatchSheetOrderItem) return 0;
+    return pickLineSegmentsCommittedQty(lineMrpMap.get(mrpBatchSheetOrderItem.id));
+  }, [lineMrpMap, mrpBatchSheetOrderItem]);
+
+  const mrpBatchSheetRemaining = useMemo(() => {
+    if (!mrpBatchSheetOrderItem) return 0;
+    return pickLineSplitRemaining(
+      lineMrpMap.get(mrpBatchSheetOrderItem.id),
+      pickQuantityTarget(mrpBatchSheetOrderItem),
+    );
+  }, [lineMrpMap, mrpBatchSheetOrderItem]);
 
 
   const deckDotStatus = useMemo((): SwipeDeckDotStatus[] => {
@@ -2387,14 +2460,14 @@ export function PickFlowPanel({
                           cardShelfMrpBands,
                         );
                         if (!isSplitMode(cardLineMrp) && splitSuggested) {
-                          updateLineMrp(
-                            pi.orderItem.id,
-                            enterSplitMode(cardLineMrp, pi.orderItem.id, targetQty),
-                          );
-                          openMrpSheet(pi.orderItem.id, true);
+                          handlePickFirstBatch(pi.orderItem);
                           return;
                         }
-                        openMrpSheet(pi.orderItem.id, isSplitMode(cardLineMrp));
+                        if (isSplitMode(cardLineMrp)) {
+                          setMrpBatchSheetItemId(pi.orderItem.id);
+                          return;
+                        }
+                        openMrpSheet(pi.orderItem.id);
                       }}
                       onConfirmMrp={() => {
                         const history =
@@ -2406,7 +2479,7 @@ export function PickFlowPanel({
                           handlePickFirstBatch(pi.orderItem);
                           return;
                         }
-                        openMrpSheet(pi.orderItem.id, false);
+                        openMrpSheet(pi.orderItem.id);
                       }}
                       onMarkPicked={
                         isCardCurrent ? () => handleMarkPicked(pi.orderItem) : undefined
@@ -2684,6 +2757,26 @@ export function PickFlowPanel({
         onClose={() => setManualQtyTargetItemId(null)}
       />
 
+      {mrpBatchSheetItemId != null && mrpBatchSheetOrderItem && (
+        <PickMrpBatchSheet
+          isOpen
+          remainingQty={mrpBatchSheetRemaining}
+          targetQty={pickQuantityTarget(mrpBatchSheetOrderItem)}
+          pickedQty={mrpBatchSheetPicked}
+          history={mrpHistoryData?.history ?? []}
+          isLoading={mrpHistoryLoading}
+          partCode={
+            mrpBatchSheetOrderItem.catalog_alias1 ??
+            mrpBatchSheetOrderItem.catalog_alias ??
+            mrpBatchSheetOrderItem.item_alias ??
+            null
+          }
+          rackNo={mrpBatchSheetOrderItem.rack_no}
+          onConfirm={(batch) => handleSaveMrpBatch(mrpBatchSheetOrderItem, batch)}
+          onClose={() => setMrpBatchSheetItemId(null)}
+        />
+      )}
+
       {mrpSheetItemId != null && mrpFocusItem && (
         <MrpHistorySheet
           isOpen
@@ -2691,13 +2784,6 @@ export function PickFlowPanel({
           isLoading={mrpHistoryLoading}
           confirmedMrp={lineMrpMap.get(mrpSheetItemId)?.confirmedMrp ?? null}
           customMrp={lineMrpMap.get(mrpSheetItemId)?.customMrp ?? null}
-          selectBatchMode={mrpSheetUsesBatchMode(mrpSheetItemId)}
-          batchNumber={
-            mrpSheetUsesBatchMode(mrpSheetItemId)
-              ? (lineMrpMap.get(mrpSheetItemId)?.segments.filter((s) => s.committed).length ?? 0) +
-                1
-              : undefined
-          }
           partCode={
             mrpFocusItem.catalog_alias1 ??
             mrpFocusItem.catalog_alias ??
@@ -2706,23 +2792,11 @@ export function PickFlowPanel({
           }
           rackNo={mrpFocusItem.rack_no}
           onSelectMrp={(mrp) => {
-            if (mrpSheetUsesBatchMode(mrpSheetItemId)) {
-              const targetQty = pickQuantityTarget(mrpFocusItem);
-              const splitState = ensureSplitLineMrp(mrpSheetItemId, targetQty);
-              updateLineMrp(mrpSheetItemId, startActiveSegment(splitState, mrp, false));
-            } else {
-              updateLineMrp(mrpSheetItemId, { confirmedMrp: mrp, customMrp: null });
-            }
+            updateLineMrp(mrpSheetItemId, { confirmedMrp: mrp, customMrp: null });
             closeMrpSheet();
           }}
           onSelectCustomMrp={(mrp) => {
-            if (mrpSheetUsesBatchMode(mrpSheetItemId)) {
-              const targetQty = pickQuantityTarget(mrpFocusItem);
-              const splitState = ensureSplitLineMrp(mrpSheetItemId, targetQty);
-              updateLineMrp(mrpSheetItemId, startActiveSegment(splitState, mrp, true));
-            } else {
-              updateLineMrp(mrpSheetItemId, { customMrp: mrp, confirmedMrp: null });
-            }
+            updateLineMrp(mrpSheetItemId, { customMrp: mrp, confirmedMrp: null });
             closeMrpSheet();
           }}
           onClose={closeMrpSheet}

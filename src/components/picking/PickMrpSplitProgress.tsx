@@ -1,7 +1,6 @@
 import {
   PICKER_MRP_BILL_RATE_CHIP,
   PICKER_MRP_SPLIT_PROGRESS_IDLE,
-  PICKER_MRP_SPLIT_PICKED_AT,
 } from '../../lib/billing/mrpWorkflowCopy';
 import type { PickLineMrpState } from '../../lib/picking/pickLineMrp';
 import {
@@ -42,11 +41,38 @@ export function PickMrpSplitProgress({
       <div className="px-3 py-2.5 sm:px-4">
         <div className="flex items-baseline justify-between gap-2">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--content-warning-on-light)]">
-            Split by label MRP
+            Label batches
           </p>
           <p className="font-mono text-xs font-bold tabular-nums text-[var(--content-warning-on-light)]">
-            {committed} / {goal} pcs
+            Balance {remaining} pcs
           </p>
+        </div>
+
+        <div className="mt-2 grid grid-cols-3 overflow-hidden rounded-lg border border-[var(--border-warning)]/25 bg-[var(--bg-secondary)]/65">
+          <div className="px-2 py-1.5">
+            <p className="text-[8px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+              Need
+            </p>
+            <p className="font-mono text-sm font-extrabold tabular-nums text-[var(--content-primary)]">
+              {goal}
+            </p>
+          </div>
+          <div className="border-x border-[var(--border-warning)]/20 px-2 py-1.5">
+            <p className="text-[8px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+              Picked
+            </p>
+            <p className="font-mono text-sm font-extrabold tabular-nums text-[var(--content-primary)]">
+              {committed}
+            </p>
+          </div>
+          <div className="px-2 py-1.5">
+            <p className="text-[8px] font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
+              Balance
+            </p>
+            <p className="font-mono text-sm font-extrabold tabular-nums text-[var(--content-warning-on-light)]">
+              {remaining}
+            </p>
+          </div>
         </div>
 
         {billingRate != null ? (
@@ -69,7 +95,7 @@ export function PickMrpSplitProgress({
               className="inline-flex flex-col gap-0.5 rounded-lg border border-[var(--border-positive)] bg-[var(--bg-positive-subtle)] px-2 py-1 text-[10px] font-semibold text-[var(--content-positive)]"
             >
               <span className="font-mono tabular-nums">
-                {PICKER_MRP_SPLIT_PICKED_AT(seg.qty, Math.round(seg.mrp), goal)}
+                ₹{Math.round(seg.mrp)} · {seg.qty} pcs
               </span>
               {billingRate != null && Math.round(seg.mrp) !== billingRate ? (
                 <span className="font-medium text-[var(--content-warning-on-light)]">
