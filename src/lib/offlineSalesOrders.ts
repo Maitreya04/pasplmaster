@@ -1,0 +1,311 @@
+import type { CartItem, Customer, OrderPriority, Transport } from '../types';
+import { idbGet, idbSet } from './idb';
+import {
+  offlineOrderStatusFromResult,
+  type OfflineSalesOrderStatus,
+  type SalesOrderSubmitResult,
+} from './offlineSalesOrderResult';
+import { normalizeSalesLineUnit } from './salesUnit';
+import { supabase } from './supabase/client';
+
+const IDB_KEY = 'offline-sales-orders-v1';
+const CHANGE_EVENT = 'paspl-offline-sales-orders-changed';
+
+export type {
+  OfflineSalesOrderStatus,
+  SalesOrderSubmitLineResult,
+  SalesOrderSubmitResult,
+} from './offlineSalesOrderResult';
+
+export interface SalesOrderPayloadLine {
+  item_id: number;
+  qty_requested: number;
+  sales_unit: string;
+  price_quoted: number;
+  price_system: number;
+  is_foc: boolean;
+}
+
+export interface SalesOrderPayload {
+  client_order_key?: string;
+  submission_mode?: 'online' | 'offline_replay';
+  shortage_policy?: 'po_pending' | 'bill_available_skip_rest';
+  customer_id: number;
+  customer_name: string;
+  customer_city: string | null;
+  transport_id: number | null;
+  transport_name: string | null;
+  salesperson_name: string;
+  salesperson_user_id: number | null;
+  priority: OrderPriority;
+  notes: string | null;
+  lines: SalesOrderPayloadLine[];
+}
+
+export interface OfflineSalesOrderSummary {
+  customerName: string;
+  itemCount: number;
+  totalPieces: number;
+  totalValue: number;
+  createdAt: string;
+}
+
+export interface OfflineSalesOrder {
+  clientOrderKey: string;
+  payload: SalesOrderPayload;
+  summary: OfflineSalesOrderSummary;
+  status: OfflineSalesOrderStatus;
+  attempts: number;
+  lastError: string | null;
+  result: SalesOrderSubmitResult | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+let syncPromise: Promise<OfflineSalesOrder[]> | null = null;
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function notifyChanged(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(CHANGE_EVENT));
+  }
+}
+
+export function createSalesOrderClientKey(): string {
+  const random =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `offline-${random}`;
+}
+
+function normalizeQueue(rows: OfflineSalesOrder[] | undefined): OfflineSalesOrder[] {
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function writeQueue(rows: OfflineSalesOrder[]): Promise<void> {
+  await idbSet(IDB_KEY, rows);
+  notifyChanged();
+}
+
+export function subscribeOfflineSalesOrders(listener: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  window.addEventListener(CHANGE_EVENT, listener);
+  return () => window.removeEventListener(CHANGE_EVENT, listener);
+}
+
+export async function readOfflineSalesOrders(): Promise<OfflineSalesOrder[]> {
+  return normalizeQueue(await idbGet<OfflineSalesOrder[]>(IDB_KEY));
+}
+
+export function buildSalesOrderPayload(args: {
+  customer: Customer;
+  transport: Transport | null;
+  userId: number | null;
+  userName: string;
+  priority: OrderPriority;
+  notes: string;
+  items: CartItem[];
+  clientOrderKey?: string;
+  submissionMode?: 'online' | 'offline_replay';
+  shortagePolicy?: 'po_pending' | 'bill_available_skip_rest';
+}): SalesOrderPayload {
+  return {
+    client_order_key: args.clientOrderKey,
+    submission_mode: args.submissionMode,
+    shortage_policy: args.shortagePolicy,
+    customer_id: args.customer.id,
+    customer_name: args.customer.name,
+    customer_city: args.customer.city ?? null,
+    transport_id: args.transport?.id ?? null,
+    transport_name: args.transport?.name ?? null,
+    salesperson_name: args.userName,
+    salesperson_user_id: args.userId,
+    priority: args.priority,
+    notes: args.notes.trim() || null,
+    lines: args.items.flatMap((ci) => {
+      const foc = Math.max(0, ci.focQty ?? 0);
+      const paid = ci.qty;
+      const sys = ci.item.sales_price;
+      const salesUnit = normalizeSalesLineUnit(ci.salesUnit);
+      const rows: SalesOrderPayloadLine[] = [];
+      if (paid > 0) {
+        rows.push({
+          item_id: ci.item.id,
+          qty_requested: paid,
+          sales_unit: salesUnit,
+          price_quoted: ci.specialRate ?? sys,
+          price_system: sys,
+          is_foc: false,
+        });
+      }
+      if (foc > 0) {
+        rows.push({
+          item_id: ci.item.id,
+          qty_requested: foc,
+          sales_unit: salesUnit,
+          price_quoted: 0,
+          price_system: sys,
+          is_foc: true,
+        });
+      }
+      return rows;
+    }),
+  };
+}
+
+export function buildOfflineOrderSummary(args: {
+  customer: Customer;
+  items: CartItem[];
+}): OfflineSalesOrderSummary {
+  let totalPieces = 0;
+  let totalValue = 0;
+  for (const c of args.items) {
+    totalPieces += c.qty + (c.focQty ?? 0);
+    totalValue += (c.specialRate ?? c.item.sales_price) * c.qty;
+  }
+  return {
+    customerName: args.customer.name,
+    itemCount: args.items.length,
+    totalPieces,
+    totalValue,
+    createdAt: nowIso(),
+  };
+}
+
+export function isNetworkSubmitError(err: unknown): boolean {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  const message =
+    err instanceof Error
+      ? err.message
+      : typeof err === 'object' && err !== null && 'message' in err
+        ? String((err as { message: unknown }).message)
+        : String(err ?? '');
+  return /failed to fetch|network|fetch failed|timeout|load failed|request/i.test(message);
+}
+
+export async function submitSalesOrderPayload(
+  payload: SalesOrderPayload,
+): Promise<SalesOrderSubmitResult> {
+  const { data, error } = await supabase.rpc('submit_sales_order', {
+    p_payload: payload,
+  });
+  if (error) throw error;
+  return data as SalesOrderSubmitResult;
+}
+
+export async function enqueueOfflineSalesOrder(args: {
+  customer: Customer;
+  transport: Transport | null;
+  userId: number | null;
+  userName: string;
+  priority: OrderPriority;
+  notes: string;
+  items: CartItem[];
+  clientOrderKey?: string;
+  payload?: SalesOrderPayload;
+}): Promise<OfflineSalesOrder> {
+  const clientOrderKey = args.clientOrderKey ?? createSalesOrderClientKey();
+  const payload =
+    args.payload ??
+    buildSalesOrderPayload({
+      ...args,
+      clientOrderKey,
+      submissionMode: 'offline_replay',
+      shortagePolicy: 'bill_available_skip_rest',
+    });
+  const createdAt = nowIso();
+  const row: OfflineSalesOrder = {
+    clientOrderKey,
+    payload: args.payload
+      ? { ...payload, client_order_key: clientOrderKey }
+      : {
+          ...payload,
+          client_order_key: clientOrderKey,
+          submission_mode: 'offline_replay',
+          shortage_policy: 'bill_available_skip_rest',
+        },
+    summary: buildOfflineOrderSummary({ customer: args.customer, items: args.items }),
+    status: 'queued',
+    attempts: 0,
+    lastError: null,
+    result: null,
+    createdAt,
+    updatedAt: createdAt,
+  };
+
+  const queue = await readOfflineSalesOrders();
+  const next = queue.filter((q) => q.clientOrderKey !== clientOrderKey);
+  next.unshift(row);
+  await writeQueue(next);
+  return row;
+}
+
+export async function syncOfflineSalesOrders(): Promise<OfflineSalesOrder[]> {
+  if (syncPromise) return syncPromise;
+  syncPromise = (async () => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return readOfflineSalesOrders();
+    }
+
+    let queue = await readOfflineSalesOrders();
+    const target = queue.find((row) => row.status === 'queued' || row.status === 'syncing');
+    if (!target) return queue;
+
+    const startedAt = nowIso();
+    queue = queue.map((row) =>
+      row.clientOrderKey === target.clientOrderKey
+        ? { ...row, status: 'syncing', updatedAt: startedAt }
+        : row,
+    );
+    await writeQueue(queue);
+
+    try {
+      const result = await submitSalesOrderPayload({
+        ...target.payload,
+        client_order_key: target.clientOrderKey,
+      });
+
+      const status = result.success ? offlineOrderStatusFromResult(result) : 'failed';
+      const updatedAt = nowIso();
+      queue = (await readOfflineSalesOrders()).map((row) =>
+        row.clientOrderKey === target.clientOrderKey
+          ? {
+              ...row,
+              status,
+              attempts: row.attempts + 1,
+              lastError: result.success ? null : result.detail ?? result.error ?? 'Sync failed',
+              result,
+              updatedAt,
+            }
+          : row,
+      );
+      await writeQueue(queue);
+      return queue;
+    } catch (err) {
+      const retryable = isNetworkSubmitError(err);
+      const message = err instanceof Error ? err.message : 'Sync failed';
+      const updatedAt = nowIso();
+      queue = (await readOfflineSalesOrders()).map((row) =>
+        row.clientOrderKey === target.clientOrderKey
+          ? {
+              ...row,
+              status: retryable ? 'queued' : 'failed',
+              attempts: row.attempts + 1,
+              lastError: message,
+              updatedAt,
+            }
+          : row,
+      );
+      await writeQueue(queue);
+      return queue;
+    }
+  })().finally(() => {
+    syncPromise = null;
+  });
+
+  return syncPromise;
+}

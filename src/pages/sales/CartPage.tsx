@@ -36,6 +36,15 @@ import {
 import { useUserStockLocation } from '../../hooks/useUserStockLocation';
 import { supabase } from '../../lib/supabase/client';
 import {
+  buildSalesOrderPayload,
+  createSalesOrderClientKey,
+  enqueueOfflineSalesOrder,
+  isNetworkSubmitError,
+  submitSalesOrderPayload,
+  type SalesOrderSubmitResult,
+  type OfflineSalesOrder,
+} from '../../lib/offlineSalesOrders';
+import {
   PageHeader,
   NumberStepper,
   BigButton,
@@ -1024,6 +1033,7 @@ export default function CartPage(): React.JSX.Element | null {
     orderNumber: string;
     shareText: string;
   } | null>(null);
+  const [queuedSuccess, setQueuedSuccess] = useState<OfflineSalesOrder | null>(null);
   const [summaryCopied, setSummaryCopied] = useState(false);
   const summaryCopyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showItemBreakdown, setShowItemBreakdown] = useState(false);
@@ -1179,74 +1189,52 @@ export default function CartPage(): React.JSX.Element | null {
       if (!customer || !userName) throw new Error('Customer and salesperson required');
 
       const submittedAt = new Date();
-
-      const payload = {
-        customer_id: customer.id,
-        customer_name: customer.name,
-        customer_city: customer.city ?? null,
-        transport_id: transport?.id ?? null,
-        transport_name: transport?.name ?? null,
-        salesperson_name: userName,
-        salesperson_user_id: userId,
+      const clientOrderKey = createSalesOrderClientKey();
+      const onlinePayload = buildSalesOrderPayload({
+        customer,
+        transport,
+        userId,
+        userName,
         priority,
-        notes: notes.trim() || null,
-        lines: items.flatMap((ci) => {
-          const foc = Math.max(0, ci.focQty ?? 0);
-          const paid = ci.qty;
-          const sys = ci.item.sales_price;
-          const salesUnit = normalizeSalesLineUnit(ci.salesUnit);
-          const rows: Array<{
-            item_id: number;
-            qty_requested: number;
-            sales_unit: string;
-            price_quoted: number;
-            price_system: number;
-            is_foc: boolean;
-          }> = [];
-          if (paid > 0) {
-            rows.push({
-              item_id: ci.item.id,
-              qty_requested: paid,
-              sales_unit: salesUnit,
-              price_quoted: ci.specialRate ?? sys,
-              price_system: sys,
-              is_foc: false,
-            });
-          }
-          if (foc > 0) {
-            rows.push({
-              item_id: ci.item.id,
-              qty_requested: foc,
-              sales_unit: salesUnit,
-              price_quoted: 0,
-              price_system: sys,
-              is_foc: true,
-            });
-          }
-          return rows;
-        }),
-      };
-
-      const { data: rpcData, error: rpcError } = await supabase.rpc('submit_sales_order', {
-        p_payload: payload,
+        notes,
+        items,
+        clientOrderKey,
+        submissionMode: 'online',
+        shortagePolicy: 'po_pending',
       });
 
-      if (rpcError) throw rpcError;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        const queuedOrder = await enqueueOfflineSalesOrder({
+          customer,
+          transport,
+          userId,
+          userName,
+          priority,
+          notes,
+          items,
+          clientOrderKey,
+        });
+        return { kind: 'queued' as const, queuedOrder };
+      }
 
-      const result = rpcData as {
-        success?: boolean;
-        error?: string;
-        detail?: string;
-        order_id?: number;
-        order_number?: string;
-        lines?: Array<{
-          name: string;
-          qty_requested: number;
-          qty_ship: number;
-          qty_po: number;
-          is_foc?: boolean;
-        }>;
-      };
+      let result: SalesOrderSubmitResult;
+      try {
+        result = await submitSalesOrderPayload(onlinePayload);
+      } catch (err) {
+        if (!isNetworkSubmitError(err)) throw err;
+        const queuedOrder = await enqueueOfflineSalesOrder({
+          customer,
+          transport,
+          userId,
+          userName,
+          priority,
+          notes,
+          items,
+          clientOrderKey,
+          payload: onlinePayload,
+        });
+        return { kind: 'queued' as const, queuedOrder };
+      }
 
       if (!result?.success) {
         throw new Error(
@@ -1294,6 +1282,7 @@ export default function CartPage(): React.JSX.Element | null {
       }
 
       return {
+        kind: 'submitted' as const,
         orderNumber,
         shareText: shareTextFinal,
       };
@@ -1305,7 +1294,17 @@ export default function CartPage(): React.JSX.Element | null {
         clearTimeout(summaryCopyTimeoutRef.current);
         summaryCopyTimeoutRef.current = null;
       }
-      setSubmitSuccess(payload);
+      if (payload.kind === 'queued') {
+        setSubmitSuccess(null);
+        setQueuedSuccess(payload.queuedOrder);
+        toast.success('Order queued. It will sync when network returns.');
+        return;
+      }
+      setQueuedSuccess(null);
+      setSubmitSuccess({
+        orderNumber: payload.orderNumber,
+        shareText: payload.shareText,
+      });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['pending-items'] });
       queryClient.invalidateQueries({ queryKey: ['open-po-demand-lines'] });
@@ -1357,6 +1356,51 @@ export default function CartPage(): React.JSX.Element | null {
       toast.error('Could not copy');
     }
   }, [submitSuccess, toast]);
+
+  if (queuedSuccess) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <PageHeader
+          title="Order Queued"
+          stickyTopClassName={billingHeaderTop}
+          onBack={() => {
+            setQueuedSuccess(null);
+            navigate(routes.home);
+          }}
+        />
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+          <div className="w-16 h-16 rounded-full bg-[var(--bg-warning-subtle)] flex items-center justify-center mb-4">
+            <CheckCircle size={36} weight="fill" className="text-[var(--content-warning)]" />
+          </div>
+          <h2 className="text-xl font-bold text-[var(--content-primary)] mb-2">
+            Saved for sync
+          </h2>
+          <p className="max-w-sm text-sm text-[var(--content-secondary)] leading-relaxed">
+            {queuedSuccess.summary.customerName} is queued on this device. When network returns,
+            stock will be checked by the server and the order will sync without another tap.
+          </p>
+          <div className="mt-5 rounded-xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] px-4 py-3 text-left">
+            <p className="font-mono text-sm font-semibold text-[var(--content-primary)]">
+              {queuedSuccess.summary.itemCount} items · {queuedSuccess.summary.totalPieces} pcs
+            </p>
+            <p className="mt-1 text-xs text-[var(--content-tertiary)]">
+              You can see sync status in My Orders.
+            </p>
+          </div>
+          <div className="mt-6 w-full max-w-sm">
+            <BigButton
+              onClick={() => {
+                setQueuedSuccess(null);
+                navigate(routes.home);
+              }}
+            >
+              Done
+            </BigButton>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Success screen
   if (submitSuccess) {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CaretDown, CaretUp, Check, Copy, Package, Trash, Warning } from '@phosphor-icons/react';
+import { CaretDown, CaretUp, Check, CloudArrowUp, Copy, Package, Trash, Warning } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useOrders } from '../../hooks/useOrders';
@@ -33,6 +33,10 @@ import {
   salesLineEditHint,
 } from '../../lib/sales/orderAllowsSalesLineEdit';
 import { SalesEditAddLineSheet } from './SalesEditAddLineSheet';
+import {
+  useOfflineSalesOrders,
+  type OfflineSalesOrder,
+} from '../../hooks/useOfflineSalesOrders';
 
 const SALES_CLAIM_MESSAGES: Record<string, string> = {
   locked_by_billing: 'Billing is reviewing this order. Try again when they finish.',
@@ -443,6 +447,65 @@ function OrderCard({
           </span>
           <span className="text-[var(--content-tertiary)]">{formatTimeAgo(order.created_at)}</span>
         </div>
+      </div>
+    </Card>
+  );
+}
+
+function OfflineOrderCard({ order }: { order: OfflineSalesOrder }) {
+  const statusLabel =
+    order.status === 'syncing'
+      ? 'Syncing'
+      : order.status === 'partial'
+        ? 'Partially submitted'
+        : order.status === 'no_stock'
+          ? 'No stock at sync'
+          : order.status === 'failed'
+            ? 'Sync failed'
+            : 'Pending sync';
+  const tone =
+    order.status === 'failed' || order.status === 'no_stock'
+      ? 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] border-[var(--border-negative)]'
+      : order.status === 'partial'
+        ? 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] border-[var(--border-warning)]'
+        : 'bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border-[var(--border-accent)]';
+
+  return (
+    <Card>
+      <div className="space-y-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <CloudArrowUp size={18} weight="duotone" className="shrink-0 text-[var(--content-accent)]" />
+            <span className="truncate font-bold text-[var(--content-primary)]">
+              {order.summary.customerName}
+            </span>
+          </div>
+          <span className={`inline-flex shrink-0 rounded-md border px-2 py-1 text-xs font-semibold ${tone}`}>
+            {statusLabel}
+          </span>
+        </div>
+        <p className="font-mono text-sm text-[var(--content-secondary)]">
+          {order.summary.itemCount} items · {order.summary.totalPieces} pcs ·{' '}
+          {formatCurrency(order.summary.totalValue)}
+        </p>
+        {order.status === 'partial' && (
+          <p className="text-xs font-medium text-[var(--content-warning-on-light)]">
+            {order.result?.order_number
+              ? `Order ${order.result.order_number} was created; ${order.result.shortage_qty ?? 0} pcs were skipped.`
+              : `${order.result?.shortage_qty ?? 0} pcs were skipped.`}
+          </p>
+        )}
+        {order.status === 'no_stock' && (
+          <p className="text-xs font-medium text-[var(--content-negative)]">
+            No items were available when this queued order synced.
+          </p>
+        )}
+        {order.status === 'failed' && order.lastError && (
+          <p className="text-xs text-[var(--content-negative)]">{order.lastError}</p>
+        )}
+        <p className="text-xs text-[var(--content-tertiary)]">
+          Saved {formatTimeAgo(order.createdAt)}
+        </p>
       </div>
     </Card>
   );
@@ -1056,6 +1119,16 @@ export default function MyOrdersPage(): React.JSX.Element | null {
   });
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const { items: notifications, markRead } = useUserNotifications(userId);
+  const offlineOrders = useOfflineSalesOrders();
+  const visibleOfflineOrders = useMemo(
+    () =>
+      offlineOrders.filter((order) => {
+        if (order.status === 'synced') return false;
+        if (userId != null && order.payload.salesperson_user_id === userId) return true;
+        return userName != null && order.payload.salesperson_name === userName;
+      }),
+    [offlineOrders, userId, userName],
+  );
 
   const unreadSalesUpdatesByOrderId = useMemo(() => {
     const map = new Map<number, { id: number; label: string; created_at: string }>();
@@ -1119,13 +1192,24 @@ export default function MyOrdersPage(): React.JSX.Element | null {
         {userName ? `Orders by ${userName}` : 'Your submitted orders'}
       </p>
 
+      {visibleOfflineOrders.length > 0 && (
+        <div className="mt-6 space-y-3">
+          <h2 className="text-sm font-semibold text-[var(--content-secondary)]">
+            Offline orders
+          </h2>
+          {visibleOfflineOrders.map((order) => (
+            <OfflineOrderCard key={order.clientOrderKey} order={order} />
+          ))}
+        </div>
+      )}
+
       {isLoading ? (
         <div className="mt-6 space-y-3">
           <Skeleton variant="card" count={4} />
         </div>
       ) : error ? (
         <p className="mt-6 text-[var(--content-negative)]">Failed to load orders</p>
-      ) : !orders?.length ? (
+      ) : !orders?.length && visibleOfflineOrders.length === 0 ? (
         <EmptyState
           icon={Package}
           title="No orders yet"
@@ -1133,7 +1217,7 @@ export default function MyOrdersPage(): React.JSX.Element | null {
         />
       ) : (
         <div className="mt-6 space-y-3">
-          {orders.map((order) => (
+          {(orders ?? []).map((order) => (
             <OrderCard
               key={order.id}
               order={order}

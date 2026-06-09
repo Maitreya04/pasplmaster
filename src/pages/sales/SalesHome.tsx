@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom';
-import { PlusCircle, ListBullets, HourglassHigh } from '@phosphor-icons/react';
+import { CloudArrowUp, PlusCircle, ListBullets, HourglassHigh } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { useSalesDashboard } from '../../hooks/useSalesDashboard';
 import { useSalesPendingRecovery } from '../../hooks/useSalesPendingRecovery';
+import { useOfflineSalesOrderStats } from '../../hooks/useOfflineSalesOrders';
 import { Card, Skeleton } from '../../components/shared';
 import type { Order } from '../../types';
 
@@ -231,6 +232,7 @@ export default function SalesHome(): React.JSX.Element | null {
   const { userId, userName } = useAuth();
   const { data, isLoading } = useSalesDashboard(userName);
   const { data: pendingRecovery = [] } = useSalesPendingRecovery(userId, userName);
+  const offlineStats = useOfflineSalesOrderStats();
   const actionableRecoveryCount = pendingRecovery.filter(
     (item) => item.recovery_status === 'back_in_stock' || item.recovery_status === 'needs_checked',
   ).length;
@@ -254,6 +256,28 @@ export default function SalesHome(): React.JSX.Element | null {
           isLoading={isLoading}
           lastUpdatedAt={data?.lastUpdatedAt ?? null}
         />
+
+        {(offlineStats.active > 0 || offlineStats.partial > 0 || offlineStats.noStock > 0 || offlineStats.failed > 0) && (
+          <Link to="/sales/orders">
+            <Card pressable className="border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/70 flex items-center justify-center">
+                  <CloudArrowUp size={24} weight="duotone" className="text-[var(--content-warning)]" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-[var(--content-primary)]">
+                    Offline sync
+                  </p>
+                  <p className="text-xs text-[var(--content-secondary)]">
+                    {offlineStats.active > 0
+                      ? `${offlineStats.active} order${offlineStats.active === 1 ? '' : 's'} waiting to sync`
+                      : `${offlineStats.partial + offlineStats.noStock + offlineStats.failed} recent sync update${offlineStats.partial + offlineStats.noStock + offlineStats.failed === 1 ? '' : 's'}`}
+                  </p>
+                </div>
+              </div>
+            </Card>
+          </Link>
+        )}
 
         {/* This Month */}
         <ThisMonthCard
