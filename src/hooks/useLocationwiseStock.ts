@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery, type QueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
+import { idbGet, idbSet } from '../lib/idb';
 import type { StockLocationCode } from '../types';
 
 export interface ItemLocationStock {
@@ -21,9 +22,19 @@ export type StockLocationRow = {
 };
 
 const POLL_INTERVAL_MS = 30_000;
+const IDB_KEY = 'locationwise-stock-cache-v1';
+const CACHE_VERSION = 1;
+
+interface PersistedLocationwiseStockCache {
+  version: number;
+  rows: Array<[number, { stock: ItemLocationStock; fetchedAt: number }]>;
+}
 
 /** Per-SKU cache survives React Query key changes (e.g. search result churn). */
 const stockByBusyCodeCache = new Map<number, { stock: ItemLocationStock; fetchedAt: number }>();
+let hydratedFromIdb = false;
+let hydratePromise: Promise<void> | null = null;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 function emptyItemLocationStock(): ItemLocationStock {
   return {
@@ -53,15 +64,49 @@ function isCacheFresh(busyCode: number, now = Date.now()): boolean {
   return entry != null && now - entry.fetchedAt < POLL_INTERVAL_MS;
 }
 
+async function hydrateLocationwiseStockCache(): Promise<void> {
+  if (hydratedFromIdb) return;
+  if (hydratePromise) return hydratePromise;
+
+  hydratePromise = (async () => {
+    const snapshot = await idbGet<PersistedLocationwiseStockCache>(IDB_KEY);
+    if (snapshot?.version === CACHE_VERSION && Array.isArray(snapshot.rows)) {
+      for (const [code, entry] of snapshot.rows) {
+        if (Number.isFinite(code) && entry?.stock) {
+          stockByBusyCodeCache.set(Number(code), entry);
+        }
+      }
+    }
+    hydratedFromIdb = true;
+  })().finally(() => {
+    hydratePromise = null;
+  });
+
+  return hydratePromise;
+}
+
+function schedulePersistLocationwiseStockCache(): void {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    void idbSet<PersistedLocationwiseStockCache>(IDB_KEY, {
+      version: CACHE_VERSION,
+      rows: Array.from(stockByBusyCodeCache.entries()),
+    });
+  }, 1_000);
+}
+
 /** Call before invalidateQueries so the next fetch bypasses the in-memory SKU cache. */
 export function clearLocationwiseStockCache(busyCodes?: number[]): void {
   if (!busyCodes?.length) {
     stockByBusyCodeCache.clear();
+    schedulePersistLocationwiseStockCache();
     return;
   }
   for (const code of busyCodes) {
     stockByBusyCodeCache.delete(code);
   }
+  schedulePersistLocationwiseStockCache();
 }
 
 export async function invalidateLocationwiseStockQueries(
@@ -122,6 +167,7 @@ function writeCacheFromRows(rows: StockLocationRow[], fetchedAt: number): Record
   for (const [code, stock] of Object.entries(batch)) {
     stockByBusyCodeCache.set(Number(code), { stock, fetchedAt });
   }
+  schedulePersistLocationwiseStockCache();
   return batch;
 }
 
@@ -161,13 +207,20 @@ export function getStockQtyForLocation(
 export async function fetchLocationwiseStock(
   busyCodes: number[],
 ): Promise<Record<number, ItemLocationStock>> {
+  await hydrateLocationwiseStockCache();
   if (busyCodes.length === 0) return {};
 
   const now = Date.now();
   const staleCodes = busyCodes.filter((code) => !isCacheFresh(code, now));
   if (staleCodes.length > 0) {
-    const rows = await fetchLocationwiseStockRows(staleCodes);
-    writeCacheFromRows(rows, now);
+    try {
+      const rows = await fetchLocationwiseStockRows(staleCodes);
+      writeCacheFromRows(rows, now);
+    } catch (err) {
+      const cached = snapshotLocationwiseStockFromCache(busyCodes);
+      if (Object.keys(cached).length > 0) return cached;
+      throw err;
+    }
   }
 
   return snapshotLocationwiseStockFromCache(busyCodes);
@@ -179,6 +232,7 @@ export function isLocationwiseStockResolving(
   isFetching: boolean,
 ): boolean {
   if (busyCode == null || !Number.isFinite(busyCode)) return false;
+  if (stockByBusyCodeCache.has(Number(busyCode))) return false;
   if (isCacheFresh(busyCode)) return false;
   return isFetching;
 }
@@ -194,6 +248,9 @@ export function useLocationwiseStock(busyCodes: Array<number | null | undefined>
     staleTime: POLL_INTERVAL_MS,
     placeholderData: () => {
       const cached = snapshotLocationwiseStockFromCache(normalizedBusyCodes);
+      if (Object.keys(cached).length === 0 && !hydratedFromIdb) {
+        void hydrateLocationwiseStockCache();
+      }
       return Object.keys(cached).length > 0 ? cached : undefined;
     },
     refetchInterval: POLL_INTERVAL_MS,

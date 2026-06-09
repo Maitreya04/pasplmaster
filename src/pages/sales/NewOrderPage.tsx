@@ -2401,8 +2401,9 @@ export default function NewOrderPage(): React.JSX.Element | null {
   const editingCartItemName = editingCartLines[0]?.item.name ?? '';
   const getMainStoreStockQty = (item: Item) => {
     const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
-    if (!Number.isFinite(busyCode)) return null;
-    return locationwiseStock[busyCode]?.mainStoreStockQty ?? null;
+    const catalogStock = Number.isFinite(Number(item.stock_qty)) ? Number(item.stock_qty) : null;
+    if (!Number.isFinite(busyCode)) return catalogStock;
+    return locationwiseStock[busyCode]?.mainStoreStockQty ?? catalogStock;
   };
   const getJabalpurStockQty = (item: Item) => {
     const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
@@ -2411,11 +2412,20 @@ export default function NewOrderPage(): React.JSX.Element | null {
   };
   const getSellableStockQty = (item: Item) => {
     const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
-    if (!Number.isFinite(busyCode)) return null;
-    return getStockQtyForLocation(locationwiseStock[busyCode], sellableLocationCode);
+    const catalogStock = Number.isFinite(Number(item.stock_qty)) ? Number(item.stock_qty) : null;
+    if (!Number.isFinite(busyCode)) {
+      return sellableLocationCode === 'main_store' ? catalogStock : null;
+    }
+    return (
+      getStockQtyForLocation(locationwiseStock[busyCode], sellableLocationCode) ??
+      (sellableLocationCode === 'main_store' ? catalogStock : null)
+    );
   };
   const getStockResolving = (item: Item) => {
     const busyCode = item.busy_code == null ? NaN : Number(item.busy_code);
+    const hasFallback =
+      sellableLocationCode === 'main_store' && Number.isFinite(Number(item.stock_qty));
+    if (hasFallback && locationwiseStock[busyCode]?.mainStoreStockQty == null) return false;
     return stockLocationLoading || isLocationwiseStockResolving(busyCode, locationwiseStockFetching);
   };
   const hasSpecialLine = (id: number) => specialLineItemIds.has(id);
