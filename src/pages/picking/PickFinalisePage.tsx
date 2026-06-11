@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CaretLeft, Flag, Warning, ArrowRight } from '@phosphor-icons/react';
@@ -7,11 +7,23 @@ import { TransportChip } from '../../components/picking/TransportChip';
 import { Numpad, numKey } from '../../components/picker-v10/Numpad';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
+import { useOfflinePickSession, useOfflinePicksHydrated } from '../../hooks/useOfflinePicks';
+import { pickerBillingHandoffLine } from '../../lib/picking/pickerBillingHandoff';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { formatBilledLabel, formatLineCountLabel } from '../../lib/picking/pickQueueDisplay';
 import { pickFinalisationCounts } from '../../lib/picking/pickFinalisationCounts';
 import { completePickSession } from '../../lib/picking/completePickSession';
+import { completeOfflinePick, isOfflinePickUsable } from '../../lib/offlinePicks';
+import {
+  buildPickCompletionSnapshot,
+  withPickCompletionSaveState,
+  type PickCompletionSnapshot,
+} from '../../lib/picking/pickCompletionSnapshot';
+import {
+  isPickNoLongerActiveError,
+  pickNoLongerActiveMessage,
+} from '../../lib/picking/pickSessionErrors';
 import { appHaptics } from '../../lib/haptics';
 import { PickCompleteScreen } from './PickCompleteScreen';
 
@@ -26,12 +38,29 @@ export default function PickFinalisePage(): React.JSX.Element | null {
   const orderId = id ? parseInt(id, 10) : null;
   const isLab = searchParams.get('lab') === '1';
 
-  const { data: order, isLoading, error } = useOrderDetail(orderId);
-  const { claimId } = useWorkClaim(isLab ? null : orderId, 'picking');
+  const offlinePickSession = useOfflinePickSession(isLab ? null : orderId);
+  const offlinePicksHydrated = useOfflinePicksHydrated();
+  const offlinePickActive = !isLab && isOfflinePickUsable(offlinePickSession);
+  const orderQuery = useOrderDetail(orderId);
+  const order = offlinePickActive
+    ? offlinePickSession?.orderSnapshot ?? orderQuery.data ?? null
+    : orderQuery.data ?? null;
+  const isLoading = orderQuery.isLoading && !offlinePickSession;
+  const error = orderQuery.error && !offlinePickSession ? orderQuery.error : null;
+  const workClaim = useWorkClaim(
+    isLab || offlinePickActive || !offlinePicksHydrated ? null : orderId,
+    'picking',
+  );
+  const claimId = offlinePickActive ? offlinePickSession?.claimId ?? null : isLab ? null : workClaim.claimId;
+  const isClaimedByMe = offlinePickActive ? true : isLab ? true : workClaim.isClaimedByMe;
+  const claim = isLab || offlinePickActive ? undefined : workClaim.claim;
+  const claimError = isLab || offlinePickActive ? null : workClaim.error;
+  const closedToastShownRef = useRef(false);
 
   const [boxCountInput, setBoxCountInput] = useState('');
-  const [showComplete, setShowComplete] = useState(false);
-  const [submittedBoxCount, setSubmittedBoxCount] = useState<number | null>(null);
+  const [completionSnapshot, setCompletionSnapshot] =
+    useState<PickCompletionSnapshot | null>(null);
+  const pendingCompletionSnapshotRef = useRef<PickCompletionSnapshot | null>(null);
 
   const counts = useMemo(
     () => pickFinalisationCounts(order?.items ?? []),
@@ -43,7 +72,8 @@ export default function PickFinalisePage(): React.JSX.Element | null {
     return Number.isFinite(parsed) ? parsed : 0;
   }, [boxCountInput]);
 
-  const canFinalise = boxCount >= 1;
+  const canFinalise =
+    boxCount >= 1 && (isLab || isClaimedByMe) && order?.workflow_status === 'picking';
 
   useEffect(() => {
     if (!orderId || !Number.isFinite(orderId)) {
@@ -55,16 +85,44 @@ export default function PickFinalisePage(): React.JSX.Element | null {
     (location.state as { expectAllDone?: boolean } | null)?.expectAllDone === true;
 
   useEffect(() => {
+    if (completionSnapshot) return;
     if (!order || isLoading) return;
-    if (order.workflow_status === 'completed' || order.workflow_status === 'flagged') {
-      toast.info('This pick is already finalised.');
+    if (!offlinePickActive && (order.workflow_status === 'completed' || order.workflow_status === 'flagged')) {
+      if (!closedToastShownRef.current) {
+        closedToastShownRef.current = true;
+        toast.info('This pick is already finalised.');
+      }
+      navigate('/picking', { replace: true });
+      return;
+    }
+    if (!offlinePickActive && order.workflow_status !== 'picking') {
+      if (!closedToastShownRef.current) {
+        closedToastShownRef.current = true;
+        toast.info(pickNoLongerActiveMessage('not_picking'));
+      }
       navigate('/picking', { replace: true });
       return;
     }
     if (!counts.allDone && !expectAllDone) {
       navigate(`/picking/pick/${orderId}`, { replace: true });
     }
-  }, [counts.allDone, expectAllDone, isLoading, navigate, order, orderId, toast]);
+  }, [
+    completionSnapshot,
+    counts.allDone,
+    expectAllDone,
+    isLoading,
+    navigate,
+    order,
+    orderId,
+    toast,
+  ]);
+
+  useEffect(() => {
+    if (isLab || offlinePickActive) return;
+    if (order?.workflow_status === 'picking' && !isClaimedByMe && !claimError) {
+      void claim?.();
+    }
+  }, [claim, claimError, isClaimedByMe, isLab, order?.workflow_status]);
 
   const handleNumpadKey = useCallback((key: string) => {
     appHaptics.selection();
@@ -74,6 +132,26 @@ export default function PickFinalisePage(): React.JSX.Element | null {
   const finaliseMutation = useMutation({
     mutationFn: async () => {
       if (!order || !orderId) throw new Error('No order');
+      if (!isLab && !offlinePickActive && !isClaimedByMe) {
+        throw new Error(pickNoLongerActiveMessage('claim_lost'));
+      }
+      const snapshot = buildPickCompletionSnapshot({
+        order,
+        counts,
+        boxCount,
+        billingNotified: !isLab && !offlinePickActive,
+      });
+      pendingCompletionSnapshotRef.current = snapshot;
+      if (offlinePickActive) {
+        const saved = await completeOfflinePick({ orderId, boxCount });
+        if (saved?.status === 'conflict' || saved?.status === 'failed') {
+          return withPickCompletionSaveState(snapshot, 'needs_review');
+        }
+        if (saved?.status === 'queued' || saved?.status === 'syncing') {
+          return withPickCompletionSaveState(snapshot, 'queued');
+        }
+        return snapshot;
+      }
       await completePickSession({
         orderId,
         orderNumber: order.order_number,
@@ -87,23 +165,36 @@ export default function PickFinalisePage(): React.JSX.Element | null {
         completedAt: order.completed_at,
         isLab,
       });
+      return snapshot;
     },
-    onSuccess: () => {
-      if (isLab) {
-        appHaptics.success();
-        toast.info('Lab session complete — order unchanged in production.');
-      } else {
+    onSuccess: (snapshot) => {
+      if (!isLab && !offlinePickActive) {
         void queryClient.invalidateQueries({ queryKey: ['orders'] });
         void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
         void queryClient.invalidateQueries({ queryKey: ['picker-daily-stats'] });
         void queryClient.invalidateQueries({ queryKey: ['picker-completed-orders'] });
-        appHaptics.success();
       }
-      setSubmittedBoxCount(boxCount);
-      setShowComplete(true);
+      appHaptics.success();
+      setCompletionSnapshot(snapshot);
     },
-    onError: () => {
-      toast.error('Failed to finalise pick');
+    onError: (err) => {
+      const message = err instanceof Error ? err.message : 'Failed to finalise pick';
+      const normalizedMessage = message.toLowerCase();
+      const isReceiptCompatible =
+        isPickNoLongerActiveError(message) ||
+        normalizedMessage.includes('already finalised') ||
+        normalizedMessage.includes('no longer active for picking') ||
+        normalizedMessage.includes('picking lock');
+      const snapshot = pendingCompletionSnapshotRef.current;
+      if (isReceiptCompatible && snapshot) {
+        setCompletionSnapshot(withPickCompletionSaveState(snapshot, 'already_saved'));
+        void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+        void queryClient.invalidateQueries({ queryKey: ['orders'] });
+        void queryClient.invalidateQueries({ queryKey: ['picker-completed-orders'] });
+        appHaptics.success();
+        return;
+      }
+      toast.error(message);
     },
   });
 
@@ -111,22 +202,8 @@ export default function PickFinalisePage(): React.JSX.Element | null {
     return null;
   }
 
-  if (showComplete && order && submittedBoxCount != null) {
-    return (
-      <PickCompleteScreen
-        orderNumber={order.order_number}
-        customerName={order.customer_name}
-        customerCity={order.customer_city}
-        transportName={order.transport_name}
-        pickedLineCount={counts.picked}
-        flaggedLineCount={counts.flagged}
-        totalLineCount={counts.total}
-        pickedPieceCount={counts.piecePicked}
-        totalPieceCount={counts.pieceTarget}
-        boxCount={submittedBoxCount}
-        billingNotified={!isLab}
-      />
-    );
+  if (completionSnapshot) {
+    return <PickCompleteScreen snapshot={completionSnapshot} />;
   }
 
   if (isLoading) {
@@ -232,6 +309,11 @@ export default function PickFinalisePage(): React.JSX.Element | null {
             hideConfirm
             tone={counts.hasFlagged ? 'amber' : 'default'}
           />
+          {!isLab && order.workflow_status === 'picking' && !isClaimedByMe && (
+            <p className="mt-3 text-center text-xs font-semibold text-[var(--content-warning)]">
+              Securing pick lock before finalise...
+            </p>
+          )}
         </div>
       </div>
 
@@ -263,7 +345,7 @@ export default function PickFinalisePage(): React.JSX.Element | null {
           )}
         </BigButton>
         <p className="text-center text-[11px] text-[var(--content-tertiary)] px-2">
-          Billing will resolve the order and generate the bill
+          {pickerBillingHandoffLine(counts.hasFlagged)}
         </p>
       </div>
     </div>

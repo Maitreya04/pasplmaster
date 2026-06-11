@@ -8,6 +8,7 @@ import {
   PlusCircle,
   Prohibit,
   Desk,
+  CloudWarning,
 } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
@@ -25,6 +26,7 @@ const preloadRejected = () => import('./RejectedPage');
 const preloadLiveQueue = () => import('./LiveQueuePage');
 const preloadBillingDesk = () => import('./BillingDeskPage');
 const preloadNewOrder = () => import('./BillingNewOrderLayout');
+const preloadOfflinePicks = () => import('./OfflinePickConflictsPage');
 
 const NAV_ITEMS: BottomNavItem[] = [
   { icon: SquaresFour, label: 'Dashboard', path: '/billing', preload: preloadDashboard },
@@ -60,6 +62,12 @@ const NAV_ITEMS: BottomNavItem[] = [
   },
   { icon: HourglassHigh, label: 'Pending', path: '/billing/pending', preload: preloadPending },
   { icon: Prohibit, label: 'Rejected', path: '/billing/rejected', preload: preloadRejected },
+  {
+    icon: CloudWarning,
+    label: 'Offline',
+    path: '/billing/offline-picks',
+    preload: preloadOfflinePicks,
+  },
   { icon: ClockCounterClockwise, label: 'History', path: '/billing/history', preload: preloadHistory },
 ];
 

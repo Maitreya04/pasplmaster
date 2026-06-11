@@ -1,12 +1,13 @@
-import { Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
-import { Queue, UsersThree, Barcode } from '@phosphor-icons/react';
+import { Queue, UsersThree, Barcode, CloudArrowUp, Warning } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
 import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
 import { useCameraPermissionWarmup } from '../../context/CameraContext';
 import { useAuth } from '../../context/AuthContext';
 import { warmPickQueueRoute } from '../../lib/picking/warmPickQueue';
+import { useOfflinePickStats, useOfflinePickSync } from '../../hooks/useOfflinePicks';
 
 const preloadQueue = () => import('./QueuePage');
 const preloadActivePicks = () => import('./ActivePicksPage');
@@ -46,8 +47,10 @@ function PickingLayoutInner(): React.JSX.Element | null {
   const location = useLocation();
   const isPickPage = location.pathname.startsWith('/picking/pick/');
   const { userId } = useAuth();
+  const offlineStats = useOfflinePickStats();
 
   const { permissionState, requestWarmup } = useCameraPermissionWarmup();
+  useOfflinePickSync();
 
   useEffect(() => {
     warmPickQueueRoute(userId);
@@ -76,6 +79,33 @@ function PickingLayoutInner(): React.JSX.Element | null {
           <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
             Camera access is blocked. Allow the camera in browser settings to use the live scanner.
           </div>
+        </div>
+      )}
+      {!isPickPage && (offlineStats.waiting > 0 || offlineStats.conflict > 0 || offlineStats.failed > 0) && (
+        <div className="px-3 pt-3 pb-1">
+          <Link
+            to={offlineStats.conflict > 0 || offlineStats.failed > 0 ? '/billing/offline-picks' : '/picking'}
+            className={`flex min-h-11 items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold ${
+              offlineStats.conflict > 0 || offlineStats.failed > 0
+                ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]'
+                : 'border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]'
+            }`}
+          >
+            {offlineStats.conflict > 0 || offlineStats.failed > 0 ? (
+              <Warning size={17} weight="fill" className="shrink-0" />
+            ) : (
+              <CloudArrowUp size={17} weight="fill" className="shrink-0" />
+            )}
+            <span className="min-w-0 flex-1">
+              {offlineStats.conflict > 0
+                ? `${offlineStats.conflict} offline pick needs review`
+                : offlineStats.failed > 0
+                  ? `${offlineStats.failed} offline pick sync failed`
+                  : offlineStats.syncing > 0
+                    ? 'Syncing offline pick'
+                    : `${offlineStats.waiting} offline pick waiting to sync`}
+            </span>
+          </Link>
         </div>
       )}
 

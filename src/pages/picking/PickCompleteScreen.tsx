@@ -1,110 +1,203 @@
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, Warning, Flag, ArrowRight } from '@phosphor-icons/react';
+import { CheckCircle, Warning, Flag, ArrowRight, Clock, Package, CloudArrowUp } from '@phosphor-icons/react';
 import { BigButton } from '../../components/shared';
 import { formatLineCountLabel } from '../../lib/picking/pickQueueDisplay';
+import type { PickCompletionSnapshot } from '../../lib/picking/pickCompletionSnapshot';
 
 interface PickCompleteScreenProps {
-  orderNumber: string;
-  customerName: string;
-  customerCity?: string | null;
-  transportName?: string | null;
-  pickedLineCount: number;
-  flaggedLineCount: number;
-  totalLineCount: number;
-  pickedPieceCount: number;
-  totalPieceCount: number;
-  boxCount?: number | null;
-  billingNotified?: boolean;
+  snapshot: PickCompletionSnapshot;
 }
 
-export function PickCompleteScreen({
-  orderNumber,
-  customerName,
-  customerCity,
-  transportName,
-  pickedLineCount,
-  flaggedLineCount,
-  pickedPieceCount,
-  totalPieceCount,
-  boxCount,
-  billingNotified = false,
-}: PickCompleteScreenProps): React.JSX.Element | null {
+function formatReceiptTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-IN', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+function formatPickDuration(startIso: string | null, endIso: string): string {
+  if (!startIso) return '';
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '';
+  const ms = end.getTime() - start.getTime();
+  if (ms <= 0) return '';
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest > 0 ? `${hours} hr ${rest} min` : `${hours} hr`;
+}
+
+export function PickCompleteScreen({ snapshot }: PickCompleteScreenProps): React.JSX.Element | null {
   const navigate = useNavigate();
+  const {
+    orderNumber,
+    customerName,
+    customerCity,
+    transportName,
+    pickedLineCount,
+    flaggedLineCount,
+    totalLineCount,
+    pickedPieceCount,
+    totalPieceCount,
+    boxCount,
+    billingNotified,
+    billingHandoffLine,
+    finishedAtIso,
+    startedAtIso,
+    flagReasonLabels,
+    saveState,
+  } = snapshot;
   const hasFlagged = flaggedLineCount > 0;
+  const completedTime = formatReceiptTime(finishedAtIso);
+  const duration = formatPickDuration(startedAtIso, finishedAtIso);
+  const statusText =
+    saveState === 'already_saved'
+      ? 'Pick already saved'
+      : saveState === 'queued'
+        ? 'Waiting to sync'
+        : saveState === 'needs_review'
+          ? 'Needs review'
+          : hasFlagged
+            ? 'Sent to billing with flags'
+            : 'Pick complete';
+  const toneClass = saveState === 'queued'
+    ? 'bg-[var(--bg-accent)] text-[var(--content-on-color)]'
+    : saveState === 'needs_review' || hasFlagged
+    ? 'bg-[var(--bg-warning)] text-[var(--content-primary)]'
+    : 'bg-[var(--bg-positive)] text-[var(--content-on-color)]';
 
   return (
-    <div
-      className={`
-        min-h-screen flex flex-col items-center justify-center px-6 text-center
-        ${hasFlagged ? 'bg-[var(--bg-warning)]' : 'bg-[var(--bg-positive)]'}
-      `}
-    >
-      <div className="mb-6">
-        {hasFlagged ? (
-          <Warning size={80} weight="fill" className="text-white/90" />
-        ) : (
-          <CheckCircle size={80} weight="fill" className="text-white/90" />
-        )}
-      </div>
+    <div className="min-h-[100dvh] bg-[var(--bg-primary)] px-4 py-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] text-[var(--content-primary)]">
+      <div className="mx-auto flex min-h-[calc(100dvh-2.5rem)] w-full max-w-md flex-col">
+        <section className={`rounded-2xl px-5 py-6 shadow-sm ${toneClass}`}>
+          <div className="mb-5 flex items-start justify-between gap-3">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-white/20">
+              {saveState === 'queued' ? (
+                <CloudArrowUp size={42} weight="fill" />
+              ) : saveState === 'needs_review' || hasFlagged ? (
+                <Warning size={42} weight="fill" />
+              ) : (
+                <CheckCircle size={42} weight="fill" />
+              )}
+            </div>
+            <div className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold">
+              {statusText}
+            </div>
+          </div>
 
-      <h1 className="text-2xl font-bold text-white mb-1 leading-tight max-w-sm">
-        {customerName}
-      </h1>
-      {customerCity && (
-        <p className="text-white/80 text-base mb-2">{customerCity}</p>
-      )}
-      {transportName && (
-        <p className="text-white/85 text-sm font-semibold mb-4">{transportName}</p>
-      )}
+          <p className="font-mono text-xs font-bold opacity-80">{orderNumber}</p>
+          <h1 className="mt-2 text-2xl font-bold leading-tight">{customerName}</h1>
+          <div className="mt-3 space-y-1 text-sm font-semibold opacity-85">
+            {customerCity && <p>{customerCity}</p>}
+            {transportName && <p>{transportName}</p>}
+          </div>
+        </section>
 
-      <p className="text-white/75 text-sm mb-8">
-        {hasFlagged ? 'Sent to billing with flags' : 'Pick complete'}
-        {' · '}
-        <span className="font-mono">{orderNumber}</span>
-        {billingNotified && (
-          <>
-            {' · '}
-            Billing notified
-          </>
-        )}
-      </p>
+        <section className="mt-4 space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3 border-b border-[var(--border-subtle)] pb-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[var(--content-secondary)]">
+              <Clock size={18} weight="bold" />
+              Completed
+            </div>
+            <div className="text-right">
+              {completedTime && (
+                <p className="text-sm font-bold text-[var(--content-primary)]">
+                  {completedTime}
+                </p>
+              )}
+              {duration && (
+                <p className="text-xs font-semibold text-[var(--content-tertiary)]">
+                  Took {duration}
+                </p>
+              )}
+            </div>
+          </div>
 
-      <div className="w-full max-w-xs bg-white/20 backdrop-blur-sm rounded-2xl p-5 mb-8 space-y-2 text-white/90 text-sm">
-        {boxCount != null && boxCount >= 1 && (
-          <p className="tabular-nums font-semibold">
-            {boxCount} box{boxCount === 1 ? '' : 'es'} packed
-          </p>
-        )}
-        <p className="tabular-nums">
-          {formatLineCountLabel(pickedLineCount, { short: true })} picked
-        </p>
-        <p className="tabular-nums text-white/75">
-          {pickedPieceCount}/{totalPieceCount} pcs
-        </p>
-        {flaggedLineCount > 0 && (
-          <p className="flex items-center justify-center gap-1.5">
-            <Flag size={16} weight="fill" />
-            {flaggedLineCount} flagged for billing
-          </p>
-        )}
-      </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-[var(--bg-tertiary)] p-3">
+              <p className="text-xs font-semibold text-[var(--content-tertiary)]">Boxes</p>
+              <p className="mt-1 flex items-center gap-1.5 text-xl font-bold tabular-nums">
+                <Package size={18} weight="bold" />
+                {boxCount}
+              </p>
+            </div>
+            <div className="rounded-xl bg-[var(--bg-tertiary)] p-3">
+              <p className="text-xs font-semibold text-[var(--content-tertiary)]">Lines</p>
+              <p className="mt-1 text-xl font-bold tabular-nums">
+                {pickedLineCount + flaggedLineCount}/{totalLineCount}
+              </p>
+            </div>
+            <div className="rounded-xl bg-[var(--bg-tertiary)] p-3">
+              <p className="text-xs font-semibold text-[var(--content-tertiary)]">Picked</p>
+              <p className="mt-1 text-lg font-bold tabular-nums">
+                {formatLineCountLabel(pickedLineCount, { short: true })}
+              </p>
+            </div>
+            <div className="rounded-xl bg-[var(--bg-tertiary)] p-3">
+              <p className="text-xs font-semibold text-[var(--content-tertiary)]">Pieces</p>
+              <p className="mt-1 text-lg font-bold tabular-nums">
+                {pickedPieceCount}/{totalPieceCount}
+              </p>
+            </div>
+          </div>
 
-      <div className="w-full max-w-xs space-y-3">
-        <BigButton
-          variant="secondary"
-          onClick={() => navigate('/picking', { replace: true })}
-          className="bg-[var(--bg-primary)] text-[var(--content-primary)] font-semibold"
-        >
-          <ArrowRight size={20} weight="bold" />
-          Next order
-        </BigButton>
-        <button
-          type="button"
-          onClick={() => navigate('/picking?view=done&day=today', { replace: true })}
-          className="w-full text-sm font-semibold text-white/90 underline-offset-2 hover:underline"
-        >
-          View in completed
-        </button>
+          {hasFlagged && (
+            <div className="rounded-xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] p-3">
+              <p className="flex items-center gap-1.5 text-sm font-bold text-[var(--content-warning-on-light)]">
+                <Flag size={16} weight="fill" />
+                {flaggedLineCount} flagged for billing
+              </p>
+              {flagReasonLabels.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {flagReasonLabels.map((label) => (
+                    <span
+                      key={label}
+                      className="rounded-full bg-[var(--bg-primary)] px-2.5 py-1 text-xs font-bold text-[var(--content-secondary)]"
+                    >
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="rounded-xl bg-[var(--bg-accent-subtle)] p-3 text-sm font-semibold text-[var(--content-accent)]">
+            {saveState === 'queued'
+              ? 'Saved on this device. It will sync automatically when network returns.'
+              : saveState === 'needs_review'
+                ? 'Saved on this device. Billing/admin review is needed before this pick can be applied.'
+                : billingHandoffLine}
+            {billingNotified && saveState === 'saved' && (
+              <span className="block pt-1 text-xs text-[var(--content-secondary)]">
+                Billing notified
+              </span>
+            )}
+          </div>
+        </section>
+
+        <div className="mt-auto pt-4 space-y-3">
+          <BigButton
+            variant="primary"
+            onClick={() => navigate('/picking', { replace: true })}
+            className="bg-[var(--bg-positive)] text-[var(--content-on-color)] font-bold"
+          >
+            <ArrowRight size={20} weight="bold" />
+            Next order
+          </BigButton>
+          <button
+            type="button"
+            onClick={() => navigate('/picking?view=done&day=today', { replace: true })}
+            className="min-h-11 w-full rounded-xl text-sm font-bold text-[var(--content-secondary)] underline-offset-2 hover:underline"
+          >
+            View completed
+          </button>
+        </div>
       </div>
     </div>
   );

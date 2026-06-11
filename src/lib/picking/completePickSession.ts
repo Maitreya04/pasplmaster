@@ -1,5 +1,6 @@
 import { supabase } from '../supabase/client';
 import { notifyBillingPickReady } from './notifyBillingPickReady';
+import { pickNoLongerActiveMessage } from './pickSessionErrors';
 
 export interface CompletePickSessionParams {
   orderId: number;
@@ -21,37 +22,24 @@ export async function completePickSession(params: CompletePickSessionParams): Pr
   }
   if (params.isLab) return;
 
-  const isCompleted = !params.hasFlagged;
+  if (!params.claimId || !params.userId) {
+    throw new Error(pickNoLongerActiveMessage('claim_lost'));
+  }
 
-  if (params.claimId && params.userId) {
-    const { error } = await supabase.rpc('complete_picking', {
-      p_order_id: params.orderId,
-      p_claim_id: params.claimId,
-      p_user_id: params.userId,
-      p_has_flags: params.hasFlagged,
-      p_box_count: params.boxCount,
-    });
-    if (error) throw error;
-  } else {
-    const updates: {
-      workflow_status: 'completed' | 'flagged';
-      box_count: number;
-      completed_at?: string;
-      picking_completed_at?: string;
-      priority?: 'normal';
-    } = {
-      workflow_status: isCompleted ? 'completed' : 'flagged',
-      box_count: params.boxCount,
-      picking_completed_at: new Date().toISOString(),
-    };
-    if (!params.completedAt && isCompleted) {
-      updates.completed_at = new Date().toISOString();
-    }
-    if (isCompleted) {
-      updates.priority = 'normal';
-    }
-    const { error } = await supabase.from('orders').update(updates).eq('id', params.orderId);
-    if (error) throw error;
+  const { data, error } = await supabase.rpc('complete_picking', {
+    p_order_id: params.orderId,
+    p_claim_id: params.claimId,
+    p_user_id: params.userId,
+    p_has_flags: params.hasFlagged,
+    p_box_count: params.boxCount,
+  });
+  if (error) throw error;
+
+  const result = data as { success?: boolean; reason?: string } | null;
+  if (!result?.success) {
+    throw new Error(
+      result?.reason ? pickNoLongerActiveMessage(result.reason) : 'Failed to finalise pick',
+    );
   }
 
   try {

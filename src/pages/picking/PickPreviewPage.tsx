@@ -5,6 +5,8 @@ import { CaretLeft, UserCircle, Package, Play } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { Card, Skeleton, BigButton, BottomSheet } from '../../components/shared';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
+import { useOrderHandoff } from '../../hooks/useOrderHandoff';
+import { handoffFirstName } from '../../lib/billing/orderHandoffFromEvents';
 import { useClaimableOrders } from '../../hooks/useClaimableOrders';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -18,6 +20,7 @@ import { buildPickWalkBrandSections, orderItemBrandLabel } from '../../lib/picki
 import { rackRangeFromPreview } from '../../lib/picking/pickQueueDisplay';
 import { isInProgressPick, isPickStarted } from '../../lib/picking/pickLifecycle';
 import { startPicking, startPickingErrorMessage } from '../../lib/picking/startPicking';
+import { prepareOfflinePickSession } from '../../lib/offlinePicks';
 import type { OrderItem } from '../../types';
 
 function getLineMrp(line: OrderItem): number | null {
@@ -43,6 +46,11 @@ export default function PickPreviewPage(): React.JSX.Element | null {
   const skippedPreviewRef = useRef(false);
 
   const { data: order, isLoading, error } = useOrderDetail(orderId);
+  const { data: handoffSummary } = useOrderHandoff(orderId, Boolean(orderId), {
+    picker_name: order?.picker_name,
+    reviewer_name: order?.reviewer_name,
+    fulfillment_path: order?.fulfillment_path,
+  });
   const { myActive } = useClaimableOrders({
     stage: 'picking',
     workflowStatus: ['approved', 'picking'],
@@ -117,7 +125,11 @@ export default function PickPreviewPage(): React.JSX.Element | null {
 
   const contextMessage = useMemo(() => {
     if (isAssignedToMe || source === 'assigned') {
-      return 'Assigned by billing — review the full pick list, then tap Start when ready.';
+      const assigner = handoffSummary?.assignedBy
+        ? handoffFirstName(handoffSummary.assignedBy)
+        : null;
+      const assignerPhrase = assigner ? `Assigned by ${assigner}` : 'Assigned by billing';
+      return `${assignerPhrase} — review the full pick list, then tap Start when ready.`;
     }
     if (isPoolOrder || source === 'pool') {
       return 'Unassigned — you will claim this order when you tap Start.';
@@ -126,7 +138,7 @@ export default function PickPreviewPage(): React.JSX.Element | null {
       return `Assigned to ${order.picker_name}.`;
     }
     return 'Review the pick list before you start.';
-  }, [isAssignedToMe, isPoolOrder, order?.picker_name, source, userName]);
+  }, [handoffSummary?.assignedBy, isAssignedToMe, isPoolOrder, order?.picker_name, source, userName]);
 
   const startMutation = useMutation({
     mutationFn: async () => {
@@ -161,11 +173,42 @@ export default function PickPreviewPage(): React.JSX.Element | null {
         throw new Error(startPickingErrorMessage(startResult));
       }
 
-      return { navigated: true as const, claimId: startResult.claim_id ?? claimId };
+      const resolvedClaimId = startResult.claim_id ?? claimId;
+      let offlinePrepared = false;
+      let offlinePrepareError: string | null = null;
+      if (order && resolvedClaimId) {
+        try {
+          await prepareOfflinePickSession({
+            order: {
+              ...order,
+              workflow_status: 'picking',
+              picked_at: order.picked_at ?? new Date().toISOString(),
+            },
+            claimId: resolvedClaimId,
+            userId,
+            pickerName: userName,
+          });
+          offlinePrepared = true;
+        } catch (err) {
+          offlinePrepareError = err instanceof Error ? err.message : 'Offline setup failed';
+        }
+      }
+
+      return {
+        navigated: true as const,
+        claimId: resolvedClaimId,
+        offlinePrepared,
+        offlinePrepareError,
+      };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       queryClient.invalidateQueries({ queryKey: ['picker-daily-stats'] });
+      if (result.offlinePrepared) {
+        toast.success('Offline pick ready on this device');
+      } else if (result.offlinePrepareError) {
+        toast.warning('Offline pick could not be prepared. This pick will need network.');
+      }
       navigate(`/picking/pick/${orderId}`, { replace: true });
     },
     onError: (err) => {

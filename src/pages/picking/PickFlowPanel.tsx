@@ -8,10 +8,12 @@ import {
   ArrowRight,
   ArrowCounterClockwise,
   Flask,
+  CloudArrowUp,
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
+import { useOfflinePickSession, useOfflinePicksHydrated } from '../../hooks/useOfflinePicks';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -108,6 +110,12 @@ import {
 } from '../../lib/picking/pickLineMrp';
 import { pickLineBillingRate } from '../../lib/picking/pickMrpDisplay';
 import { commitPickMrpSegment, undoPickMrpSegment } from '../../lib/picking/splitMrpSegment';
+import {
+  applyOfflinePickTransition,
+  isOfflinePickUsable,
+  resetOfflinePickLine,
+  saveOfflinePickLineMrpMap,
+} from '../../lib/offlinePicks';
 import {
   isPickNoLongerActiveError,
   pickNoLongerActiveMessage,
@@ -278,7 +286,15 @@ export function PickFlowPanel({
     ? sandboxPickItemTransitionAdapter
     : defaultPickItemTransitionAdapter;
 
-  const { data: order, isLoading, error } = useOrderDetail(orderId);
+  const offlinePickSession = useOfflinePickSession(isLab ? null : orderId);
+  const offlinePicksHydrated = useOfflinePicksHydrated();
+  const offlinePickActive = !isLab && isOfflinePickUsable(offlinePickSession);
+  const orderQuery = useOrderDetail(orderId);
+  const order = offlinePickActive
+    ? offlinePickSession?.orderSnapshot ?? orderQuery.data ?? null
+    : orderQuery.data ?? null;
+  const isLoading = orderQuery.isLoading && !offlinePickSession;
+  const error = orderQuery.error && !offlinePickSession ? orderQuery.error : null;
   const closedPickToastShownRef = useRef(false);
 
   useEffect(() => {
@@ -300,11 +316,18 @@ export function PickFlowPanel({
     }
   }, [isLab, navigate, order, orderId, toast]);
 
-  const workClaim = useWorkClaim(isLab ? null : orderId, 'picking');
-  const claimId = isLab ? null : workClaim.claimId;
-  const isClaimedByMe = isLab ? false : workClaim.isClaimedByMe;
-  const claim = isLab ? undefined : workClaim.claim;
-  const claimError = isLab ? null : workClaim.error;
+  const workClaim = useWorkClaim(
+    isLab || offlinePickActive || !offlinePicksHydrated ? null : orderId,
+    'picking',
+  );
+  const claimId = offlinePickActive
+    ? offlinePickSession?.claimId ?? null
+    : isLab
+      ? null
+      : workClaim.claimId;
+  const isClaimedByMe = offlinePickActive ? true : isLab ? false : workClaim.isClaimedByMe;
+  const claim = isLab || offlinePickActive ? undefined : workClaim.claim;
+  const claimError = isLab || offlinePickActive ? null : workClaim.error;
 
   useEffect(() => {
     if (isLab) return;
@@ -392,6 +415,11 @@ export function PickFlowPanel({
   useEffect(() => {
     writePickLineMrpMap(orderId, lineMrpMap, isLab ? 'lab' : 'production');
   }, [orderId, lineMrpMap, isLab]);
+
+  useEffect(() => {
+    if (!orderId || !offlinePickActive) return;
+    void saveOfflinePickLineMrpMap(orderId, lineMrpMap);
+  }, [lineMrpMap, offlinePickActive, orderId]);
 
   useEffect(() => {
     writeIdSet(storageKeys.rackVerified, orderId, rackVerifiedIds);
@@ -806,6 +834,13 @@ export function PickFlowPanel({
       if (optimisticState) {
         updateLocalItem(itemId, { uiState: optimisticState });
       }
+      if (offlinePickActive) {
+        await applyOfflinePickTransition({
+          orderId,
+          transition,
+        });
+        return { itemId, previous };
+      }
       await transitionAdapter.applyTransition(transition);
 
       if (isLab || !order || transition.kind !== 'flagged') return { itemId, previous };
@@ -885,7 +920,7 @@ export function PickFlowPanel({
       }
     },
     onSuccess: () => {
-      if (!isLab) {
+      if (!isLab && !offlinePickActive) {
         queryClient.invalidateQueries({ queryKey: ['order', orderId] });
         queryClient.invalidateQueries({ queryKey: [STOCK_MRP_HISTORY_QUERY_KEY] });
       }
@@ -898,7 +933,7 @@ export function PickFlowPanel({
       qtyDelta: number,
       overrideReason?: string | null,
     ): Promise<'ok' | 'override_blocked' | 'abort'> => {
-      if (isLab || qtyDelta <= 0) return 'ok';
+      if (isLab || offlinePickActive || qtyDelta <= 0) return 'ok';
       const busy = primaryBusyCodeForOrderItem(orderItem);
       if (busy == null) return 'ok';
       const bin = binIdForPickItem(orderItem) ?? STAGING_BIN_DEFAULT;
@@ -932,7 +967,7 @@ export function PickFlowPanel({
       toast.error(res.reason);
       return 'abort';
     },
-    [isLab, navigate, orderId, preferredPickLayer, queryClient, toast, userId],
+    [isLab, navigate, offlinePickActive, orderId, preferredPickLayer, queryClient, toast, userId],
   );
 
   const openManualQty = useCallback((orderItem: OrderItem) => {
@@ -1078,10 +1113,18 @@ export function PickFlowPanel({
       setRevertPickPending(true);
 
       try {
-        if (isLab) {
+        if (isLab || offlinePickActive) {
           updateLocalItem(itemId, { uiState: 'pending', scanResult: null });
           if (mode === 'full') {
             updateLineMrp(itemId, createDefaultPickLineMrpState());
+          }
+          if (offlinePickActive) {
+            await resetOfflinePickLine({
+              orderId,
+              orderItemId: itemId,
+              state: 'pending',
+              scanResult: null,
+            });
           }
           appHaptics.impactLight();
           toast.info(
@@ -1125,6 +1168,7 @@ export function PickFlowPanel({
       claimId,
       isLab,
       lineMrpMap,
+      offlinePickActive,
       order,
       orderId,
       queryClient,
@@ -1151,7 +1195,7 @@ export function PickFlowPanel({
     if (!snapshot) return;
     setUndoSnapshot(null);
     setLineOutcome(null);
-    if (isLab) {
+    if (isLab || offlinePickActive) {
       updateLocalItem(snapshot.itemId, {
         uiState:
           snapshot.previousState === 'picked'
@@ -1163,6 +1207,14 @@ export function PickFlowPanel({
                 : 'pending',
         scanResult: snapshot.previousScanResult,
       });
+      if (offlinePickActive) {
+        await resetOfflinePickLine({
+          orderId,
+          orderItemId: snapshot.itemId,
+          state: snapshot.previousState,
+          scanResult: snapshot.previousScanResult,
+        });
+      }
       appHaptics.impactLight();
       toast.info(`Undid ${snapshot.itemName}. Pick it again or skip.`);
       return;
@@ -1193,7 +1245,7 @@ export function PickFlowPanel({
     } catch {
       toast.error('Could not undo. Refresh and try again.');
     }
-  }, [isLab, orderId, queryClient, toast, undoSnapshot, updateLocalItem]);
+  }, [isLab, offlinePickActive, orderId, queryClient, toast, undoSnapshot, updateLocalItem]);
 
   const processEmbeddedScan = useCallback(
     (orderItem: OrderItem, mode: 'rack' | 'item', scan: LiveQrScannerResolved) => {
@@ -1775,7 +1827,7 @@ export function PickFlowPanel({
       );
 
       let orderItemId = rootId;
-      if (isLab) {
+      if (isLab || offlinePickActive) {
         orderItemId = rootId;
         updateLineMrp(itemId, commitActiveSegment(lineMrp, qty, orderItemId));
       } else {
@@ -1812,6 +1864,16 @@ export function PickFlowPanel({
       if (nextRemaining === 0) {
         const batchCount = lineMrp.segments.filter((s) => s.committed).length + 1;
         updateLocalItem(itemId, { uiState: 'picked', scanResult });
+        if (offlinePickActive) {
+          void applyOfflinePickTransition({
+            orderId,
+            transition: {
+              kind: 'picked',
+              itemId,
+              scanResult,
+            },
+          });
+        }
         beginLineOutcome({
           itemId,
           kind: 'picked',
@@ -1824,6 +1886,16 @@ export function PickFlowPanel({
         );
       } else {
         updateLocalItem(itemId, { uiState: 'matched', scanResult });
+        if (offlinePickActive) {
+          void applyOfflinePickTransition({
+            orderId,
+            transition: {
+              kind: 'scan_saved',
+              itemId,
+              scanResult,
+            },
+          });
+        }
         toast.info(`Batch saved · ${nextRemaining} pcs left`);
       }
       return true;
@@ -1836,6 +1908,7 @@ export function PickFlowPanel({
       markRackVerified,
       mrpHistoryData,
       navigate,
+      offlinePickActive,
       order,
       orderId,
       queryClient,
@@ -1937,7 +2010,7 @@ export function PickFlowPanel({
         committed.length === 1 && last.orderItemId === rootId
           ? lineMrp.originalTargetQty ?? pickQuantityTarget(orderItem)
           : null;
-      if (!isLab) {
+      if (!isLab && !offlinePickActive) {
         const result = await undoPickMrpSegment({
           orderId: order.id,
           claimId,
@@ -1960,13 +2033,13 @@ export function PickFlowPanel({
         activeSegmentIndex: null,
       });
       updateLocalItem(orderItem.id, { uiState: 'pending', scanResult: null });
-      if (!isLab) {
+      if (!isLab && !offlinePickActive) {
         await queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       }
       appHaptics.impactLight();
       toast.info('Last batch undone');
     },
-    [claimId, isLab, lineMrpMap, order, orderId, queryClient, toast, updateLineMrp, updateLocalItem, userId],
+    [claimId, isLab, lineMrpMap, offlinePickActive, order, orderId, queryClient, toast, updateLineMrp, updateLocalItem, userId],
   );
 
   const completeQueueItem = useCallback(
@@ -1997,7 +2070,7 @@ export function PickFlowPanel({
     }
     const orderItem = order?.items.find((i) => i.id === sheet.orderItemId);
     if (!orderItem) return;
-    if (!isLab) {
+    if (!isLab && !offlinePickActive) {
       const inv = await consumeBinLayerForPick({
         orderItemId: sheet.orderItemId,
         qtyEa: sheet.qtyDelta,
@@ -2065,6 +2138,7 @@ export function PickFlowPanel({
     updateLocalItem,
     userId,
     isLab,
+    offlinePickActive,
   ]);
 
   const handleFlagSubmit = useCallback(
@@ -2289,6 +2363,12 @@ export function PickFlowPanel({
         <div className="z-50 flex shrink-0 items-center gap-2 border-b border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-3 py-2 text-xs font-semibold text-[var(--content-accent)]">
           <Flask size={16} weight="fill" className="shrink-0" />
           <span>UX Lab — same pick flow as production. Nothing is saved to this order.</span>
+        </div>
+      )}
+      {offlinePickActive && (
+        <div className="z-50 flex shrink-0 items-center gap-2 border-b border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2 text-xs font-semibold text-[var(--content-warning-on-light)]">
+          <CloudArrowUp size={16} weight="fill" className="shrink-0" />
+          <span>Offline-ready pick — scans save on this device and sync when you finish.</span>
         </div>
       )}
       <header className="z-40 shrink-0 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-md">

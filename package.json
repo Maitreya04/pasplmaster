@@ -15,6 +15,9 @@
     "test:derive-operator-stage": "npx tsx src/lib/billing/deriveBillingOperatorStage.test.ts",
     "test:order-age-tier": "npx tsx src/lib/billing/orderAgeTier.test.ts",
     "test:stage-bar-presentation": "npx tsx src/lib/billing/deriveStageBarPresentation.test.ts",
+    "test:order-handoff": "npx tsx src/lib/billing/orderHandoffFromEvents.test.ts",
+    "test:offline-sales-orders": "node --experimental-strip-types src/lib/offlineSalesOrderResult.test.ts",
+    "test:offline-picks": "node --experimental-strip-types src/lib/offlinePickResult.test.ts",
     "tokens:generate": "node scripts/generate-palette.mjs"
   },
   "dependencies": {

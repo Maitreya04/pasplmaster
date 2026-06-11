@@ -23,6 +23,7 @@ const LiveQueuePage = lazy(() => import('./pages/billing/LiveQueuePage'));
 const BillingDeskPage = lazy(() => import('./pages/billing/BillingDeskPage'));
 const CompactQueuePage = lazy(() => import('./pages/billing/CompactQueuePage'));
 const BillingNewOrderLayout = lazy(() => import('./pages/billing/BillingNewOrderLayout'));
+const OfflinePickConflictsPage = lazy(() => import('./pages/billing/OfflinePickConflictsPage'));
 
 const PickingLayout = lazy(() =>
   import('./pages/picking/PickingLayout').then((module) => {
@@ -159,6 +160,7 @@ export default function App(): React.JSX.Element | null {
           <Route path="rejected" element={<RejectedPage />} />
           <Route path="review/:id" element={<ReviewPage />} />
           <Route path="history" element={<HistoryPage />} />
+          <Route path="offline-picks" element={<OfflinePickConflictsPage />} />
           <Route path="new-order" element={<BillingNewOrderLayout />}>
             <Route index element={<Navigate to="items" replace />} />
             <Route path="items" element={<NewOrderPage />} />
