@@ -4,6 +4,8 @@ export interface NumpadProps {
   onConfirm: () => void;
   confirmLabel: string;
   tone?: 'default' | 'amber';
+  /** Prefix shown before display (e.g. ₹ for MRP entry). */
+  prefix?: string;
   /** When true, omit the confirm button — parent renders it in a sticky footer. */
   hideConfirm?: boolean;
 }
@@ -14,6 +16,7 @@ export function Numpad({
   onConfirm,
   confirmLabel,
   tone = 'default',
+  prefix,
   hideConfirm = false,
 }: NumpadProps): React.JSX.Element {
   const keys = [1, 2, 3, 4, 5, 6, 7, 8, 9, '00', 0, '⌫'] as const;
@@ -23,11 +26,14 @@ export function Numpad({
     <>
       <div className="mb-2 text-right sm:mb-3">
         <div
-          className={`pick-sheet-display font-mono font-extrabold tracking-tight ${
+          className={`pick-sheet-display inline-flex items-baseline justify-end gap-1 font-mono font-extrabold tracking-tight ${
             isAmber ? 'text-[var(--content-warning-on-light)]' : 'text-[var(--content-accent)]'
           }`}
         >
-          {display || '0'}
+          {prefix ? (
+            <span className="text-[0.45em] font-medium text-[var(--content-tertiary)]">{prefix}</span>
+          ) : null}
+          <span>{display || '0'}</span>
         </div>
       </div>
       <div className={`pick-numpad-grid ${hideConfirm ? '' : 'mb-3'}`}>
