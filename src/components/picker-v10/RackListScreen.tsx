@@ -26,7 +26,6 @@ export function RackListScreen({
 }: RackListScreenProps): React.JSX.Element {
   const doneCount = lines.filter((l) => lineDone(progress[l.id])).length;
   const nextIdx = lines.findIndex((l) => !lineDone(progress[l.id]));
-  const pct = lines.length > 0 ? (doneCount / lines.length) * 100 : 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">

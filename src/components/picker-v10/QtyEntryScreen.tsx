@@ -1,5 +1,5 @@
 import { PencilSimple, Flag } from '@phosphor-icons/react';
-import { Numpad, NumpadConfirmButton, numKey } from './Numpad';
+import { Numpad, NumpadConfirmButton } from './Numpad';
 import { NoteInput } from './NoteInput';
 import { OverTargetBanner } from './OverTargetBanner';
 import { UomBadge } from './UomBadge';
