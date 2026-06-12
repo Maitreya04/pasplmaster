@@ -433,6 +433,8 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION IF EXISTS public.list_user_activation_status();
+
 CREATE OR REPLACE FUNCTION public.list_user_activation_status()
 RETURNS TABLE (
   id BIGINT,
@@ -467,6 +469,8 @@ AS $$
   FROM public.users u
   ORDER BY u.is_active DESC, u.role, u.full_name;
 $$;
+
+GRANT EXECUTE ON FUNCTION public.list_user_activation_status() TO anon, authenticated, service_role;
 
 GRANT EXECUTE ON FUNCTION public.assert_admin_actor(BIGINT) TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.log_user_admin_event(BIGINT, BIGINT, TEXT, JSONB) TO service_role;
