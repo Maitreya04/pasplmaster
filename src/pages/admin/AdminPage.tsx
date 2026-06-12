@@ -54,9 +54,9 @@ export default function AdminPage(): React.JSX.Element | null {
               <UsersThree size={22} weight="regular" className="text-[var(--role-primary)]" />
             </div>
             <div className="text-left">
-              <p className="font-semibold text-[var(--content-primary)]">User activation</p>
+              <p className="font-semibold text-[var(--content-primary)]">User management</p>
               <p className="text-sm text-[var(--content-tertiary)]">
-                Generate invite codes for phone + PIN login across branches
+                Add staff, edit roles, generate invite codes, and remove access
               </p>
             </div>
           </button>
