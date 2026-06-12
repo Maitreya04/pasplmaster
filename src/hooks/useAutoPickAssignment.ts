@@ -4,6 +4,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { useAuth } from '../context/AuthContext';
 import { subscribeToTable } from '../lib/realtime';
+import {
+  isBillingQueueEventsEnabled,
+  isDirectTableRealtimeEnabled,
+  isSupabasePostgresChangesEnabled,
+} from '../lib/realtimePolicy';
+
+const QUEUE_EVENTS_ON = isSupabasePostgresChangesEnabled() && isBillingQueueEventsEnabled();
+const DIRECT_TABLE_REALTIME_ON = isDirectTableRealtimeEnabled();
 
 export type AutoPickAssignStatus = 'idle' | 'assigning' | 'waiting' | 'error';
 
@@ -97,24 +105,42 @@ export function useAutoPickAssignment(
       }, 750);
     };
 
-    const unsubOrders = subscribeToTable({
-      channelName: `auto-pick-orders:${userId}`,
-      table: 'orders',
-      onChange: scheduleRetry,
-      onReconnect: scheduleRetry,
-    });
+    const subscriptions: Array<() => void> = [];
 
-    const unsubClaims = subscribeToTable({
-      channelName: `auto-pick-claims:${userId}`,
-      table: 'work_claims',
-      onChange: scheduleRetry,
-      onReconnect: scheduleRetry,
-    });
+    if (QUEUE_EVENTS_ON) {
+      subscriptions.push(
+        subscribeToTable({
+          channelName: `auto-pick-events:${userId}`,
+          table: 'queue_events',
+          filter: 'stage=eq.picking',
+          events: ['INSERT'],
+          onChange: scheduleRetry,
+          onReconnect: scheduleRetry,
+        }),
+      );
+    } else if (DIRECT_TABLE_REALTIME_ON) {
+      subscriptions.push(
+        subscribeToTable({
+          channelName: `auto-pick-orders:${userId}`,
+          table: 'orders',
+          onChange: scheduleRetry,
+          onReconnect: scheduleRetry,
+        }),
+        subscribeToTable({
+          channelName: `auto-pick-claims:${userId}`,
+          table: 'work_claims',
+          onChange: scheduleRetry,
+          onReconnect: scheduleRetry,
+        }),
+      );
+    } else {
+      const pollId = window.setInterval(scheduleRetry, 5_000);
+      subscriptions.push(() => window.clearInterval(pollId));
+    }
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
-      unsubOrders();
-      unsubClaims();
+      for (const unsubscribe of subscriptions) unsubscribe();
     };
   }, [assignNext, enabled, status, userId]);
 

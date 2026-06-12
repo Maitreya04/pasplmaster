@@ -36,12 +36,19 @@ export function ToastProvider({ children }: { children: ReactNode }): React.JSX.
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const counterRef = useRef(0);
   const timeoutRefs = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const toastKeyByIdRef = useRef<Map<string, string>>(new Map());
+  const activeToastIdByKeyRef = useRef<Map<string, string>>(new Map());
 
   const dismiss = useCallback((id: string) => {
     const t = timeoutRefs.current.get(id);
     if (t) {
       clearTimeout(t);
       timeoutRefs.current.delete(id);
+    }
+    const key = toastKeyByIdRef.current.get(id);
+    if (key) {
+      toastKeyByIdRef.current.delete(id);
+      activeToastIdByKeyRef.current.delete(key);
     }
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
@@ -52,8 +59,13 @@ export function ToastProvider({ children }: { children: ReactNode }): React.JSX.
       if (type === 'warning') appHaptics.warning();
       if (type === 'error') appHaptics.error();
 
+      const key = `${type}:${message}`;
+      if (activeToastIdByKeyRef.current.has(key)) return;
+
       const id = String(++counterRef.current);
       const item: ToastItem = { id, type, message, action: options?.action };
+      activeToastIdByKeyRef.current.set(key, id);
+      toastKeyByIdRef.current.set(id, key);
       setToasts((prev) => [...prev, item]);
       const ms = options?.action ? 6000 : AUTO_DISMISS_MS;
       const t = setTimeout(() => dismiss(id), ms);

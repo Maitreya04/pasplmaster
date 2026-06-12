@@ -28,6 +28,7 @@ import type { DeskOrderRow } from '../../hooks/useBillingDeskOrders';
 import type { OrderWithItems } from '../../types';
 import type { BillingLineEdit, ItemFlag } from '../../hooks/useBillingFlow';
 import { formatCurrencyRaw } from '../../utils/formatters';
+import { useOrderHandoff } from '../../hooks/useOrderHandoff';
 
 interface BillingOrderStageBodyProps {
   order: DeskOrderRow;
@@ -157,6 +158,14 @@ export function BillingOrderStageBody({
 
   const isReviewStage = stage === 'resolve_flags' || stage === 'review_finalise';
   const showReviewDock = isReviewStage || stage === 'done';
+  const handoffEnabled = stage === 'review_finalise' || stage === 'done';
+  const { data: handoffSummary } = useOrderHandoff(order.id, handoffEnabled, {
+    picker_name: orderDetail.picker_name,
+    reviewer_name: orderDetail.reviewer_name,
+    fulfillment_path: orderDetail.fulfillment_path ?? order.fulfillment_path,
+    created_at: orderDetail.created_at,
+    completed_at: orderDetail.completed_at,
+  });
   const reviewWorkMetrics = useMemo(
     () => (showReviewDock ? deriveReviewWorkMetrics(billSheet) : null),
     [showReviewDock, billSheet],
@@ -181,11 +190,22 @@ export function BillingOrderStageBody({
   }, [copyForBusy]);
 
   const unresolvedReviewCount = billSheet.unresolvedFlagged.length;
+  const resolveBlocked = billSheet.resolveBlocked;
   const finaliseBlocked =
-    unresolvedReviewCount > 0 || !billSheet.allFlagsResolved;
+    resolveBlocked || unresolvedReviewCount > 0 || !billSheet.allFlagsResolved;
 
   return (
     <div className="relative flex flex-col min-h-0 flex-1">
+      {resolveBlocked && billSheet.resolveBlockedBy ? (
+        <div className="shrink-0 mx-3 mt-2 rounded-lg border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2">
+          <p className="font-ds-caption-size font-semibold text-[var(--content-warning-on-light)]">
+            Being finalised by {billSheet.resolveBlockedBy}
+          </p>
+          <p className="font-ds-micro text-[var(--content-warning-on-light)] mt-0.5 opacity-90">
+            Wait or take over from the queue if their session is stale.
+          </p>
+        </div>
+      ) : null}
       <BillingOrderChrome
         stage={stage}
         embedded={embedded}
@@ -211,6 +231,7 @@ export function BillingOrderStageBody({
             />
           ) : undefined
         }
+        handoffSummary={handoffSummary ?? null}
         context={{
           salesperson: orderDetail.salesperson_name,
           createdAt: orderDetail.created_at,
@@ -309,7 +330,7 @@ export function BillingOrderStageBody({
         ) : null}
 
         {isReviewStage && !showAssign ? (
-          <PostPickReviewStage billSheet={billSheet} />
+          <PostPickReviewStage billSheet={billSheet} readOnly={resolveBlocked} />
         ) : null}
 
         {stage === 'done' && !showAssign ? (

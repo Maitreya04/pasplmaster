@@ -10,7 +10,7 @@ import type { OrderWithClaimInfo } from './useClaimableOrders';
 import {
   buildCompletedPickSummary,
   getPickerCompletedDayRange,
-  isPickQueueEligible,
+  isPickQueueEligibleForBranch,
   type CompletedPickSummary,
   type PickerCompletedDay,
 } from '../lib/picking/completedPickSummary';
@@ -29,10 +29,13 @@ export function pickerCompletedOrdersQueryKey(
   return ['picker-completed-orders', pickerName, day];
 }
 
-function toCompletedOrder(row: OrderRowWithEmbed): PickerCompletedOrder | null {
+function toCompletedOrder(
+  row: OrderRowWithEmbed,
+  pickerBranch: 'main_store' | 'jabalpur' | null,
+): PickerCompletedOrder | null {
   const embed = row.order_items as OrderItemEmbedRow[] | null | undefined;
   const normalized = normalizeOrderListBusyItemCount([row])[0];
-  if (!normalized || !isPickQueueEligible(normalized)) return null;
+  if (!normalized || !isPickQueueEligibleForBranch(normalized, pickerBranch)) return null;
 
   return {
     ...normalized,
@@ -46,7 +49,7 @@ function toCompletedOrder(row: OrderRowWithEmbed): PickerCompletedOrder | null {
 }
 
 export function usePickerCompletedOrders(day: PickerCompletedDay) {
-  const { userName } = useAuth();
+  const { userName, branch } = useAuth();
   const { start, end } = getPickerCompletedDayRange(day);
 
   return useQuery({
@@ -67,7 +70,7 @@ export function usePickerCompletedOrders(day: PickerCompletedDay) {
 
       const orders: PickerCompletedOrder[] = [];
       for (const row of (data ?? []) as OrderRowWithEmbed[]) {
-        const mapped = toCompletedOrder(row);
+        const mapped = toCompletedOrder(row, branch);
         if (mapped) orders.push(mapped);
       }
       return orders;

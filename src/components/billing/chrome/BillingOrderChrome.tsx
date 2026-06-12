@@ -6,6 +6,9 @@ import { BillingContextBar } from './BillingContextBar';
 import { BillingStageBar } from './BillingStageBar';
 import type { BillingSummaryStat, BillingSummaryChip } from './BillingSummaryBar';
 import { BillingSummaryBar } from './BillingSummaryBar';
+import { OrderHandoffRow } from './OrderHandoffRow';
+import type { OrderHandoffSummary } from '../../../lib/billing/orderHandoffFromEvents';
+import { hasHandoffContent } from '../../../lib/billing/orderHandoffFromEvents';
 
 export interface BillingOrderContext {
   customerName?: string;
@@ -50,6 +53,7 @@ interface BillingOrderChromeProps {
   onReject?: () => void;
   rejectDisabled?: boolean;
   context: BillingOrderContext;
+  handoffSummary?: OrderHandoffSummary | null;
   summaryStats?: BillingSummaryStat[];
   summaryChips?: BillingSummaryChip[];
   summaryRight?: ReactNode;
@@ -75,6 +79,7 @@ export function BillingOrderChrome({
   onReject,
   rejectDisabled = false,
   context,
+  handoffSummary,
   summaryStats,
   summaryChips,
   summaryRight,
@@ -87,6 +92,12 @@ export function BillingOrderChrome({
 
   const resolvedCheckerPending =
     checkerPending || (stage === 'review_finalise' && !context.reviewerName);
+
+  const showHandoffBand =
+    (stage === 'review_finalise' || stage === 'done') &&
+    handoffSummary != null &&
+    hasHandoffContent(handoffSummary, context.salesperson);
+  const hideContextForUnifiedHandoff = showHandoffBand && stage === 'done';
 
   return (
     <div
@@ -112,7 +123,7 @@ export function BillingOrderChrome({
         pickProgress={pickProgress}
       />
 
-      {!suppressContextBar && (
+      {!suppressContextBar && !hideContextForUnifiedHandoff ? (
         <BillingContextBar
           stage={stage}
           salesperson={context.salesperson}
@@ -133,7 +144,14 @@ export function BillingOrderChrome({
           completedAt={context.completedAt}
           onPickerClick={context.onPickerClick}
         />
-      )}
+      ) : null}
+
+      {showHandoffBand ? (
+        <OrderHandoffRow
+          summary={handoffSummary}
+          salesperson={context.salesperson}
+        />
+      ) : null}
 
       <div className="flex-1 min-h-0 overflow-y-auto bg-[var(--bg-secondary)]">
         {children}

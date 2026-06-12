@@ -281,9 +281,11 @@ export interface CartItem {
 
 export interface AuthState {
   isAuthenticated: boolean;
+  authMode?: 'supabase' | 'legacy' | null;
   role: 'sales' | 'billing' | 'picking' | 'admin' | 'partner' | null;
   userName: string | null;
   userId: number | null;
+  branch?: StockLocationCode | null;
   partnerCompanyId: number | null;
 }
 
@@ -311,6 +313,12 @@ export interface AppUser {
   is_active: boolean;
   station_label: string | null;
   stock_location_code?: StockLocationCode | null;
+  auth_id?: string | null;
+  phone?: string | null;
+  invite_code?: string | null;
+  invite_code_expires_at?: string | null;
+  activated_at?: string | null;
+  last_login_at?: string | null;
   created_at: string;
 }
 

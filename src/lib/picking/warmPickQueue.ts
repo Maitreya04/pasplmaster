@@ -13,14 +13,20 @@ export function preloadPickQueueChunks(): void {
 }
 
 /** Prefetch queue data so QueuePage mounts with cache already warm. */
-export function prefetchPickQueueData(userId: number | null): void {
-  prefetchClaimableOrders(PICK_QUEUE_OPTIONS, userId);
+export function prefetchPickQueueData(
+  userId: number | null,
+  pickerBranch: 'main_store' | 'jabalpur' | null = null,
+): void {
+  prefetchClaimableOrders(PICK_QUEUE_OPTIONS, userId, pickerBranch);
 }
 
 /** Warm both route chunks and queue data — call as early as possible for pickers. */
-export function warmPickQueueRoute(userId: number | null): void {
+export function warmPickQueueRoute(
+  userId: number | null,
+  pickerBranch: 'main_store' | 'jabalpur' | null = null,
+): void {
   preloadPickQueueChunks();
-  prefetchPickQueueData(userId);
+  prefetchPickQueueData(userId, pickerBranch);
 }
 
 /** Read persisted picker session from storage (safe before React mounts). */

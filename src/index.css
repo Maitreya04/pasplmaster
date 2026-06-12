@@ -1164,6 +1164,61 @@ select {
   flex-shrink: 0;
 }
 
+.billing-handoff-band--header {
+  padding: 0.5rem 1rem;
+  border-bottom: 0.5px solid var(--border-faint);
+  background: var(--bg-secondary);
+}
+
+.billing-handoff-scan {
+  display: flex;
+  align-items: stretch;
+  min-height: 2rem;
+}
+
+.billing-handoff-segment {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.0625rem;
+  padding-inline: 0.75rem;
+  border-right: 0.5px solid var(--border-faint);
+  flex-shrink: 0;
+}
+
+.billing-handoff-segment--first {
+  padding-left: 0;
+}
+
+.billing-handoff-segment:last-child {
+  border-right: none;
+}
+
+.billing-handoff-segment__label {
+  font-size: var(--ds-font-micro);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--content-quaternary);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.billing-handoff-segment__name {
+  font-size: var(--ds-font-body);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--content-primary);
+  white-space: nowrap;
+}
+
+.billing-handoff-meta {
+  font-size: var(--ds-font-caption);
+  font-weight: 500;
+  color: var(--content-tertiary);
+  white-space: nowrap;
+}
+
 .billing-context-icon-btn {
   position: relative;
   display: inline-flex;

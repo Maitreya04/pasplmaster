@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase/client';
 import { queryClient } from '../lib/queryClient';
 import { useAuth } from '../context/AuthContext';
@@ -13,8 +12,10 @@ import {
 import { subscribeToTable } from '../lib/realtime';
 import {
   isBillingQueueEventsEnabled,
+  isDirectTableRealtimeEnabled,
   isSupabasePostgresChangesEnabled,
 } from '../lib/realtimePolicy';
+import { isPickQueueEligibleForBranch } from '../lib/picking/pickQueueEligibility';
 import type {
   FulfillmentPath,
   Order,
@@ -24,14 +25,15 @@ import type {
 } from '../types';
 
 const REALTIME_ON = isSupabasePostgresChangesEnabled();
-const BILLING_QUEUE_EVENTS_ON = isBillingQueueEventsEnabled();
+const QUEUE_EVENTS_ON = isBillingQueueEventsEnabled();
+const DIRECT_TABLE_REALTIME_ON = isDirectTableRealtimeEnabled();
 
 /** Stale threshold in ms — matches the 3-minute heartbeat timeout */
 const STALE_THRESHOLD_MS = 3 * 60 * 1000;
 
 /**
- * Realtime is primary. Old table-subscription queues keep their previous
- * keep-alive cadence; the new billing event stream uses a slow safety poll.
+ * Queue events are primary. Direct table Realtime is opt-in and keeps the old
+ * short keep-alive cadence; queue events use a slow safety poll.
  */
 const KEEPALIVE_INTERVAL_MS = 5_000;
 const BILLING_EVENT_CONNECTED_KEEPALIVE_INTERVAL_MS = 60_000;
@@ -40,9 +42,6 @@ const POLL_NO_REALTIME_MS = 2_000;
 
 /** Coalesce realtime bursts into a single refetch. */
 const REALTIME_DEBOUNCE_MS = 750;
-
-const INITIAL_REALTIME_RETRY_MS = 2_000;
-const MAX_REALTIME_RETRY_MS = 60_000;
 
 interface ClaimableOrdersOptions {
   /** The stage to check claims for */
@@ -172,15 +171,12 @@ function workflowStatusesToArray(
   return Array.isArray(workflowStatus) ? workflowStatus : [workflowStatus];
 }
 
-function shouldUseBillingQueueEvents(stage: ClaimStage): boolean {
-  return stage === 'billing' && BILLING_QUEUE_EVENTS_ON;
+function shouldUseQueueEvents(stage: ClaimStage): boolean {
+  return (stage === 'billing' || stage === 'picking') && QUEUE_EVENTS_ON;
 }
 
-/** Indore warehouse pick queue — excludes direct-bill and non–main-store orders. */
-function isPickQueueEligible(order: Order): boolean {
-  if (order.fulfillment_path === 'direct_bill') return false;
-  if (order.stock_location_code === 'jabalpur') return false;
-  return true;
+function shouldUseBillingQueueSnapshot(stage: ClaimStage): boolean {
+  return stage === 'billing' && QUEUE_EVENTS_ON;
 }
 
 type PickQueueBucket = 'available' | 'myActive' | 'otherActive' | 'stale';
@@ -217,6 +213,7 @@ function categorizePickQueueOrder(
 async function fetchLegacyClaimableOrders(
   options: ClaimableOrdersOptions,
   userId: number | null,
+  pickerBranch: StockLocationCode | null,
 ): Promise<OrderWithClaimInfo[]> {
   const { stage, workflowStatus, todayOnly, completedTodayOnly } = options;
   const todayIso = getTodayStartIso();
@@ -249,7 +246,7 @@ async function fetchLegacyClaimableOrders(
   );
 
   if (stage === 'picking') {
-    orders = orders.filter(isPickQueueEligible);
+    orders = orders.filter((order) => isPickQueueEligibleForBranch(order, pickerBranch));
   }
 
   const orderIds = orders.map((o: Order) => o.id);
@@ -426,11 +423,12 @@ function buildClaimableOrdersQueryKey(
 export function prefetchClaimableOrders(
   options: ClaimableOrdersOptions,
   userId: number | null,
+  pickerBranch: StockLocationCode | null = null,
 ): void {
   const statusKey = Array.isArray(options.workflowStatus)
     ? options.workflowStatus.join(',')
     : options.workflowStatus ?? 'all';
-  const billingEventsEnabled = shouldUseBillingQueueEvents(options.stage);
+  const billingEventsEnabled = shouldUseBillingQueueSnapshot(options.stage);
 
   void queryClient.prefetchQuery({
     queryKey: buildClaimableOrdersQueryKey(
@@ -442,12 +440,12 @@ export function prefetchClaimableOrders(
     ),
     queryFn: async () => {
       if (!billingEventsEnabled) {
-        return fetchLegacyClaimableOrders(options, userId);
+        return fetchLegacyClaimableOrders(options, userId, pickerBranch);
       }
       try {
         return await fetchBillingQueueSnapshot(options, userId);
       } catch {
-        return fetchLegacyClaimableOrders(options, userId);
+        return fetchLegacyClaimableOrders(options, userId, pickerBranch);
       }
     },
     staleTime: 0,
@@ -463,13 +461,14 @@ export function prefetchClaimableOrders(
 export function useClaimableOrders(
   options: ClaimableOrdersOptions,
 ): UseClaimableOrdersReturn {
-  const { userId, userName } = useAuth();
+  const { userId, userName, branch } = useAuth();
   const { stage, workflowStatus, todayOnly, completedTodayOnly } = options;
   const [billingSnapshotFailed, setBillingSnapshotFailed] = useState(false);
   const [billingRealtimeStatus, setBillingRealtimeStatus] =
     useState<BillingRealtimeStatus>(REALTIME_ON ? 'disconnected' : 'disabled');
+  const queueEventsEnabled = shouldUseQueueEvents(stage) && !billingSnapshotFailed;
   const billingEventsEnabled =
-    shouldUseBillingQueueEvents(stage) && !billingSnapshotFailed;
+    shouldUseBillingQueueSnapshot(stage) && !billingSnapshotFailed;
 
   const statusKey = Array.isArray(workflowStatus)
     ? workflowStatus.join(',')
@@ -491,7 +490,7 @@ export function useClaimableOrders(
     queryKey,
     queryFn: async () => {
       if (!billingEventsEnabled) {
-        return fetchLegacyClaimableOrders(options, userId);
+        return fetchLegacyClaimableOrders(options, userId, branch);
       }
 
       try {
@@ -499,13 +498,13 @@ export function useClaimableOrders(
       } catch (error) {
         console.warn('[billing-queue] snapshot RPC failed; falling back to legacy query', error);
         setBillingSnapshotFailed(true);
-        return fetchLegacyClaimableOrders(options, userId);
+        return fetchLegacyClaimableOrders(options, userId, branch);
       }
     },
     staleTime: 0,
     refetchInterval: (query) => {
       if (query.state.data === undefined) return false;
-      if (billingEventsEnabled) {
+      if (queueEventsEnabled) {
         return billingRealtimeStatus === 'connected'
           ? BILLING_EVENT_CONNECTED_KEEPALIVE_INTERVAL_MS
           : BILLING_EVENT_DEGRADED_KEEPALIVE_INTERVAL_MS;
@@ -543,129 +542,36 @@ export function useClaimableOrders(
       }, REALTIME_DEBOUNCE_MS);
     };
 
-    if (billingEventsEnabled) {
+    if (queueEventsEnabled) {
       setBillingStatus('disconnected');
 
-      let cancelled = false;
-      let channel: RealtimeChannel | null = null;
-      let retryTimer: ReturnType<typeof setTimeout> | null = null;
-      let retryMs = INITIAL_REALTIME_RETRY_MS;
-      let everConnected = false;
-      let shouldInvalidateOnSubscribe = false;
-
-      const removeChannel = (dead: RealtimeChannel | null) => {
-        if (!dead) return;
-        setTimeout(() => {
-          try {
-            void supabase.removeChannel(dead);
-          } catch (error) {
-            console.debug('[billing-queue] removeChannel failed', error);
-          }
-        }, 0);
-      };
-
-      const scheduleReconnect = () => {
-        if (cancelled || retryTimer) return;
-        retryTimer = setTimeout(() => {
-          retryTimer = null;
-          connect();
-        }, retryMs);
-        retryMs = Math.min(retryMs * 2, MAX_REALTIME_RETRY_MS);
-      };
-
-      const handleDisconnect = (dead: RealtimeChannel | null) => {
-        if (cancelled) return;
-        setBillingStatus('disconnected');
-        shouldInvalidateOnSubscribe = everConnected;
-        if (channel === dead) channel = null;
-        removeChannel(dead);
-        scheduleReconnect();
-      };
-
-      function connect() {
-        if (cancelled || channel) return;
-
-        let nextChannel: RealtimeChannel;
-        try {
-          nextChannel = supabase
-            .channel(
-              `billing-queue-events:${statusKey}:${todayOnly ?? false}:${completedTodayOnly ?? false}`,
-            )
-            .on(
-              'postgres_changes',
-              {
-                event: 'INSERT',
-                schema: 'public',
-                table: 'queue_events',
-                filter: 'stage=eq.billing',
-              },
-              () => {
-                invalidateNow();
-              },
-            );
-        } catch (error) {
-          console.warn('[billing-queue] queue_events channel setup failed', error);
-          handleDisconnect(null);
-          return;
-        }
-
-        channel = nextChannel;
-
-        try {
-          nextChannel.subscribe((status) => {
-            if (cancelled) return;
-
-            if (status === 'SUBSCRIBED') {
-              retryMs = INITIAL_REALTIME_RETRY_MS;
-              setBillingStatus('connected');
-              if (shouldInvalidateOnSubscribe) {
-                shouldInvalidateOnSubscribe = false;
-                invalidateNow();
-              }
-              everConnected = true;
-              return;
-            }
-
-            if (
-              status === 'CHANNEL_ERROR' ||
-              status === 'CLOSED' ||
-              status === 'TIMED_OUT'
-            ) {
-              handleDisconnect(nextChannel);
-            }
-          });
-        } catch (error) {
-          console.warn('[billing-queue] queue_events subscribe failed', error);
-          handleDisconnect(nextChannel);
-        }
-      }
-
-      connect();
-
-      const ordersFilter =
-        typeof workflowStatus === 'string'
-          ? `workflow_status=eq.${workflowStatus}`
-          : undefined;
-
-      const unsubOrders = subscribeToTable({
-        channelName: `billing-orders-backstop:${statusKey}:${todayOnly ?? false}:${completedTodayOnly ?? false}`,
-        table: 'orders',
-        filter: ordersFilter,
-        onChange: scheduleInvalidate,
-        onReconnect: invalidateNow,
+      const unsubQueueEvents = subscribeToTable({
+        channelName: `queue-events:${stage}:${statusKey}:${todayOnly ?? false}:${completedTodayOnly ?? false}`,
+        table: 'queue_events',
+        filter: `stage=eq.${stage}`,
+        events: ['INSERT'],
+        onChange: invalidateNow,
+        onSubscribe: () => setBillingStatus('connected'),
+        onReconnect: () => {
+          setBillingStatus('connected');
+          invalidateNow();
+        },
+        onGiveUp: () => setBillingStatus('disconnected'),
       });
 
       return () => {
-        cancelled = true;
-        if (retryTimer) clearTimeout(retryTimer);
         if (debounceRef.current) clearTimeout(debounceRef.current);
-        removeChannel(channel);
-        channel = null;
-        unsubOrders();
+        unsubQueueEvents();
       };
     }
 
     setBillingStatus('disabled');
+
+    if (!DIRECT_TABLE_REALTIME_ON) {
+      return () => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+      };
+    }
 
     const ordersFilter =
       typeof workflowStatus === 'string'
@@ -698,6 +604,7 @@ export function useClaimableOrders(
     };
   }, [
     billingEventsEnabled,
+    queueEventsEnabled,
     queryClient,
     queryKey,
     stage,
@@ -710,7 +617,7 @@ export function useClaimableOrders(
   const categorized = useMemo(() => {
     let all = result.data ?? [];
     if (stage === 'picking') {
-      all = all.filter(isPickQueueEligible);
+      all = all.filter((order) => isPickQueueEligibleForBranch(order, branch));
     }
     const available: OrderWithClaimInfo[] = [];
     const myActive: OrderWithClaimInfo[] = [];
@@ -755,7 +662,7 @@ export function useClaimableOrders(
     }
 
     return { available, myActive, otherActive, stale, salesLocked, all };
-  }, [result.data, stage, userName]);
+  }, [branch, result.data, stage, userName]);
 
   return {
     ...categorized,

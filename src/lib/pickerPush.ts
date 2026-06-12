@@ -58,12 +58,21 @@ export type PickReadyForBillingPayload = {
   pickerName: string | null;
 };
 
+export type BillReadyToCollectPayload = {
+  eventType: 'bill_ready_to_collect';
+  orderId: number;
+  orderNumber: string;
+  customerName: string;
+  billingPersonName: string;
+};
+
 export type InternalNotificationPayload =
   | PickerReadyPayload
   | ItemFlaggedPayload
   | OrderUpdateForSalesPayload
   | PickCompleteReminderPayload
-  | PickReadyForBillingPayload;
+  | PickReadyForBillingPayload
+  | BillReadyToCollectPayload;
 
 /** Edge function JSON body (partial; varies by eventType). */
 export type InternalNotificationResult = {
@@ -98,5 +107,9 @@ export async function sendPickerReadyNotification(payload: PickerReadyPayload) {
 }
 
 export async function sendPickCompleteReminder(payload: PickCompleteReminderPayload) {
+  return sendInternalNotification(payload);
+}
+
+export async function notifyPickerBillReadyToCollect(payload: BillReadyToCollectPayload) {
   return sendInternalNotification(payload);
 }

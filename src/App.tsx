@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
+const ActivatePage = lazy(() => import('./pages/auth/ActivatePage'));
 const RoleSelectPage = lazy(() => import('./pages/RoleSelectPage'));
 
 const SalesLayout = lazy(() => import('./pages/sales/SalesLayout'));
@@ -39,6 +40,7 @@ const PickFinalisePage = lazy(() => import('./pages/picking/PickFinalisePage'));
 const ActivePicksPage = lazy(() => import('./pages/picking/ActivePicksPage'));
 
 const AdminPage = lazy(() => import('./pages/admin/AdminPage'));
+const UserManagementPage = lazy(() => import('./pages/admin/UserManagementPage'));
 const AdminPasscodePage = lazy(() => import('./pages/admin/AdminPasscodePage'));
 const UploadPage = lazy(() => import('./pages/admin/UploadPage'));
 const LabelStudioPage = lazy(() => import('./pages/admin/LabelStudioPage'));
@@ -94,8 +96,11 @@ function RequireAdminUnlock({ children }: { children: React.ReactNode }) {
 }
 
 function RootRedirect() {
-  const { isAuthenticated, role } = useAuth();
+  const { isAuthenticated, role, authMode } = useAuth();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (authMode === 'supabase' && role && ROLE_HOME[role]) {
+    return <Navigate to={ROLE_HOME[role]} replace />;
+  }
   if (role && ROLE_HOME[role]) return <Navigate to={ROLE_HOME[role]} replace />;
   return <Navigate to="/select-role" replace />;
 }
@@ -118,6 +123,7 @@ export default function App(): React.JSX.Element | null {
       <Routes>
         <Route path="/" element={<RootRedirect />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/activate" element={<ActivatePage />} />
         <Route
           path="/select-role"
           element={
@@ -211,6 +217,16 @@ export default function App(): React.JSX.Element | null {
             <RequireRole>
               <RequireAdminUnlock>
                 <AdminPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/users"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <UserManagementPage />
               </RequireAdminUnlock>
             </RequireRole>
           }

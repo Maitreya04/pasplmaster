@@ -9,6 +9,8 @@ import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 import { DeskPickProgress } from './DeskPickProgress';
 import { deskType } from './deskTypography';
+import { BillingClaimBadge } from '../../../components/billing/shared/BillingClaimBadge';
+import { showPostPickBillingClaimBadge } from '../../../lib/billing/postPickBillingClaim';
 
 function flagDescription(order: DeskOrderRow): string {
   const first = order.pickerFlags[0];
@@ -115,6 +117,11 @@ export function DeskFlagOrderCard({
               </span>
             )}
           </p>
+          {showPostPickBillingClaimBadge(order) ? (
+            <div className="mt-1.5">
+              <BillingClaimBadge order={order} postPick />
+            </div>
+          ) : null}
           <p className={`${deskType.orderDetail} text-[var(--content-warning-on-light)] mt-0.5 line-clamp-2`}>
             {flagDescription(order)}
           </p>

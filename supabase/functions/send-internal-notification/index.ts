@@ -53,6 +53,13 @@ type InternalRequest =
       boxCount: number;
       flaggedLineCount: number;
       pickerName: string | null;
+    }
+  | {
+      eventType: 'bill_ready_to_collect';
+      orderId: number;
+      orderNumber: string;
+      customerName: string;
+      billingPersonName: string;
     };
 
 interface PushSubscriptionRow {
@@ -764,6 +771,140 @@ serve(async (req) => {
         sentCount,
         failedCount,
         inboxCount: billingIds.length,
+      });
+    }
+
+    if (eventType === 'bill_ready_to_collect') {
+      const payload = raw as Partial<InternalRequest>;
+      if (
+        typeof payload.orderId !== 'number' ||
+        typeof payload.orderNumber !== 'string' ||
+        typeof payload.customerName !== 'string' ||
+        typeof payload.billingPersonName !== 'string'
+      ) {
+        return json(400, { error: 'Invalid bill_ready_to_collect payload' });
+      }
+
+      const billingName = payload.billingPersonName.trim() || 'Billing';
+      const billingFirst = billingName.split(/\s+/)[0] ?? billingName;
+
+      const { data: pickEvent, error: pickEventError } = await admin
+        .from('order_events')
+        .select('actor_user_id')
+        .eq('order_id', payload.orderId)
+        .eq('event_type', 'picking_completed')
+        .not('actor_user_id', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (pickEventError) throw pickEventError;
+
+      const pickerUserId =
+        pickEvent?.actor_user_id != null ? Number(pickEvent.actor_user_id) : null;
+
+      if (pickerUserId == null || !Number.isFinite(pickerUserId)) {
+        return json(200, {
+          success: true,
+          skipped: true,
+          reason: 'no_picker',
+        });
+      }
+
+      const { data: pickerUser, error: pickerUserError } = await admin
+        .from('users')
+        .select('id')
+        .eq('id', pickerUserId)
+        .eq('role', 'picking')
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (pickerUserError) throw pickerUserError;
+      if (!pickerUser) {
+        return json(200, {
+          success: true,
+          skipped: true,
+          reason: 'picker_not_active',
+        });
+      }
+
+      const dedupeSince = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const { data: existing, error: existingError } = await admin
+        .from('user_notifications')
+        .select('id')
+        .eq('user_id', pickerUserId)
+        .eq('order_id', payload.orderId)
+        .eq('type', 'bill_ready_to_collect')
+        .is('read_at', null)
+        .gte('created_at', dedupeSince)
+        .limit(1);
+
+      if (existingError) throw existingError;
+      if ((existing ?? []).length > 0) {
+        return json(200, {
+          success: true,
+          skipped: true,
+          reason: 'already_notified',
+        });
+      }
+
+      const title = `Final bill ready · ${payload.orderNumber}`;
+      const body = `Collect from ${billingFirst} · ${payload.customerName}`;
+      const pickerDeepLink = '/picking?view=done&day=today';
+
+      await insertUserNotifications(admin, [
+        {
+          user_id: pickerUserId,
+          title,
+          body,
+          type: 'bill_ready_to_collect',
+          order_id: payload.orderId,
+          payload: {
+            eventType: 'bill_ready_to_collect',
+            orderNumber: payload.orderNumber,
+            customerName: payload.customerName,
+            billingPersonName: billingName,
+            deep_link: pickerDeepLink,
+          },
+        },
+      ]);
+
+      let sentCount = 0;
+      let failedCount = 0;
+      if (pushConfigured) {
+        const pickerSubs = await fetchPushSubscriptions(admin, cutoffIso, {
+          userIds: [pickerUserId],
+        });
+        const pickerResult = await sendWebPushes(admin, pickerSubs, {
+          title,
+          body: pushBodyPreview(body),
+          url: pickerDeepLink,
+          tag: `bill-ready-${payload.orderId}`,
+          payload: {
+            eventType: 'bill_ready_to_collect',
+            orderId: payload.orderId,
+            orderNumber: payload.orderNumber,
+            billingPersonName: billingName,
+          },
+        });
+        sentCount += pickerResult.sentCount;
+        failedCount += pickerResult.failedCount;
+      }
+
+      await admin.from('notification_events').insert({
+        event_type: 'bill_ready_to_collect',
+        order_id: payload.orderId,
+        payload: raw,
+        target_role: 'picking',
+        sent_count: sentCount,
+        failed_count: failedCount,
+      });
+
+      return json(200, {
+        success: true,
+        sentCount,
+        failedCount,
+        inboxCount: 1,
       });
     }
 

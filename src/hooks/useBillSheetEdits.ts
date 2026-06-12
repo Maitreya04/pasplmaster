@@ -27,7 +27,9 @@ import {
 import { shouldNotifyPickers } from '../lib/billing/fulfillmentPath';
 import { canBroadcastReadyToPick } from '../lib/billing/pickerNotifyPolicy';
 import { pickQuantityTarget } from '../lib/cartSupply';
-import { sendPickerReadyNotification } from '../lib/pickerPush';
+import { needsPostPickBillingClaim } from '../lib/billing/postPickBillingClaim';
+import { shouldNotifyPickerBillReady } from '../lib/picking/pickerBillReadyNotify';
+import { notifyPickerBillReadyToCollect, sendPickerReadyNotification } from '../lib/pickerPush';
 import { flagsFromOrderItems } from '../lib/billing/liveQueueDraft';
 import type { BillingLineEdit } from '../lib/billing/liveQueueDraft';
 import { sortBillLines } from '../lib/billing/sortBillLines';
@@ -121,9 +123,13 @@ export function useBillSheetEdits({
   const toast = useToast();
   const queryClient = useQueryClient();
 
+  const postPickClaimNeeded = needsPostPickBillingClaim(orderDetail);
+
   const claimOrderId =
     orderIdForClaim ??
-    (orderDetail.workflow_status === 'submitted' ? orderDetail.id : null);
+    (orderDetail.workflow_status === 'submitted' || postPickClaimNeeded
+      ? orderDetail.id
+      : null);
 
   const { claimId, isClaimedByMe, claim, error: claimError } = useWorkClaim(
     claimOrderId,
@@ -150,6 +156,7 @@ export function useBillSheetEdits({
   const [undoRemoveId, setUndoRemoveId] = useState<number | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [busyLineEdits, setBusyLineEdits] = useState<Record<number, BillingLineEdit>>({});
+  const [resolveBlockedBy, setResolveBlockedBy] = useState<string | null>(null);
 
   const resetKey = `${orderDetail.id}:${items.map((item) => item.id).join(',')}`;
   const [boundResetKey, setBoundResetKey] = useState(resetKey);
@@ -166,11 +173,44 @@ export function useBillSheetEdits({
 
   const claimAutoAttemptedRef = useRef<number | null>(null);
   useEffect(() => {
-    if (orderDetail.workflow_status !== 'submitted' || isClaimedByMe) return;
+    claimAutoAttemptedRef.current = null;
+    setResolveBlockedBy(null);
+  }, [orderDetail.id]);
+
+  useEffect(() => {
+    const shouldAutoClaim =
+      orderDetail.workflow_status === 'submitted' || postPickClaimNeeded;
+    if (!shouldAutoClaim || isClaimedByMe) return;
     if (claimAutoAttemptedRef.current === orderDetail.id) return;
     claimAutoAttemptedRef.current = orderDetail.id;
-    void claim();
-  }, [orderDetail.id, orderDetail.workflow_status, isClaimedByMe, claim]);
+
+    void (async () => {
+      const result = await claim();
+      if (result.success) {
+        setResolveBlockedBy(null);
+        return;
+      }
+      if (result.reason === 'already_claimed') {
+        const who =
+          typeof result.claimed_by === 'string' && result.claimed_by.trim()
+            ? result.claimed_by.trim()
+            : 'someone else';
+        setResolveBlockedBy(who);
+        toast.warning(
+          `Being finalised by ${who}. Take over from the queue if their session is stale.`,
+        );
+      }
+    })();
+  }, [
+    orderDetail.id,
+    orderDetail.workflow_status,
+    postPickClaimNeeded,
+    isClaimedByMe,
+    claim,
+    toast,
+  ]);
+
+  const resolveBlocked = postPickClaimNeeded && !isClaimedByMe && resolveBlockedBy != null;
 
   useEffect(() => {
     return () => {
@@ -384,6 +424,26 @@ export function useBillSheetEdits({
         throw new Error(`Resolve ${unresolvedFlagged.length} flagged line(s) first`);
       }
 
+      const workflowAtSave = orderDetail.workflow_status;
+      const notifyPickerAfterSave = shouldNotifyPickerBillReady({
+        fulfillment_path: orderDetail.fulfillment_path,
+        picking_completed_at: orderDetail.picking_completed_at,
+        workflow_status: workflowAtSave,
+      });
+
+      if (postPickClaimNeeded) {
+        if (!isClaimedByMe) {
+          const claimResult = await claim();
+          if (!claimResult.success) {
+            const who =
+              typeof claimResult.claimed_by === 'string' && claimResult.claimed_by.trim()
+                ? claimResult.claimed_by.trim()
+                : resolveBlockedBy ?? 'another billing person';
+            throw new Error(`Being finalised by ${who}`);
+          }
+        }
+      }
+
       const reviewer = userName ?? 'Billing';
       const nowIso = new Date().toISOString();
 
@@ -533,6 +593,20 @@ export function useBillSheetEdits({
           })
           .eq('id', orderDetail.id);
       }
+
+      if (notifyPickerAfterSave) {
+        try {
+          await notifyPickerBillReadyToCollect({
+            eventType: 'bill_ready_to_collect',
+            orderId: orderDetail.id,
+            orderNumber: orderDetail.order_number,
+            customerName: orderDetail.customer_name,
+            billingPersonName: reviewer,
+          });
+        } catch {
+          // Save succeeded — picker can still collect from billing desk.
+        }
+      }
     },
     onSuccess: () => {
       setStep('saved');
@@ -585,6 +659,8 @@ export function useBillSheetEdits({
 
   return {
     claimError,
+    resolveBlocked,
+    resolveBlockedBy,
     sortedLines,
     edits,
     reason,

@@ -42,6 +42,8 @@ export interface SubscribeToTableOptions<Row extends AnyRow> {
   filter?: string;
   events?: ChangeEvent[];
   onChange: (payload: ChangePayload<Row>) => void;
+  /** Fires whenever the channel reaches SUBSCRIBED, including the first connection. */
+  onSubscribe?: () => void;
   /** Fires whenever the channel transitions to SUBSCRIBED after the first time. */
   onReconnect?: () => void;
   /** Fires once when we stop reconnecting after repeated failures (e.g. `wss://` blocked). */
@@ -173,6 +175,13 @@ export function subscribeToTable<Row extends AnyRow>(
           connecting = false;
           backoffMs = INITIAL_BACKOFF_MS;
           consecutiveFailures = 0;
+          try {
+            opts.onSubscribe?.();
+          } catch (err) {
+            if (typeof console !== 'undefined') {
+              console.error('[realtime] onSubscribe threw', err);
+            }
+          }
           if (everConnected) {
             try {
               opts.onReconnect?.();

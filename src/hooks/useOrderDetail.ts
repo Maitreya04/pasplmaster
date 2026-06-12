@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
 import { subscribeToTable } from '../lib/realtime';
-import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
+import { isDirectTableRealtimeEnabled } from '../lib/realtimePolicy';
 import { isAskLine } from '../lib/picking/askBrand';
 import { isLucasLine } from '../lib/picking/lucasBrand';
 import { countPickableOrderLines } from '../lib/cartSupply';
@@ -35,7 +35,7 @@ const KEEPALIVE_INTERVAL_MS = 60_000;
 const POLL_NO_REALTIME_MS = 2_000;
 const REALTIME_DEBOUNCE_MS = 500;
 
-const REALTIME_ON = isSupabasePostgresChangesEnabled();
+const DIRECT_TABLE_REALTIME_ON = isDirectTableRealtimeEnabled();
 
 function mapOrderItemsWithCatalog(rows: OrderItemRow[] | null): OrderItem[] {
   if (!rows?.length) return [];
@@ -134,15 +134,15 @@ export function useOrderDetail(orderId: number | null) {
     },
     enabled: orderId !== null,
     staleTime: 0,
-    refetchInterval: REALTIME_ON ? KEEPALIVE_INTERVAL_MS : POLL_NO_REALTIME_MS,
+    refetchInterval: DIRECT_TABLE_REALTIME_ON ? KEEPALIVE_INTERVAL_MS : POLL_NO_REALTIME_MS,
     refetchIntervalInBackground: false,
   });
 
-  // Realtime: row-level subscriptions for this specific order.
+  // Optional direct table Realtime for local/debug environments.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (orderId == null || !REALTIME_ON) return;
+    if (orderId == null || !DIRECT_TABLE_REALTIME_ON) return;
 
     const scheduleInvalidate = () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);

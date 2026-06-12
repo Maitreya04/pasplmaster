@@ -45,7 +45,11 @@ function matchesRole(n: UserNotification, role: AppRole | null): boolean {
     return dl == null || dl.startsWith('/billing');
   }
   if (role === 'picking') {
-    return n.type === 'order_ready_to_pick' || n.type === 'pick_complete_reminder';
+    return (
+      n.type === 'order_ready_to_pick' ||
+      n.type === 'pick_complete_reminder' ||
+      n.type === 'bill_ready_to_collect'
+    );
   }
   return false;
 }
@@ -57,6 +61,10 @@ function deepLinkFromPayload(n: UserNotification): string | null {
   }
   if (n.type === 'pick_complete_reminder' && n.order_id) {
     return `/picking/pick/${n.order_id}`;
+  }
+  if (n.type === 'bill_ready_to_collect') {
+    const dl = payloadDeepLink(n);
+    return dl ?? '/picking?view=done&day=today';
   }
   if (n.type === 'order_ready_to_pick' && n.order_id) {
     const dl = payloadDeepLink(n);
@@ -152,6 +160,8 @@ function notificationTypeLabel(type: string): string {
       return 'Ready for billing';
     case 'pick_ready_for_billing':
       return 'Pick ready to bill';
+    case 'bill_ready_to_collect':
+      return 'Bill ready';
     default:
       return type.replace(/_/g, ' ');
   }

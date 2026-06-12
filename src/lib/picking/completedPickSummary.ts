@@ -1,4 +1,3 @@
-import type { Order } from '../../types';
 import type { OrderItemEmbedRow } from '../orderItemCount';
 import {
   pickQuantityTarget,
@@ -33,12 +32,8 @@ export interface CompletedPickSummary {
   lines: CompletedPickLineDetail[];
 }
 
-/** Indore warehouse pick queue — excludes direct-bill and non–main-store orders. */
-export function isPickQueueEligible(order: Order): boolean {
-  if (order.fulfillment_path === 'direct_bill') return false;
-  if (order.stock_location_code === 'jabalpur') return false;
-  return true;
-}
+/** @deprecated Import from pickQueueEligibility with explicit branch. */
+export { isPickQueueEligibleForBranch, isPickQueueEligible } from './pickQueueEligibility';
 
 export function getPickerCompletedDayRange(day: PickerCompletedDay): {
   start: string;

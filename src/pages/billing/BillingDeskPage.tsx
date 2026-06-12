@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useBillingDeskOrders, orderHasDeskPickerFlags } from '../../hooks/useBillingDeskOrders';
+import { useToast } from '../../context/ToastContext';
+import { deskOrderClaimBlockedBy, canOpenDeskOrder } from '../../lib/billing/postPickBillingClaim';
 import { LiveQueueWorkspace } from './LiveQueue/LiveQueueWorkspace';
 import { DeskMobileFallback } from './BillingDesk/DeskMobileFallback';
 import { DeskBillWorkspace } from './BillingDesk/DeskBillWorkspace';
@@ -9,6 +11,7 @@ import { DeskSplitPane } from './BillingDesk/DeskSplitPane';
 import type { DeskOrderRow } from '../../hooks/useBillingDeskOrders';
 
 export default function BillingDeskPage(): React.JSX.Element {
+  const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const { listOrders, resolveCount, assignCount, pickingCount, completedCount, isLoading, all } =
     useBillingDeskOrders();
@@ -50,9 +53,19 @@ export default function BillingDeskPage(): React.JSX.Element {
     };
   }, [all, selectedDesk, urlSelection]);
 
-  const handleSelectOrder = useCallback((order: DeskOrderRow, flaggedMode: boolean) => {
-    setSelectedDesk({ order, flaggedMode });
-  }, []);
+  const handleSelectOrder = useCallback(
+    (order: DeskOrderRow, flaggedMode: boolean) => {
+      if (!canOpenDeskOrder(order)) {
+        const who = deskOrderClaimBlockedBy(order);
+        toast.warning(
+          who ? `Being finalised by ${who}` : 'Another billing person is finalising this order',
+        );
+        return;
+      }
+      setSelectedDesk({ order, flaggedMode });
+    },
+    [toast],
+  );
 
   const handleClearSelection = useCallback(() => {
     setSelectedDesk(null);

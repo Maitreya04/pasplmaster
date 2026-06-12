@@ -7,10 +7,10 @@ import {
   type OrderRowWithEmbed,
 } from '../lib/orderItemCount';
 import { subscribeToTable } from '../lib/realtime';
-import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
+import { isDirectTableRealtimeEnabled } from '../lib/realtimePolicy';
 import type { Order, RejectionKind, WorkflowStatus } from '../types';
 
-const REALTIME_ON = isSupabasePostgresChangesEnabled();
+const DIRECT_TABLE_REALTIME_ON = isDirectTableRealtimeEnabled();
 
 interface UseOrdersOptions {
   status?: WorkflowStatus;
@@ -48,7 +48,7 @@ const REALTIME_DEBOUNCE_MS = 750;
 
 /** When Realtime is off, poll every 2s unless caller asked for a slower cadence (capped at 10s). */
 function ordersRefetchIntervalMs(opts: UseOrdersOptions): number {
-  if (REALTIME_ON) return opts.liveRefreshIntervalMs ?? KEEPALIVE_INTERVAL_MS;
+  if (DIRECT_TABLE_REALTIME_ON) return opts.liveRefreshIntervalMs ?? KEEPALIVE_INTERVAL_MS;
   if (opts.liveRefreshIntervalMs != null) {
     return Math.min(opts.liveRefreshIntervalMs, 10_000);
   }
@@ -156,14 +156,12 @@ export function useOrders(options?: UseOrdersOptions | WorkflowStatus) {
     refetchOnWindowFocus: true,
   });
 
-  // Realtime: invalidate this list whenever a relevant order changes.
-  // We deliberately subscribe broadly (no filter) and let React Query refetch
-  // — the list is already filtered server-side and the refetch is cheap
-  // relative to a 10s polling cadence.
+  // Optional direct table Realtime. Production uses polling/event streams so
+  // hot tables can stay out of the `supabase_realtime` publication.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!REALTIME_ON) return;
+    if (!DIRECT_TABLE_REALTIME_ON) return;
 
     const scheduleInvalidate = () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);

@@ -17,6 +17,8 @@ import { DESK_STATUS_TOOLTIPS } from './deskStatusHelp';
 import { isPickerReassign, needsPickerAssignStrip } from './deskPickerAssign';
 import { canDeskStaleComplete } from './deskStaleComplete';
 import { deskBtn, deskType } from './deskTypography';
+import { BillingClaimBadge } from '../../../components/billing/shared/BillingClaimBadge';
+import { showPostPickBillingClaimBadge } from '../../../lib/billing/postPickBillingClaim';
 
 const STATUS_PILL: Record<
   DeskOrderRow['deskStatus'],
@@ -179,6 +181,12 @@ export function DeskOrderRowCard({
               </span>
               <BillingFigure value={order.total_value} kind="currency" size="xs" />
             </p>
+
+            {showPostPickBillingClaimBadge(order) ? (
+              <div className="mt-1.5">
+                <BillingClaimBadge order={order} postPick />
+              </div>
+            ) : null}
 
             {!isAssignExpanded && !completeExpanded && (
               <DeskPickProgress
