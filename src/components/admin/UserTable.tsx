@@ -8,6 +8,7 @@ export type UserRowAction =
   | 'edit'
   | 'generate_code'
   | 'copy_invite'
+  | 'login_as'
   | 'revoke_access'
   | 'deactivate'
   | 'reactivate';
@@ -24,10 +25,13 @@ function statusLabel(row: UserActivationRow): { text: string; className: string 
   if (status === 'activated') {
     return { text: 'Activated', className: 'text-emerald-600 font-medium' };
   }
-  if (status === 'pending') {
-    return { text: 'Pending', className: 'text-amber-600 font-medium' };
+  if (status === 'deactivated') {
+    return { text: 'Inactive', className: 'text-[var(--content-secondary)] font-medium' };
   }
-  return { text: 'Deactivated', className: 'text-[var(--content-secondary)] font-medium' };
+  if (row.invite_code) {
+    return { text: 'Code sent', className: 'text-sky-600 font-medium' };
+  }
+  return { text: 'Pending', className: 'text-amber-600 font-medium' };
 }
 
 function actionItems(row: UserActivationRow): Array<{ action: UserRowAction; label: string; danger?: boolean }> {
@@ -52,6 +56,7 @@ function actionItems(row: UserActivationRow): Array<{ action: UserRowAction; lab
   }
 
   if (status === 'activated') {
+    items.push({ action: 'login_as', label: 'Login as user' });
     items.push({ action: 'revoke_access', label: 'Revoke access', danger: true });
   }
 

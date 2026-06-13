@@ -21,6 +21,13 @@ export interface PhoneLoginResult {
   error?: string;
 }
 
+export interface ImpersonationTarget {
+  userId: number;
+  userName: string;
+  role: Exclude<UserRole, 'admin' | 'partner'>;
+  branch: StockLocationCode | null;
+}
+
 interface AuthContextValue {
   isAuthenticated: boolean;
   authMode: AuthMode;
@@ -33,11 +40,17 @@ interface AuthContextValue {
   session: Session | null;
   supabaseUser: SupabaseUser | null;
   authReady: boolean;
+  isImpersonating: boolean;
+  actualRole: Role;
+  actualUserId: number | null;
+  actualUserName: string | null;
   loginWithPhone: (phone: string, pin: string) => Promise<PhoneLoginResult>;
   /** Legacy shared access code (transition period). */
   login: (code: string) => Promise<boolean>;
   unlockAdmin: (code: string) => boolean;
   selectRole: (role: NonNullable<Role>, name?: string, partnerCompanyId?: number) => void;
+  startImpersonation: (target: ImpersonationTarget) => boolean;
+  exitImpersonation: () => void;
   logout: () => Promise<void>;
   switchRole: () => void;
 }
@@ -53,6 +66,7 @@ const LS_KEYS = {
   branch: 'paspl_branch',
   partnerCompanyId: 'paspl_partnerCompanyId',
   adminUnlocked: 'paspl_admin_unlocked',
+  impersonation: 'paspl_impersonation',
 } as const;
 
 /** Admin section passcode (separate from app access code). */
@@ -112,6 +126,31 @@ function safeSessionStorageRemove(key: string) {
   }
 }
 
+interface StoredImpersonation {
+  userId: number;
+  userName: string;
+  role: Exclude<UserRole, 'admin' | 'partner'>;
+  branch: StockLocationCode | null;
+}
+
+function loadImpersonationFromStorage(): StoredImpersonation | null {
+  const raw = safeSessionStorageGet(LS_KEYS.impersonation);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as StoredImpersonation;
+    if (
+      typeof parsed.userId === 'number' &&
+      typeof parsed.userName === 'string' &&
+      typeof parsed.role === 'string'
+    ) {
+      return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 function loadFromStorage() {
   const userIdStr = safeLocalStorageGet(LS_KEYS.userId);
   const partnerIdStr = safeLocalStorageGet(LS_KEYS.partnerCompanyId);
@@ -125,6 +164,7 @@ function loadFromStorage() {
     branch: (safeLocalStorageGet(LS_KEYS.branch) as StockLocationCode | null) || null,
     partnerCompanyId: partnerIdStr ? parseInt(partnerIdStr, 10) : null,
     adminUnlocked: safeSessionStorageGet(LS_KEYS.adminUnlocked) === 'true',
+    impersonation: loadImpersonationFromStorage(),
   };
 }
 
@@ -140,10 +180,13 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   const [authReady, setAuthReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(initial.isAuthenticated);
   const [authMode, setAuthMode] = useState<AuthMode>(initial.authMode);
-  const [role, setRole] = useState<Role>(initial.role);
-  const [userName, setUserName] = useState<string | null>(initial.userName);
-  const [userId, setUserId] = useState<number | null>(initial.userId);
-  const [branch, setBranch] = useState<StockLocationCode | null>(initial.branch);
+  const [actualRole, setActualRole] = useState<Role>(initial.role);
+  const [actualUserName, setActualUserName] = useState<string | null>(initial.userName);
+  const [actualUserId, setActualUserId] = useState<number | null>(initial.userId);
+  const [actualBranch, setActualBranch] = useState<StockLocationCode | null>(initial.branch);
+  const [impersonation, setImpersonation] = useState<StoredImpersonation | null>(
+    initial.impersonation,
+  );
   const [partnerCompanyId, setPartnerCompanyId] = useState<number | null>(
     initial.partnerCompanyId,
   );
@@ -151,19 +194,18 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   const [session, setSession] = useState<Session | null>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
 
-  const applySupabaseProfile = useCallback((profile: UserProfileRow, nextSession: Session) => {
-    setSession(nextSession);
-    setSupabaseUser(nextSession.user);
-    setAuthMode('supabase');
-    setIsAuthenticated(true);
-    setRole(profile.role as Role);
-    setUserName(profile.full_name);
-    setUserId(profile.id);
-    setBranch(profile.stock_location_code);
-    setPartnerCompanyId(null);
+  const role = impersonation ? (impersonation.role as Role) : actualRole;
+  const userName = impersonation ? impersonation.userName : actualUserName;
+  const userId = impersonation ? impersonation.userId : actualUserId;
+  const branch = impersonation ? impersonation.branch : actualBranch;
+  const isImpersonating = impersonation !== null;
 
-    safeLocalStorageSet(LS_KEYS.authenticated, 'true');
-    safeLocalStorageSet(LS_KEYS.authMode, 'supabase');
+  const persistProfile = useCallback((profile: UserProfileRow) => {
+    setActualRole(profile.role as Role);
+    setActualUserName(profile.full_name);
+    setActualUserId(profile.id);
+    setActualBranch(profile.stock_location_code);
+
     safeLocalStorageSet(LS_KEYS.role, profile.role);
     safeLocalStorageSet(LS_KEYS.userName, profile.full_name);
     safeLocalStorageSet(LS_KEYS.userId, String(profile.id));
@@ -172,16 +214,42 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     } else {
       safeLocalStorageRemove(LS_KEYS.branch);
     }
-    safeLocalStorageRemove(LS_KEYS.partnerCompanyId);
   }, []);
+
+  const applySupabaseProfile = useCallback((profile: UserProfileRow, nextSession: Session) => {
+    const storedImpersonation = loadImpersonationFromStorage();
+    const canRestoreImpersonation =
+      profile.role === 'admin' &&
+      storedImpersonation !== null &&
+      safeSessionStorageGet(LS_KEYS.adminUnlocked) === 'true';
+
+    setSession(nextSession);
+    setSupabaseUser(nextSession.user);
+    setAuthMode('supabase');
+    setIsAuthenticated(true);
+    setPartnerCompanyId(null);
+    persistProfile(profile);
+
+    if (canRestoreImpersonation) {
+      setImpersonation(storedImpersonation);
+    } else {
+      setImpersonation(null);
+      safeSessionStorageRemove(LS_KEYS.impersonation);
+    }
+
+    safeLocalStorageSet(LS_KEYS.authenticated, 'true');
+    safeLocalStorageSet(LS_KEYS.authMode, 'supabase');
+    safeLocalStorageRemove(LS_KEYS.partnerCompanyId);
+  }, [persistProfile]);
 
   const clearAuthState = useCallback(() => {
     setIsAuthenticated(false);
     setAuthMode(null);
-    setRole(null);
-    setUserName(null);
-    setUserId(null);
-    setBranch(null);
+    setActualRole(null);
+    setActualUserName(null);
+    setActualUserId(null);
+    setActualBranch(null);
+    setImpersonation(null);
     setPartnerCompanyId(null);
     setAdminUnlocked(false);
     setSession(null);
@@ -195,6 +263,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     safeLocalStorageRemove(LS_KEYS.branch);
     safeLocalStorageRemove(LS_KEYS.partnerCompanyId);
     safeSessionStorageRemove(LS_KEYS.adminUnlocked);
+    safeSessionStorageRemove(LS_KEYS.impersonation);
   }, []);
 
   useEffect(() => {
@@ -250,24 +319,24 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   }, [applySupabaseProfile, authMode, clearAuthState]);
 
   useEffect(() => {
-    if (!userName || !role || role === 'admin' || role === 'partner' || userId !== null) return;
+    if (!actualUserName || !actualRole || actualRole === 'admin' || actualRole === 'partner' || actualUserId !== null) return;
     if (authMode === 'supabase') return;
 
     let cancelled = false;
     void supabase
       .from('users')
       .select('id, full_name, stock_location_code')
-      .eq('role', role)
+      .eq('role', actualRole)
       .eq('is_active', true)
       .then(({ data: rows }) => {
         if (cancelled) return;
-        const needle = userName.trim().toLowerCase();
+        const needle = actualUserName.trim().toLowerCase();
         const match = (rows ?? []).find((u) => u.full_name.trim().toLowerCase() === needle);
         if (match?.id != null) {
-          setUserId(match.id);
+          setActualUserId(match.id);
           safeLocalStorageSet(LS_KEYS.userId, String(match.id));
           if (match.stock_location_code) {
-            setBranch(match.stock_location_code as StockLocationCode);
+            setActualBranch(match.stock_location_code as StockLocationCode);
             safeLocalStorageSet(LS_KEYS.branch, match.stock_location_code);
           }
         }
@@ -275,7 +344,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     return () => {
       cancelled = true;
     };
-  }, [authMode, userName, role, userId]);
+  }, [authMode, actualUserName, actualRole, actualUserId]);
 
   useEffect(() => {
     if (role !== 'picking') return;
@@ -341,11 +410,34 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     return false;
   }, []);
 
+  const startImpersonation = useCallback(
+    (target: ImpersonationTarget): boolean => {
+      if (actualRole !== 'admin' || !adminUnlocked) return false;
+      const next: StoredImpersonation = {
+        userId: target.userId,
+        userName: target.userName,
+        role: target.role,
+        branch: target.branch,
+      };
+      setImpersonation(next);
+      safeSessionStorageSet(LS_KEYS.impersonation, JSON.stringify(next));
+      return true;
+    },
+    [actualRole, adminUnlocked],
+  );
+
+  const exitImpersonation = useCallback(() => {
+    setImpersonation(null);
+    safeSessionStorageRemove(LS_KEYS.impersonation);
+  }, []);
+
   const selectRole = useCallback(
     (newRole: NonNullable<Role>, name?: string, companyId?: number) => {
       const resolvedName = name || null;
-      setRole(newRole);
-      setUserName(resolvedName);
+      setActualRole(newRole);
+      setActualUserName(resolvedName);
+      setImpersonation(null);
+      safeSessionStorageRemove(LS_KEYS.impersonation);
       safeLocalStorageSet(LS_KEYS.role, newRole);
       if (resolvedName) {
         safeLocalStorageSet(LS_KEYS.userName, resolvedName);
@@ -356,8 +448,8 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
       if (newRole === 'partner') {
         const id = companyId ?? null;
         setPartnerCompanyId(id);
-        setUserId(null);
-        setBranch(null);
+        setActualUserId(null);
+        setActualBranch(null);
         safeLocalStorageRemove(LS_KEYS.userId);
         safeLocalStorageRemove(LS_KEYS.branch);
         if (id !== null) {
@@ -380,8 +472,8 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
           .then(({ data: rows, error }) => {
             if (error) {
               console.error('users lookup', error);
-              setUserId(null);
-              setBranch(null);
+              setActualUserId(null);
+              setActualBranch(null);
               safeLocalStorageRemove(LS_KEYS.userId);
               safeLocalStorageRemove(LS_KEYS.branch);
               return;
@@ -389,14 +481,14 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
             const needle = resolvedName.trim().toLowerCase();
             const match = (rows ?? []).find((u) => u.full_name.trim().toLowerCase() === needle);
             const id = match?.id ?? null;
-            setUserId(id);
+            setActualUserId(id);
             if (id !== null) {
               safeLocalStorageSet(LS_KEYS.userId, String(id));
             } else {
               safeLocalStorageRemove(LS_KEYS.userId);
             }
             const nextBranch = (match?.stock_location_code as StockLocationCode | null) ?? null;
-            setBranch(nextBranch);
+            setActualBranch(nextBranch);
             if (nextBranch) {
               safeLocalStorageSet(LS_KEYS.branch, nextBranch);
             } else {
@@ -404,8 +496,8 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
             }
           });
       } else {
-        setUserId(null);
-        setBranch(null);
+        setActualUserId(null);
+        setActualBranch(null);
         safeLocalStorageRemove(LS_KEYS.userId);
         safeLocalStorageRemove(LS_KEYS.branch);
       }
@@ -414,13 +506,15 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   );
 
   const switchRole = useCallback(() => {
-    setRole(null);
-    setUserName(null);
-    setUserId(null);
-    setBranch(null);
+    setActualRole(null);
+    setActualUserName(null);
+    setActualUserId(null);
+    setActualBranch(null);
     setPartnerCompanyId(null);
+    setImpersonation(null);
     setAdminUnlocked(false);
     safeSessionStorageRemove(LS_KEYS.adminUnlocked);
+    safeSessionStorageRemove(LS_KEYS.impersonation);
     safeLocalStorageRemove(LS_KEYS.role);
     safeLocalStorageRemove(LS_KEYS.userName);
     safeLocalStorageRemove(LS_KEYS.userId);
@@ -455,10 +549,16 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
         session,
         supabaseUser,
         authReady,
+        isImpersonating,
+        actualRole,
+        actualUserId,
+        actualUserName,
         loginWithPhone,
         login,
         unlockAdmin,
         selectRole,
+        startImpersonation,
+        exitImpersonation,
         logout,
         switchRole,
       }}

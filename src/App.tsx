@@ -1,9 +1,11 @@
 import { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { ImpersonationBanner } from './components/layout/ImpersonationBanner';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const ActivatePage = lazy(() => import('./pages/auth/ActivatePage'));
+const GetStartedPage = lazy(() => import('./pages/auth/GetStartedPage'));
 const RoleSelectPage = lazy(() => import('./pages/RoleSelectPage'));
 
 const SalesLayout = lazy(() => import('./pages/sales/SalesLayout'));
@@ -83,9 +85,9 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 function RequireRole({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, role } = useAuth();
+  const { isAuthenticated, role, actualRole } = useAuth();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  if (!role) return <Navigate to="/select-role" replace />;
+  if (!role && actualRole !== 'admin') return <Navigate to="/select-role" replace />;
   return <>{children}</>;
 }
 
@@ -120,9 +122,11 @@ export default function App(): React.JSX.Element | null {
         </div>
       }
     >
+      <ImpersonationBanner />
       <Routes>
         <Route path="/" element={<RootRedirect />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/get-started" element={<GetStartedPage />} />
         <Route path="/activate" element={<ActivatePage />} />
         <Route
           path="/select-role"

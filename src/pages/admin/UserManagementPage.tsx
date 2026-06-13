@@ -31,9 +31,15 @@ type PendingConfirm =
   | { type: 'deactivate'; row: UserActivationRow }
   | null;
 
+const ROLE_HOME: Record<string, string> = {
+  sales: '/sales',
+  billing: '/billing/queue',
+  picking: '/picking',
+};
+
 export default function UserManagementPage(): React.JSX.Element {
   const navigate = useNavigate();
-  const { userId } = useAuth();
+  const { userId, startImpersonation } = useAuth();
   const { data: rows = [], isLoading, error } = useUserActivationStatus();
   const generateOne = useGenerateInviteCode(userId);
   const generateAll = useGenerateAllInviteCodes(userId);
@@ -68,6 +74,16 @@ export default function UserManagementPage(): React.JSX.Element {
     () => rows.filter((row) => row.is_active && !row.auth_id && row.invite_code),
     [rows],
   );
+
+  const stats = useMemo(() => {
+    const total = rows.length;
+    const active = rows.filter((row) => row.is_active && row.auth_id).length;
+    const pending = rows.filter(
+      (row) => row.is_active && !row.auth_id && row.role !== 'admin',
+    ).length;
+    const inactive = rows.filter((row) => !row.is_active).length;
+    return { total, active, pending, inactive };
+  }, [rows]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -176,6 +192,31 @@ export default function UserManagementPage(): React.JSX.Element {
     }
   };
 
+  const handleLoginAs = (row: UserActivationRow) => {
+    if (!row.auth_id || row.role === 'admin') {
+      showToast('This user cannot be impersonated');
+      return;
+    }
+
+    const started = startImpersonation({
+      userId: row.id,
+      userName: row.full_name,
+      role: row.role as 'sales' | 'billing' | 'picking',
+      branch: row.stock_location_code,
+    });
+
+    if (!started) {
+      showToast('Unlock admin access before using Login as');
+      return;
+    }
+
+    const home = ROLE_HOME[row.role];
+    if (home) {
+      navigate(home);
+      showToast(`Viewing as ${row.full_name}`);
+    }
+  };
+
   const handleRowAction = (action: UserRowAction, row: UserActivationRow) => {
     switch (action) {
       case 'edit':
@@ -189,6 +230,9 @@ export default function UserManagementPage(): React.JSX.Element {
           .writeText(formatInviteWhatsApp(row))
           .then(() => showToast(`Copied invite message for ${row.full_name}`))
           .catch(() => showToast('Could not copy to clipboard'));
+        return;
+      case 'login_as':
+        handleLoginAs(row);
         return;
       case 'revoke_access':
         setPendingConfirm({ type: 'revoke', row });
@@ -231,6 +275,25 @@ export default function UserManagementPage(): React.JSX.Element {
             <p className="text-sm text-[var(--content-secondary)]">
               Add staff, edit roles and branches, generate invite codes, and remove access.
             </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
+            <p className="text-xs text-[var(--content-secondary)]">Total</p>
+            <p className="text-2xl font-bold text-[var(--content-primary)]">{stats.total}</p>
+          </div>
+          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
+            <p className="text-xs text-[var(--content-secondary)]">Active</p>
+            <p className="text-2xl font-bold text-emerald-600">{stats.active}</p>
+          </div>
+          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
+            <p className="text-xs text-[var(--content-secondary)]">Pending</p>
+            <p className="text-2xl font-bold text-amber-600">{stats.pending}</p>
+          </div>
+          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
+            <p className="text-xs text-[var(--content-secondary)]">Inactive</p>
+            <p className="text-2xl font-bold text-[var(--content-secondary)]">{stats.inactive}</p>
           </div>
         </div>
 
