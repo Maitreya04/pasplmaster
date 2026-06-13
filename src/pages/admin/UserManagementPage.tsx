@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Copy, DownloadSimple, Plus, UsersThree } from '@phosphor-icons/react';
+import { ArrowLeft, Plus, UsersThree } from '@phosphor-icons/react';
 import { AddUserModal } from '../../components/admin/AddUserModal';
 import { ConfirmDialog } from '../../components/admin/ConfirmDialog';
 import { EditUserModal } from '../../components/admin/EditUserModal';
@@ -13,12 +13,8 @@ import {
   type UserManagementStatus,
 } from '../../lib/admin/userManagement';
 import {
-  buildInviteCsv,
-  formatInviteWhatsApp,
   useCreateUser,
   useDeactivateUser,
-  useGenerateAllInviteCodes,
-  useGenerateInviteCode,
   useReactivateUser,
   useRevokeUserAccess,
   useUpdateUser,
@@ -41,15 +37,12 @@ export default function UserManagementPage(): React.JSX.Element {
   const navigate = useNavigate();
   const { userId, startImpersonation } = useAuth();
   const { data: rows = [], isLoading, error } = useUserActivationStatus();
-  const generateOne = useGenerateInviteCode(userId);
-  const generateAll = useGenerateAllInviteCodes(userId);
   const createUser = useCreateUser(userId);
   const updateUser = useUpdateUser(userId);
   const deactivateUser = useDeactivateUser(userId);
   const revokeAccess = useRevokeUserAccess(userId);
   const reactivateUser = useReactivateUser(userId);
 
-  const [generatingUserId, setGeneratingUserId] = useState<number | null>(null);
   const [pendingActionUserId, setPendingActionUserId] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -61,19 +54,6 @@ export default function UserManagementPage(): React.JSX.Element {
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm>(null);
 
   const existingNames = useMemo(() => rows.map((row) => row.full_name), [rows]);
-
-  const pendingCount = useMemo(
-    () =>
-      rows.filter(
-        (row) => row.is_active && !row.auth_id && row.role !== 'admin',
-      ).length,
-    [rows],
-  );
-
-  const pendingWithCodes = useMemo(
-    () => rows.filter((row) => row.is_active && !row.auth_id && row.invite_code),
-    [rows],
-  );
 
   const stats = useMemo(() => {
     const total = rows.length;
@@ -112,59 +92,9 @@ export default function UserManagementPage(): React.JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const handleGenerateOne = async (targetUserId: number) => {
-    setGeneratingUserId(targetUserId);
-    try {
-      const result = await generateOne.mutateAsync(targetUserId);
-      showToast(`Code for ${result.full_name}: ${result.invite_code}`);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to generate code');
-    } finally {
-      setGeneratingUserId(null);
-    }
-  };
-
-  const handleGenerateAll = async () => {
-    try {
-      const result = await generateAll.mutateAsync();
-      showToast(`Generated ${result.count ?? 0} invite codes`);
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to generate codes');
-    }
-  };
-
-  const handleCopyWhatsApp = async () => {
-    const text = pendingWithCodes.map(formatInviteWhatsApp).join('\n\n');
-    if (!text) {
-      showToast('No pending codes to copy');
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast('Copied WhatsApp messages');
-    } catch {
-      showToast('Could not copy to clipboard');
-    }
-  };
-
-  const handleDownloadCsv = () => {
-    const csv = buildInviteCsv(filteredRows);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `paspl-users-${new Date().toISOString().slice(0, 10)}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  };
-
   const handleCreateUser = async (input: Parameters<typeof createUser.mutateAsync>[0]) => {
     const result = await createUser.mutateAsync(input);
-    if (result.invite_code) {
-      showToast(`Created ${result.full_name} with code ${result.invite_code}`);
-    } else {
-      showToast(`Created ${result.full_name ?? input.fullName}`);
-    }
+    showToast(`Created ${result.full_name ?? input.fullName}. Tell them to open Get started.`);
   };
 
   const handleUpdateUser = async (input: Parameters<typeof updateUser.mutateAsync>[0]) => {
@@ -222,15 +152,6 @@ export default function UserManagementPage(): React.JSX.Element {
       case 'edit':
         setEditingUser(row);
         return;
-      case 'generate_code':
-        void handleGenerateOne(row.id);
-        return;
-      case 'copy_invite':
-        void navigator.clipboard
-          .writeText(formatInviteWhatsApp(row))
-          .then(() => showToast(`Copied invite message for ${row.full_name}`))
-          .catch(() => showToast('Could not copy to clipboard'));
-        return;
       case 'login_as':
         handleLoginAs(row);
         return;
@@ -273,7 +194,7 @@ export default function UserManagementPage(): React.JSX.Element {
               User management
             </h1>
             <p className="text-sm text-[var(--content-secondary)]">
-              Add staff, edit roles and branches, generate invite codes, and remove access.
+              Add staff, edit roles and branches, and manage access. New users set up at Get started.
             </p>
           </div>
         </div>
@@ -305,30 +226,6 @@ export default function UserManagementPage(): React.JSX.Element {
           >
             <Plus size={16} weight="bold" />
             Add user
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleGenerateAll()}
-            disabled={generateAll.isPending || pendingCount === 0}
-            className="rounded-xl border border-[var(--border-subtle)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
-          >
-            Generate all codes ({pendingCount} pending)
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleCopyWhatsApp()}
-            className="rounded-xl border border-[var(--border-subtle)] px-4 py-2 text-sm flex items-center gap-2"
-          >
-            <Copy size={16} />
-            Copy for WhatsApp
-          </button>
-          <button
-            type="button"
-            onClick={handleDownloadCsv}
-            className="rounded-xl border border-[var(--border-subtle)] px-4 py-2 text-sm flex items-center gap-2"
-          >
-            <DownloadSimple size={16} />
-            Download CSV
           </button>
         </div>
 
@@ -404,7 +301,6 @@ export default function UserManagementPage(): React.JSX.Element {
         {!isLoading && !error && (
           <UserTable
             rows={filteredRows}
-            generatingUserId={generatingUserId}
             pendingActionUserId={pendingActionUserId}
             onAction={handleRowAction}
           />
@@ -433,7 +329,7 @@ export default function UserManagementPage(): React.JSX.Element {
       {pendingConfirm?.type === 'revoke' && (
         <ConfirmDialog
           title={`Revoke access for ${pendingConfirm.row.full_name}?`}
-          description="This removes their phone login immediately. They will need a new invite code to activate again."
+          description="This removes their phone login immediately. They can set up again via Get started."
           confirmLabel="Revoke access"
           tone="danger"
           isSubmitting={revokeAccess.isPending}

@@ -25,7 +25,6 @@ export function AddUserModal({
   const [role, setRole] = useState<Exclude<UserRole, 'admin'>>('sales');
   const [branch, setBranch] = useState<StockLocationCode>('main_store');
   const [stationLabel, setStationLabel] = useState('');
-  const [generateInviteCode, setGenerateInviteCode] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const normalizedExisting = useMemo(
@@ -54,7 +53,6 @@ export function AddUserModal({
         role,
         branch,
         stationLabel: role === 'billing' ? stationLabel.trim() : undefined,
-        generateInviteCode,
       });
       onClose();
     } catch (err) {
@@ -76,7 +74,7 @@ export function AddUserModal({
               Add user
             </h3>
             <p className="text-sm text-[var(--content-secondary)] mt-1">
-              Create a staff profile and optionally generate an invite code right away.
+              Create a staff profile. They can set up login at Get started on the sign-in page.
             </p>
           </div>
           <button
@@ -146,23 +144,6 @@ export function AddUserModal({
               />
             </label>
           )}
-
-          <label className="flex items-start gap-3 rounded-xl border border-[var(--border-subtle)] p-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={generateInviteCode}
-              onChange={(event) => setGenerateInviteCode(event.target.checked)}
-              className="mt-1"
-            />
-            <span>
-              <span className="block text-sm font-medium text-[var(--content-primary)]">
-                Generate invite code now
-              </span>
-              <span className="block text-xs text-[var(--content-secondary)] mt-0.5">
-                Recommended so you can share activation details immediately.
-              </span>
-            </span>
-          </label>
 
           {error && <p className="text-sm text-[var(--content-negative)]">{error}</p>}
 

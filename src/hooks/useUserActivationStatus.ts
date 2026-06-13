@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
-import { branchDisplayName } from '../lib/auth/phoneAuth';
 import {
   adminUserManagementErrorMessage,
   callAdminUserAuth,
@@ -26,23 +25,9 @@ interface RpcResult {
   error?: string;
   user_id?: number;
   full_name?: string;
-  invite_code?: string;
   requires_auth_cleanup?: boolean;
   requires_auth_sync?: boolean;
   auth_id?: string;
-}
-
-interface GenerateAllResult {
-  success: boolean;
-  count?: number;
-  users?: Array<{
-    user_id: number;
-    full_name: string;
-    role: string;
-    branch: string | null;
-    invite_code: string;
-  }>;
-  error?: string;
 }
 
 export interface CreateUserInput {
@@ -50,7 +35,6 @@ export interface CreateUserInput {
   role: Exclude<UserRole, 'admin'>;
   branch: StockLocationCode;
   stationLabel?: string;
-  generateInviteCode?: boolean;
 }
 
 export interface UpdateUserInput {
@@ -96,43 +80,6 @@ export function useUserActivationStatus() {
   });
 }
 
-export function useGenerateInviteCode(actorUserId: number | null) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (targetUserId: number) => {
-      if (!actorUserId) throw new Error('Not signed in');
-      const { data, error } = await supabase.rpc('generate_invite_code', {
-        p_user_id: targetUserId,
-        p_actor_user_id: actorUserId,
-      });
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error ?? 'generate_failed');
-      return data as { invite_code: string; full_name: string };
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['user-activation-status'] });
-    },
-  });
-}
-
-export function useGenerateAllInviteCodes(actorUserId: number | null) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      if (!actorUserId) throw new Error('Not signed in');
-      const { data, error } = await supabase.rpc('generate_all_invite_codes', {
-        p_actor_user_id: actorUserId,
-      });
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error ?? 'generate_failed');
-      return data as GenerateAllResult;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['user-activation-status'] });
-    },
-  });
-}
-
 export function useCreateUser(actorUserId: number | null) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -144,7 +91,7 @@ export function useCreateUser(actorUserId: number | null) {
         p_role: input.role,
         p_branch: input.branch,
         p_station_label: input.stationLabel?.trim() || null,
-        p_generate_invite_code: input.generateInviteCode ?? false,
+        p_generate_invite_code: false,
       });
     },
     onSuccess: () => {
@@ -256,28 +203,4 @@ export function useReactivateUser(actorUserId: number | null) {
       void queryClient.invalidateQueries({ queryKey: ['user-activation-status'] });
     },
   });
-}
-
-export function formatInviteWhatsApp(row: UserActivationRow): string {
-  const branch = branchDisplayName(row.stock_location_code);
-  if (!row.invite_code) {
-    return `${row.full_name} (${row.role}, ${branch}): ask admin for invite code`;
-  }
-  return `${row.full_name} ji, your PASPL activation code is ${row.invite_code} (${row.role}, ${branch}). Open the app → Activate with invite code.`;
-}
-
-export function buildInviteCsv(rows: UserActivationRow[]): string {
-  const header = 'full_name,role,branch,status,invite_code,phone,station_label';
-  const lines = rows.map((row) =>
-    [
-      JSON.stringify(row.full_name),
-      row.role,
-      row.stock_location_code ?? '',
-      row.is_active ? (row.auth_id ? 'activated' : 'pending') : 'deactivated',
-      row.invite_code ?? '',
-      row.phone ?? '',
-      row.station_label ?? '',
-    ].join(','),
-  );
-  return [header, ...lines].join('\n');
 }

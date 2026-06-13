@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { CloudArrowUp, PlusCircle, ListBullets, HourglassHigh } from '@phosphor-icons/react';
+import { CloudArrowUp, PlusCircle, ListBullets, HourglassHigh, MapPin } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { useSalesDashboard } from '../../hooks/useSalesDashboard';
 import { useSalesPendingRecovery } from '../../hooks/useSalesPendingRecovery';
@@ -328,6 +328,14 @@ export default function SalesHome(): React.JSX.Element | null {
                   <ListBullets size={24} weight="duotone" className="text-[var(--role-content)]" />
                 </div>
                 <span className="font-semibold text-[var(--content-primary)]">My Orders</span>
+              </Card>
+            </Link>
+            <Link to="/sales/beat">
+              <Card pressable className="flex items-center gap-3 py-4">
+                <div className="w-10 h-10 rounded-xl bg-[var(--role-primary-subtle)] flex items-center justify-center">
+                  <MapPin size={24} weight="duotone" className="text-[var(--role-content)]" />
+                </div>
+                <span className="font-semibold text-[var(--content-primary)]">My Beat</span>
               </Card>
             </Link>
             <Link to="/sales/pending-recovery">

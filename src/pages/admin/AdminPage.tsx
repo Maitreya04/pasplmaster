@@ -14,6 +14,7 @@ import {
   Warehouse,
   Truck,
   ShoppingBag,
+  MapTrifold,
   UsersThree,
 } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
@@ -47,6 +48,22 @@ export default function AdminPage(): React.JSX.Element | null {
         <div className="space-y-3">
           <button
             type="button"
+            onClick={() => navigate('/admin/field-activity')}
+            className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
+          >
+            <div className="w-12 h-12 rounded-xl bg-[var(--role-primary-subtle)] flex items-center justify-center">
+              <MapTrifold size={22} weight="regular" className="text-[var(--role-primary)]" />
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-[var(--content-primary)]">Field activity</p>
+              <p className="text-sm text-[var(--content-tertiary)]">
+                Sales workdays, visit routes, and geofence overrides
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
             onClick={() => navigate('/admin/users')}
             className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
           >
@@ -56,7 +73,7 @@ export default function AdminPage(): React.JSX.Element | null {
             <div className="text-left">
               <p className="font-semibold text-[var(--content-primary)]">User management</p>
               <p className="text-sm text-[var(--content-tertiary)]">
-                Add staff, edit roles, generate invite codes, and remove access
+                Add staff, edit roles and branches, and manage access
               </p>
             </div>
           </button>

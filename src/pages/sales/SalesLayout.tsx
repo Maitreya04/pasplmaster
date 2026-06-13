@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Link, Outlet } from 'react-router-dom';
-import { CloudArrowUp, House, PlusCircle, ListBullets, HourglassHigh } from '@phosphor-icons/react';
+import { CloudArrowUp, House, PlusCircle, ListBullets, HourglassHigh, MapPin } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
 import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
@@ -17,12 +17,15 @@ import { useAuth } from '../../context/AuthContext';
 import { useRolePushNotifications } from '../../hooks/useRolePushNotifications';
 import { NotificationBell } from '../../components/notifications/NotificationBell';
 import { PushAlertsCompact } from '../../components/notifications/PushAlertsCompact';
+import { NearbyGeofencePrompt } from '../../components/sales/NearbyGeofencePrompt';
+import { useGeofenceProximity } from '../../hooks/useGeofenceProximity';
 import { SalesChromeProvider, useSalesChrome } from './SalesChromeContext';
 
 const preloadSalesHome = () => import('./SalesHome');
 const preloadNewOrder = () => import('./NewOrderPage');
 const preloadCart = () => import('./CartPage');
 const preloadMyOrders = () => import('./MyOrdersPage');
+const preloadMyBeat = () => import('./MyBeatPage');
 const preloadPendingRecovery = () => import('./PendingRecoveryPage');
 
 const NAV_ITEMS: BottomNavItem[] = [
@@ -40,6 +43,12 @@ const NAV_ITEMS: BottomNavItem[] = [
     path: '/sales/orders',
     activeWeight: 'bold',
     preload: preloadMyOrders,
+  },
+  {
+    icon: MapPin,
+    label: 'My Beat',
+    path: '/sales/beat',
+    preload: preloadMyBeat,
   },
   {
     icon: HourglassHigh,
@@ -64,12 +73,18 @@ export default function SalesLayout(): React.JSX.Element | null {
   const { userId, userName, role } = useAuth();
   const push = useRolePushNotifications({ role, userId, userName });
   useOfflineSalesOrderSync();
+  const { nearbyCustomer, dismissNearby } = useGeofenceProximity();
 
   return (
     <SalesChromeProvider>
       <CartProvider key={`${userId ?? 'anon'}:${userName ?? 'guest'}`}>
         <div className="role-sales min-h-screen bg-[var(--bg-primary)] relative">
           <SalesTopBar userId={userId} role={role} push={push} />
+          {nearbyCustomer && (
+            <div className="pt-2">
+              <NearbyGeofencePrompt customer={nearbyCustomer} onDismiss={dismissNearby} />
+            </div>
+          )}
           <div className="pb-[6.5rem]">
             <Outlet />
           </div>

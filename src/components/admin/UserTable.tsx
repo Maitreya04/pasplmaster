@@ -6,8 +6,6 @@ import type { UserActivationRow } from '../../hooks/useUserActivationStatus';
 
 export type UserRowAction =
   | 'edit'
-  | 'generate_code'
-  | 'copy_invite'
   | 'login_as'
   | 'revoke_access'
   | 'deactivate'
@@ -15,7 +13,6 @@ export type UserRowAction =
 
 interface UserTableProps {
   rows: UserActivationRow[];
-  generatingUserId: number | null;
   pendingActionUserId: number | null;
   onAction: (action: UserRowAction, row: UserActivationRow) => void;
 }
@@ -27,9 +24,6 @@ function statusLabel(row: UserActivationRow): { text: string; className: string 
   }
   if (status === 'deactivated') {
     return { text: 'Inactive', className: 'text-[var(--content-secondary)] font-medium' };
-  }
-  if (row.invite_code) {
-    return { text: 'Code sent', className: 'text-sky-600 font-medium' };
   }
   return { text: 'Pending', className: 'text-amber-600 font-medium' };
 }
@@ -48,13 +42,6 @@ function actionItems(row: UserActivationRow): Array<{ action: UserRowAction; lab
     { action: 'edit', label: 'Edit details' },
   ];
 
-  if (status === 'pending') {
-    items.push({ action: 'generate_code', label: 'Generate new code' });
-    if (row.invite_code) {
-      items.push({ action: 'copy_invite', label: 'Copy invite message' });
-    }
-  }
-
   if (status === 'activated') {
     items.push({ action: 'login_as', label: 'Login as user' });
     items.push({ action: 'revoke_access', label: 'Revoke access', danger: true });
@@ -66,7 +53,6 @@ function actionItems(row: UserActivationRow): Array<{ action: UserRowAction; lab
 
 export function UserTable({
   rows,
-  generatingUserId,
   pendingActionUserId,
   onAction,
 }: UserTableProps): React.JSX.Element {
@@ -103,7 +89,6 @@ export function UserTable({
             <th className="px-3 py-2 font-medium">Role</th>
             <th className="px-3 py-2 font-medium">Branch</th>
             <th className="px-3 py-2 font-medium">Status</th>
-            <th className="px-3 py-2 font-medium">Invite code</th>
             <th className="px-3 py-2 font-medium">Phone</th>
             <th className="px-3 py-2 font-medium">Actions</th>
           </tr>
@@ -112,7 +97,7 @@ export function UserTable({
           {rows.map((row) => {
             const status = statusLabel(row);
             const items = actionItems(row);
-            const isBusy = generatingUserId === row.id || pendingActionUserId === row.id;
+            const isBusy = pendingActionUserId === row.id;
 
             return (
               <tr
@@ -125,7 +110,6 @@ export function UserTable({
                 <td className="px-3 py-2">
                   <span className={status.className}>{status.text}</span>
                 </td>
-                <td className="px-3 py-2 font-mono">{row.invite_code ?? '—'}</td>
                 <td className="px-3 py-2 font-mono">{row.phone ?? '—'}</td>
                 <td className="px-3 py-2">
                   {items.length === 0 ? (

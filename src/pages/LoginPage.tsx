@@ -161,12 +161,6 @@ export default function LoginPage(): React.JSX.Element | null {
                 Get started →
               </Link>
             </p>
-            <Link
-              to="/activate"
-              className="block text-xs text-[var(--content-tertiary)] hover:text-[var(--content-secondary)]"
-            >
-              Have an invite code? Activate here
-            </Link>
             {LEGACY_LOGIN_ENABLED && (
               <button
                 type="button"

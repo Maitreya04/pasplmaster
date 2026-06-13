@@ -4,7 +4,6 @@ import { useAuth } from './context/AuthContext';
 import { ImpersonationBanner } from './components/layout/ImpersonationBanner';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
-const ActivatePage = lazy(() => import('./pages/auth/ActivatePage'));
 const GetStartedPage = lazy(() => import('./pages/auth/GetStartedPage'));
 const RoleSelectPage = lazy(() => import('./pages/RoleSelectPage'));
 
@@ -13,6 +12,8 @@ const SalesHome = lazy(() => import('./pages/sales/SalesHome'));
 const NewOrderPage = lazy(() => import('./pages/sales/NewOrderPage'));
 const CartPage = lazy(() => import('./pages/sales/CartPage'));
 const MyOrdersPage = lazy(() => import('./pages/sales/MyOrdersPage'));
+const MyBeatPage = lazy(() => import('./pages/sales/MyBeatPage'));
+const CustomerVisitPage = lazy(() => import('./pages/sales/CustomerVisitPage'));
 const PendingRecoveryPage = lazy(() => import('./pages/sales/PendingRecoveryPage'));
 
 const BillingLayout = lazy(() => import('./pages/billing/BillingLayout'));
@@ -53,6 +54,7 @@ const CycleCountPage = lazy(() => import('./pages/admin/CycleCountPage'));
 const PickScanLabPage = lazy(() => import('./pages/admin/PickScanLabPage'));
 const PickerUxLabPage = lazy(() => import('./pages/admin/PickerUxLabPage'));
 const OcrOrderLabPage = lazy(() => import('./pages/admin/OcrOrderLabPage'));
+const FieldActivityPage = lazy(() => import('./pages/admin/FieldActivityPage'));
 const SupplyDemandPage = lazy(() => import('./pages/admin/SupplyDemandPage'));
 const SupplyDemandSkuDetailPage = lazy(() => import('./pages/admin/SupplyDemandSkuDetailPage'));
 const BarcodeMappingPage = lazy(() => import('./pages/admin/BarcodeMappingPage'));
@@ -127,7 +129,6 @@ export default function App(): React.JSX.Element | null {
         <Route path="/" element={<RootRedirect />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/get-started" element={<GetStartedPage />} />
-        <Route path="/activate" element={<ActivatePage />} />
         <Route
           path="/select-role"
           element={
@@ -150,6 +151,8 @@ export default function App(): React.JSX.Element | null {
           <Route path="new" element={<NewOrderPage />} />
           <Route path="cart" element={<CartPage />} />
           <Route path="orders" element={<MyOrdersPage />} />
+          <Route path="beat" element={<MyBeatPage />} />
+          <Route path="customer/:customerId" element={<CustomerVisitPage />} />
           <Route path="pending-recovery" element={<PendingRecoveryPage />} />
         </Route>
 
@@ -361,6 +364,16 @@ export default function App(): React.JSX.Element | null {
             <RequireRole>
               <RequireAdminUnlock>
                 <OcrOrderLabPage />
+              </RequireAdminUnlock>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/field-activity"
+          element={
+            <RequireRole>
+              <RequireAdminUnlock>
+                <FieldActivityPage />
               </RequireAdminUnlock>
             </RequireRole>
           }

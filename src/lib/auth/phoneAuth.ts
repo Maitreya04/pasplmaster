@@ -81,11 +81,11 @@ export type ValidateInviteCodeResult =
 export function inviteCodeErrorMessage(error: string | undefined): string {
   switch (error) {
     case 'invalid_code':
-      return 'Invalid invite code. Check with your manager.';
+      return 'Invalid verification code. Try again from Get started.';
     case 'already_activated':
       return 'This account is already activated. Sign in with phone + PIN.';
     case 'code_expired':
-      return 'Invite code expired. Ask admin for a new code.';
+      return 'Verification code expired. Start again from Get started.';
     case 'phone_already_used':
       return 'This phone number is already registered.';
     case 'pin_must_be_4_to_6_digits':
