@@ -15,6 +15,7 @@ import { GeofenceWarningSheet } from '../../components/sales/GeofenceWarningShee
 import { GeofenceOverrideSheet } from '../../components/sales/GeofenceOverrideSheet';
 import { WorkdayBanner } from '../../components/sales/WorkdayBanner';
 import { useCustomers } from '../../hooks/useCustomers';
+import { getCustomerCity } from '../../lib/customerDisplay';
 import { useVisitTracking } from '../../hooks/useVisitTracking';
 import { fetchCustomerLastVisit } from '../../lib/visit/visitService';
 import { formatTimeAgo } from '../../utils/formatters';
@@ -121,7 +122,7 @@ export default function CustomerVisitPage(): React.JSX.Element {
             <p className="text-xs uppercase tracking-wide text-[var(--content-tertiary)]">Customer</p>
             <p className="text-lg font-semibold text-[var(--content-primary)]">{customer.name}</p>
             <p className="text-sm text-[var(--content-secondary)]">
-              {customer.city ?? '—'} · {customer.salesman ?? 'Unassigned'}
+              {getCustomerCity(customer) ?? '—'} · {customer.salesman ?? 'Unassigned'}
             </p>
             {lastVisit?.last_visit_at && (
               <p className="text-xs text-[var(--content-tertiary)]">

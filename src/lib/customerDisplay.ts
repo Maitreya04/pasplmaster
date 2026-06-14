@@ -1,5 +1,27 @@
 import type { Customer } from '../types';
 
+function trimOrNull(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+/** ERP imports use `station`; app-created rows use `city`. */
+export function getCustomerCity(customer: Customer): string | null {
+  return trimOrNull(customer.city) ?? trimOrNull(customer.station);
+}
+
+/** ERP imports split address across address1–3; app-created rows use `address`. */
+export function getCustomerAddress(customer: Customer): string | null {
+  const legacy = trimOrNull(customer.address);
+  if (legacy) return legacy;
+
+  const parts = [customer.address1, customer.address2, customer.address3]
+    .map(trimOrNull)
+    .filter((part): part is string => Boolean(part));
+
+  return parts.length > 0 ? parts.join(', ') : null;
+}
+
 export function normalizeCustomerText(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
@@ -23,7 +45,7 @@ export function isCustomerNameDuplicate(customer: Customer, duplicateNames: Set<
 }
 
 export function getCustomerSearchText(customer: Customer): string {
-  return [customer.name, customer.city, customer.address]
+  return [customer.name, getCustomerCity(customer), getCustomerAddress(customer)]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
@@ -34,11 +56,12 @@ export function getCustomerSecondaryLine(
   duplicateNames: Set<string>,
 ): string | null {
   void duplicateNames;
-  return customer.city || null;
+  return getCustomerCity(customer);
 }
 
 export function getCustomerTertiaryLine(customer: Customer, duplicateNames: Set<string>): string | null {
-  if (customer.address) return customer.address;
+  const address = getCustomerAddress(customer);
+  if (address) return address;
   if (isCustomerNameDuplicate(customer, duplicateNames)) return null;
   return null;
 }

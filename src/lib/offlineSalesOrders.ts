@@ -1,4 +1,5 @@
 import type { CartItem, Customer, OrderPriority, Transport } from '../types';
+import { getCustomerCity } from './customerDisplay';
 import { idbGet, idbSet } from './idb';
 import {
   offlineOrderStatusFromResult,
@@ -119,7 +120,7 @@ export function buildSalesOrderPayload(args: {
     shortage_policy: args.shortagePolicy,
     customer_id: args.customer.id,
     customer_name: args.customer.name,
-    customer_city: args.customer.city ?? null,
+    customer_city: getCustomerCity(args.customer),
     transport_id: args.transport?.id ?? null,
     transport_name: args.transport?.name ?? null,
     salesperson_name: args.userName,

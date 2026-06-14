@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
+import { getCustomerAddress } from '../lib/customerDisplay';
 import { queryClient } from '../lib/queryClient';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -260,13 +261,13 @@ async function fetchLegacyClaimableOrders(
   if (customerIds.length > 0) {
     const { data: customers, error: customerError } = await supabase
       .from('customers')
-      .select('id, address')
+      .select('id, address, address1, address2, address3')
       .in('id', customerIds);
 
     if (customerError) throw customerError;
 
     for (const customer of customers ?? []) {
-      customerAddressMap.set(customer.id, customer.address ?? null);
+      customerAddressMap.set(customer.id, getCustomerAddress(customer));
     }
   }
 

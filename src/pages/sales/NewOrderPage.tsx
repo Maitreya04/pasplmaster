@@ -56,6 +56,8 @@ import {
   getCustomerSearchText,
   getCustomerSecondaryLine,
   getCustomerTertiaryLine,
+  getCustomerCity,
+  getCustomerAddress,
   normalizeCustomerText,
 } from '../../lib/customerDisplay';
 import {
@@ -496,8 +498,8 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
     return customers
       .map((customer) => {
         const name = customer.name.toLowerCase();
-        const city = customer.city?.toLowerCase() ?? '';
-        const address = customer.address?.toLowerCase() ?? '';
+        const city = getCustomerCity(customer)?.toLowerCase() ?? '';
+        const address = getCustomerAddress(customer)?.toLowerCase() ?? '';
         const searchText = getCustomerSearchText(customer);
         let score = Number.POSITIVE_INFINITY;
         if (name === q) score = 0;

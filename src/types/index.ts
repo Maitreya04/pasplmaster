@@ -26,9 +26,13 @@ export interface Customer {
   id: number;
   name: string;
   address: string | null;
+  address1?: string | null;
+  address2?: string | null;
+  address3?: string | null;
   mobile: string | null;
   parent_group: string | null;
   city: string | null;
+  station?: string | null;
   salesman: string | null;
   gstin: string | null;
   dealer_type: string | null;
