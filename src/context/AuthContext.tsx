@@ -266,6 +266,13 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     safeSessionStorageRemove(LS_KEYS.impersonation);
   }, []);
 
+  // Legacy access-code sessions must not keep a Supabase JWT — branch RLS would hide billing orders.
+  useEffect(() => {
+    if (safeLocalStorageGet(LS_KEYS.authMode) !== 'legacy') return;
+    if (safeLocalStorageGet(LS_KEYS.authenticated) !== 'true') return;
+    void supabase.auth.signOut();
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -383,6 +390,8 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   );
 
   const login = useCallback(async (code: string): Promise<boolean> => {
+    await supabase.auth.signOut();
+
     const { data, error } = await supabase
       .from('app_config')
       .select('value')

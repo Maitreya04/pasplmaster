@@ -10,8 +10,10 @@ export function getCustomerCity(customer: Customer): string | null {
   return trimOrNull(customer.city) ?? trimOrNull(customer.station);
 }
 
+type CustomerAddressFields = Pick<Customer, 'address' | 'address1' | 'address2' | 'address3'>;
+
 /** ERP imports split address across address1–3; app-created rows use `address`. */
-export function getCustomerAddress(customer: Customer): string | null {
+export function getCustomerAddress(customer: CustomerAddressFields): string | null {
   const legacy = trimOrNull(customer.address);
   if (legacy) return legacy;
 
