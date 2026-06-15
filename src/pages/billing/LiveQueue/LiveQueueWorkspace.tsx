@@ -79,7 +79,7 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
     : null;
 
   // 1. Queue Data
-  const { available, myActive, otherActive, stale, salesLocked, isLoading: queueLoading } = useClaimableOrders({
+  const { available, myActive, otherActive, stale, salesLocked, isLoading: queueLoading, isError: queueError } = useClaimableOrders({
     stage: 'billing',
     workflowStatus: 'submitted',
   });
@@ -88,6 +88,11 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
     () => sortByUrgencyAndAge([...myActive, ...available, ...stale]),
     [myActive, available, stale],
   );
+
+  useEffect(() => {
+    if (!queueError || queueLoading) return;
+    toast.error('Could not load the billing queue. Check your connection and reload.');
+  }, [queueError, queueLoading, toast]);
 
   const [currentOrderId, setCurrentOrderId] = useState<number | null>(null);
 
@@ -115,11 +120,13 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
 
   const claimAttempted = useRef<number | null>(null);
   const claimFailureToasted = useRef<number | null>(null);
+  const missingSelectionToasted = useRef(false);
 
   useEffect(() => {
     claimAttempted.current = null;
     claimFailureToasted.current = null;
-  }, [effectiveOrderId]);
+    missingSelectionToasted.current = false;
+  }, [effectiveOrderId, userId]);
 
   const activeOrderSalesLocked =
     activeInQueue != null && isSalesEditFreshLock(activeInQueue);
@@ -136,7 +143,7 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
   });
 
   // 3. Order Details
-  const { data: order, isLoading: orderLoading } = useOrderDetail(effectiveOrderId);
+  const { data: order, isLoading: orderLoading, isError: orderError } = useOrderDetail(effectiveOrderId);
   const items = useMemo(() => order?.items ?? [], [order]);
 
   // 4. New 3-state machine
@@ -273,14 +280,58 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
   // ── Handle pre-selection from URL on mount ──
   const didConsumeParam = useRef(false);
   useEffect(() => {
-    if (preSelectedOrderId && !didConsumeParam.current) {
-      didConsumeParam.current = true;
+    if (!preSelectedOrderId || didConsumeParam.current || queueLoading) return;
+
+    didConsumeParam.current = true;
+    setSearchParams({}, { replace: true });
+
+    const selectable = [...myActive, ...available, ...stale, ...salesLocked];
+    const found = selectable.find((o) => o.id === preSelectedOrderId);
+    if (found) {
       setCurrentOrderId(preSelectedOrderId);
-      setSearchParams({}, { replace: true });
       flow.openOrder();
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preSelectedOrderId]);
+
+    if (!missingSelectionToasted.current) {
+      missingSelectionToasted.current = true;
+      toast.info('That order is no longer in the live billing queue.');
+    }
+  }, [
+    preSelectedOrderId,
+    queueLoading,
+    myActive,
+    available,
+    stale,
+    salesLocked,
+    flow,
+    setSearchParams,
+    toast,
+  ]);
+
+  useEffect(() => {
+    if (flow.state !== 'orderSheet' || effectiveOrderId || queueLoading) return;
+
+    claimAttempted.current = null;
+    claimFailureToasted.current = null;
+    setCurrentOrderId(null);
+    flow.returnToQueue();
+
+    if (!missingSelectionToasted.current) {
+      missingSelectionToasted.current = true;
+      toast.info('That order is no longer in the live billing queue.');
+    }
+  }, [flow.state, effectiveOrderId, queueLoading, flow, toast]);
+
+  useEffect(() => {
+    if (flow.state !== 'orderSheet' || orderLoading || !orderError) return;
+
+    toast.error('Could not load this order. Returning to the queue.');
+    claimAttempted.current = null;
+    claimFailureToasted.current = null;
+    setCurrentOrderId(null);
+    flow.returnToQueue();
+  }, [flow.state, orderLoading, orderError, flow, toast]);
 
   // ── Urgent order detection ──
   const urgentInQueue = useMemo(
@@ -306,6 +357,7 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
   useEffect(() => {
     if (flow.state !== 'orderSheet' || !effectiveOrderId || isClaimedByMe) return;
     if (activeOrderSalesLocked) return;
+    if (!userId) return;
     if (claimAttempted.current === effectiveOrderId) return;
 
     claimAttempted.current = effectiveOrderId;
@@ -353,6 +405,7 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
     claim,
     toast,
     activeOrderSalesLocked,
+    userId,
   ]);
 
   // ── Skip / Release ──
@@ -689,6 +742,10 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
   }
 
   if (flow.state === 'orderSheet') {
+    if (!effectiveOrderId) {
+      return <div className={loadingClass} />;
+    }
+
     if (!order || orderLoading) {
       return <div className={loadingClass} />;
     }
@@ -785,5 +842,29 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
     );
   }
 
-  return <div className={shellClass} />;
+  return (
+    <div className={shellClass || 'min-h-screen bg-[var(--bg-primary)]'}>
+      <QueueView
+        embedded={embedded}
+        available={available}
+        otherActive={otherActive}
+        stale={stale}
+        myActive={myActive}
+        salesLocked={salesLocked}
+        isLoading={queueLoading}
+        onSelect={(orderId) => {
+          claimAttempted.current = null;
+          claimFailureToasted.current = null;
+          setCurrentOrderId(orderId);
+          flow.openOrder();
+        }}
+        onTakeover={(orderId) => {
+          claimAttempted.current = null;
+          claimFailureToasted.current = null;
+          setCurrentOrderId(orderId);
+          flow.openOrder();
+        }}
+      />
+    </div>
+  );
 }

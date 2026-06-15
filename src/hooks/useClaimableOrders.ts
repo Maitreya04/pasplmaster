@@ -97,6 +97,8 @@ interface UseClaimableOrdersReturn {
   all: OrderWithClaimInfo[];
   /** Loading state */
   isLoading: boolean;
+  /** True when the latest fetch failed */
+  isError: boolean;
 }
 
 type BillingRealtimeStatus = 'disabled' | 'connected' | 'disconnected';
@@ -170,6 +172,12 @@ function workflowStatusesToArray(
 ): WorkflowStatus[] | null {
   if (!workflowStatus) return null;
   return Array.isArray(workflowStatus) ? workflowStatus : [workflowStatus];
+}
+
+function shouldUseBillingQueueSnapshot(stage: ClaimStage): boolean {
+  // SECURITY DEFINER RPC bypasses branch RLS — required after migration 132 when a
+  // Supabase Auth session is active. Falls back to legacy table reads on RPC error.
+  return stage === 'billing';
 }
 
 function shouldUseBillingQueueEvents(stage: ClaimStage): boolean {
@@ -410,7 +418,7 @@ function buildClaimableOrdersQueryKey(
   statusKey: string,
   todayOnly: boolean | undefined,
   completedTodayOnly: boolean | undefined,
-  billingEventsEnabled: boolean,
+  billingSnapshotEnabled: boolean,
 ) {
   return [
     'claimable-orders',
@@ -418,7 +426,7 @@ function buildClaimableOrdersQueryKey(
     statusKey,
     todayOnly ?? false,
     completedTodayOnly ?? false,
-    billingEventsEnabled ? 'billing-events' : 'legacy',
+    billingSnapshotEnabled ? 'billing-snapshot' : 'legacy',
   ] as const;
 }
 
@@ -430,7 +438,7 @@ export function prefetchClaimableOrders(
   const statusKey = Array.isArray(options.workflowStatus)
     ? options.workflowStatus.join(',')
     : options.workflowStatus ?? 'all';
-  const billingEventsEnabled = shouldUseBillingQueueEvents(options.stage);
+  const billingSnapshotEnabled = shouldUseBillingQueueSnapshot(options.stage);
 
   void queryClient.prefetchQuery({
     queryKey: buildClaimableOrdersQueryKey(
@@ -438,10 +446,10 @@ export function prefetchClaimableOrders(
       statusKey,
       options.todayOnly,
       options.completedTodayOnly,
-      billingEventsEnabled,
+      billingSnapshotEnabled,
     ),
     queryFn: async () => {
-      if (!billingEventsEnabled) {
+      if (!billingSnapshotEnabled) {
         return fetchLegacyClaimableOrders(options, userId);
       }
       try {
@@ -465,11 +473,10 @@ export function useClaimableOrders(
 ): UseClaimableOrdersReturn {
   const { userId, userName } = useAuth();
   const { stage, workflowStatus, todayOnly, completedTodayOnly } = options;
-  const [billingSnapshotFailed, setBillingSnapshotFailed] = useState(false);
   const [billingRealtimeStatus, setBillingRealtimeStatus] =
     useState<BillingRealtimeStatus>(REALTIME_ON ? 'disconnected' : 'disabled');
-  const billingEventsEnabled =
-    shouldUseBillingQueueEvents(stage) && !billingSnapshotFailed;
+  const billingSnapshotEnabled = shouldUseBillingQueueSnapshot(stage);
+  const billingEventsEnabled = shouldUseBillingQueueEvents(stage);
 
   const statusKey = Array.isArray(workflowStatus)
     ? workflowStatus.join(',')
@@ -482,30 +489,28 @@ export function useClaimableOrders(
         statusKey,
         todayOnly,
         completedTodayOnly,
-        billingEventsEnabled,
+        billingSnapshotEnabled,
       ),
-    [stage, statusKey, todayOnly, completedTodayOnly, billingEventsEnabled],
+    [stage, statusKey, todayOnly, completedTodayOnly, billingSnapshotEnabled],
   );
 
   const result = useQuery<OrderWithClaimInfo[]>({
     queryKey,
     queryFn: async () => {
-      if (!billingEventsEnabled) {
-        return fetchLegacyClaimableOrders(options, userId);
+      if (billingSnapshotEnabled) {
+        try {
+          return await fetchBillingQueueSnapshot(options, userId);
+        } catch (error) {
+          console.warn('[billing-queue] snapshot RPC failed; falling back to legacy query', error);
+          return fetchLegacyClaimableOrders(options, userId);
+        }
       }
-
-      try {
-        return await fetchBillingQueueSnapshot(options, userId);
-      } catch (error) {
-        console.warn('[billing-queue] snapshot RPC failed; falling back to legacy query', error);
-        setBillingSnapshotFailed(true);
-        return fetchLegacyClaimableOrders(options, userId);
-      }
+      return fetchLegacyClaimableOrders(options, userId);
     },
     staleTime: 0,
     refetchInterval: (query) => {
       if (query.state.data === undefined) return false;
-      if (billingEventsEnabled) {
+      if (billingSnapshotEnabled && billingEventsEnabled) {
         return billingRealtimeStatus === 'connected'
           ? BILLING_EVENT_CONNECTED_KEEPALIVE_INTERVAL_MS
           : BILLING_EVENT_DEGRADED_KEEPALIVE_INTERVAL_MS;
@@ -760,6 +765,7 @@ export function useClaimableOrders(
   return {
     ...categorized,
     isLoading: result.isLoading,
+    isError: result.isError,
   };
 }
 

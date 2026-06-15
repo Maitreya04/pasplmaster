@@ -117,6 +117,13 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   );
   const [adminUnlocked, setAdminUnlocked] = useState(() => loadFromStorage().adminUnlocked);
 
+  // Legacy access-code auth must not inherit a Supabase JWT from newer builds — branch
+  // RLS (migration 132) would hide billing orders when auth.uid() is set.
+  useEffect(() => {
+    if (safeLocalStorageGet(LS_KEYS.authenticated) !== 'true') return;
+    void supabase.auth.signOut();
+  }, []);
+
   // Backfill userId when name + role exist but id was missing (e.g. older exact-match lookup failed).
   useEffect(() => {
     if (!userName || !role || role === 'admin' || role === 'partner' || userId !== null) return;
@@ -147,6 +154,8 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   }, [role, userId]);
 
   const login = useCallback(async (code: string): Promise<boolean> => {
+    await supabase.auth.signOut();
+
     const { data, error } = await supabase
       .from('app_config')
       .select('value')
@@ -251,6 +260,8 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     const parsedId = draftIdStr ? parseInt(draftIdStr, 10) : NaN;
     const draftUserId = Number.isNaN(parsedId) ? null : parsedId;
     clearCartDraft(draftName, draftUserId);
+
+    void supabase.auth.signOut();
 
     setIsAuthenticated(false);
     setRole(null);

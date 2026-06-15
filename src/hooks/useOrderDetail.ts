@@ -115,9 +115,12 @@ export function useOrderDetail(orderId: number | null) {
           .limit(1)
           .maybeSingle();
 
-        if (customerError) throw customerError;
-        customerMobile = (customer as { mobile?: string | null } | null)?.mobile ?? null;
-        customerAddress = (customer as { address?: string | null } | null)?.address ?? null;
+        if (customerError) {
+          console.warn('[useOrderDetail] customer lookup failed', customerError);
+        } else {
+          customerMobile = (customer as { mobile?: string | null } | null)?.mobile ?? null;
+          customerAddress = (customer as { address?: string | null } | null)?.address ?? null;
+        }
       }
 
       return {
