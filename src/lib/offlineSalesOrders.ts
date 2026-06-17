@@ -234,6 +234,47 @@ export async function enqueueOfflineSalesOrder(args: {
   clientOrderKey?: string;
   payload?: SalesOrderPayload;
 }): Promise<OfflineSalesOrder> {
+  const row = createOfflineSalesOrder(args);
+  const queue = await readOfflineSalesOrders();
+  const next = queue.filter((q) => q.clientOrderKey !== row.clientOrderKey);
+  next.unshift(row);
+  await writeQueue(next);
+  return row;
+}
+
+const LOCAL_QUEUE_MIRROR_KEY = `paspl-cache:${IDB_KEY}`;
+
+function readLocalQueueMirror(): OfflineSalesOrder[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(LOCAL_QUEUE_MIRROR_KEY);
+    const rows = raw == null ? [] : (JSON.parse(raw) as OfflineSalesOrder[]);
+    return normalizeQueue(rows);
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalQueueMirror(rows: OfflineSalesOrder[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(LOCAL_QUEUE_MIRROR_KEY, JSON.stringify(rows));
+  } catch {
+    // If even the synchronous mirror is unavailable, keep the UI responsive.
+  }
+}
+
+export function createOfflineSalesOrder(args: {
+  customer: Customer;
+  transport: Transport | null;
+  userId: number | null;
+  userName: string;
+  priority: OrderPriority;
+  notes: string;
+  items: CartItem[];
+  clientOrderKey?: string;
+  payload?: SalesOrderPayload;
+}): OfflineSalesOrder {
   const clientOrderKey = args.clientOrderKey ?? createSalesOrderClientKey();
   const payload =
     args.payload ??
@@ -262,11 +303,36 @@ export async function enqueueOfflineSalesOrder(args: {
     createdAt,
     updatedAt: createdAt,
   };
+  return row;
+}
 
-  const queue = await readOfflineSalesOrders();
-  const next = queue.filter((q) => q.clientOrderKey !== clientOrderKey);
+export function enqueueOfflineSalesOrderImmediate(args: {
+  customer: Customer;
+  transport: Transport | null;
+  userId: number | null;
+  userName: string;
+  priority: OrderPriority;
+  notes: string;
+  items: CartItem[];
+  clientOrderKey?: string;
+  payload?: SalesOrderPayload;
+}): OfflineSalesOrder {
+  const row = createOfflineSalesOrder(args);
+  const queue = readLocalQueueMirror();
+  const next = queue.filter((q) => q.clientOrderKey !== row.clientOrderKey);
   next.unshift(row);
-  await writeQueue(next);
+  writeLocalQueueMirror(next);
+  notifyChanged();
+
+  void (async () => {
+    const persistedQueue = await readOfflineSalesOrders();
+    const merged = persistedQueue.filter((q) => q.clientOrderKey !== row.clientOrderKey);
+    merged.unshift(row);
+    await writeQueue(merged);
+  })().catch((error) => {
+    console.error('offline sales order background persist failed', error);
+  });
+
   return row;
 }
 

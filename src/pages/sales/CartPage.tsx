@@ -40,7 +40,9 @@ import {
   buildSalesOrderPayload,
   createSalesOrderClientKey,
   enqueueOfflineSalesOrder,
+  enqueueOfflineSalesOrderImmediate,
   isNetworkSubmitError,
+  syncOfflineSalesOrders,
   submitSalesOrderPayloadWithTimeout,
   type SalesOrderSubmitResult,
   type OfflineSalesOrder,
@@ -1381,9 +1383,46 @@ export default function CartPage(): React.JSX.Element | null {
     },
   });
 
+  const queueCurrentOrderImmediately = useCallback(() => {
+    if (!customer || !userName) {
+      toast.error('Customer and salesperson required');
+      return;
+    }
+
+    const queuedOrder = enqueueOfflineSalesOrderImmediate({
+      customer,
+      transport,
+      userId,
+      userName,
+      priority,
+      notes,
+      items,
+    });
+
+    clearCart();
+    setSubmitSuccess(null);
+    setQueuedSuccess(queuedOrder);
+    setSummaryCopied(false);
+    toast.success('Order queued. It will sync when network returns.');
+
+    if (!shouldQueueSalesOrderLocally()) {
+      void syncOfflineSalesOrders();
+    }
+  }, [
+    clearCart,
+    customer,
+    items,
+    notes,
+    priority,
+    toast,
+    transport,
+    userId,
+    userName,
+  ]);
+
   const handleSubmit = () => {
     appHaptics.impactMedium();
-    submitMutation.mutate();
+    queueCurrentOrderImmediately();
   };
 
   useEffect(() => {

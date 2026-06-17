@@ -14,7 +14,7 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.ts',
-      registerType: 'prompt',
+      registerType: 'autoUpdate',
       injectManifest: {
         // Precache only critical assets for fast initial load.
         // Route-specific chunks (admin, billing, etc.) load on-demand and get runtime-cached.
