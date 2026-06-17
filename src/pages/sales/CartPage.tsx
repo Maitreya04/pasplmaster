@@ -45,6 +45,7 @@ import {
   type SalesOrderSubmitResult,
   type OfflineSalesOrder,
 } from '../../lib/offlineSalesOrders';
+import { canReachSupabase, isBrowserOffline } from '../../lib/networkStatus';
 import {
   PageHeader,
   NumberStepper,
@@ -1068,7 +1069,7 @@ export default function CartPage(): React.JSX.Element | null {
   const [deviceOffline, setDeviceOffline] = useState(isOffline);
 
   useEffect(() => {
-    const sync = () => setDeviceOffline(!navigator.onLine);
+    const sync = () => setDeviceOffline(isBrowserOffline());
     window.addEventListener('online', sync);
     window.addEventListener('offline', sync);
     sync();
@@ -1078,8 +1079,15 @@ export default function CartPage(): React.JSX.Element | null {
     };
   }, []);
 
+  useEffect(() => {
+    if (!deviceOffline) return;
+    void queryClient.cancelQueries({ queryKey: ['stock_locationwise'] });
+    void queryClient.cancelQueries({ queryKey: ['user-stock-location'] });
+  }, [deviceOffline, queryClient]);
+
+  const effectivelyOffline = deviceOffline || isBrowserOffline();
   const stockSplitLoading =
-    !deviceOffline &&
+    !effectivelyOffline &&
     (stockLocationLoading ||
       (hasLocationwiseLines &&
         normalizedVisibleBusyCodes.some((code) =>
@@ -1099,7 +1107,7 @@ export default function CartPage(): React.JSX.Element | null {
       minute: '2-digit',
     });
   }, [normalizedVisibleBusyCodes, sellableLocationCode]);
-  const showOfflineStockHint = deviceOffline || isOffline;
+  const showOfflineStockHint = effectivelyOffline;
 
   /** Single pass over lines: splits, billing/PO lists, totals (one stock calc per line). */
   const {
@@ -1228,6 +1236,31 @@ export default function CartPage(): React.JSX.Element | null {
 
       const submittedAt = new Date();
       const clientOrderKey = createSalesOrderClientKey();
+      const queueArgs = {
+        customer,
+        transport,
+        userId,
+        userName,
+        priority,
+        notes,
+        items,
+        clientOrderKey,
+      };
+
+      const queueNow = async () => {
+        const queuedOrder = await enqueueOfflineSalesOrder(queueArgs);
+        return { kind: 'queued' as const, queuedOrder };
+      };
+
+      if (isBrowserOffline()) {
+        return queueNow();
+      }
+
+      const reachable = await canReachSupabase();
+      if (!reachable) {
+        return queueNow();
+      }
+
       const onlinePayload = buildSalesOrderPayload({
         customer,
         transport,
@@ -1241,34 +1274,13 @@ export default function CartPage(): React.JSX.Element | null {
         shortagePolicy: 'po_pending',
       });
 
-      if (deviceOffline || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
-        const queuedOrder = await enqueueOfflineSalesOrder({
-          customer,
-          transport,
-          userId,
-          userName,
-          priority,
-          notes,
-          items,
-          clientOrderKey,
-        });
-        return { kind: 'queued' as const, queuedOrder };
-      }
-
       let result: SalesOrderSubmitResult;
       try {
         result = await submitSalesOrderPayloadWithTimeout(onlinePayload);
       } catch (err) {
         if (!isNetworkSubmitError(err)) throw err;
         const queuedOrder = await enqueueOfflineSalesOrder({
-          customer,
-          transport,
-          userId,
-          userName,
-          priority,
-          notes,
-          items,
-          clientOrderKey,
+          ...queueArgs,
           payload: onlinePayload,
         });
         return { kind: 'queued' as const, queuedOrder };

@@ -7,6 +7,7 @@ import {
   type SalesOrderSubmitResult,
 } from './offlineSalesOrderResult';
 import { normalizeSalesLineUnit } from './salesUnit';
+import { isBrowserOffline } from './networkStatus';
 import { supabase } from './supabase/client';
 
 const IDB_KEY = 'offline-sales-orders-v1';
@@ -179,10 +180,10 @@ export function buildOfflineOrderSummary(args: {
   };
 }
 
-export const SALES_SUBMIT_TIMEOUT_MS = 8_000;
+export const SALES_SUBMIT_TIMEOUT_MS = 3_000;
 
 export function isNetworkSubmitError(err: unknown): boolean {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  if (isBrowserOffline()) return true;
   const message =
     err instanceof Error
       ? err.message
@@ -391,7 +392,7 @@ async function syncSingleOfflineSalesOrder(clientOrderKey: string): Promise<Offl
 export async function syncOfflineSalesOrders(): Promise<OfflineSalesOrder[]> {
   if (syncPromise) return syncPromise;
   syncPromise = (async () => {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    if (isBrowserOffline()) {
       return readOfflineSalesOrders();
     }
 
