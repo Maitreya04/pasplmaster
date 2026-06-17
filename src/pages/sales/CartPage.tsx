@@ -27,6 +27,7 @@ import { ITEMS_QUERY_KEY } from '../../hooks/useItems';
 import { broadcastItemsChanged, broadcastInvalidate } from '../../lib/crossTabSync';
 import {
   getStockQtyForLocation,
+  getOldestLocationwiseStockSyncedAt,
   stockLocationLabel,
   invalidateLocationwiseStockQueries,
   isLocationwiseStockResolving,
@@ -1022,11 +1023,12 @@ export default function CartPage(): React.JSX.Element | null {
   } = useCart();
   const toast = useToast();
   const { userId, userName } = useOrderAuthor();
-  const { userId: authUserId, userName: authUserName } = useAuth();
+  const { userId: authUserId, userName: authUserName, branch } = useAuth();
   const {
-    data: sellableLocationCode = 'main_store',
+    data: sellableLocationFromUser,
     isLoading: stockLocationLoading,
   } = useUserStockLocation(userId, userName);
+  const sellableLocationCode = sellableLocationFromUser ?? branch ?? 'main_store';
   const isOnBehalf = userId !== null && authUserId !== null && userId !== authUserId;
 
   const [submitSuccess, setSubmitSuccess] = useState<{
@@ -1067,6 +1069,21 @@ export default function CartPage(): React.JSX.Element | null {
       normalizedVisibleBusyCodes.some((code) =>
         isLocationwiseStockResolving(code, locationwiseStockFetching),
       ));
+  const stockAsOf = useMemo(() => {
+    const oldest = getOldestLocationwiseStockSyncedAt(
+      normalizedVisibleBusyCodes,
+      sellableLocationCode,
+    );
+    if (!oldest) return null;
+    return oldest.toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  }, [normalizedVisibleBusyCodes, sellableLocationCode]);
+  const isOffline =
+    typeof navigator !== 'undefined' && navigator.onLine === false;
 
   /** Single pass over lines: splits, billing/PO lists, totals (one stock calc per line). */
   const {
@@ -1826,6 +1843,12 @@ export default function CartPage(): React.JSX.Element | null {
             {stockSplitLoading && (
               <p className="mt-2 text-center text-xs font-medium text-[var(--content-tertiary)]">
                 Loading {stockLocationLabel(sellableLocationCode)} stock…
+              </p>
+            )}
+            {!stockSplitLoading && stockAsOf && (isOffline || locationwiseStockFetching) && (
+              <p className="mt-2 text-center text-xs font-medium text-[var(--content-tertiary)]">
+                Stock as of {stockAsOf}
+                {isOffline ? ' (offline estimate)' : ''}
               </p>
             )}
           </div>

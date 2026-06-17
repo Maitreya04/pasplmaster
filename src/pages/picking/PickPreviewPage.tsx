@@ -20,7 +20,7 @@ import { buildPickWalkBrandSections, orderItemBrandLabel } from '../../lib/picki
 import { rackRangeFromPreview } from '../../lib/picking/pickQueueDisplay';
 import { isInProgressPick, isPickStarted } from '../../lib/picking/pickLifecycle';
 import { startPicking, startPickingErrorMessage } from '../../lib/picking/startPicking';
-import { prepareOfflinePickSession } from '../../lib/offlinePicks';
+import { prepareOfflinePickWithRetry } from '../../lib/offlinePicks';
 import type { OrderItem } from '../../types';
 
 function getLineMrp(line: OrderItem): number | null {
@@ -174,41 +174,30 @@ export default function PickPreviewPage(): React.JSX.Element | null {
       }
 
       const resolvedClaimId = startResult.claim_id ?? claimId;
-      let offlinePrepared = false;
-      let offlinePrepareError: string | null = null;
-      if (order && resolvedClaimId) {
-        try {
-          await prepareOfflinePickSession({
-            order: {
-              ...order,
-              workflow_status: 'picking',
-              picked_at: order.picked_at ?? new Date().toISOString(),
-            },
-            claimId: resolvedClaimId,
-            userId,
-            pickerName: userName,
-          });
-          offlinePrepared = true;
-        } catch (err) {
-          offlinePrepareError = err instanceof Error ? err.message : 'Offline setup failed';
-        }
+      if (!order || !resolvedClaimId) {
+        throw new Error('offline_prepare_failed');
       }
+
+      await prepareOfflinePickWithRetry({
+        order: {
+          ...order,
+          workflow_status: 'picking',
+          picked_at: order.picked_at ?? new Date().toISOString(),
+        },
+        claimId: resolvedClaimId,
+        userId,
+        pickerName: userName,
+      });
 
       return {
         navigated: true as const,
         claimId: resolvedClaimId,
-        offlinePrepared,
-        offlinePrepareError,
       };
     },
-    onSuccess: (result) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       queryClient.invalidateQueries({ queryKey: ['picker-daily-stats'] });
-      if (result.offlinePrepared) {
-        toast.success('Offline pick ready on this device');
-      } else if (result.offlinePrepareError) {
-        toast.warning('Offline pick could not be prepared. This pick will need network.');
-      }
+      toast.success('Offline pick ready on this device');
       navigate(`/picking/pick/${orderId}`, { replace: true });
     },
     onError: (err) => {
@@ -216,6 +205,8 @@ export default function PickPreviewPage(): React.JSX.Element | null {
       if (msg.startsWith('ALREADY_CLAIMED:')) {
         const who = msg.replace('ALREADY_CLAIMED:', '');
         toast.error(`Already being picked by ${who}.`);
+      } else if (msg === 'offline_prepare_failed' || msg.includes('offline_prepare')) {
+        toast.error('Could not prepare offline pick. Check network and try again.');
       } else {
         toast.error(msg || 'Could not start picking.');
       }

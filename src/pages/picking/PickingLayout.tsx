@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { Queue, UsersThree, Barcode, CloudArrowUp, Warning } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
+import { OfflineStatusBanner } from '../../components/shared/OfflineStatusBanner';
 import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
 import { useCameraPermissionWarmup } from '../../context/CameraContext';
 import { useAuth } from '../../context/AuthContext';
@@ -58,6 +59,10 @@ function PickingLayoutInner(): React.JSX.Element | null {
 
   return (
     <div className="role-picking min-h-screen bg-[var(--bg-primary)] relative">
+      <OfflineStatusBanner
+        pendingCount={offlineStats.waiting + offlineStats.conflict + offlineStats.failed}
+        syncing={offlineStats.syncing > 0}
+      />
       {permissionState === 'prompt' && (
         <div className="px-3 pt-3 pb-1">
           <div className="rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-3 py-2.5 flex flex-wrap items-center gap-2 justify-between">

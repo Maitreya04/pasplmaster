@@ -11,6 +11,8 @@ import { supabase } from './supabase/client';
 
 const IDB_KEY = 'offline-sales-orders-v1';
 const CHANGE_EVENT = 'paspl-offline-sales-orders-changed';
+const SYNC_MAX_PER_RUN = 5;
+const SYNCED_PRUNE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type {
   OfflineSalesOrderStatus,
@@ -245,6 +247,125 @@ export async function enqueueOfflineSalesOrder(args: {
   return row;
 }
 
+export function isRetryableFailedSalesOrder(order: OfflineSalesOrder): boolean {
+  if (order.status !== 'failed') return false;
+  if (!order.lastError) return true;
+  return isNetworkSubmitError(new Error(order.lastError));
+}
+
+export async function removeOfflineSalesOrder(clientOrderKey: string): Promise<void> {
+  const queue = await readOfflineSalesOrders();
+  await writeQueue(queue.filter((row) => row.clientOrderKey !== clientOrderKey));
+}
+
+export async function retryOfflineSalesOrder(
+  clientOrderKey: string,
+): Promise<OfflineSalesOrder | null> {
+  const requeuedAt = nowIso();
+  const queue = await readOfflineSalesOrders();
+  const next = queue.map((row) =>
+    row.clientOrderKey === clientOrderKey
+      ? { ...row, status: 'queued' as const, lastError: null, updatedAt: requeuedAt }
+      : row,
+  );
+  await writeQueue(next);
+  await syncOfflineSalesOrders();
+  return (await readOfflineSalesOrders()).find((row) => row.clientOrderKey === clientOrderKey) ?? null;
+}
+
+async function pruneSyncedOfflineSalesOrders(): Promise<void> {
+  const cutoff = Date.now() - SYNCED_PRUNE_AGE_MS;
+  const queue = await readOfflineSalesOrders();
+  const next = queue.filter((row) => {
+    if (row.status !== 'synced') return true;
+    const updatedAt = new Date(row.updatedAt).getTime();
+    return Number.isNaN(updatedAt) || updatedAt >= cutoff;
+  });
+  if (next.length !== queue.length) {
+    await writeQueue(next);
+  }
+}
+
+function findNextSalesSyncTarget(queue: OfflineSalesOrder[]): OfflineSalesOrder | undefined {
+  return (
+    queue.find((row) => row.status === 'queued' || row.status === 'syncing') ??
+    queue.find((row) => isRetryableFailedSalesOrder(row))
+  );
+}
+
+async function syncSingleOfflineSalesOrder(clientOrderKey: string): Promise<OfflineSalesOrder[]> {
+  let queue = await readOfflineSalesOrders();
+  let target = queue.find((row) => row.clientOrderKey === clientOrderKey);
+  if (!target) return queue;
+
+  if (isRetryableFailedSalesOrder(target)) {
+    const requeuedAt = nowIso();
+    queue = queue.map((row) =>
+      row.clientOrderKey === clientOrderKey
+        ? { ...row, status: 'queued', lastError: null, updatedAt: requeuedAt }
+        : row,
+    );
+    await writeQueue(queue);
+    target = { ...target, status: 'queued', lastError: null };
+  }
+
+  if (target.status !== 'queued' && target.status !== 'syncing') {
+    return queue;
+  }
+
+  const startedAt = nowIso();
+  queue = queue.map((row) =>
+    row.clientOrderKey === clientOrderKey
+      ? { ...row, status: 'syncing', updatedAt: startedAt }
+      : row,
+  );
+  await writeQueue(queue);
+
+  const payloadTarget =
+    (await readOfflineSalesOrders()).find((row) => row.clientOrderKey === clientOrderKey) ?? target;
+
+  try {
+    const result = await submitSalesOrderPayload({
+      ...payloadTarget.payload,
+      client_order_key: payloadTarget.clientOrderKey,
+    });
+
+    const status = result.success ? offlineOrderStatusFromResult(result) : 'failed';
+    const updatedAt = nowIso();
+    queue = (await readOfflineSalesOrders()).map((row) =>
+      row.clientOrderKey === clientOrderKey
+        ? {
+            ...row,
+            status,
+            attempts: row.attempts + 1,
+            lastError: result.success ? null : result.detail ?? result.error ?? 'Sync failed',
+            result,
+            updatedAt,
+          }
+        : row,
+    );
+    await writeQueue(queue);
+    return queue;
+  } catch (err) {
+    const retryable = isNetworkSubmitError(err);
+    const message = err instanceof Error ? err.message : 'Sync failed';
+    const updatedAt = nowIso();
+    queue = (await readOfflineSalesOrders()).map((row) =>
+      row.clientOrderKey === clientOrderKey
+        ? {
+            ...row,
+            status: retryable ? 'queued' : 'failed',
+            attempts: row.attempts + 1,
+            lastError: message,
+            updatedAt,
+          }
+        : row,
+    );
+    await writeQueue(queue);
+    return queue;
+  }
+}
+
 export async function syncOfflineSalesOrders(): Promise<OfflineSalesOrder[]> {
   if (syncPromise) return syncPromise;
   syncPromise = (async () => {
@@ -253,57 +374,17 @@ export async function syncOfflineSalesOrders(): Promise<OfflineSalesOrder[]> {
     }
 
     let queue = await readOfflineSalesOrders();
-    const target = queue.find((row) => row.status === 'queued' || row.status === 'syncing');
-    if (!target) return queue;
+    let processed = 0;
 
-    const startedAt = nowIso();
-    queue = queue.map((row) =>
-      row.clientOrderKey === target.clientOrderKey
-        ? { ...row, status: 'syncing', updatedAt: startedAt }
-        : row,
-    );
-    await writeQueue(queue);
-
-    try {
-      const result = await submitSalesOrderPayload({
-        ...target.payload,
-        client_order_key: target.clientOrderKey,
-      });
-
-      const status = result.success ? offlineOrderStatusFromResult(result) : 'failed';
-      const updatedAt = nowIso();
-      queue = (await readOfflineSalesOrders()).map((row) =>
-        row.clientOrderKey === target.clientOrderKey
-          ? {
-              ...row,
-              status,
-              attempts: row.attempts + 1,
-              lastError: result.success ? null : result.detail ?? result.error ?? 'Sync failed',
-              result,
-              updatedAt,
-            }
-          : row,
-      );
-      await writeQueue(queue);
-      return queue;
-    } catch (err) {
-      const retryable = isNetworkSubmitError(err);
-      const message = err instanceof Error ? err.message : 'Sync failed';
-      const updatedAt = nowIso();
-      queue = (await readOfflineSalesOrders()).map((row) =>
-        row.clientOrderKey === target.clientOrderKey
-          ? {
-              ...row,
-              status: retryable ? 'queued' : 'failed',
-              attempts: row.attempts + 1,
-              lastError: message,
-              updatedAt,
-            }
-          : row,
-      );
-      await writeQueue(queue);
-      return queue;
+    while (processed < SYNC_MAX_PER_RUN) {
+      const target = findNextSalesSyncTarget(queue);
+      if (!target) break;
+      queue = await syncSingleOfflineSalesOrder(target.clientOrderKey);
+      processed += 1;
     }
+
+    await pruneSyncedOfflineSalesOrders();
+    return queue;
   })().finally(() => {
     syncPromise = null;
   });

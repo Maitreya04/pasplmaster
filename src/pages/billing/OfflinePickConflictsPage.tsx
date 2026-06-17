@@ -1,8 +1,11 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CloudWarning, Package, UserCircle, Clock } from '@phosphor-icons/react';
 import { PageHeader, Skeleton, EmptyState } from '../../components/shared';
+import { resolveOfflinePickConflict } from '../../lib/offlinePicks';
 import { supabase } from '../../lib/supabase/client';
+import { useToast } from '../../context/ToastContext';
 
 interface OfflinePickConflictRow {
   id: number;
@@ -49,11 +52,35 @@ function formatWhen(iso: string | null | undefined): string {
 }
 
 export default function OfflinePickConflictsPage(): React.JSX.Element | null {
+  const toast = useToast();
+  const queryClient = useQueryClient();
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [actingId, setActingId] = useState<number | null>(null);
   const { data, isLoading, error } = useQuery({
     queryKey: ['offline-pick-conflicts'],
     queryFn: fetchOfflinePickConflicts,
     refetchInterval: 30_000,
+  });
+
+  const resolveMutation = useMutation({
+    mutationFn: async (args: { submissionId: number; action: 'discard' | 'release_claim' }) => {
+      await resolveOfflinePickConflict(args);
+    },
+    onSuccess: (_result, variables) => {
+      toast.success(
+        variables.action === 'release_claim'
+          ? 'Claim released and packet discarded'
+          : 'Offline pick packet discarded',
+      );
+      void queryClient.invalidateQueries({ queryKey: ['offline-pick-conflicts'] });
+      void queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
+      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+      setActingId(null);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Could not resolve conflict');
+      setActingId(null);
+    },
   });
 
   const rows = data ?? [];
@@ -111,6 +138,7 @@ export default function OfflinePickConflictsPage(): React.JSX.Element | null {
               (typeof row.result?.reason === 'string' ? row.result.reason : null) ??
               'Needs review';
             const expanded = expandedId === row.id;
+            const acting = actingId === row.id && resolveMutation.isPending;
             return (
               <article
                 key={row.id}
@@ -160,6 +188,31 @@ export default function OfflinePickConflictsPage(): React.JSX.Element | null {
                 <p className="mt-3 rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 text-xs font-semibold text-[var(--content-secondary)]">
                   {reason}
                 </p>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={acting}
+                    onClick={() => {
+                      setActingId(row.id);
+                      resolveMutation.mutate({ submissionId: row.id, action: 'release_claim' });
+                    }}
+                    className="min-h-10 rounded-lg border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 text-xs font-bold text-[var(--content-warning-on-light)] disabled:opacity-50"
+                  >
+                    Release claim to pool
+                  </button>
+                  <button
+                    type="button"
+                    disabled={acting}
+                    onClick={() => {
+                      setActingId(row.id);
+                      resolveMutation.mutate({ submissionId: row.id, action: 'discard' });
+                    }}
+                    className="min-h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-3 text-xs font-bold text-[var(--content-secondary)] disabled:opacity-50"
+                  >
+                    Discard packet
+                  </button>
+                </div>
 
                 <button
                   type="button"

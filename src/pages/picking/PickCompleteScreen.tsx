@@ -1,11 +1,14 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle, Warning, Flag, ArrowRight, Clock, Package, CloudArrowUp } from '@phosphor-icons/react';
+import { CheckCircle, Warning, Flag, ArrowRight, Clock, Package, CloudArrowUp, ArrowsClockwise } from '@phosphor-icons/react';
 import { BigButton } from '../../components/shared';
 import { formatLineCountLabel } from '../../lib/picking/pickQueueDisplay';
+import { retryOfflinePickSync } from '../../lib/offlinePicks';
 import type { PickCompletionSnapshot } from '../../lib/picking/pickCompletionSnapshot';
 
 interface PickCompleteScreenProps {
   snapshot: PickCompletionSnapshot;
+  orderId?: number | null;
 }
 
 function formatReceiptTime(iso: string): string {
@@ -32,8 +35,10 @@ function formatPickDuration(startIso: string | null, endIso: string): string {
   return rest > 0 ? `${hours} hr ${rest} min` : `${hours} hr`;
 }
 
-export function PickCompleteScreen({ snapshot }: PickCompleteScreenProps): React.JSX.Element | null {
+export function PickCompleteScreen({ snapshot, orderId }: PickCompleteScreenProps): React.JSX.Element | null {
   const navigate = useNavigate();
+  const [retrying, setRetrying] = useState(false);
+  const [retryMessage, setRetryMessage] = useState<string | null>(null);
   const {
     orderNumber,
     customerName,
@@ -182,6 +187,38 @@ export function PickCompleteScreen({ snapshot }: PickCompleteScreenProps): React
         </section>
 
         <div className="mt-auto pt-4 space-y-3">
+          {(saveState === 'queued' || saveState === 'needs_review') && orderId != null && (
+            <BigButton
+              variant="secondary"
+              loading={retrying}
+              onClick={() => {
+                setRetrying(true);
+                setRetryMessage(null);
+                void retryOfflinePickSync(orderId)
+                  .then((session) => {
+                    if (session?.status === 'applied') {
+                      setRetryMessage('Pick synced successfully.');
+                    } else if (session?.status === 'conflict' || session?.status === 'failed') {
+                      setRetryMessage(session.lastError ?? 'Sync still needs review.');
+                    } else {
+                      setRetryMessage('Still waiting for network. Will retry automatically.');
+                    }
+                  })
+                  .catch((err) => {
+                    setRetryMessage(err instanceof Error ? err.message : 'Retry failed');
+                  })
+                  .finally(() => setRetrying(false));
+              }}
+            >
+              <ArrowsClockwise size={20} weight="bold" />
+              Retry sync now
+            </BigButton>
+          )}
+          {retryMessage && (
+            <p className="text-center text-xs font-semibold text-[var(--content-secondary)]">
+              {retryMessage}
+            </p>
+          )}
           <BigButton
             variant="primary"
             onClick={() => navigate('/picking', { replace: true })}

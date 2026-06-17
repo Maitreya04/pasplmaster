@@ -334,3 +334,22 @@ export function useLocationwiseStock(busyCodes: Array<number | null | undefined>
     refetchOnReconnect: true,
   });
 }
+
+export function getOldestLocationwiseStockSyncedAt(
+  busyCodes: number[],
+  locationCode: StockLocationCode,
+): Date | null {
+  let oldestMs: number | null = null;
+  for (const busyCode of busyCodes) {
+    const entry = stockByBusyCodeCache.get(busyCode);
+    if (!entry) continue;
+    const syncedAtIso =
+      locationCode === 'jabalpur'
+        ? entry.stock.jabalpurDeviceSyncedAt
+        : entry.stock.mainStoreDeviceSyncedAt;
+    const candidate = syncedAtIso ? new Date(syncedAtIso).getTime() : entry.fetchedAt;
+    if (!Number.isFinite(candidate)) continue;
+    if (oldestMs == null || candidate < oldestMs) oldestMs = candidate;
+  }
+  return oldestMs == null ? null : new Date(oldestMs);
+}

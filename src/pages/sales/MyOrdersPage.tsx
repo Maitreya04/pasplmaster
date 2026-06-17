@@ -34,6 +34,10 @@ import {
 } from '../../lib/sales/orderAllowsSalesLineEdit';
 import { SalesEditAddLineSheet } from './SalesEditAddLineSheet';
 import {
+  removeOfflineSalesOrder,
+  retryOfflineSalesOrder,
+} from '../../lib/offlineSalesOrders';
+import {
   useOfflineSalesOrders,
   type OfflineSalesOrder,
 } from '../../hooks/useOfflineSalesOrders';
@@ -453,6 +457,8 @@ function OrderCard({
 }
 
 function OfflineOrderCard({ order }: { order: OfflineSalesOrder }) {
+  const toast = useToast();
+  const [acting, setActing] = useState(false);
   const statusLabel =
     order.status === 'syncing'
       ? 'Syncing'
@@ -502,6 +508,42 @@ function OfflineOrderCard({ order }: { order: OfflineSalesOrder }) {
         )}
         {order.status === 'failed' && order.lastError && (
           <p className="text-xs text-[var(--content-negative)]">{order.lastError}</p>
+        )}
+        {(order.status === 'failed' || order.status === 'queued') && (
+          <div className="flex flex-wrap gap-2 pt-1">
+            <button
+              type="button"
+              disabled={acting}
+              onClick={() => {
+                setActing(true);
+                void retryOfflineSalesOrder(order.clientOrderKey)
+                  .then(() => toast.success('Retrying sync'))
+                  .catch((err) =>
+                    toast.error(err instanceof Error ? err.message : 'Retry failed'),
+                  )
+                  .finally(() => setActing(false));
+              }}
+              className="rounded-lg border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] px-3 py-1.5 text-xs font-semibold text-[var(--content-accent)] disabled:opacity-50"
+            >
+              Retry sync
+            </button>
+            <button
+              type="button"
+              disabled={acting}
+              onClick={() => {
+                setActing(true);
+                void removeOfflineSalesOrder(order.clientOrderKey)
+                  .then(() => toast.info('Queued order removed from this device'))
+                  .catch((err) =>
+                    toast.error(err instanceof Error ? err.message : 'Remove failed'),
+                  )
+                  .finally(() => setActing(false));
+              }}
+              className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-xs font-semibold text-[var(--content-secondary)] disabled:opacity-50"
+            >
+              Remove
+            </button>
+          </div>
         )}
         <p className="text-xs text-[var(--content-tertiary)]">
           Saved {formatTimeAgo(order.createdAt)}

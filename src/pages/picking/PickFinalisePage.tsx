@@ -203,7 +203,7 @@ export default function PickFinalisePage(): React.JSX.Element | null {
   }
 
   if (completionSnapshot) {
-    return <PickCompleteScreen snapshot={completionSnapshot} />;
+    return <PickCompleteScreen snapshot={completionSnapshot} orderId={orderId} />;
   }
 
   if (isLoading) {

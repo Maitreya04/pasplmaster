@@ -1,9 +1,11 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CloudArrowUp, PlusCircle, ListBullets, HourglassHigh, MapPin } from '@phosphor-icons/react';
+import { CloudArrowUp, PlusCircle, ListBullets, HourglassHigh, MapPin, WifiSlash } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
 import { useSalesDashboard } from '../../hooks/useSalesDashboard';
 import { useSalesPendingRecovery } from '../../hooks/useSalesPendingRecovery';
 import { useOfflineSalesOrderStats } from '../../hooks/useOfflineSalesOrders';
+import { getSalesOfflineReadiness } from '../../lib/offlineReadiness';
 import { Card, Skeleton } from '../../components/shared';
 import type { Order } from '../../types';
 
@@ -233,6 +235,12 @@ export default function SalesHome(): React.JSX.Element | null {
   const { data, isLoading } = useSalesDashboard(userName);
   const { data: pendingRecovery = [] } = useSalesPendingRecovery(userId, userName);
   const offlineStats = useOfflineSalesOrderStats();
+  const [offlineReady, setOfflineReady] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    void getSalesOfflineReadiness().then((readiness) => setOfflineReady(readiness.ready));
+  }, []);
+
   const actionableRecoveryCount = pendingRecovery.filter(
     (item) => item.recovery_status === 'back_in_stock' || item.recovery_status === 'needs_checked',
   ).length;
@@ -247,6 +255,28 @@ export default function SalesHome(): React.JSX.Element | null {
           </h1>
           <p className="text-sm text-[var(--content-tertiary)] mt-0.5">{todayFormatted()}</p>
         </header>
+
+        {offlineReady === false && (
+          <Card className="border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]">
+            <div className="flex items-center gap-3">
+              <WifiSlash size={22} weight="bold" className="shrink-0 text-[var(--content-warning)]" />
+              <div className="min-w-0">
+                <p className="font-semibold text-[var(--content-primary)]">Not offline-ready yet</p>
+                <p className="mt-0.5 text-xs text-[var(--content-secondary)]">
+                  Open the app online once so items, customers, and stock cache on this device.
+                </p>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {offlineReady === true && (
+          <Card className="border-[var(--border-accent)] bg-[var(--bg-accent-subtle)]">
+            <p className="text-sm font-semibold text-[var(--content-accent)]">
+              Offline-ready — catalog and stock cached on this device
+            </p>
+          </Card>
+        )}
 
         {/* Hero: Annual target ring */}
         <HeroCard

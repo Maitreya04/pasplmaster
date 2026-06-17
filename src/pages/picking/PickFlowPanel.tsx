@@ -8,7 +8,6 @@ import {
   ArrowRight,
   ArrowCounterClockwise,
   Flask,
-  CloudArrowUp,
 } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase/client';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
@@ -112,10 +111,13 @@ import { pickLineBillingRate } from '../../lib/picking/pickMrpDisplay';
 import { commitPickMrpSegment, undoPickMrpSegment } from '../../lib/picking/splitMrpSegment';
 import {
   applyOfflinePickTransition,
+  extendOfflinePickLease,
   isOfflinePickUsable,
   resetOfflinePickLine,
   saveOfflinePickLineMrpMap,
 } from '../../lib/offlinePicks';
+import { OfflinePickLeaseBanner } from '../../components/picking/OfflinePickLeaseBanner';
+import { getOfflineLeaseWarningLevel } from '../../lib/offlinePickLease';
 import {
   isPickNoLongerActiveError,
   pickNoLongerActiveMessage,
@@ -415,6 +417,42 @@ export function PickFlowPanel({
   useEffect(() => {
     writePickLineMrpMap(orderId, lineMrpMap, isLab ? 'lab' : 'production');
   }, [orderId, lineMrpMap, isLab]);
+
+  const [leaseExtending, setLeaseExtending] = useState(false);
+
+  const handleExtendOfflineLease = useCallback(async () => {
+    if (!offlinePickSession?.clientPickKey || userId == null) return;
+    setLeaseExtending(true);
+    try {
+      await extendOfflinePickLease({
+        clientPickKey: offlinePickSession.clientPickKey,
+        userId,
+      });
+      toast.success('Offline lease extended');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not extend lease');
+    } finally {
+      setLeaseExtending(false);
+    }
+  }, [offlinePickSession?.clientPickKey, toast, userId]);
+
+  useEffect(() => {
+    if (!offlinePickActive || !offlinePickSession?.clientPickKey || userId == null) return;
+    if (typeof navigator === 'undefined' || !navigator.onLine) return;
+    const level = getOfflineLeaseWarningLevel(offlinePickSession.offlineLeaseExpiresAt);
+    if (level !== 'soon' && level !== 'urgent') return;
+    void extendOfflinePickLease({
+      clientPickKey: offlinePickSession.clientPickKey,
+      userId,
+    }).catch(() => {
+      // Best-effort silent extend when briefly online.
+    });
+  }, [
+    offlinePickActive,
+    offlinePickSession?.clientPickKey,
+    offlinePickSession?.offlineLeaseExpiresAt,
+    userId,
+  ]);
 
   useEffect(() => {
     if (!orderId || !offlinePickActive) return;
@@ -2366,10 +2404,11 @@ export function PickFlowPanel({
         </div>
       )}
       {offlinePickActive && (
-        <div className="z-50 flex shrink-0 items-center gap-2 border-b border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2 text-xs font-semibold text-[var(--content-warning-on-light)]">
-          <CloudArrowUp size={16} weight="fill" className="shrink-0" />
-          <span>Offline-ready pick — scans save on this device and sync when you finish.</span>
-        </div>
+        <OfflinePickLeaseBanner
+          leaseExpiresAt={offlinePickSession?.offlineLeaseExpiresAt}
+          onExtendLease={() => void handleExtendOfflineLease()}
+          extending={leaseExtending}
+        />
       )}
       <header className="z-40 shrink-0 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-md">
         <div className="flex items-start gap-2 px-3 py-3 sm:px-4">

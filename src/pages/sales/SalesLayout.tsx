@@ -3,6 +3,7 @@ import { Link, Outlet } from 'react-router-dom';
 import { CloudArrowUp, House, PlusCircle, ListBullets, HourglassHigh, MapPin } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
+import { OfflineStatusBanner } from '../../components/shared/OfflineStatusBanner';
 import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
 import { CartProvider } from '../../context/CartContext';
 import { fetchAllItems, prefetchItems } from '../../hooks/useItems';
@@ -72,6 +73,7 @@ export default function SalesLayout(): React.JSX.Element | null {
 
   const { userId, userName, role } = useAuth();
   const push = useRolePushNotifications({ role, userId, userName });
+  const offlineStats = useOfflineSalesOrderStats();
   useOfflineSalesOrderSync();
   const { nearbyCustomer, dismissNearby } = useGeofenceProximity();
 
@@ -80,6 +82,10 @@ export default function SalesLayout(): React.JSX.Element | null {
       <CartProvider key={`${userId ?? 'anon'}:${userName ?? 'guest'}`}>
         <div className="role-sales min-h-screen bg-[var(--bg-primary)] relative">
           <SalesTopBar userId={userId} role={role} push={push} />
+          <OfflineStatusBanner
+            pendingCount={offlineStats.active + offlineStats.partial + offlineStats.noStock + offlineStats.failed}
+            syncing={offlineStats.syncing > 0}
+          />
           {nearbyCustomer && (
             <div className="pt-2">
               <NearbyGeofencePrompt customer={nearbyCustomer} onDismiss={dismissNearby} />

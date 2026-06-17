@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
-import { precacheAndRoute } from 'workbox-precaching';
-import { registerRoute } from 'workbox-routing';
+import { precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching';
+import { registerRoute, NavigationRoute } from 'workbox-routing';
 import { CacheFirst, StaleWhileRevalidate } from 'workbox-strategies';
 import { ExpirationPlugin } from 'workbox-expiration';
 
@@ -9,6 +9,13 @@ declare const self: ServiceWorkerGlobalScope & {
 };
 
 precacheAndRoute(self.__WB_MANIFEST);
+
+const navigationHandler = createHandlerBoundToURL('/index.html');
+registerRoute(
+  new NavigationRoute(navigationHandler, {
+    denylist: [/^\/_/, /\/[^/?]+\.[^/]+$/],
+  }),
+);
 
 // Cache JS chunks not in precache (admin, billing, sales pages) on first use.
 registerRoute(

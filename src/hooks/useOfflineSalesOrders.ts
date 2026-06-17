@@ -9,6 +9,8 @@ import {
 import { broadcastInvalidate } from '../lib/crossTabSync';
 import { ITEMS_QUERY_KEY } from './useItems';
 import { invalidateLocationwiseStockQueries } from './useLocationwiseStock';
+import { buildOrderCustomerMessage } from '../lib/buildOrderCustomerMessage';
+import { useToast } from '../context/ToastContext';
 
 export type { OfflineSalesOrder } from '../lib/offlineSalesOrders';
 
@@ -90,6 +92,7 @@ export function useOfflineSalesOrderStats() {
 
 export function useOfflineSalesOrderSync(): void {
   const queryClient = useQueryClient();
+  const toast = useToast();
 
   useEffect(() => {
     let stopped = false;
@@ -103,6 +106,40 @@ export function useOfflineSalesOrderSync(): void {
       broadcastInvalidate(['orders']);
     };
 
+    const notifySyncedOrders = (before: OfflineSalesOrder[], after: OfflineSalesOrder[]) => {
+      const beforeByKey = new Map(before.map((order) => [order.clientOrderKey, order]));
+      for (const order of after) {
+        const prev = beforeByKey.get(order.clientOrderKey);
+        if (!prev) continue;
+        if (!['queued', 'syncing'].includes(prev.status)) continue;
+        if (order.status !== 'synced' && order.status !== 'partial') continue;
+        if (!order.result?.order_number) continue;
+
+        const lines = (order.result.lines ?? []).map((line) => ({
+          name: line.name,
+          qtyRequested: line.qty_requested,
+          qtyShip: line.qty_ship,
+          qtyPo: line.qty_po,
+          qtyUnavailable: line.qty_skipped,
+          isFoc: line.is_foc ?? false,
+        }));
+        const shareText = buildOrderCustomerMessage({
+          customerName: order.payload.customer_name,
+          date: new Date(order.updatedAt),
+          lines,
+        });
+
+        toast.success(`Order ${order.result.order_number} synced`, {
+          action: {
+            label: 'Copy message',
+            onClick: () => {
+              void navigator.clipboard.writeText(shareText);
+            },
+          },
+        });
+      }
+    };
+
     const run = async () => {
       const before = await readOfflineSalesOrders();
       const beforeDone = before.filter((o) =>
@@ -110,6 +147,7 @@ export function useOfflineSalesOrderSync(): void {
       ).length;
       const after = await syncOfflineSalesOrders();
       if (stopped) return;
+      notifySyncedOrders(before, after);
       const afterDone = after.filter((o) =>
         ['synced', 'partial', 'no_stock'].includes(o.status),
       ).length;
@@ -141,5 +179,5 @@ export function useOfflineSalesOrderSync(): void {
       document.removeEventListener('visibilitychange', onVisibility);
       window.clearInterval(timer);
     };
-  }, [queryClient]);
+  }, [queryClient, toast]);
 }
