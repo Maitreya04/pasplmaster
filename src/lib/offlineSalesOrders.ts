@@ -7,7 +7,7 @@ import {
   type SalesOrderSubmitResult,
 } from './offlineSalesOrderResult';
 import { normalizeSalesLineUnit } from './salesUnit';
-import { isBrowserOffline, shouldQueueSalesOrderLocally } from './networkStatus';
+import { isBrowserOffline } from './networkStatus';
 import { supabase } from './supabase/client';
 
 const IDB_KEY = 'offline-sales-orders-v1';
@@ -181,6 +181,7 @@ export function buildOfflineOrderSummary(args: {
 }
 
 export const SALES_SUBMIT_TIMEOUT_MS = 2_000;
+const SALES_SYNC_TIMEOUT_MS = 12_000;
 
 export function isNetworkSubmitError(err: unknown): boolean {
   if (isBrowserOffline()) return true;
@@ -414,10 +415,13 @@ async function syncSingleOfflineSalesOrder(clientOrderKey: string): Promise<Offl
     (await readOfflineSalesOrders()).find((row) => row.clientOrderKey === clientOrderKey) ?? target;
 
   try {
-    const result = await submitSalesOrderPayload({
-      ...payloadTarget.payload,
-      client_order_key: payloadTarget.clientOrderKey,
-    });
+    const result = await submitSalesOrderPayloadWithTimeout(
+      {
+        ...payloadTarget.payload,
+        client_order_key: payloadTarget.clientOrderKey,
+      },
+      SALES_SYNC_TIMEOUT_MS,
+    );
 
     const status = result.success ? offlineOrderStatusFromResult(result) : 'failed';
     const updatedAt = nowIso();
@@ -458,7 +462,7 @@ async function syncSingleOfflineSalesOrder(clientOrderKey: string): Promise<Offl
 export async function syncOfflineSalesOrders(): Promise<OfflineSalesOrder[]> {
   if (syncPromise) return syncPromise;
   syncPromise = (async () => {
-    if (shouldQueueSalesOrderLocally()) {
+    if (isBrowserOffline()) {
       return readOfflineSalesOrders();
     }
 

@@ -11,6 +11,7 @@ import { ITEMS_QUERY_KEY } from './useItems';
 import { invalidateLocationwiseStockQueries } from './useLocationwiseStock';
 import { buildOrderCustomerMessage } from '../lib/buildOrderCustomerMessage';
 import { useToast } from '../context/ToastContext';
+import { isBrowserOffline, markDeviceOnline } from '../lib/networkStatus';
 
 export type { OfflineSalesOrder } from '../lib/offlineSalesOrders';
 
@@ -141,6 +142,9 @@ export function useOfflineSalesOrderSync(): void {
     };
 
     const run = async () => {
+      if (!isBrowserOffline()) {
+        markDeviceOnline();
+      }
       const before = await readOfflineSalesOrders();
       const beforeDone = before.filter((o) =>
         ['synced', 'partial', 'no_stock'].includes(o.status),
@@ -155,6 +159,7 @@ export function useOfflineSalesOrderSync(): void {
     };
 
     const onOnline = () => {
+      markDeviceOnline();
       void run();
     };
     const onFocus = () => {
@@ -170,7 +175,7 @@ export function useOfflineSalesOrderSync(): void {
     document.addEventListener('visibilitychange', onVisibility);
     const timer = window.setInterval(() => {
       void run();
-    }, 60_000);
+    }, 10_000);
 
     return () => {
       stopped = true;
