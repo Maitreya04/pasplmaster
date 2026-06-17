@@ -45,7 +45,7 @@ import {
   type SalesOrderSubmitResult,
   type OfflineSalesOrder,
 } from '../../lib/offlineSalesOrders';
-import { canReachSupabase, isBrowserOffline } from '../../lib/networkStatus';
+import { shouldQueueSalesOrderLocally, markDeviceOffline, markDeviceOnline, isBrowserOffline } from '../../lib/networkStatus';
 import {
   PageHeader,
   NumberStepper,
@@ -1064,18 +1064,25 @@ export default function CartPage(): React.JSX.Element | null {
     data: locationwiseStock = {},
     isFetching: locationwiseStockFetching,
   } = useLocationwiseStock(visibleBusyCodes);
-  const isOffline =
-    typeof navigator !== 'undefined' && navigator.onLine === false;
-  const [deviceOffline, setDeviceOffline] = useState(isOffline);
+  const [deviceOffline, setDeviceOffline] = useState(shouldQueueSalesOrderLocally);
 
   useEffect(() => {
-    const sync = () => setDeviceOffline(isBrowserOffline());
-    window.addEventListener('online', sync);
-    window.addEventListener('offline', sync);
-    sync();
+    if (isBrowserOffline()) markDeviceOffline();
+
+    const onOffline = () => {
+      markDeviceOffline();
+      setDeviceOffline(true);
+    };
+    const onOnline = () => {
+      markDeviceOnline();
+      setDeviceOffline(shouldQueueSalesOrderLocally());
+    };
+
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
     return () => {
-      window.removeEventListener('online', sync);
-      window.removeEventListener('offline', sync);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
     };
   }, []);
 
@@ -1085,7 +1092,7 @@ export default function CartPage(): React.JSX.Element | null {
     void queryClient.cancelQueries({ queryKey: ['user-stock-location'] });
   }, [deviceOffline, queryClient]);
 
-  const effectivelyOffline = deviceOffline || isBrowserOffline();
+  const effectivelyOffline = deviceOffline || shouldQueueSalesOrderLocally();
   const stockSplitLoading =
     !effectivelyOffline &&
     (stockLocationLoading ||
@@ -1252,12 +1259,7 @@ export default function CartPage(): React.JSX.Element | null {
         return { kind: 'queued' as const, queuedOrder };
       };
 
-      if (isBrowserOffline()) {
-        return queueNow();
-      }
-
-      const reachable = await canReachSupabase();
-      if (!reachable) {
+      if (shouldQueueSalesOrderLocally()) {
         return queueNow();
       }
 
