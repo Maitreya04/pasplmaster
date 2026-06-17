@@ -41,7 +41,7 @@ import {
   createSalesOrderClientKey,
   enqueueOfflineSalesOrder,
   isNetworkSubmitError,
-  submitSalesOrderPayload,
+  submitSalesOrderPayloadWithTimeout,
   type SalesOrderSubmitResult,
   type OfflineSalesOrder,
 } from '../../lib/offlineSalesOrders';
@@ -1063,12 +1063,29 @@ export default function CartPage(): React.JSX.Element | null {
     data: locationwiseStock = {},
     isFetching: locationwiseStockFetching,
   } = useLocationwiseStock(visibleBusyCodes);
+  const isOffline =
+    typeof navigator !== 'undefined' && navigator.onLine === false;
+  const [deviceOffline, setDeviceOffline] = useState(isOffline);
+
+  useEffect(() => {
+    const sync = () => setDeviceOffline(!navigator.onLine);
+    window.addEventListener('online', sync);
+    window.addEventListener('offline', sync);
+    sync();
+    return () => {
+      window.removeEventListener('online', sync);
+      window.removeEventListener('offline', sync);
+    };
+  }, []);
+
   const stockSplitLoading =
-    stockLocationLoading ||
-    (hasLocationwiseLines &&
-      normalizedVisibleBusyCodes.some((code) =>
-        isLocationwiseStockResolving(code, locationwiseStockFetching),
-      ));
+    !deviceOffline &&
+    (stockLocationLoading ||
+      (hasLocationwiseLines &&
+        normalizedVisibleBusyCodes.some((code) =>
+          isLocationwiseStockResolving(code, locationwiseStockFetching),
+        )));
+
   const stockAsOf = useMemo(() => {
     const oldest = getOldestLocationwiseStockSyncedAt(
       normalizedVisibleBusyCodes,
@@ -1082,8 +1099,7 @@ export default function CartPage(): React.JSX.Element | null {
       minute: '2-digit',
     });
   }, [normalizedVisibleBusyCodes, sellableLocationCode]);
-  const isOffline =
-    typeof navigator !== 'undefined' && navigator.onLine === false;
+  const showOfflineStockHint = deviceOffline || isOffline;
 
   /** Single pass over lines: splits, billing/PO lists, totals (one stock calc per line). */
   const {
@@ -1225,7 +1241,7 @@ export default function CartPage(): React.JSX.Element | null {
         shortagePolicy: 'po_pending',
       });
 
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      if (deviceOffline || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
         const queuedOrder = await enqueueOfflineSalesOrder({
           customer,
           transport,
@@ -1241,7 +1257,7 @@ export default function CartPage(): React.JSX.Element | null {
 
       let result: SalesOrderSubmitResult;
       try {
-        result = await submitSalesOrderPayload(onlinePayload);
+        result = await submitSalesOrderPayloadWithTimeout(onlinePayload);
       } catch (err) {
         if (!isNetworkSubmitError(err)) throw err;
         const queuedOrder = await enqueueOfflineSalesOrder({
@@ -1845,10 +1861,10 @@ export default function CartPage(): React.JSX.Element | null {
                 Loading {stockLocationLabel(sellableLocationCode)} stock…
               </p>
             )}
-            {!stockSplitLoading && stockAsOf && (isOffline || locationwiseStockFetching) && (
+            {!stockSplitLoading && stockAsOf && (showOfflineStockHint || locationwiseStockFetching) && (
               <p className="mt-2 text-center text-xs font-medium text-[var(--content-tertiary)]">
                 Stock as of {stockAsOf}
-                {isOffline ? ' (offline estimate)' : ''}
+                {showOfflineStockHint ? ' (offline estimate)' : ''}
               </p>
             )}
           </div>

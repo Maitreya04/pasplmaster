@@ -179,6 +179,8 @@ export function buildOfflineOrderSummary(args: {
   };
 }
 
+export const SALES_SUBMIT_TIMEOUT_MS = 8_000;
+
 export function isNetworkSubmitError(err: unknown): boolean {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
   const message =
@@ -187,7 +189,9 @@ export function isNetworkSubmitError(err: unknown): boolean {
       : typeof err === 'object' && err !== null && 'message' in err
         ? String((err as { message: unknown }).message)
         : String(err ?? '');
-  return /failed to fetch|network|fetch failed|timeout|load failed|request/i.test(message);
+  return /failed to fetch|network|fetch failed|timeout|load failed|request|submit_timeout/i.test(
+    message,
+  );
 }
 
 export async function submitSalesOrderPayload(
@@ -198,6 +202,24 @@ export async function submitSalesOrderPayload(
   });
   if (error) throw error;
   return data as SalesOrderSubmitResult;
+}
+
+/** Avoid long hangs when the device reports online but the network is dead. */
+export async function submitSalesOrderPayloadWithTimeout(
+  payload: SalesOrderPayload,
+  timeoutMs = SALES_SUBMIT_TIMEOUT_MS,
+): Promise<SalesOrderSubmitResult> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      submitSalesOrderPayload(payload),
+      new Promise<SalesOrderSubmitResult>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('submit_timeout')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 export async function enqueueOfflineSalesOrder(args: {

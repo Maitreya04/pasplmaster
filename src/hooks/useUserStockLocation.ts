@@ -57,5 +57,7 @@ export function useUserStockLocation(
       return normalizeStockLocationCode(match?.stock_location_code);
     },
     staleTime: 5 * 60 * 1000,
+    enabled: typeof navigator === 'undefined' ? true : navigator.onLine,
+    retry: false,
   });
 }

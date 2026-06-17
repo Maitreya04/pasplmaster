@@ -319,7 +319,9 @@ export function useLocationwiseStock(busyCodes: Array<number | null | undefined>
   return useQuery<Record<number, ItemLocationStock>>({
     queryKey: ['stock_locationwise', busyCodesKey],
     queryFn: () => fetchLocationwiseStock(normalizedBusyCodes),
-    enabled: normalizedBusyCodes.length > 0,
+    enabled:
+      normalizedBusyCodes.length > 0 &&
+      (typeof navigator === 'undefined' || navigator.onLine),
     staleTime: POLL_INTERVAL_MS,
     placeholderData: () => {
       const cached = snapshotLocationwiseStockFromCache(normalizedBusyCodes);
@@ -328,10 +330,13 @@ export function useLocationwiseStock(busyCodes: Array<number | null | undefined>
       }
       return Object.keys(cached).length > 0 ? cached : undefined;
     },
-    refetchInterval: POLL_INTERVAL_MS,
+    refetchInterval: () =>
+      typeof navigator !== 'undefined' && !navigator.onLine ? false : POLL_INTERVAL_MS,
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: typeof navigator === 'undefined' ? true : navigator.onLine,
     refetchOnReconnect: true,
+    retry: (failureCount) =>
+      typeof navigator !== 'undefined' && !navigator.onLine ? false : failureCount < 1,
   });
 }
 
