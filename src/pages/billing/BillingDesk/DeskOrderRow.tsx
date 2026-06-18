@@ -6,6 +6,7 @@ import type { PickerLoadInfo } from '../../../hooks/usePickerLoad';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 import { BillingFigure } from '../../../components/billing/shared/BillingFigure';
 import { AssignPickerStage } from '../../../components/billing/stages/AssignPickerStage';
+import { DeskCustomerLocation } from './DeskCustomerLocation';
 import { DeskOrderQuickActions } from './DeskOrderQuickActions';
 import { DeskPickProgress } from './DeskPickProgress';
 import {
@@ -174,6 +175,8 @@ export function DeskOrderRowCard({
             <p className={`${deskType.orderTitle} line-clamp-2 mt-1`} title={order.customer_name}>
               {order.customer_name}
             </p>
+
+            <DeskCustomerLocation order={order} />
 
             <p className={`${deskType.orderDetail} mt-0.5 flex flex-wrap items-baseline gap-x-1`}>
               <span>

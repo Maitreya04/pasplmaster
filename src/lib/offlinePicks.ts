@@ -11,8 +11,10 @@ import { supabase } from './supabase/client';
 import type { OrderItem, OrderWithItems, ScanResult } from '../types';
 
 const IDB_KEY = 'offline-picks-v1';
+const LOCAL_QUEUE_MIRROR_KEY = `paspl-cache:${IDB_KEY}`;
 const CHANGE_EVENT = 'paspl-offline-picks-changed';
 const PREPARE_RETRY_DELAYS_MS = [0, 1_000, 2_000];
+const BOOTSTRAP_TIMEOUT_MS = 8_000;
 const SYNC_MAX_PER_RUN = 5;
 const APPLIED_PRUNE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -52,7 +54,7 @@ export interface OfflinePickPayload {
 export interface OfflinePickSession {
   clientPickKey: string;
   orderId: number;
-  claimId: number;
+  claimId: number | null;
   pickerUserId: number;
   pickerName: string | null;
   orderNumber: string;
@@ -69,6 +71,8 @@ export interface OfflinePickSession {
   boxCount: number | null;
   orderSnapshot: OrderWithItems;
   lineMrpByItemId: Record<string, PickLineMrpState>;
+  /** Pool orders need a server claim before bootstrap can finish. */
+  fromPool?: boolean;
 }
 
 let syncPromise: Promise<OfflinePickSession[]> | null = null;
@@ -83,12 +87,64 @@ function notifyChanged(): void {
   }
 }
 
+function normalizeSession(row: OfflinePickSession): OfflinePickSession {
+  return {
+    ...row,
+    claimId: typeof row.claimId === 'number' && Number.isFinite(row.claimId) ? row.claimId : null,
+    fromPool: row.fromPool === true,
+  };
+}
+
 function normalizeQueue(rows: OfflinePickSession[] | undefined): OfflinePickSession[] {
-  return Array.isArray(rows) ? rows : [];
+  return Array.isArray(rows) ? rows.map(normalizeSession) : [];
+}
+
+function readLocalQueueMirror(): OfflinePickSession[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(LOCAL_QUEUE_MIRROR_KEY);
+    const rows = raw == null ? [] : (JSON.parse(raw) as OfflinePickSession[]);
+    return normalizeQueue(rows);
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalQueueMirror(rows: OfflinePickSession[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(LOCAL_QUEUE_MIRROR_KEY, JSON.stringify(rows));
+  } catch {
+    // Keep the UI responsive even if the synchronous mirror is unavailable.
+  }
+}
+
+export function createOfflinePickClientKey(): string {
+  const random =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `pick-${random}`;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(`${label}_timeout`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 async function writeQueue(rows: OfflinePickSession[]): Promise<void> {
-  await idbSet(IDB_KEY, rows);
+  const normalized = normalizeQueue(rows);
+  writeLocalQueueMirror(normalized);
+  await idbSet(IDB_KEY, normalized);
   notifyChanged();
 }
 
@@ -102,6 +158,10 @@ export async function readOfflinePicks(): Promise<OfflinePickSession[]> {
   return normalizeQueue(await idbGet<OfflinePickSession[]>(IDB_KEY));
 }
 
+export function readOfflinePicksMirror(): OfflinePickSession[] {
+  return readLocalQueueMirror();
+}
+
 export async function readOfflinePickSession(
   orderId: number | null,
 ): Promise<OfflinePickSession | null> {
@@ -112,6 +172,14 @@ export async function readOfflinePickSession(
 
 export function isOfflinePickUsable(session: OfflinePickSession | null | undefined): boolean {
   return Boolean(session && session.status !== 'applied');
+}
+
+export function isOfflinePickSessionOpen(session: OfflinePickSession | null | undefined): boolean {
+  return Boolean(session && (session.status === 'preparing' || session.status === 'active'));
+}
+
+export function isOfflinePickServerPrepared(session: OfflinePickSession | null | undefined): boolean {
+  return Boolean(session?.offlineLeaseExpiresAt);
 }
 
 function getPickedQtyFromResult(result: ScanResult | null | undefined): number {
@@ -201,11 +269,171 @@ export async function prepareOfflinePickWithRetry(args: {
   throw lastError instanceof Error ? lastError : new Error('offline_prepare_failed');
 }
 
+export function createProvisionalOfflinePickSessionImmediate(args: {
+  order: OrderWithItems;
+  claimId: number | null;
+  userId: number;
+  pickerName: string | null;
+  fromPool?: boolean;
+  clientPickKey?: string;
+}): OfflinePickSession {
+  const preparedAt = nowIso();
+  const session: OfflinePickSession = {
+    clientPickKey: args.clientPickKey ?? createOfflinePickClientKey(),
+    orderId: args.order.id,
+    claimId: args.claimId,
+    pickerUserId: args.userId,
+    pickerName: args.pickerName,
+    orderNumber: args.order.order_number,
+    customerName: args.order.customer_name,
+    status: 'preparing',
+    attempts: 0,
+    lastError: null,
+    result: null,
+    preparedAt,
+    startedAt: args.order.picked_at ?? preparedAt,
+    completedAt: null,
+    updatedAt: preparedAt,
+    offlineLeaseExpiresAt: null,
+    boxCount: null,
+    orderSnapshot: args.order,
+    lineMrpByItemId: {},
+    fromPool: args.fromPool === true,
+  };
+
+  const queue = readLocalQueueMirror();
+  const next = queue.filter((row) => row.orderId !== session.orderId && row.clientPickKey !== session.clientPickKey);
+  next.unshift(session);
+  writeLocalQueueMirror(next);
+  notifyChanged();
+
+  void (async () => {
+    const persistedQueue = await readOfflinePicks();
+    const merged = persistedQueue.filter(
+      (row) => row.orderId !== session.orderId && row.clientPickKey !== session.clientPickKey,
+    );
+    merged.unshift(session);
+    await writeQueue(merged);
+  })().catch((error) => {
+    console.error('offline pick background persist failed', error);
+  });
+
+  return session;
+}
+
+export async function persistSessionPatch(
+  clientPickKey: string,
+  patch: Partial<OfflinePickSession>,
+): Promise<OfflinePickSession | null> {
+  const queue = await readOfflinePicks();
+  let updated: OfflinePickSession | null = null;
+  const changedAt = nowIso();
+  const next = queue.map((row) => {
+    if (row.clientPickKey !== clientPickKey) return row;
+    updated = { ...row, ...patch, updatedAt: changedAt };
+    return updated;
+  });
+  if (!updated) return null;
+  await writeQueue(next);
+  return updated;
+}
+
+/**
+ * Finishes server-side bootstrap for a local pick session: claim (pool) + prepare lease.
+ */
+export async function bootstrapOfflinePickSession(
+  session: OfflinePickSession,
+): Promise<OfflinePickSession> {
+  if (session.status === 'active' && isOfflinePickServerPrepared(session)) {
+    return session;
+  }
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return session;
+  }
+
+  let working = session;
+  if (working.fromPool && !working.claimId) {
+    try {
+      const claimResponse = await withTimeout(
+        Promise.resolve(
+          supabase.rpc('claim_order', {
+            p_order_id: working.orderId,
+            p_stage: 'picking',
+            p_user_id: working.pickerUserId,
+          }),
+        ),
+        BOOTSTRAP_TIMEOUT_MS,
+        'bootstrap_claim',
+      );
+      const { data, error } = claimResponse;
+      if (error) throw error;
+      const claimResult = data as {
+        success?: boolean;
+        reason?: string;
+        claim_id?: number;
+      };
+      if (!claimResult?.success || !claimResult.claim_id) {
+        return working;
+      }
+      working =
+        (await persistSessionPatch(working.clientPickKey, { claimId: claimResult.claim_id })) ??
+        { ...working, claimId: claimResult.claim_id };
+    } catch (err) {
+      if (!isNetworkPickSyncError(err)) {
+        const message = err instanceof Error ? err.message : 'bootstrap_claim_failed';
+        return (
+          (await persistSessionPatch(working.clientPickKey, { lastError: message })) ?? working
+        );
+      }
+      return working;
+    }
+  }
+
+  if (!working.claimId) {
+    return working;
+  }
+
+  try {
+    const prepared = await withTimeout(
+      prepareOfflinePickSession({
+        order: working.orderSnapshot,
+        claimId: working.claimId,
+        userId: working.pickerUserId,
+        pickerName: working.pickerName,
+        existingClientPickKey: working.clientPickKey,
+        preserveStatus: working.status === 'queued' || working.status === 'syncing',
+      }),
+      BOOTSTRAP_TIMEOUT_MS,
+      'bootstrap_prepare',
+    );
+    return prepared;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'bootstrap_failed';
+    const updatedAt = nowIso();
+    const queue = await readOfflinePicks();
+    const next: OfflinePickSession[] = queue.map((row) => {
+      if (row.clientPickKey !== working.clientPickKey) return row;
+      const status: OfflinePickStatus =
+        row.status === 'queued' || row.status === 'syncing' ? row.status : 'preparing';
+      return {
+        ...row,
+        status,
+        lastError: isNetworkPickSyncError(err) ? message : row.lastError ?? message,
+        updatedAt,
+      };
+    });
+    await writeQueue(next);
+    return next.find((row) => row.clientPickKey === working.clientPickKey) ?? working;
+  }
+}
+
 export async function prepareOfflinePickSession(args: {
   order: OrderWithItems;
   claimId: number;
   userId: number;
   pickerName: string | null;
+  existingClientPickKey?: string;
+  preserveStatus?: boolean;
 }): Promise<OfflinePickSession> {
   const { data, error } = await supabase.rpc('prepare_offline_pick', {
     p_order_id: args.order.id,
@@ -224,6 +452,9 @@ export async function prepareOfflinePickSession(args: {
   }
 
   const preparedAt = nowIso();
+  const existing = args.existingClientPickKey
+    ? (await readOfflinePicks()).find((row) => row.clientPickKey === args.existingClientPickKey)
+    : null;
   const session: OfflinePickSession = {
     clientPickKey: result.client_pick_key,
     orderId: args.order.id,
@@ -232,24 +463,32 @@ export async function prepareOfflinePickSession(args: {
     pickerName: args.pickerName,
     orderNumber: args.order.order_number,
     customerName: args.order.customer_name,
-    status: 'active',
-    attempts: 0,
+    status:
+      args.preserveStatus && existing && (existing.status === 'queued' || existing.status === 'syncing')
+        ? existing.status
+        : 'active',
+    attempts: existing?.attempts ?? 0,
     lastError: null,
-    result: null,
-    preparedAt,
-    startedAt: args.order.picked_at ?? preparedAt,
-    completedAt: null,
+    result: existing?.result ?? null,
+    preparedAt: existing?.preparedAt ?? preparedAt,
+    startedAt: args.order.picked_at ?? existing?.startedAt ?? preparedAt,
+    completedAt: existing?.completedAt ?? null,
     updatedAt: preparedAt,
     offlineLeaseExpiresAt: result.offline_lease_expires_at ?? null,
-    boxCount: null,
-    orderSnapshot: args.order,
-    lineMrpByItemId: {},
+    boxCount: existing?.boxCount ?? null,
+    orderSnapshot: existing?.orderSnapshot ?? args.order,
+    lineMrpByItemId: existing?.lineMrpByItemId ?? {},
+    fromPool: existing?.fromPool,
   };
 
   const queue = await readOfflinePicks();
-  const next = queue.filter((row) => row.clientPickKey !== session.clientPickKey);
-  next.unshift(session);
-  await writeQueue(next);
+  const withoutOrder = queue.filter(
+    (row) =>
+      row.clientPickKey !== session.clientPickKey &&
+      !(row.orderId === session.orderId && row.status !== 'applied'),
+  );
+  withoutOrder.unshift(session);
+  await writeQueue(withoutOrder);
   return session;
 }
 
@@ -264,7 +503,12 @@ export async function applyOfflinePickTransition(args: {
     if (row.orderId !== args.orderId || row.status === 'applied') return row;
     updated = {
       ...row,
-      status: row.status === 'failed' ? 'active' : row.status,
+      status:
+        row.status === 'failed'
+          ? 'active'
+          : row.status === 'preparing'
+            ? 'preparing'
+            : row.status,
       lastError: null,
       updatedAt: changedAt,
       orderSnapshot: withUpdatedOrderItem(row.orderSnapshot, (item) =>
@@ -343,6 +587,9 @@ function lineSegmentsForPayload(
 }
 
 export function buildOfflinePickPayload(session: OfflinePickSession): OfflinePickPayload {
+  if (!session.claimId) {
+    throw new Error('missing_claim_id');
+  }
   const completedAt = session.completedAt ?? nowIso();
   const lines: OfflinePickLine[] = pickableOrderItems(session.orderSnapshot.items).map((item) => {
     const targetQty = pickQuantityTarget(item);
@@ -393,10 +640,35 @@ export async function completeOfflinePick(args: {
   orderId: number;
   boxCount: number;
 }): Promise<OfflinePickSession | null> {
-  const queue = await readOfflinePicks();
+  let queue = await readOfflinePicks();
+  const existing = queue.find((row) => row.orderId === args.orderId && row.status !== 'applied');
+  if (!existing) return null;
+
+  if (existing.status === 'preparing' || !isOfflinePickServerPrepared(existing)) {
+    const bootstrapped = await bootstrapOfflinePickSession(existing);
+    if (bootstrapped.status === 'preparing' || !isOfflinePickServerPrepared(bootstrapped)) {
+      const completedAt = nowIso();
+      const pendingComplete = {
+        ...bootstrapped,
+        boxCount: args.boxCount,
+        completedAt,
+        updatedAt: completedAt,
+        status: 'queued' as const,
+        lastError: bootstrapped.lastError ?? 'waiting_for_server_prepare',
+      };
+      queue = (await readOfflinePicks()).map((row) =>
+        row.clientPickKey === pendingComplete.clientPickKey ? pendingComplete : row,
+      );
+      await writeQueue(queue);
+      await syncOfflinePicks();
+      const after = await readOfflinePicks();
+      return after.find((row) => row.orderId === args.orderId) ?? pendingComplete;
+    }
+  }
+
   const completedAt = nowIso();
   let target: OfflinePickSession | null = null;
-  const next = queue.map((row) => {
+  const next = (await readOfflinePicks()).map((row) => {
     if (row.orderId !== args.orderId || row.status === 'applied') return row;
     target = {
       ...row,
@@ -425,6 +697,10 @@ async function submitOfflinePickPayload(
   return data as OfflinePickSyncResult;
 }
 
+function findNextBootstrapTarget(queue: OfflinePickSession[]): OfflinePickSession | undefined {
+  return queue.find((row) => row.status === 'preparing');
+}
+
 function findNextSyncTarget(queue: OfflinePickSession[]): OfflinePickSession | undefined {
   return (
     queue.find((row) => row.status === 'queued' || row.status === 'syncing') ??
@@ -434,18 +710,27 @@ function findNextSyncTarget(queue: OfflinePickSession[]): OfflinePickSession | u
 
 async function syncSingleOfflinePick(clientPickKey: string): Promise<OfflinePickSession[]> {
   let queue = await readOfflinePicks();
-  const target = queue.find((row) => row.clientPickKey === clientPickKey);
+  let target = queue.find((row) => row.clientPickKey === clientPickKey);
   if (!target) return queue;
+  let activeKey = clientPickKey;
+
+  if (!isOfflinePickServerPrepared(target)) {
+    target = await bootstrapOfflinePickSession(target);
+    activeKey = target.clientPickKey;
+    if (!isOfflinePickServerPrepared(target)) {
+      return readOfflinePicks();
+    }
+  }
 
   if (target.status === 'failed' && isRetryableFailedPick(target)) {
     const requeuedAt = nowIso();
     queue = queue.map((row) =>
-      row.clientPickKey === clientPickKey
+      row.clientPickKey === activeKey
         ? { ...row, status: 'queued', lastError: null, updatedAt: requeuedAt }
         : row,
     );
     await writeQueue(queue);
-    target.status = 'queued';
+    target = { ...target, status: 'queued' };
   }
 
   if (target.status !== 'queued' && target.status !== 'syncing') {
@@ -454,21 +739,21 @@ async function syncSingleOfflinePick(clientPickKey: string): Promise<OfflinePick
 
   const startedAt = nowIso();
   queue = queue.map((row) =>
-    row.clientPickKey === clientPickKey
+    row.clientPickKey === activeKey
       ? { ...row, status: 'syncing', updatedAt: startedAt }
       : row,
   );
   await writeQueue(queue);
 
   const session =
-    (await readOfflinePicks()).find((row) => row.clientPickKey === clientPickKey) ?? target;
+    (await readOfflinePicks()).find((row) => row.clientPickKey === activeKey) ?? target;
 
   try {
     const result = await submitOfflinePickPayload(buildOfflinePickPayload(session));
     const status = offlinePickStatusFromResult(result);
     const updatedAt = nowIso();
     queue = (await readOfflinePicks()).map((row) =>
-      row.clientPickKey === clientPickKey
+      row.clientPickKey === activeKey
         ? {
             ...row,
             status,
@@ -486,7 +771,7 @@ async function syncSingleOfflinePick(clientPickKey: string): Promise<OfflinePick
     const message = err instanceof Error ? err.message : 'Sync failed';
     const updatedAt = nowIso();
     queue = (await readOfflinePicks()).map((row) =>
-      row.clientPickKey === clientPickKey
+      row.clientPickKey === activeKey
         ? {
             ...row,
             status: retryable ? 'queued' : 'failed',
@@ -588,6 +873,13 @@ export async function syncOfflinePicks(): Promise<OfflinePickSession[]> {
     let processed = 0;
 
     while (processed < SYNC_MAX_PER_RUN) {
+      const bootstrapTarget = findNextBootstrapTarget(queue);
+      if (bootstrapTarget) {
+        queue = await bootstrapOfflinePickSession(bootstrapTarget).then(() => readOfflinePicks());
+        processed += 1;
+        continue;
+      }
+
       const target = findNextSyncTarget(queue);
       if (!target) break;
       queue = await syncSingleOfflinePick(target.clientPickKey);

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
-import { getCustomerAddress } from '../lib/customerDisplay';
+import { getCustomerAddress, getCustomerCity } from '../lib/customerDisplay';
 import { queryClient } from '../lib/queryClient';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -218,6 +218,84 @@ function categorizePickQueueOrder(
   return 'otherActive';
 }
 
+type CustomerLocationRow = {
+  id: number;
+  city?: string | null;
+  station?: string | null;
+  address?: string | null;
+  address1?: string | null;
+  address2?: string | null;
+  address3?: string | null;
+};
+
+async function fetchCustomerLocationMaps(customerIds: number[]): Promise<{
+  addressById: Map<number, string | null>;
+  cityById: Map<number, string | null>;
+}> {
+  const addressById = new Map<number, string | null>();
+  const cityById = new Map<number, string | null>();
+  if (customerIds.length === 0) return { addressById, cityById };
+
+  let customers: CustomerLocationRow[] | null = null;
+
+  const { data: extendedCustomers, error: extendedError } = await supabase
+    .from('customers')
+    .select('id, city, station, address, address1, address2, address3')
+    .in('id', customerIds);
+
+  if (!extendedError) {
+    customers = extendedCustomers;
+  } else {
+    const { data: basicCustomers, error: basicError } = await supabase
+      .from('customers')
+      .select('id, city, address')
+      .in('id', customerIds);
+
+    if (basicError) {
+      console.warn('[claimable-orders] customer location lookup failed', basicError);
+    } else {
+      customers = basicCustomers;
+    }
+  }
+
+  for (const customer of customers ?? []) {
+    addressById.set(
+      customer.id,
+      getCustomerAddress({
+        address: customer.address ?? null,
+        address1: customer.address1 ?? null,
+        address2: customer.address2 ?? null,
+        address3: customer.address3 ?? null,
+      }),
+    );
+    cityById.set(
+      customer.id,
+      getCustomerCity({
+        city: customer.city ?? null,
+        station: customer.station ?? null,
+      } as Parameters<typeof getCustomerCity>[0]),
+    );
+  }
+
+  return { addressById, cityById };
+}
+
+function resolveOrderCustomerLocation(
+  order: { customer_id: number; customer_city: string | null },
+  maps: {
+    addressById: Map<number, string | null>;
+    cityById: Map<number, string | null>;
+  },
+): { customer_city: string | null; customer_address: string | null } {
+  const orderCity = order.customer_city?.trim() ?? '';
+  const customerCity =
+    orderCity || (maps.cityById.get(order.customer_id) ?? null) || null;
+  return {
+    customer_city: customerCity,
+    customer_address: maps.addressById.get(order.customer_id) ?? null,
+  };
+}
+
 async function fetchLegacyClaimableOrders(
   options: ClaimableOrdersOptions,
   userId: number | null,
@@ -264,44 +342,7 @@ async function fetchLegacyClaimableOrders(
       .filter((id): id is number => typeof id === 'number'),
   )];
 
-  const customerAddressMap = new Map<number, string | null>();
-  if (customerIds.length > 0) {
-    let customers:
-      | { id: number; address?: string | null; address1?: string | null; address2?: string | null; address3?: string | null }[]
-      | null = null;
-
-    const { data: extendedCustomers, error: extendedError } = await supabase
-      .from('customers')
-      .select('id, address, address1, address2, address3')
-      .in('id', customerIds);
-
-    if (!extendedError) {
-      customers = extendedCustomers;
-    } else {
-      const { data: basicCustomers, error: basicError } = await supabase
-        .from('customers')
-        .select('id, address')
-        .in('id', customerIds);
-
-      if (basicError) {
-        console.warn('[claimable-orders] customer address lookup failed', basicError);
-      } else {
-        customers = basicCustomers;
-      }
-    }
-
-    for (const customer of customers ?? []) {
-      customerAddressMap.set(
-        customer.id,
-        getCustomerAddress({
-          address: customer.address ?? null,
-          address1: customer.address1 ?? null,
-          address2: customer.address2 ?? null,
-          address3: customer.address3 ?? null,
-        }),
-      );
-    }
-  }
+  const customerLocationMaps = await fetchCustomerLocationMaps(customerIds);
 
   const claimStages = stage === 'billing' ? ['billing', 'sales_edit'] : [stage];
 
@@ -340,12 +381,11 @@ async function fetchLegacyClaimableOrders(
   return orders.map((order): OrderWithClaimInfo => {
     const claimInfo = claimMap.get(order.id) ?? null;
     const salesEditInfo = salesEditClaimMap.get(order.id) ?? null;
+    const location = resolveOrderCustomerLocation(order, customerLocationMaps);
     return {
       ...order,
-      customer_address:
-        typeof order.customer_id === 'number'
-          ? (customerAddressMap.get(order.customer_id) ?? null)
-          : null,
+      customer_city: location.customer_city,
+      customer_address: location.customer_address,
       claim_info: claimInfo,
       sales_edit_claim_info: salesEditInfo,
       is_mine: claimInfo?.claimed_by_user_id === userId,
@@ -367,7 +407,17 @@ async function fetchBillingQueueSnapshot(
 
   if (error) throw error;
 
-  return ((data ?? []) as BillingQueueSnapshotRow[]).map((row): OrderWithClaimInfo => {
+  const rows = (data ?? []) as BillingQueueSnapshotRow[];
+  const customerIds = [
+    ...new Set(
+      rows
+        .map((row) => row.customer_id)
+        .filter((id): id is number => typeof id === 'number'),
+    ),
+  ];
+  const customerLocationMaps = await fetchCustomerLocationMaps(customerIds);
+
+  return rows.map((row): OrderWithClaimInfo => {
     const claimInfo =
       row.claim_id != null &&
       row.claimed_by_user_id != null &&
@@ -398,13 +448,19 @@ async function fetchBillingQueueSnapshot(
           }
         : null;
 
+    const location = resolveOrderCustomerLocation(
+      { customer_id: Number(row.customer_id), customer_city: row.customer_city },
+      customerLocationMaps,
+    );
+
     return {
       id: Number(row.id),
       order_number: row.order_number,
       order_kind: row.order_kind ?? 'standard',
       customer_id: Number(row.customer_id),
       customer_name: row.customer_name,
-      customer_city: row.customer_city,
+      customer_city: location.customer_city,
+      customer_address: location.customer_address,
       transport_id: row.transport_id == null ? null : Number(row.transport_id),
       transport_name: row.transport_name,
       salesperson_name: row.salesperson_name,

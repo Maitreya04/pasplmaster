@@ -2,6 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   readOfflinePicks,
+  readOfflinePicksMirror,
   subscribeOfflinePicks,
   syncOfflinePicks,
   type OfflinePickSession,
@@ -16,6 +17,11 @@ let hydratePromise: Promise<void> | null = null;
 
 async function hydrate(): Promise<void> {
   if (hydratePromise) return hydratePromise;
+  const mirror = readOfflinePicksMirror();
+  if (mirror.length > 0) {
+    cachedPicks = mirror;
+    hydrated = true;
+  }
   hydratePromise = readOfflinePicks()
     .then((rows) => {
       cachedPicks = rows;
@@ -76,12 +82,14 @@ export function useOfflinePickStats() {
   const picks = useOfflinePicks();
   return useMemo(() => {
     let active = 0;
+    let preparing = 0;
     let queued = 0;
     let syncing = 0;
     let conflict = 0;
     let failed = 0;
     for (const pick of picks) {
       if (pick.status === 'active') active += 1;
+      else if (pick.status === 'preparing') preparing += 1;
       else if (pick.status === 'queued') queued += 1;
       else if (pick.status === 'syncing') syncing += 1;
       else if (pick.status === 'conflict') conflict += 1;
@@ -89,7 +97,8 @@ export function useOfflinePickStats() {
     }
     return {
       total: picks.length,
-      waiting: active + queued + syncing,
+      waiting: preparing + active + queued + syncing,
+      preparing,
       active,
       queued,
       syncing,

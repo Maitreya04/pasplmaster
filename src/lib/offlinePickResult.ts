@@ -1,4 +1,5 @@
 export type OfflinePickStatus =
+  | 'preparing'
   | 'active'
   | 'queued'
   | 'syncing'

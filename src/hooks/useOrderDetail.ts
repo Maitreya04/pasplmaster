@@ -6,6 +6,7 @@ import { isDirectTableRealtimeEnabled } from '../lib/realtimePolicy';
 import { isAskLine } from '../lib/picking/askBrand';
 import { isLucasLine } from '../lib/picking/lucasBrand';
 import { countPickableOrderLines } from '../lib/cartSupply';
+import { getCustomerAddress } from '../lib/customerDisplay';
 import type { OrderItem, OrderWithItems } from '../types';
 
 type ItemCatalogJoin = {
@@ -106,25 +107,42 @@ export function useOrderDetail(orderId: number | null) {
       ).length;
       let customerMobile: string | null = null;
       let customerAddress: string | null = null;
+      let customerRecord: {
+        city?: string | null;
+        station?: string | null;
+      } | null = null;
 
       if (typeof order.customer_id === 'number') {
         const { data: customer, error: customerError } = await supabase
           .from('customers')
-          .select('mobile, address')
+          .select('mobile, city, station, address, address1, address2, address3')
           .eq('id', order.customer_id)
           .limit(1)
           .maybeSingle();
 
         if (customerError) {
           console.warn('[useOrderDetail] customer lookup failed', customerError);
-        } else {
-          customerMobile = (customer as { mobile?: string | null } | null)?.mobile ?? null;
-          customerAddress = (customer as { address?: string | null } | null)?.address ?? null;
+        } else if (customer) {
+          customerRecord = customer;
+          customerMobile = customer.mobile ?? null;
+          customerAddress = getCustomerAddress({
+            address: customer.address ?? null,
+            address1: customer.address1 ?? null,
+            address2: customer.address2 ?? null,
+            address3: customer.address3 ?? null,
+          });
         }
       }
 
+      const resolvedCustomerCity =
+        order.customer_city?.trim() ||
+        customerRecord?.city?.trim() ||
+        customerRecord?.station?.trim() ||
+        null;
+
       return {
         ...order,
+        customer_city: resolvedCustomerCity,
         customer_mobile: customerMobile,
         customer_address: customerAddress,
         items,

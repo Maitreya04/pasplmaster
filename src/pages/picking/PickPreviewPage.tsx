@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CaretLeft, UserCircle, Package, Play } from '@phosphor-icons/react';
-import { supabase } from '../../lib/supabase/client';
 import { Card, Skeleton, BigButton, BottomSheet } from '../../components/shared';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useOrderHandoff } from '../../hooks/useOrderHandoff';
@@ -19,8 +18,11 @@ import { sortPickWalkOrder } from '../../lib/picking/pickWalkOrder';
 import { buildPickWalkBrandSections, orderItemBrandLabel } from '../../lib/picking/deckOrder';
 import { rackRangeFromPreview } from '../../lib/picking/pickQueueDisplay';
 import { isInProgressPick, isPickStarted } from '../../lib/picking/pickLifecycle';
-import { startPicking, startPickingErrorMessage } from '../../lib/picking/startPicking';
-import { prepareOfflinePickWithRetry } from '../../lib/offlinePicks';
+import {
+  beginOfflinePickSession,
+  beginOfflinePickSessionErrorMessage,
+} from '../../lib/picking/beginOfflinePickSession';
+import { readOfflinePickSession } from '../../lib/offlinePicks';
 import type { OrderItem } from '../../types';
 
 function getLineMrp(line: OrderItem): number | null {
@@ -140,76 +142,51 @@ export default function PickPreviewPage(): React.JSX.Element | null {
     return 'Review the pick list before you start.';
   }, [handoffSummary?.assignedBy, isAssignedToMe, isPoolOrder, order?.picker_name, source, userName]);
 
+  const knownClaimId = useMemo(() => {
+    const mine = myActive.find((o) => o.id === orderId);
+    return mine?.claim_info?.claim_id ?? null;
+  }, [myActive, orderId]);
+
   const startMutation = useMutation({
     mutationFn: async () => {
-      if (!orderId || !userId) throw new Error('Not signed in');
+      if (!orderId || !userId || !order) throw new Error('Not signed in');
 
-      let claimId: number | undefined;
-
-      if (isPoolOrder) {
-        const { data, error: claimError } = await supabase.rpc('claim_order', {
-          p_order_id: orderId,
-          p_stage: 'picking',
-          p_user_id: userId,
+      const existing = await readOfflinePickSession(orderId);
+      if (existing && (existing.status === 'preparing' || existing.status === 'active')) {
+        return beginOfflinePickSession({
+          orderId,
+          userId,
+          pickerName: userName,
+          fromPool: isPoolOrder,
+          knownClaimId,
+          orderSnapshot: existing.orderSnapshot,
         });
-        if (claimError) throw claimError;
-        const claimResult = data as {
-          success: boolean;
-          reason?: string;
-          claimed_by?: string;
-          claim_id?: number;
-        };
-        if (!claimResult.success) {
-          if (claimResult.reason === 'already_claimed') {
-            throw new Error(`ALREADY_CLAIMED:${claimResult.claimed_by ?? 'someone'}`);
-          }
-          throw new Error(claimResult.reason ?? 'CLAIM_FAILED');
-        }
-        claimId = claimResult.claim_id;
       }
 
-      const startResult = await startPicking({ orderId, userId });
-      if (!startResult.success) {
-        throw new Error(startPickingErrorMessage(startResult));
-      }
-
-      const resolvedClaimId = startResult.claim_id ?? claimId;
-      if (!order || !resolvedClaimId) {
-        throw new Error('offline_prepare_failed');
-      }
-
-      await prepareOfflinePickWithRetry({
-        order: {
-          ...order,
-          workflow_status: 'picking',
-          picked_at: order.picked_at ?? new Date().toISOString(),
-        },
-        claimId: resolvedClaimId,
+      return beginOfflinePickSession({
+        orderId,
         userId,
         pickerName: userName,
+        fromPool: isPoolOrder,
+        knownClaimId,
+        orderSnapshot: order,
       });
-
-      return {
-        navigated: true as const,
-        claimId: resolvedClaimId,
-      };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       queryClient.invalidateQueries({ queryKey: ['picker-daily-stats'] });
-      toast.success('Offline pick ready on this device');
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      if (result.bootstrapPending) {
+        toast.info('Pick saved on this device. Connecting to server in the background.');
+      } else if (result.resumed) {
+        toast.success('Resuming your offline pick');
+      } else {
+        toast.success('Pick ready — scans save on this device');
+      }
       navigate(`/picking/pick/${orderId}`, { replace: true });
     },
     onError: (err) => {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg.startsWith('ALREADY_CLAIMED:')) {
-        const who = msg.replace('ALREADY_CLAIMED:', '');
-        toast.error(`Already being picked by ${who}.`);
-      } else if (msg === 'offline_prepare_failed' || msg.includes('offline_prepare')) {
-        toast.error('Could not prepare offline pick. Check network and try again.');
-      } else {
-        toast.error(msg || 'Could not start picking.');
-      }
+      toast.error(beginOfflinePickSessionErrorMessage(err));
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
     },
   });

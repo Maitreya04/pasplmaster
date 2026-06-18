@@ -117,6 +117,7 @@ import {
   saveOfflinePickLineMrpMap,
 } from '../../lib/offlinePicks';
 import { OfflinePickLeaseBanner } from '../../components/picking/OfflinePickLeaseBanner';
+import { OfflinePickPrepareBanner } from '../../components/picking/OfflinePickPrepareBanner';
 import { getOfflineLeaseWarningLevel } from '../../lib/offlinePickLease';
 import {
   isPickNoLongerActiveError,
@@ -291,6 +292,7 @@ export function PickFlowPanel({
   const offlinePickSession = useOfflinePickSession(isLab ? null : orderId);
   const offlinePicksHydrated = useOfflinePicksHydrated();
   const offlinePickActive = !isLab && isOfflinePickUsable(offlinePickSession);
+  const offlinePickPreparing = offlinePickSession?.status === 'preparing';
   const orderQuery = useOrderDetail(orderId);
   const order = offlinePickActive
     ? offlinePickSession?.orderSnapshot ?? orderQuery.data ?? null
@@ -405,14 +407,38 @@ export function PickFlowPanel({
   );
 
   // Hydrate per-order state from sessionStorage so a refresh doesn't force the
-  // picker to re-scan racks mid-flow.
+  // picker to re-scan racks mid-flow. Offline picks prefer the IDB session copy
+  // of MRP split state so a tab reload still matches what will sync to billing.
   useEffect(() => {
     if (!orderId) return;
     setRackVerifiedIds(readIdSet(storageKeys.rackVerified, orderId));
     setSkippedIds(readIdSet(storageKeys.skipped, orderId));
     setCurrentCardIndex(readCardIndex(storageKeys.cardIndex, orderId));
+
+    const offlineMrpEntries =
+      offlinePickActive && offlinePickSession?.lineMrpByItemId
+        ? Object.entries(offlinePickSession.lineMrpByItemId)
+        : [];
+    if (offlineMrpEntries.length > 0) {
+      const mrpMap = new Map<number, PickLineMrpState>();
+      for (const [key, state] of offlineMrpEntries) {
+        const id = Number(key);
+        if (Number.isFinite(id)) mrpMap.set(id, state);
+      }
+      setLineMrpMap(mrpMap);
+      return;
+    }
+
     setLineMrpMap(readPickLineMrpMap(orderId, isLab ? 'lab' : 'production'));
-  }, [orderId, isLab, storageKeys.cardIndex, storageKeys.rackVerified, storageKeys.skipped]);
+  }, [
+    orderId,
+    isLab,
+    offlinePickActive,
+    offlinePickSession?.lineMrpByItemId,
+    storageKeys.cardIndex,
+    storageKeys.rackVerified,
+    storageKeys.skipped,
+  ]);
 
   useEffect(() => {
     writePickLineMrpMap(orderId, lineMrpMap, isLab ? 'lab' : 'production');
@@ -630,14 +656,25 @@ export function PickFlowPanel({
   const prevAllDoneRef = useRef(false);
 
   useEffect(() => {
-    if (allDone && !prevAllDoneRef.current && orderId) {
-      const finishPath = isLab
-        ? `/picking/pick/${orderId}/finish?lab=1`
-        : `/picking/pick/${orderId}/finish`;
-      navigate(finishPath, { state: { expectAllDone: true } });
+    if (!allDone || prevAllDoneRef.current || !orderId) {
+      prevAllDoneRef.current = allDone;
+      return;
     }
-    prevAllDoneRef.current = allDone;
-  }, [allDone, isLab, navigate, orderId]);
+    prevAllDoneRef.current = true;
+
+    const finishPath = isLab
+      ? `/picking/pick/${orderId}/finish?lab=1`
+      : `/picking/pick/${orderId}/finish`;
+
+    const goFinish = async () => {
+      if (offlinePickActive) {
+        await saveOfflinePickLineMrpMap(orderId, lineMrpMap);
+      }
+      navigate(finishPath, { state: { expectAllDone: true } });
+    };
+
+    void goFinish();
+  }, [allDone, isLab, lineMrpMap, navigate, offlinePickActive, orderId]);
   const visibility = useMemo(() => {
     let packAssisted = 0;
     let manual = 0;
@@ -1903,7 +1940,7 @@ export function PickFlowPanel({
         const batchCount = lineMrp.segments.filter((s) => s.committed).length + 1;
         updateLocalItem(itemId, { uiState: 'picked', scanResult });
         if (offlinePickActive) {
-          void applyOfflinePickTransition({
+          await applyOfflinePickTransition({
             orderId,
             transition: {
               kind: 'picked',
@@ -1925,7 +1962,7 @@ export function PickFlowPanel({
       } else {
         updateLocalItem(itemId, { uiState: 'matched', scanResult });
         if (offlinePickActive) {
-          void applyOfflinePickTransition({
+          await applyOfflinePickTransition({
             orderId,
             transition: {
               kind: 'scan_saved',
@@ -2197,7 +2234,13 @@ export function PickFlowPanel({
         },
         {
           onSuccess: () => {
-            toast.info(isLab ? 'Flag recorded (lab only — not sent to billing)' : 'Flag sent to billing');
+            toast.info(
+              isLab
+                ? 'Flag recorded (lab only — not sent to billing)'
+                : offlinePickActive
+                  ? 'Flag recorded — will reach billing when this pick syncs'
+                  : 'Flag sent to billing',
+            );
             setFlagSheetOpen(false);
             beginLineOutcome({
               itemId: flagTargetItemId,
@@ -2209,7 +2252,7 @@ export function PickFlowPanel({
         },
       );
     },
-    [beginLineOutcome, flagTargetItemId, isLab, itemTransitionMutation, localItems, toast],
+    [beginLineOutcome, flagTargetItemId, isLab, itemTransitionMutation, localItems, offlinePickActive, toast],
   );
 
   // These derived values depend only on hook-provided state, so they must stay
@@ -2403,7 +2446,10 @@ export function PickFlowPanel({
           <span>UX Lab — same pick flow as production. Nothing is saved to this order.</span>
         </div>
       )}
-      {offlinePickActive && (
+      {offlinePickPreparing && (
+        <OfflinePickPrepareBanner online={typeof navigator !== 'undefined' && navigator.onLine} />
+      )}
+      {offlinePickActive && !offlinePickPreparing && (
         <OfflinePickLeaseBanner
           leaseExpiresAt={offlinePickSession?.offlineLeaseExpiresAt}
           onExtendLease={() => void handleExtendOfflineLease()}

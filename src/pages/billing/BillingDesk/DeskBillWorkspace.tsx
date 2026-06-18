@@ -4,6 +4,7 @@ import { useBillSheetEdits } from '../../../hooks/useBillSheetEdits';
 import { BillingOrderStageBody } from '../../../components/billing/BillingOrderStageBody';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 import type { OrderWithItems } from '../../../types';
+import { DeskCustomerLocation } from './DeskCustomerLocation';
 import { deskType } from './deskTypography';
 
 interface DeskBillWorkspaceProps {
@@ -65,6 +66,7 @@ function DeskBillWorkspaceShell({
         <div className="flex-1 min-w-0">
           <p className={`${deskType.panelTitle} truncate`}>{order.order_number}</p>
           <p className={`${deskType.panelSub} truncate`}>{order.customer_name}</p>
+          <DeskCustomerLocation order={order} />
         </div>
         <button
           type="button"

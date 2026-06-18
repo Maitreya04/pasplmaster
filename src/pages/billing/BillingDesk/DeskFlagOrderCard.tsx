@@ -7,6 +7,7 @@ import { deskOrderFlagTypeLabel } from '../../../lib/billing/deskLineFlagKind';
 import type { PickLineProgress } from '../../../lib/cartSupply';
 import { formatCurrency, formatTimeAgo } from '../../../utils/formatters';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
+import { DeskCustomerLocation } from './DeskCustomerLocation';
 import { DeskPickProgress } from './DeskPickProgress';
 import { deskType } from './deskTypography';
 import { BillingClaimBadge } from '../../../components/billing/shared/BillingClaimBadge';
@@ -117,6 +118,10 @@ export function DeskFlagOrderCard({
               </span>
             )}
           </p>
+          <DeskCustomerLocation
+            order={order}
+            className="text-[var(--content-warning-on-light)]"
+          />
           {showPostPickBillingClaimBadge(order) ? (
             <div className="mt-1.5">
               <BillingClaimBadge order={order} postPick />
