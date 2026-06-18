@@ -335,6 +335,7 @@ export async function enqueueOfflineSalesOrder(args: {
   items: CartItem[];
   clientOrderKey?: string;
   payload?: SalesOrderPayload;
+  shortagePolicy?: 'po_pending' | 'bill_available_skip_rest';
 }): Promise<OfflineSalesOrder> {
   const row = createOfflineSalesOrder(args);
   const queue = await readOfflineSalesOrders();
@@ -376,15 +377,17 @@ export function createOfflineSalesOrder(args: {
   items: CartItem[];
   clientOrderKey?: string;
   payload?: SalesOrderPayload;
+  shortagePolicy?: 'po_pending' | 'bill_available_skip_rest';
 }): OfflineSalesOrder {
   const clientOrderKey = args.clientOrderKey ?? createSalesOrderClientKey();
+  const shortagePolicy = args.shortagePolicy ?? 'po_pending';
   const payload =
     args.payload ??
     buildSalesOrderPayload({
       ...args,
       clientOrderKey,
       submissionMode: 'offline_replay',
-      shortagePolicy: 'bill_available_skip_rest',
+      shortagePolicy,
     });
   const createdAt = nowIso();
   const row: OfflineSalesOrder = {
@@ -395,7 +398,7 @@ export function createOfflineSalesOrder(args: {
           ...payload,
           client_order_key: clientOrderKey,
           submission_mode: 'offline_replay',
-          shortage_policy: 'bill_available_skip_rest',
+          shortage_policy: shortagePolicy,
         },
     summary: buildOfflineOrderSummary({ customer: args.customer, items: args.items }),
     status: 'queued',
@@ -418,6 +421,7 @@ export function enqueueOfflineSalesOrderImmediate(args: {
   items: CartItem[];
   clientOrderKey?: string;
   payload?: SalesOrderPayload;
+  shortagePolicy?: 'po_pending' | 'bill_available_skip_rest';
 }): OfflineSalesOrder {
   const row = createOfflineSalesOrder(args);
   const queue = readLocalQueueMirror();

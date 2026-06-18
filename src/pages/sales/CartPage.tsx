@@ -1254,6 +1254,7 @@ export default function CartPage(): React.JSX.Element | null {
         notes,
         items,
         clientOrderKey,
+        shortagePolicy: 'po_pending' as const,
       };
 
       const queueNow = async () => {
@@ -1397,6 +1398,7 @@ export default function CartPage(): React.JSX.Element | null {
       priority,
       notes,
       items,
+      shortagePolicy: 'po_pending',
     });
 
     clearCart();
