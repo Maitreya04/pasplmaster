@@ -86,8 +86,111 @@ export function createSalesOrderClientKey(): string {
   return `offline-${random}`;
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function numberOrZero(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function stringOrNow(value: unknown): string {
+  return typeof value === 'string' && value.trim() !== '' ? value : nowIso();
+}
+
+function normalizePayload(value: unknown): SalesOrderPayload | null {
+  if (!isObject(value)) return null;
+  const lines = Array.isArray(value.lines) ? value.lines : [];
+  if (typeof value.customer_name !== 'string' || value.customer_name.trim() === '') return null;
+  if (typeof value.salesperson_name !== 'string' || value.salesperson_name.trim() === '') return null;
+  if (lines.length === 0) return null;
+
+  return value as unknown as SalesOrderPayload;
+}
+
+function summaryFromPayload(payload: SalesOrderPayload, createdAt: string): OfflineSalesOrderSummary {
+  let totalPieces = 0;
+  let totalValue = 0;
+  for (const line of payload.lines) {
+    const qty = numberOrZero(line.qty_requested);
+    totalPieces += qty;
+    if (!line.is_foc) {
+      totalValue += qty * numberOrZero(line.price_quoted);
+    }
+  }
+  return {
+    customerName: payload.customer_name,
+    itemCount: payload.lines.length,
+    totalPieces,
+    totalValue,
+    createdAt,
+  };
+}
+
+function normalizeSummary(
+  value: unknown,
+  payload: SalesOrderPayload,
+  createdAt: string,
+): OfflineSalesOrderSummary {
+  if (!isObject(value)) return summaryFromPayload(payload, createdAt);
+  return {
+    customerName:
+      typeof value.customerName === 'string' && value.customerName.trim() !== ''
+        ? value.customerName
+        : payload.customer_name,
+    itemCount:
+      typeof value.itemCount === 'number' && Number.isFinite(value.itemCount)
+        ? value.itemCount
+        : payload.lines.length,
+    totalPieces: numberOrZero(value.totalPieces),
+    totalValue: numberOrZero(value.totalValue),
+    createdAt: stringOrNow(value.createdAt),
+  };
+}
+
+function normalizeStatus(value: unknown): OfflineSalesOrderStatus {
+  return value === 'queued' ||
+    value === 'syncing' ||
+    value === 'synced' ||
+    value === 'partial' ||
+    value === 'no_stock' ||
+    value === 'failed'
+    ? value
+    : 'queued';
+}
+
+function normalizeOfflineOrder(value: unknown): OfflineSalesOrder | null {
+  if (!isObject(value)) return null;
+  const payload = normalizePayload(value.payload);
+  if (!payload) return null;
+  const createdAt = stringOrNow(value.createdAt);
+  const clientOrderKey =
+    typeof value.clientOrderKey === 'string' && value.clientOrderKey.trim() !== ''
+      ? value.clientOrderKey
+      : payload.client_order_key ?? createSalesOrderClientKey();
+
+  return {
+    clientOrderKey,
+    payload: { ...payload, client_order_key: clientOrderKey },
+    summary: normalizeSummary(value.summary, payload, createdAt),
+    status: normalizeStatus(value.status),
+    attempts:
+      typeof value.attempts === 'number' && Number.isFinite(value.attempts)
+        ? Math.max(0, value.attempts)
+        : 0,
+    lastError: typeof value.lastError === 'string' ? value.lastError : null,
+    result: isObject(value.result) ? (value.result as unknown as SalesOrderSubmitResult) : null,
+    createdAt,
+    updatedAt: stringOrNow(value.updatedAt),
+  };
+}
+
 function normalizeQueue(rows: OfflineSalesOrder[] | undefined): OfflineSalesOrder[] {
-  return Array.isArray(rows) ? rows : [];
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((row) => {
+    const normalized = normalizeOfflineOrder(row);
+    return normalized ? [normalized] : [];
+  });
 }
 
 async function writeQueue(rows: OfflineSalesOrder[]): Promise<void> {

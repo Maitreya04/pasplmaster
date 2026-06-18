@@ -42,6 +42,16 @@ import {
   type OfflineSalesOrder,
 } from '../../hooks/useOfflineSalesOrders';
 
+function isRenderableOfflineOrder(order: OfflineSalesOrder): boolean {
+  return Boolean(
+    order?.clientOrderKey &&
+      order.payload &&
+      order.summary &&
+      typeof order.payload.salesperson_name === 'string' &&
+      typeof order.summary.customerName === 'string',
+  );
+}
+
 const SALES_CLAIM_MESSAGES: Record<string, string> = {
   locked_by_billing: 'Billing is reviewing this order. Try again when they finish.',
   not_owner: 'Only the salesperson on this order can edit lines.',
@@ -1165,6 +1175,7 @@ export default function MyOrdersPage(): React.JSX.Element | null {
   const visibleOfflineOrders = useMemo(
     () =>
       offlineOrders.filter((order) => {
+        if (!isRenderableOfflineOrder(order)) return false;
         if (order.status === 'synced') return false;
         if (userId != null && order.payload.salesperson_user_id === userId) return true;
         return userName != null && order.payload.salesperson_name === userName;
