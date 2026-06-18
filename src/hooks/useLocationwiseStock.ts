@@ -27,6 +27,7 @@ export type StockLocationRow = {
 };
 
 const POLL_INTERVAL_MS = 30_000;
+const STOCK_FETCH_TIMEOUT_MS = 10_000;
 const IDB_KEY = 'locationwise-stock-cache-v1';
 const CACHE_VERSION = 2;
 const WARMUP_CHUNK_SIZE = 200;
@@ -213,8 +214,16 @@ function writeCacheFromRows(rows: StockLocationRow[], fetchedAt: number): Record
 }
 
 async function fetchLocationwiseStockRows(busyCodes: number[]): Promise<StockLocationRow[]> {
-  const { data, error } = await supabase.rpc('get_locationwise_stock_for_busy_codes', {
-    p_busy_codes: busyCodes,
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const { data, error } = await Promise.race([
+    supabase.rpc('get_locationwise_stock_for_busy_codes', {
+      p_busy_codes: busyCodes,
+    }),
+    new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('stock_fetch_timeout')), STOCK_FETCH_TIMEOUT_MS);
+    }),
+  ]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
   });
   if (error) throw error;
   return (data ?? []) as StockLocationRow[];
@@ -319,9 +328,7 @@ export function useLocationwiseStock(busyCodes: Array<number | null | undefined>
   return useQuery<Record<number, ItemLocationStock>>({
     queryKey: ['stock_locationwise', busyCodesKey],
     queryFn: () => fetchLocationwiseStock(normalizedBusyCodes),
-    enabled:
-      normalizedBusyCodes.length > 0 &&
-      (typeof navigator === 'undefined' || navigator.onLine),
+    enabled: normalizedBusyCodes.length > 0,
     staleTime: POLL_INTERVAL_MS,
     placeholderData: () => {
       const cached = snapshotLocationwiseStockFromCache(normalizedBusyCodes);
@@ -330,13 +337,11 @@ export function useLocationwiseStock(busyCodes: Array<number | null | undefined>
       }
       return Object.keys(cached).length > 0 ? cached : undefined;
     },
-    refetchInterval: () =>
-      typeof navigator !== 'undefined' && !navigator.onLine ? false : POLL_INTERVAL_MS,
+    refetchInterval: POLL_INTERVAL_MS,
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: typeof navigator === 'undefined' ? true : navigator.onLine,
+    refetchOnWindowFocus: true,
     refetchOnReconnect: true,
-    retry: (failureCount) =>
-      typeof navigator !== 'undefined' && !navigator.onLine ? false : failureCount < 1,
+    retry: false,
   });
 }
 

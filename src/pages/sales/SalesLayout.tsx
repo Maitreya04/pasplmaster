@@ -61,14 +61,28 @@ const NAV_ITEMS: BottomNavItem[] = [
 
 export default function SalesLayout(): React.JSX.Element | null {
   useEffect(() => {
-    prefetchItems();
-    void fetchAllItems()
-      .then(prefetchLocationwiseStockForItems)
-      .catch((err) => {
-        console.warn('[sales] stock snapshot warmup skipped', err);
-      });
+    const warmSalesCaches = () => {
+      prefetchItems();
+      void fetchAllItems()
+        .then(prefetchLocationwiseStockForItems)
+        .catch((err) => {
+          console.warn('[sales] stock snapshot warmup skipped', err);
+        });
+    };
+
+    warmSalesCaches();
     void prefetchCustomers();
     void prefetchTransports();
+
+    window.addEventListener('online', warmSalesCaches);
+    window.addEventListener('focus', warmSalesCaches);
+    const timer = window.setInterval(warmSalesCaches, 30_000);
+
+    return () => {
+      window.removeEventListener('online', warmSalesCaches);
+      window.removeEventListener('focus', warmSalesCaches);
+      window.clearInterval(timer);
+    };
   }, []);
 
   const { userId, userName, role } = useAuth();
