@@ -23,6 +23,28 @@
 
 BEGIN;
 
+-- 0) Retire typo/duplicate users before roster upsert (safe soft-deactivate).
+UPDATE public.work_claims wc
+SET status = 'released', released_at = COALESCE(wc.released_at, now())
+FROM public.users u
+WHERE wc.claimed_by_user_id = u.id
+  AND wc.status = 'active'
+  AND (
+    lower(regexp_replace(coalesce(trim(u.full_name), ''), '[^a-z0-9]+', '', 'g')) = 'sachinrathod'
+    OR (
+      lower(regexp_replace(coalesce(trim(u.full_name), ''), '[^a-z0-9]+', '', 'g')) = 'pankaj'
+      AND u.full_name NOT ILIKE '%meena%'
+    )
+  );
+
+UPDATE public.users
+SET is_active = false, invite_code = NULL, invite_code_expires_at = NULL
+WHERE lower(regexp_replace(coalesce(trim(full_name), ''), '[^a-z0-9]+', '', 'g')) = 'sachinrathod'
+   OR (
+     lower(regexp_replace(coalesce(trim(full_name), ''), '[^a-z0-9]+', '', 'g')) = 'pankaj'
+     AND full_name NOT ILIKE '%meena%'
+   );
+
 -- 1) Normalize existing legacy names to the confirmed labels.
 UPDATE users
 SET full_name = 'Raju'
@@ -78,7 +100,8 @@ WITH desired_billing(full_name, role, station_label) AS (
     ('Govind', 'billing', 'Station 1'),
     ('Deepak Yogi', 'billing', 'Station 2'),
     ('Neetu', 'billing', 'Station 3'),
-    ('Ashok', 'billing', NULL)
+    ('Ashok', 'billing', NULL),
+    ('Sachin Rathore', 'billing', 'Station 5')
 )
 INSERT INTO users (full_name, role, station_label, is_active)
 SELECT full_name, role, station_label, true
@@ -99,7 +122,7 @@ WITH desired_sales(full_name, role, station_label) AS (
     ('Mankar', 'sales', NULL),
     ('Mahendra Rajput', 'sales', NULL),
     ('Sachin Rao', 'sales', NULL),
-    ('Pankaj', 'sales', NULL),
+    ('Pankaj Meena', 'sales', NULL),
     ('Direct', 'sales', NULL),
     ('Neeraj', 'sales', NULL),
     ('Asad', 'sales', NULL),
@@ -126,7 +149,8 @@ WHERE role = 'billing'
     'Govind',
     'Deepak Yogi',
     'Neetu',
-    'Ashok'
+    'Ashok',
+    'Sachin Rathore'
   );
 
 -- 6) Deactivate sales users not in the confirmed roster.
@@ -142,7 +166,7 @@ WHERE role = 'sales'
     'Mankar',
     'Mahendra Rajput',
     'Sachin Rao',
-    'Pankaj',
+    'Pankaj Meena',
     'Direct',
     'Neeraj',
     'Asad',
