@@ -466,6 +466,23 @@ function OrderCard({
   );
 }
 
+function offlinePartialDetail(order: OfflineSalesOrder): string | null {
+  if (order.status !== 'partial' || !order.result) return null;
+  const poQty = (order.result.lines ?? []).reduce(
+    (sum, line) => sum + (line.qty_po ?? 0),
+    0,
+  );
+  const skippedQty = order.result.shortage_qty ?? 0;
+  const orderRef = order.result.order_number ? `Order ${order.result.order_number} was created` : 'Order was created';
+  if (poQty > 0) {
+    return `${orderRef}; ${poQty} pcs added to Pending.`;
+  }
+  if (skippedQty > 0) {
+    return `${orderRef}; ${skippedQty} pcs were skipped.`;
+  }
+  return `${orderRef} with limited stock.`;
+}
+
 function OfflineOrderCard({ order }: { order: OfflineSalesOrder }) {
   const toast = useToast();
   const [acting, setActing] = useState(false);
@@ -473,7 +490,7 @@ function OfflineOrderCard({ order }: { order: OfflineSalesOrder }) {
     order.status === 'syncing'
       ? 'Syncing'
       : order.status === 'partial'
-        ? 'Partially submitted'
+        ? 'Synced'
         : order.status === 'no_stock'
           ? 'No stock at sync'
           : order.status === 'failed'
@@ -504,11 +521,9 @@ function OfflineOrderCard({ order }: { order: OfflineSalesOrder }) {
           {order.summary.itemCount} items · {order.summary.totalPieces} pcs ·{' '}
           {formatCurrency(order.summary.totalValue)}
         </p>
-        {order.status === 'partial' && (
+        {order.status === 'partial' && offlinePartialDetail(order) && (
           <p className="text-xs font-medium text-[var(--content-warning-on-light)]">
-            {order.result?.order_number
-              ? `Order ${order.result.order_number} was created; ${order.result.shortage_qty ?? 0} pcs were skipped.`
-              : `${order.result?.shortage_qty ?? 0} pcs were skipped.`}
+            {offlinePartialDetail(order)}
           </p>
         )}
         {order.status === 'no_stock' && (
@@ -552,6 +567,26 @@ function OfflineOrderCard({ order }: { order: OfflineSalesOrder }) {
               className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-xs font-semibold text-[var(--content-secondary)] disabled:opacity-50"
             >
               Remove
+            </button>
+          </div>
+        )}
+        {(order.status === 'partial' || order.status === 'no_stock') && (
+          <div className="flex flex-wrap gap-2 pt-1">
+            <button
+              type="button"
+              disabled={acting}
+              onClick={() => {
+                setActing(true);
+                void removeOfflineSalesOrder(order.clientOrderKey)
+                  .then(() => toast.info('Sync record cleared from this device'))
+                  .catch((err) =>
+                    toast.error(err instanceof Error ? err.message : 'Dismiss failed'),
+                  )
+                  .finally(() => setActing(false));
+              }}
+              className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-xs font-semibold text-[var(--content-secondary)] disabled:opacity-50"
+            >
+              Dismiss
             </button>
           </div>
         )}

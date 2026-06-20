@@ -4,12 +4,15 @@ import { CloudArrowUp, WifiSlash } from '@phosphor-icons/react';
 interface OfflineStatusBannerProps {
   pendingCount?: number;
   syncing?: boolean;
+  /** Resolved locally but last upload attempt failed — not the same as waiting to sync. */
+  failedCount?: number;
   label?: string;
 }
 
 export function OfflineStatusBanner({
   pendingCount = 0,
   syncing = false,
+  failedCount = 0,
   label,
 }: OfflineStatusBannerProps): React.JSX.Element | null {
   const [offline, setOffline] = useState(
@@ -27,7 +30,7 @@ export function OfflineStatusBanner({
     };
   }, []);
 
-  if (!offline && pendingCount <= 0 && !syncing) return null;
+  if (!offline && pendingCount <= 0 && !syncing && failedCount <= 0) return null;
 
   const message =
     label ??
@@ -36,10 +39,14 @@ export function OfflineStatusBanner({
         ? 'Offline — syncing when possible'
         : pendingCount > 0
           ? `Offline — ${pendingCount} waiting to sync`
-          : 'Offline — using saved data'
+          : failedCount > 0
+            ? `Offline — ${failedCount} sync failed`
+            : 'Offline — using saved data'
       : syncing
         ? 'Syncing saved changes'
-        : `${pendingCount} waiting to sync`);
+        : pendingCount > 0
+          ? `${pendingCount} waiting to sync`
+          : `${failedCount} sync failed`);
 
   return (
     <div

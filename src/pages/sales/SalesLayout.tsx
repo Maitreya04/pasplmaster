@@ -97,8 +97,9 @@ export default function SalesLayout(): React.JSX.Element | null {
         <div className="role-sales min-h-screen bg-[var(--bg-primary)] relative">
           <SalesTopBar userId={userId} role={role} push={push} />
           <OfflineStatusBanner
-            pendingCount={offlineStats.active + offlineStats.partial + offlineStats.noStock + offlineStats.failed}
+            pendingCount={offlineStats.waitingToSync}
             syncing={offlineStats.syncing > 0}
+            failedCount={offlineStats.failed}
           />
           {nearbyCustomer && (
             <div className="pt-2">
@@ -138,6 +139,15 @@ function SalesTopBar({
         >
           <CloudArrowUp size={16} weight="duotone" />
           {offlineStats.syncing > 0 ? 'Syncing' : `${offlineStats.queued} queued`}
+        </Link>
+      )}
+      {offlineStats.active === 0 && offlineStats.failed > 0 && (
+        <Link
+          to="/sales/orders"
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[var(--border-negative)] bg-[var(--bg-negative-subtle)] px-2.5 text-xs font-semibold text-[var(--content-negative)]"
+        >
+          <CloudArrowUp size={16} weight="duotone" />
+          {offlineStats.failed} sync failed
         </Link>
       )}
       <NotificationBell userId={userId} role={role} />

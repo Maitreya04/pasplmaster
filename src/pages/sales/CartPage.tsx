@@ -1069,7 +1069,13 @@ export default function CartPage(): React.JSX.Element | null {
   const [deviceOffline, setDeviceOffline] = useState(shouldQueueSalesOrderLocally);
 
   useEffect(() => {
-    if (isBrowserOffline()) markDeviceOffline();
+    if (isBrowserOffline()) {
+      markDeviceOffline();
+      setDeviceOffline(true);
+    } else {
+      markDeviceOnline();
+      setDeviceOffline(false);
+    }
 
     const onOffline = () => {
       markDeviceOffline();
@@ -1077,7 +1083,7 @@ export default function CartPage(): React.JSX.Element | null {
     };
     const onOnline = () => {
       markDeviceOnline();
-      setDeviceOffline(shouldQueueSalesOrderLocally());
+      setDeviceOffline(false);
     };
 
     window.addEventListener('online', onOnline);
@@ -1352,7 +1358,14 @@ export default function CartPage(): React.JSX.Element | null {
       if (payload.kind === 'queued') {
         setSubmitSuccess(null);
         setQueuedSuccess(payload.queuedOrder);
-        toast.success('Order queued. It will sync when network returns.');
+        toast.success(
+          shouldQueueSalesOrderLocally()
+            ? 'Order queued. It will sync when network returns.'
+            : 'Order saved. Syncing now…',
+        );
+        if (!shouldQueueSalesOrderLocally()) {
+          void syncOfflineSalesOrders();
+        }
         return;
       }
       setQueuedSuccess(null);
@@ -1405,7 +1418,11 @@ export default function CartPage(): React.JSX.Element | null {
     setSubmitSuccess(null);
     setQueuedSuccess(queuedOrder);
     setSummaryCopied(false);
-    toast.success('Order queued. It will sync when network returns.');
+    toast.success(
+      shouldQueueSalesOrderLocally()
+        ? 'Order queued. It will sync when network returns.'
+        : 'Order saved. Syncing now…',
+    );
 
     if (!shouldQueueSalesOrderLocally()) {
       void syncOfflineSalesOrders();
@@ -1424,7 +1441,11 @@ export default function CartPage(): React.JSX.Element | null {
 
   const handleSubmit = () => {
     appHaptics.impactMedium();
-    queueCurrentOrderImmediately();
+    if (shouldQueueSalesOrderLocally()) {
+      queueCurrentOrderImmediately();
+      return;
+    }
+    submitMutation.mutate();
   };
 
   useEffect(() => {
@@ -1466,11 +1487,12 @@ export default function CartPage(): React.JSX.Element | null {
             <CheckCircle size={36} weight="fill" className="text-[var(--content-warning)]" />
           </div>
           <h2 className="text-xl font-bold text-[var(--content-primary)] mb-2">
-            Saved for sync
+            {shouldQueueSalesOrderLocally() ? 'Saved for sync' : 'Submitting order'}
           </h2>
           <p className="max-w-sm text-sm text-[var(--content-secondary)] leading-relaxed">
-            {queuedSuccess.summary.customerName} is queued on this device. When network returns,
-            stock will be checked by the server and the order will sync without another tap.
+            {shouldQueueSalesOrderLocally()
+              ? `${queuedSuccess.summary.customerName} is queued on this device. When network returns, stock will be checked by the server and the order will sync without another tap.`
+              : `${queuedSuccess.summary.customerName} is saved on this device and syncing to the server now. Stock will be checked automatically — no need to tap again.`}
           </p>
           <div className="mt-5 rounded-xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] px-4 py-3 text-left">
             <p className="font-mono text-sm font-semibold text-[var(--content-primary)]">

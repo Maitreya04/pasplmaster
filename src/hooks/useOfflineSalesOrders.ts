@@ -81,9 +81,12 @@ export function useOfflineSalesOrderStats() {
     }
     return {
       total: orders.length,
+      /** Queued or actively uploading — the only states that need a sync retry. */
       active: queued + syncing,
+      waitingToSync: queued + syncing,
       queued,
       syncing,
+      /** Sync finished on the server; kept locally for visibility only. */
       partial,
       noStock,
       failed,
