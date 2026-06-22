@@ -127,7 +127,6 @@ export const PickCard = memo(function PickCard({
   const effectivePickedQty = splitActive ? splitCommitted : pickedQty;
   const effectiveTargetQty = splitActive ? splitGoal : targetQty;
 
-  const isDoneBase = uiState === 'picked' || uiState === 'flagged' || uiState === 'overridden';
   const isDone =
     uiState === 'flagged' ||
     ((uiState === 'picked' || uiState === 'overridden') && !splitInProgress);
