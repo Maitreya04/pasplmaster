@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CaretLeft, UserCircle, Package, Play } from '@phosphor-icons/react';
+import { CaretLeft, UserCircle, Package, Play, ArrowRight } from '@phosphor-icons/react';
 import { Card, Skeleton, BigButton, BottomSheet } from '../../components/shared';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useOrderHandoff } from '../../hooks/useOrderHandoff';
@@ -232,7 +232,7 @@ export default function PickPreviewPage(): React.JSX.Element | null {
   }
 
   return (
-    <div className="min-h-screen pb-24">
+    <div className="min-h-screen pb-28">
       <header className="sticky top-0 z-30 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-sm">
         <div className="flex items-center gap-2 px-3 py-2">
           <button
@@ -433,22 +433,34 @@ export default function PickPreviewPage(): React.JSX.Element | null {
         )}
       </div>
 
-      {/* Floating start button — compact, doesn't block content */}
-      <button
-        type="button"
-        onClick={handleStartClick}
-        disabled={startMutation.isPending || rows.length === 0}
-        className="fixed bottom-6 right-4 z-40 flex h-14 items-center gap-2 rounded-full bg-[var(--bg-inverse-primary)] pl-5 pr-6 text-[var(--content-on-color)] shadow-xl ring-1 ring-black/5 pick-pressable disabled:opacity-50 sm:bottom-8 sm:right-6"
+      {/* Start dock — sits above bottom nav so the CTA is always visible */}
+      <div
+        className="fixed bottom-16 left-0 right-0 z-40 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 px-4 pt-3 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur-sm"
+        style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)' }}
       >
-        {startMutation.isPending ? (
-          <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-        ) : (
-          <Play size={20} weight="fill" />
-        )}
-        <span className="text-base font-bold">
-          {startMutation.isPending ? 'Starting…' : 'Start picking'}
-        </span>
-      </button>
+        {rows.length > 0 ? (
+          <p className="mb-2 text-center text-xs font-medium tabular-nums text-[var(--content-secondary)]">
+            {rows.length} lines · {totalPcs} pcs
+          </p>
+        ) : null}
+        <BigButton
+          variant="primary"
+          onClick={handleStartClick}
+          disabled={rows.length === 0}
+          loading={startMutation.isPending}
+          className="bg-[var(--bg-inverse-primary)] font-bold"
+        >
+          {startMutation.isPending ? (
+            'Starting…'
+          ) : (
+            <>
+              <Play size={20} weight="fill" />
+              Start picking
+              <ArrowRight size={20} weight="bold" />
+            </>
+          )}
+        </BigButton>
+      </div>
 
       <BottomSheet
         isOpen={poolConfirmOpen}

@@ -15,6 +15,7 @@ const LOCAL_QUEUE_MIRROR_KEY = `paspl-cache:${IDB_KEY}`;
 const CHANGE_EVENT = 'paspl-offline-picks-changed';
 const PREPARE_RETRY_DELAYS_MS = [0, 1_000, 2_000];
 const BOOTSTRAP_TIMEOUT_MS = 8_000;
+const SYNC_RPC_TIMEOUT_MS = 15_000;
 const SYNC_MAX_PER_RUN = 5;
 const APPLIED_PRUNE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -76,6 +77,17 @@ export interface OfflinePickSession {
 }
 
 let syncPromise: Promise<OfflinePickSession[]> | null = null;
+/** Serializes IDB queue writes so MRP map saves cannot clobber line transitions. */
+let offlineQueueWriteChain: Promise<unknown> = Promise.resolve();
+
+async function withOfflineQueueLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = offlineQueueWriteChain.then(fn, fn);
+  offlineQueueWriteChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -496,29 +508,31 @@ export async function applyOfflinePickTransition(args: {
   orderId: number;
   transition: PickItemTransition;
 }): Promise<OfflinePickSession | null> {
-  const queue = await readOfflinePicks();
-  let updated: OfflinePickSession | null = null;
-  const changedAt = nowIso();
-  const next = queue.map((row) => {
-    if (row.orderId !== args.orderId || row.status === 'applied') return row;
-    updated = {
-      ...row,
-      status:
-        row.status === 'failed'
-          ? 'active'
-          : row.status === 'preparing'
-            ? 'preparing'
-            : row.status,
-      lastError: null,
-      updatedAt: changedAt,
-      orderSnapshot: withUpdatedOrderItem(row.orderSnapshot, (item) =>
-        updatedOrderItemFromTransition(item, args.transition),
-      ),
-    };
+  return withOfflineQueueLock(async () => {
+    const queue = await readOfflinePicks();
+    let updated: OfflinePickSession | null = null;
+    const changedAt = nowIso();
+    const next = queue.map((row) => {
+      if (row.orderId !== args.orderId || row.status === 'applied') return row;
+      updated = {
+        ...row,
+        status:
+          row.status === 'failed'
+            ? 'active'
+            : row.status === 'preparing'
+              ? 'preparing'
+              : row.status,
+        lastError: null,
+        updatedAt: changedAt,
+        orderSnapshot: withUpdatedOrderItem(row.orderSnapshot, (item) =>
+          updatedOrderItemFromTransition(item, args.transition),
+        ),
+      };
+      return updated;
+    });
+    if (updated) await writeQueue(next);
     return updated;
   });
-  if (updated) await writeQueue(next);
-  return updated;
 }
 
 export async function resetOfflinePickLine(args: {
@@ -527,46 +541,52 @@ export async function resetOfflinePickLine(args: {
   scanResult: ScanResult | null;
   state: OrderItem['state'];
 }): Promise<void> {
-  const queue = await readOfflinePicks();
-  const changedAt = nowIso();
-  let changed = false;
-  const next = queue.map((row) => {
-    if (row.orderId !== args.orderId || row.status === 'applied') return row;
-    changed = true;
-    return {
-      ...row,
-      updatedAt: changedAt,
-      orderSnapshot: withUpdatedOrderItem(row.orderSnapshot, (item) =>
-        item.id === args.orderItemId
-          ? {
-              ...item,
-              state: args.state,
-              scan_result: args.scanResult,
-              flag_reason: args.state === 'flagged' ? item.flag_reason : null,
-              flag_notes: args.state === 'flagged' ? item.flag_notes : null,
-              flag_box_price: args.state === 'flagged' ? item.flag_box_price : null,
-            }
-          : item,
-      ),
-    };
+  await withOfflineQueueLock(async () => {
+    const queue = await readOfflinePicks();
+    const changedAt = nowIso();
+    let changed = false;
+    const next = queue.map((row) => {
+      if (row.orderId !== args.orderId || row.status === 'applied') return row;
+      changed = true;
+      return {
+        ...row,
+        updatedAt: changedAt,
+        orderSnapshot: withUpdatedOrderItem(row.orderSnapshot, (item) =>
+          item.id === args.orderItemId
+            ? {
+                ...item,
+                state: args.state,
+                scan_result: args.scanResult,
+                flag_reason: args.state === 'flagged' ? item.flag_reason : null,
+                flag_notes: args.state === 'flagged' ? item.flag_notes : null,
+                flag_box_price: args.state === 'flagged' ? item.flag_box_price : null,
+              }
+            : item,
+        ),
+      };
+    });
+    if (changed) await writeQueue(next);
   });
-  if (changed) await writeQueue(next);
 }
 
 export async function saveOfflinePickLineMrpMap(
   orderId: number,
   lineMrpMap: Map<number, PickLineMrpState>,
 ): Promise<void> {
-  const queue = await readOfflinePicks();
-  const changedAt = nowIso();
-  let changed = false;
-  const record = Object.fromEntries([...lineMrpMap.entries()].map(([id, state]) => [String(id), state]));
-  const next = queue.map((row) => {
-    if (row.orderId !== orderId || row.status === 'applied') return row;
-    changed = true;
-    return { ...row, lineMrpByItemId: record, updatedAt: changedAt };
+  await withOfflineQueueLock(async () => {
+    const queue = await readOfflinePicks();
+    const changedAt = nowIso();
+    let changed = false;
+    const record = Object.fromEntries(
+      [...lineMrpMap.entries()].map(([id, state]) => [String(id), state]),
+    );
+    const next = queue.map((row) => {
+      if (row.orderId !== orderId || row.status === 'applied') return row;
+      changed = true;
+      return { ...row, lineMrpByItemId: record, updatedAt: changedAt };
+    });
+    if (changed) await writeQueue(next);
   });
-  if (changed) await writeQueue(next);
 }
 
 function lineSegmentsForPayload(
@@ -640,59 +660,50 @@ export async function completeOfflinePick(args: {
   orderId: number;
   boxCount: number;
 }): Promise<OfflinePickSession | null> {
-  let queue = await readOfflinePicks();
-  const existing = queue.find((row) => row.orderId === args.orderId && row.status !== 'applied');
-  if (!existing) return null;
+  return withOfflineQueueLock(async () => {
+    const queue = await readOfflinePicks();
+    const existing = queue.find((row) => row.orderId === args.orderId && row.status !== 'applied');
+    if (!existing) return null;
 
-  if (existing.status === 'preparing' || !isOfflinePickServerPrepared(existing)) {
-    const bootstrapped = await bootstrapOfflinePickSession(existing);
-    if (bootstrapped.status === 'preparing' || !isOfflinePickServerPrepared(bootstrapped)) {
-      const completedAt = nowIso();
-      const pendingComplete = {
-        ...bootstrapped,
+    const completedAt = nowIso();
+    let target: OfflinePickSession | null = null;
+    const next = queue.map((row) => {
+      if (row.orderId !== args.orderId || row.status === 'applied') return row;
+      const waitingForPrepare =
+        row.status === 'preparing' || !isOfflinePickServerPrepared(row);
+      target = {
+        ...row,
+        status: 'queued',
         boxCount: args.boxCount,
         completedAt,
         updatedAt: completedAt,
-        status: 'queued' as const,
-        lastError: bootstrapped.lastError ?? 'waiting_for_server_prepare',
+        lastError: waitingForPrepare ? (row.lastError ?? 'waiting_for_server_prepare') : null,
       };
-      queue = (await readOfflinePicks()).map((row) =>
-        row.clientPickKey === pendingComplete.clientPickKey ? pendingComplete : row,
-      );
-      await writeQueue(queue);
-      await syncOfflinePicks();
-      const after = await readOfflinePicks();
-      return after.find((row) => row.orderId === args.orderId) ?? pendingComplete;
-    }
-  }
+      return target;
+    });
+    if (!target) return null;
+    await writeQueue(next);
 
-  const completedAt = nowIso();
-  let target: OfflinePickSession | null = null;
-  const next = (await readOfflinePicks()).map((row) => {
-    if (row.orderId !== args.orderId || row.status === 'applied') return row;
-    target = {
-      ...row,
-      status: 'queued',
-      boxCount: args.boxCount,
-      completedAt,
-      updatedAt: completedAt,
-      lastError: null,
-    };
+    // Local-first finish — never block the picker on server sync.
+    void syncOfflinePicks();
+
     return target;
   });
-  if (!target) return null;
-  await writeQueue(next);
-  await syncOfflinePicks();
-  const after = await readOfflinePicks();
-  return after.find((row) => row.orderId === args.orderId) ?? target;
 }
 
 async function submitOfflinePickPayload(
   payload: OfflinePickPayload,
 ): Promise<OfflinePickSyncResult> {
-  const { data, error } = await supabase.rpc('submit_offline_pick', {
-    p_payload: payload as unknown as Record<string, unknown>,
-  });
+  const response = await withTimeout(
+    Promise.resolve(
+      supabase.rpc('submit_offline_pick', {
+        p_payload: payload as unknown as Record<string, unknown>,
+      }),
+    ),
+    SYNC_RPC_TIMEOUT_MS,
+    'submit_offline_pick',
+  );
+  const { data, error } = response;
   if (error) throw error;
   return data as OfflinePickSyncResult;
 }
@@ -749,7 +760,8 @@ async function syncSingleOfflinePick(clientPickKey: string): Promise<OfflinePick
     (await readOfflinePicks()).find((row) => row.clientPickKey === activeKey) ?? target;
 
   try {
-    const result = await submitOfflinePickPayload(buildOfflinePickPayload(session));
+    const payload = buildOfflinePickPayload(session);
+    const result = await submitOfflinePickPayload(payload);
     const status = offlinePickStatusFromResult(result);
     const updatedAt = nowIso();
     queue = (await readOfflinePicks()).map((row) =>
@@ -767,8 +779,9 @@ async function syncSingleOfflinePick(clientPickKey: string): Promise<OfflinePick
     await writeQueue(queue);
     return queue;
   } catch (err) {
-    const retryable = isNetworkPickSyncError(err);
     const message = err instanceof Error ? err.message : 'Sync failed';
+    const retryable =
+      isNetworkPickSyncError(err) || message === 'missing_claim_id';
     const updatedAt = nowIso();
     queue = (await readOfflinePicks()).map((row) =>
       row.clientPickKey === activeKey

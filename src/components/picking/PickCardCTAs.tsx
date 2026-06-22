@@ -19,6 +19,7 @@ export interface PickCardCTAsProps {
   waitingForSplitChoice?: boolean;
   onManualQty: () => void;
   onFlag: () => void;
+  onOutOfStock?: () => void;
   onScan: () => void;
   /** Rack phase — manual "I'm here" when bin QR is missing. */
   onConfirmRack?: () => void;
@@ -52,6 +53,7 @@ export function PickCardCTAs({
   waitingForSplitChoice = false,
   onManualQty,
   onFlag,
+  onOutOfStock,
   onScan,
   onConfirmRack,
   onConfirmMrp,
@@ -239,14 +241,25 @@ export function PickCardCTAs({
             >
               Enter qty
             </button>
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={onFlag}
-              className="min-h-[44px] rounded-xl bg-[var(--bg-warning-subtle)] text-xs font-semibold text-[var(--content-warning-on-light)] pick-pressable disabled:opacity-40"
-            >
-              Flag
-            </button>
+            {onOutOfStock ? (
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={onOutOfStock}
+                className="min-h-[44px] rounded-xl border-[1.5px] border-[var(--border-negative)] bg-[var(--bg-negative-subtle)] text-xs font-bold text-[var(--content-negative)] pick-pressable disabled:opacity-40"
+              >
+                Out of stock
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={onFlag}
+                className="min-h-[44px] rounded-xl bg-[var(--bg-warning-subtle)] text-xs font-semibold text-[var(--content-warning-on-light)] pick-pressable disabled:opacity-40"
+              >
+                Flag
+              </button>
+            )}
           </div>
         </div>
       </div>

@@ -144,10 +144,13 @@ export default function PickFinalisePage(): React.JSX.Element | null {
       pendingCompletionSnapshotRef.current = snapshot;
       if (offlinePickActive) {
         const saved = await completeOfflinePick({ orderId, boxCount });
-        if (saved?.status === 'conflict' || saved?.status === 'failed') {
+        if (!saved) {
+          throw new Error('Could not save this pick on device');
+        }
+        if (saved.status === 'conflict' || saved.status === 'failed') {
           return withPickCompletionSaveState(snapshot, 'needs_review');
         }
-        if (saved?.status === 'queued' || saved?.status === 'syncing') {
+        if (saved.status !== 'applied') {
           return withPickCompletionSaveState(snapshot, 'queued');
         }
         return snapshot;

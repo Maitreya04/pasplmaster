@@ -55,6 +55,8 @@ export interface PickCardProps {
   onUndoLinePick?: () => void;
   onUndoLineQty?: () => void;
   onFlag?: () => void;
+  /** Shortcut when shelf is empty — skips MRP/qty gates. */
+  onOutOfStock?: () => void;
   onEngageScanner?: () => void;
   onSelectLayer?: (layerId: number) => void;
   lineOutcome?: PickLineOutcomeKind | null;
@@ -99,6 +101,7 @@ export const PickCard = memo(function PickCard({
   onUndoLinePick,
   onUndoLineQty,
   onFlag,
+  onOutOfStock,
   onEngageScanner,
   onSelectLayer,
   lineOutcome = null,
@@ -125,7 +128,9 @@ export const PickCard = memo(function PickCard({
   const effectiveTargetQty = splitActive ? splitGoal : targetQty;
 
   const isDoneBase = uiState === 'picked' || uiState === 'flagged' || uiState === 'overridden';
-  const isDone = isDoneBase && !splitInProgress;
+  const isDone =
+    uiState === 'flagged' ||
+    ((uiState === 'picked' || uiState === 'overridden') && !splitInProgress);
   const showingOutcome = isCurrent && lineOutcome != null;
   const isAwaitingRack = !rackVerified && !isDone && !splitInProgress;
   const isVerified = rackVerified && !isDone && !showingOutcome;
@@ -338,6 +343,7 @@ export const PickCard = memo(function PickCard({
           waitingForSplitChoice={showSplitChooser}
           onManualQty={() => onManualQty?.()}
           onFlag={() => onFlag?.()}
+          onOutOfStock={onOutOfStock}
           onScan={() => onEngageScanner?.()}
           onConfirmRack={isAwaitingRack ? () => onRackTap?.() : undefined}
           onConfirmMrp={needsMrpConfirm ? () => (onConfirmMrp ?? onEditMrp)?.() : undefined}

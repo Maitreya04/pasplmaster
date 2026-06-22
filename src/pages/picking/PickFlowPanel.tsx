@@ -368,7 +368,7 @@ export function PickFlowPanel({
   // undoSnapshot: 5s window to revert the last completion. Captures the prior
   // scan_result + state so we can roll back both DB and local UI cleanly.
   const [undoSnapshot, setUndoSnapshot] = useState<UndoSnapshot | null>(null);
-  const [queueSheetOpen, setQueueSheetOpen] = useState(true);
+  const [queueSheetOpen, setQueueSheetOpen] = useState(false);
   const [queueDragProgress, setQueueDragProgress] = useState(0);
   const [flagSheetOpen, setFlagSheetOpen] = useState(false);
   const [flagTargetItemId, setFlagTargetItemId] = useState<number | null>(null);
@@ -530,7 +530,9 @@ export function PickFlowPanel({
       let uiState = local?.uiState ?? uiStateFromDb(oi);
       const scanResult = local?.scanResult ?? oi.scan_result;
       const lineMrp = lineMrpMap.get(oi.id);
-      if (isSplitInProgress(lineMrp, pickQuantityTarget(oi))) {
+      const terminal =
+        uiState === 'picked' || uiState === 'flagged' || uiState === 'overridden';
+      if (!terminal && isSplitInProgress(lineMrp, pickQuantityTarget(oi))) {
         uiState = 'matched';
       }
       return {
@@ -907,13 +909,22 @@ export function PickFlowPanel({
       const itemId = transition.itemId;
       const previous = localItems.get(itemId) ?? null;
       if (optimisticState) {
-        updateLocalItem(itemId, { uiState: optimisticState });
+        const localUpdate: Partial<PickItemLocal> = { uiState: optimisticState };
+        if (transition.kind === 'flagged' || transition.kind === 'picked') {
+          localUpdate.scanResult = transition.scanResult ?? null;
+        } else if (transition.kind === 'scan_saved') {
+          localUpdate.scanResult = transition.scanResult;
+        }
+        updateLocalItem(itemId, localUpdate);
       }
       if (offlinePickActive) {
-        await applyOfflinePickTransition({
+        const updated = await applyOfflinePickTransition({
           orderId,
           transition,
         });
+        if (!updated) {
+          throw new Error('offline_session_missing');
+        }
         return { itemId, previous };
       }
       await transitionAdapter.applyTransition(transition);
@@ -987,7 +998,11 @@ export function PickFlowPanel({
       const previous = localItems.get(itemId);
       updateLocalItem(itemId, { uiState: previous?.uiState ?? 'pending' });
       if (vars.transition.kind === 'flagged') {
-        toast.error('Failed to flag item');
+        toast.error(
+          message === 'offline_session_missing'
+            ? 'Could not save flag — reopen this pick from the queue'
+            : 'Failed to flag item',
+        );
       } else if (vars.transition.kind === 'picked') {
         toast.error('Failed to mark item as picked');
       } else {
@@ -1070,15 +1085,10 @@ export function PickFlowPanel({
     setScannerHint(null);
   }, [lineMrpMap, localItems, toast]);
 
-  const flagOutOfStock = useCallback(
-    (itemId: number) => {
-      appHaptics.impactMedium();
-      const orderItem = order?.items.find((oi) => oi.id === itemId);
-      if (!orderItem) return;
-      if (!rackVerifiedIds.has(itemId)) {
-        markRackVerified(itemId, 'override');
-      }
-      const scanResult = mergeMrpIntoScanResult(
+  const buildOutOfStockScanResult = useCallback(
+    (orderItem: OrderItem): ScanResult => {
+      const itemId = orderItem.id;
+      return mergeMrpIntoScanResult(
         {
           scannedText: 'OUT_OF_STOCK',
           confidence: 100,
@@ -1103,13 +1113,25 @@ export function PickFlowPanel({
         undefined,
         orderItem,
       );
+    },
+    [lineMrpMap, mrpFocusItem?.id, mrpHistoryData],
+  );
+
+  const commitFlaggedLine = useCallback(
+    (
+      itemId: number,
+      reason: FlagSubmitPayload['reason'],
+      notes: string | null,
+      scanResult: ScanResult | null,
+      onDone?: () => void,
+    ) => {
       itemTransitionMutation.mutate(
         {
           transition: {
             kind: 'flagged',
             itemId,
-            reason: 'Out of Stock',
-            notes: null,
+            reason,
+            notes,
             boxPrice: null,
             scanResult,
           },
@@ -1117,25 +1139,54 @@ export function PickFlowPanel({
         },
         {
           onSuccess: () => {
-            toast.info('Flagged — out of stock');
+            if (reason === 'Out of Stock') {
+              toast.info('Flagged — out of stock');
+            } else {
+              toast.info(
+                isLab
+                  ? 'Flag recorded (lab only — not sent to billing)'
+                  : offlinePickActive
+                    ? 'Flag recorded — will reach billing when this pick syncs'
+                    : 'Flag sent to billing',
+              );
+            }
             beginLineOutcome({
               itemId,
               kind: 'flagged',
-              reason: 'Out of Stock',
+              reason,
             });
+            onDone?.();
           },
         },
       );
     },
+    [beginLineOutcome, isLab, itemTransitionMutation, offlinePickActive, toast],
+  );
+
+  const flagOutOfStock = useCallback(
+    (itemId: number) => {
+      appHaptics.impactMedium();
+      const orderItem = order?.items.find((oi) => oi.id === itemId);
+      if (!orderItem) {
+        toast.error('Could not flag — line not found');
+        return;
+      }
+      if (!rackVerifiedIds.has(itemId)) {
+        markRackVerified(itemId, 'override');
+      }
+      commitFlaggedLine(
+        itemId,
+        'Out of Stock',
+        null,
+        buildOutOfStockScanResult(orderItem),
+      );
+    },
     [
-      itemTransitionMutation,
-      lineMrpMap,
+      buildOutOfStockScanResult,
+      commitFlaggedLine,
       markRackVerified,
-      mrpFocusItem?.id,
-      mrpHistoryData,
       order?.items,
       rackVerifiedIds,
-      beginLineOutcome,
       toast,
     ],
   );
@@ -2220,39 +2271,23 @@ export function PickFlowPanel({
     (payload: FlagSubmitPayload) => {
       if (flagTargetItemId === null) return;
       appHaptics.impactMedium();
-      itemTransitionMutation.mutate(
-        {
-          transition: {
-            kind: 'flagged',
-            itemId: flagTargetItemId,
-            reason: payload.reason,
-            notes: payload.notes,
-            boxPrice: null,
-            scanResult: localItems.get(flagTargetItemId)?.scanResult ?? null,
-          },
-          optimisticState: 'flagged',
-        },
-        {
-          onSuccess: () => {
-            toast.info(
-              isLab
-                ? 'Flag recorded (lab only — not sent to billing)'
-                : offlinePickActive
-                  ? 'Flag recorded — will reach billing when this pick syncs'
-                  : 'Flag sent to billing',
-            );
-            setFlagSheetOpen(false);
-            beginLineOutcome({
-              itemId: flagTargetItemId,
-              kind: 'flagged',
-              reason: payload.reason,
-            });
-            setFlagTargetItemId(null);
-          },
-        },
-      );
+      const orderItem = order?.items.find((oi) => oi.id === flagTargetItemId);
+      const scanResult =
+        payload.reason === 'Out of Stock' && orderItem
+          ? buildOutOfStockScanResult(orderItem)
+          : (localItems.get(flagTargetItemId)?.scanResult ?? null);
+      commitFlaggedLine(flagTargetItemId, payload.reason, payload.notes, scanResult, () => {
+        setFlagSheetOpen(false);
+        setFlagTargetItemId(null);
+      });
     },
-    [beginLineOutcome, flagTargetItemId, isLab, itemTransitionMutation, localItems, offlinePickActive, toast],
+    [
+      buildOutOfStockScanResult,
+      commitFlaggedLine,
+      flagTargetItemId,
+      localItems,
+      order?.items,
+    ],
   );
 
   // These derived values depend only on hook-provided state, so they must stay
@@ -2670,6 +2705,9 @@ export function PickFlowPanel({
                           : undefined
                       }
                       onFlag={() => openFlagSheet(pi.orderItem.id)}
+                      onOutOfStock={
+                        isCardCurrent ? () => flagOutOfStock(pi.orderItem.id) : undefined
+                      }
                       onEngageScanner={() =>
                         engageScanner(
                           pi.orderItem,
