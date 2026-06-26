@@ -72,6 +72,7 @@ import {
 } from '../../lib/buildOrderCustomerMessage';
 import {
   buildCustomerDuplicateNameSet,
+  getCustomerAddress,
   getCustomerSearchText,
   getCustomerSecondaryLine,
   getCustomerTertiaryLine,
@@ -172,7 +173,7 @@ function SearchableCustomerDropdown({
       .map((c) => {
         const name = c.name.toLowerCase();
         const city = c.city?.toLowerCase() ?? '';
-        const address = c.address?.toLowerCase() ?? '';
+        const address = getCustomerAddress(c)?.toLowerCase() ?? '';
         const searchText = getCustomerSearchText(c);
         let score = Number.POSITIVE_INFINITY;
         if (name === q) score = 0;

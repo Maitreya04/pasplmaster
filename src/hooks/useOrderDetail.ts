@@ -115,7 +115,7 @@ export function useOrderDetail(orderId: number | null) {
       if (typeof order.customer_id === 'number') {
         const { data: customer, error: customerError } = await supabase
           .from('customers')
-          .select('mobile, city, station, address, address1, address2, address3')
+          .select('mobile, city, station, address1, address2, address3')
           .eq('id', order.customer_id)
           .limit(1)
           .maybeSingle();
@@ -126,7 +126,7 @@ export function useOrderDetail(orderId: number | null) {
           customerRecord = customer;
           customerMobile = customer.mobile ?? null;
           customerAddress = getCustomerAddress({
-            address: customer.address ?? null,
+            address: null,
             address1: customer.address1 ?? null,
             address2: customer.address2 ?? null,
             address3: customer.address3 ?? null,

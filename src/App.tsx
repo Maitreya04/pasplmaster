@@ -5,6 +5,7 @@ import { ImpersonationBanner } from './components/layout/ImpersonationBanner';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const GetStartedPage = lazy(() => import('./pages/auth/GetStartedPage'));
+const ResetPinPage = lazy(() => import('./pages/auth/ResetPinPage'));
 const RoleSelectPage = lazy(() => import('./pages/RoleSelectPage'));
 
 const SalesLayout = lazy(() => import('./pages/sales/SalesLayout'));
@@ -129,6 +130,7 @@ export default function App(): React.JSX.Element | null {
         <Route path="/" element={<RootRedirect />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/get-started" element={<GetStartedPage />} />
+        <Route path="/reset-pin" element={<ResetPinPage />} />
         <Route
           path="/select-role"
           element={

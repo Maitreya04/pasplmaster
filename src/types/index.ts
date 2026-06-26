@@ -25,7 +25,7 @@ export interface Item {
 export interface Customer {
   id: number;
   name: string;
-  address: string | null;
+  address?: string | null;
   address1?: string | null;
   address2?: string | null;
   address3?: string | null;

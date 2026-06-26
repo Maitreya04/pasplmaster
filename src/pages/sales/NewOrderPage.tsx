@@ -545,7 +545,7 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
           city: city || null,
           mobile: mobile || null,
           gstin: gstin || null,
-          address: address || null,
+          address1: address || null,
           is_active: true,
         })
         .select('*')

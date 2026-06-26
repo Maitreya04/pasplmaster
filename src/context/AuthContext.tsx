@@ -10,7 +10,7 @@ import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase/client';
 import { clearCartDraft } from '../lib/cartDraftStorage';
 import { warmPickQueueRoute } from '../lib/picking/warmPickQueue';
-import { phoneToAuthEmail } from '../lib/auth/phoneAuth';
+import { phoneToAuthEmail, normalizePhoneInput, saveDeviceProfile } from '../lib/auth/phoneAuth';
 import type { StockLocationCode, UserRole } from '../types';
 
 type Role = 'sales' | 'billing' | 'picking' | 'admin' | 'partner' | null;
@@ -306,6 +306,8 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
 
       if (data.session) {
         await hydrateFromSession(data.session);
+      } else if (initial.authMode === 'supabase' && initial.isAuthenticated) {
+        clearAuthState();
       }
       setAuthReady(true);
     })();
@@ -379,6 +381,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
       }
 
       applySupabaseProfile(profile as UserProfileRow, data.session);
+      saveDeviceProfile({ phone: normalizePhoneInput(phone), displayName: profile.full_name });
       void supabase
         .from('users')
         .update({ last_login_at: new Date().toISOString() })

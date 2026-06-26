@@ -240,7 +240,7 @@ async function fetchCustomerLocationMaps(customerIds: number[]): Promise<{
 
   const { data: extendedCustomers, error: extendedError } = await supabase
     .from('customers')
-    .select('id, city, station, address, address1, address2, address3')
+    .select('id, city, station, address1, address2, address3')
     .in('id', customerIds);
 
   if (!extendedError) {
@@ -248,7 +248,7 @@ async function fetchCustomerLocationMaps(customerIds: number[]): Promise<{
   } else {
     const { data: basicCustomers, error: basicError } = await supabase
       .from('customers')
-      .select('id, city, address')
+      .select('id, city, station, address1')
       .in('id', customerIds);
 
     if (basicError) {

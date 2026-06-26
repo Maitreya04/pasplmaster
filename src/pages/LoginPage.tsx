@@ -1,8 +1,15 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate, Navigate, Link } from 'react-router-dom';
 import { Backspace } from '@phosphor-icons/react';
+import { PinPad } from '../components/auth/PinPad';
 import { useAuth } from '../context/AuthContext';
-import { isValidPhone, isValidPin, normalizePhoneInput } from '../lib/auth/phoneAuth';
+import {
+  clearDeviceProfile,
+  isValidPhone,
+  isValidPin,
+  loadDeviceProfile,
+  normalizePhoneInput,
+} from '../lib/auth/phoneAuth';
 
 const ROLE_HOME: Record<string, string> = {
   sales: '/sales',
@@ -14,14 +21,15 @@ const ROLE_HOME: Record<string, string> = {
 
 const LEGACY_LOGIN_ENABLED = true;
 
-type LoginMode = 'phone' | 'legacy';
+type LoginMode = 'quick' | 'full' | 'legacy';
 
 export default function LoginPage(): React.JSX.Element | null {
   const navigate = useNavigate();
   const { loginWithPhone, login, isAuthenticated, role, authMode, authReady } = useAuth();
 
-  const [mode, setMode] = useState<LoginMode>('phone');
-  const [phone, setPhone] = useState('');
+  const savedDevice = loadDeviceProfile();
+  const [mode, setMode] = useState<LoginMode>(savedDevice ? 'quick' : 'full');
+  const [phone, setPhone] = useState(savedDevice?.phone ?? '');
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -43,6 +51,22 @@ export default function LoginPage(): React.JSX.Element | null {
     }
     return <Navigate to="/select-role" replace />;
   }
+
+  const handleQuickUnlock = useCallback(
+    async (candidatePin: string): Promise<boolean> => {
+      if (!savedDevice) return false;
+      setError(null);
+      setSubmitting(true);
+      const result = await loginWithPhone(savedDevice.phone, candidatePin);
+      setSubmitting(false);
+      if (!result.success) {
+        setError(result.error ?? 'Incorrect PIN');
+        return false;
+      }
+      return true;
+    },
+    [loginWithPhone, savedDevice],
+  );
 
   const handlePhoneLogin = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -94,7 +118,16 @@ export default function LoginPage(): React.JSX.Element | null {
     [legacyChecking, legacyError, legacyCode, login, navigate],
   );
 
+  const switchToFullLogin = () => {
+    clearDeviceProfile();
+    setMode('full');
+    setPhone('');
+    setPin('');
+    setError(null);
+  };
+
   const legacyDigits = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+  const quickDevice = mode === 'quick' ? savedDevice ?? loadDeviceProfile() : null;
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-between px-6 py-12 select-none relative overflow-hidden">
@@ -104,11 +137,57 @@ export default function LoginPage(): React.JSX.Element | null {
       <div className="text-center relative z-10 pt-4">
         <h1 className="text-3xl font-bold tracking-tight text-[var(--content-primary)]">PASPL Master</h1>
         <p className="text-sm font-medium text-[var(--content-secondary)] mt-2">
-          {mode === 'phone' ? 'Sign in with phone + PIN' : 'Legacy access code'}
+          {mode === 'quick' && quickDevice
+            ? `Welcome back, ${quickDevice.displayName}`
+            : mode === 'full'
+              ? 'Sign in with phone + PIN'
+              : 'Legacy access code'}
         </p>
+        {mode === 'quick' && quickDevice && (
+          <p className="text-xs text-[var(--content-tertiary)] mt-1">Enter your PIN to continue</p>
+        )}
       </div>
 
-      {mode === 'phone' ? (
+      {mode === 'quick' && quickDevice ? (
+        <div className="w-full max-w-xs relative z-10 flex flex-col items-center">
+          <PinPad
+            onSubmit={handleQuickUnlock}
+            disabled={submitting || !authReady}
+            errorText={error}
+          />
+
+          <div className="mt-8 w-full text-center space-y-2">
+            <button
+              type="button"
+              onClick={switchToFullLogin}
+              className="text-sm text-[var(--content-secondary)] hover:text-[var(--content-primary)]"
+            >
+              Not you? Sign in differently
+            </button>
+            <p className="text-sm text-[var(--content-secondary)]">
+              Forgot PIN?{' '}
+              <Link
+                to="/reset-pin"
+                className="font-semibold text-[var(--content-accent)] hover:underline"
+              >
+                Reset PIN
+              </Link>
+            </p>
+            {LEGACY_LOGIN_ENABLED && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('legacy');
+                  setError(null);
+                }}
+                className="text-xs text-[var(--content-tertiary)] hover:text-[var(--content-secondary)]"
+              >
+                Use legacy access code
+              </button>
+            )}
+          </div>
+        </div>
+      ) : mode === 'full' ? (
         <form
           onSubmit={handlePhoneLogin}
           className="w-full max-w-sm relative z-10 space-y-4"
@@ -153,6 +232,15 @@ export default function LoginPage(): React.JSX.Element | null {
 
           <div className="text-center space-y-2 pt-2">
             <p className="text-sm text-[var(--content-secondary)]">
+              Forgot PIN?{' '}
+              <Link
+                to="/reset-pin"
+                className="font-semibold text-[var(--content-accent)] hover:underline"
+              >
+                Reset PIN
+              </Link>
+            </p>
+            <p className="text-sm text-[var(--content-secondary)]">
               New user?{' '}
               <Link
                 to="/get-started"
@@ -161,6 +249,18 @@ export default function LoginPage(): React.JSX.Element | null {
                 Get started →
               </Link>
             </p>
+            {savedDevice && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('quick');
+                  setError(null);
+                }}
+                className="text-sm text-[var(--content-secondary)] hover:text-[var(--content-primary)]"
+              >
+                Back to quick unlock
+              </button>
+            )}
             {LEGACY_LOGIN_ENABLED && (
               <button
                 type="button"
@@ -232,7 +332,7 @@ export default function LoginPage(): React.JSX.Element | null {
           <button
             type="button"
             onClick={() => {
-              setMode('phone');
+              setMode(savedDevice ? 'quick' : 'full');
               setLegacyCode('');
               setLegacyError(false);
             }}
