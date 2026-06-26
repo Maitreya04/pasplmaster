@@ -4,7 +4,6 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase/client';
 import { useAuth } from '../../context/AuthContext';
 import {
-  branchDisplayName,
   isValidPhone,
   isValidPin,
   normalizePhoneInput,
