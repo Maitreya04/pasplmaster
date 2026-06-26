@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Flag } from '@phosphor-icons/react';
 import { BottomSheet, BigButton } from '../shared';
 import { FLAG_REASONS, type FlagReason } from '../../utils/constants';
@@ -14,6 +14,10 @@ interface FlagReasonSheetProps {
   onClose: () => void;
   onSubmit: (payload: FlagSubmitPayload) => void;
   loading?: boolean;
+  /** Optional context shown above reason grid (e.g. short-pick remaining qty). */
+  contextBanner?: string;
+  /** When true, show note field expanded by default for short-pick flows. */
+  encourageNote?: boolean;
 }
 
 export function FlagReasonSheet({
@@ -21,10 +25,18 @@ export function FlagReasonSheet({
   onClose,
   onSubmit,
   loading = false,
+  contextBanner,
+  encourageNote = false,
 }: FlagReasonSheetProps): React.JSX.Element {
   const [reason, setReason] = useState<FlagReason | ''>('');
   const [notes, setNotes] = useState('');
   const [notesExpanded, setNotesExpanded] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && encourageNote) {
+      setNotesExpanded(true);
+    }
+  }, [encourageNote, isOpen]);
 
   function resetAndClose() {
     setReason('');
@@ -45,8 +57,13 @@ export function FlagReasonSheet({
     <BottomSheet isOpen={isOpen} onClose={resetAndClose} title="Report issue">
       <div className="space-y-4">
         <p className="text-sm text-[var(--content-tertiary)]">
-          Choose a reason. Billing will be notified — this cannot be undone from picking.
+          Billing will be notified. You can reset this line before leaving the order.
         </p>
+        {contextBanner ? (
+          <p className="rounded-lg border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2 text-sm text-[var(--content-warning-on-light)]">
+            {contextBanner}
+          </p>
+        ) : null}
         <p className="text-xs text-[var(--content-secondary)] rounded-lg bg-[var(--bg-tertiary)] px-3 py-2">
           {FLAG_SHEET_PRICE_HINT}
         </p>
@@ -85,7 +102,7 @@ export function FlagReasonSheet({
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Additional notes (optional)"
+            placeholder={encourageNote ? 'Only found partial stock on shelf…' : 'Additional notes (optional)'}
             className="w-full h-20 px-4 py-3 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-primary)] border border-[var(--border-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--border-negative)]"
           />
         )}

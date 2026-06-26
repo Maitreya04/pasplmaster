@@ -1,8 +1,16 @@
-import { useCallback, useMemo, useState, Fragment } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ArrowDown, CheckCircle, Flag, MapPin, SkipForward } from '@phosphor-icons/react';
 import { BottomSheet, BigButton } from '../../components/shared';
 import { TransportChip } from '../../components/picking/TransportChip';
+import { UomBadge } from '../../components/picking/UomBadge';
 import { formatBilledLabel, formatLineCountLabel } from '../../lib/picking/pickQueueDisplay';
+import {
+  formatPickLineTotalPrice,
+  groupPickLinesByRack,
+  truncatePickDescription,
+  type PickLineListEntry,
+} from '../../lib/picking/pickLineListDisplay';
+import { normalizeUom } from '../../lib/picking/pickerMicrocopy';
 import { useSwipeReveal } from '../../hooks/useSwipeReveal';
 
 const SWIPE_ACTION_BUTTON_WIDTH = 80;
@@ -16,6 +24,9 @@ export interface QueueSheetRow {
   itemName: string;
   brandLabel?: string | null;
   targetQty: number;
+  pickedQty?: number;
+  uom?: string;
+  unitPrice?: number | null;
   status: QueueSheetRowStatus;
 }
 
@@ -224,31 +235,22 @@ export function QueueSheet({
               Up next ({nextRows.length})
             </p>
             <div className="space-y-1.5">
-              {nextRows.map((r, index) => {
-                const prevBrand = index > 0 ? nextRows[index - 1]?.brandLabel : null;
-                const showBrandHeader = Boolean(r.brandLabel && r.brandLabel !== prevBrand);
-                return (
-                  <Fragment key={r.itemId}>
-                    {showBrandHeader ? (
-                      <p className="pt-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--content-tertiary)]">
-                        {r.brandLabel}
-                      </p>
-                    ) : null}
-                    <Row
-                      row={r}
-                      onJump={onJump}
-                      onCompleteItem={onCompleteItem}
-                      isSwipeOpen={openSwipeItemId === r.itemId}
-                      onSwipeOpenChange={(open) => setOpenSwipeItemId(open ? r.itemId : null)}
-                      onSkip={skipTargetId === null ? () => {
-                        closeSwipe();
-                        setSkipTargetId(r.itemId);
-                        setSkipReason('');
-                      } : undefined}
-                    />
-                  </Fragment>
-                );
-              })}
+              {renderGroupedQueueRows(nextRows, (row, showRackColumn) => (
+                <Row
+                  key={row.itemId}
+                  row={row}
+                  showRackColumn={showRackColumn}
+                  onJump={onJump}
+                  onCompleteItem={onCompleteItem}
+                  isSwipeOpen={openSwipeItemId === row.itemId}
+                  onSwipeOpenChange={(open) => setOpenSwipeItemId(open ? row.itemId : null)}
+                  onSkip={skipTargetId === null ? () => {
+                    closeSwipe();
+                    setSkipTargetId(row.itemId);
+                    setSkipReason('');
+                  } : undefined}
+                />
+              ))}
             </div>
           </section>
         )}
@@ -334,6 +336,7 @@ export function QueueSheet({
 function Row({
   row,
   highlighted = false,
+  showRackColumn = true,
   onSkip,
   onJump,
   onCompleteItem,
@@ -342,6 +345,7 @@ function Row({
 }: {
   row: QueueSheetRow;
   highlighted?: boolean;
+  showRackColumn?: boolean;
   onSkip?: () => void;
   onJump?: (itemId: number) => void;
   onCompleteItem?: (itemId: number) => void;
@@ -359,6 +363,7 @@ function Row({
       <SwipeableQueueRow
         row={row}
         highlighted={highlighted}
+        showRackColumn={showRackColumn}
         isSkipped={isSkipped}
         canJump={canJump}
         onJump={onJump}
@@ -374,6 +379,7 @@ function Row({
     <StaticQueueRow
       row={row}
       highlighted={highlighted}
+      showRackColumn={showRackColumn}
       isPicked={isPicked}
       isFlagged={isFlagged}
       isSkipped={isSkipped}
@@ -383,46 +389,140 @@ function Row({
   );
 }
 
+function queueRowUom(row: QueueSheetRow): string {
+  return normalizeUom(row.uom);
+}
+
+function toQueueListEntry(row: QueueSheetRow): PickLineListEntry {
+  const status =
+    row.status === 'now'
+      ? 'now'
+      : row.status === 'picked'
+        ? 'picked'
+        : row.status === 'flagged'
+          ? 'flagged'
+          : row.status === 'skipped'
+            ? 'skipped'
+            : 'pending';
+
+  return {
+    itemId: row.itemId,
+    rackNo: row.rackNo,
+    partCode: row.itemCode ?? String(row.itemId),
+    itemName: row.itemName,
+    targetQty: row.targetQty,
+    pickedQty: row.pickedQty,
+    uom: queueRowUom(row),
+    unitPrice: row.unitPrice,
+    status,
+  };
+}
+
+function RackSectionHeader({ label, count }: { label: string; count: number }): React.JSX.Element {
+  return (
+    <div className="flex items-center gap-2 px-1 py-1.5">
+      <span className="font-mono text-xs font-extrabold tabular-nums text-[var(--role-primary)]">
+        {label}
+      </span>
+      <span className="h-px flex-1 bg-[var(--border-faint)]" aria-hidden />
+      <span className="text-[9px] font-semibold tabular-nums text-[var(--content-quaternary)]">
+        {count} line{count === 1 ? '' : 's'}
+      </span>
+    </div>
+  );
+}
+
+function renderGroupedQueueRows(
+  rows: QueueSheetRow[],
+  renderRow: (row: QueueSheetRow, showRackColumn: boolean) => React.JSX.Element,
+): React.JSX.Element[] {
+  const groups = groupPickLinesByRack(rows.map(toQueueListEntry));
+  const useRackGrouping = groups.some((g) => g.rows.length > 1);
+  const out: React.JSX.Element[] = [];
+
+  for (const group of groups) {
+    if (useRackGrouping) {
+      out.push(
+        <RackSectionHeader key={`rack-${group.rackKey}`} label={group.rackLabel} count={group.rows.length} />,
+      );
+    }
+    for (const entry of group.rows) {
+      const row = rows.find((r) => r.itemId === entry.itemId);
+      if (!row) continue;
+      out.push(renderRow(row, !useRackGrouping));
+    }
+  }
+
+  return out;
+}
+
 function QueueRowContent({
   row,
   isPicked,
   isFlagged,
+  showRackColumn = true,
 }: {
   row: QueueSheetRow;
   isPicked: boolean;
   isFlagged: boolean;
+  showRackColumn?: boolean;
 }) {
+  const priceLabel = formatPickLineTotalPrice(row.targetQty, row.unitPrice);
+  const uomNorm = queueRowUom(row);
+
   return (
     <>
-      <div className="flex items-center gap-1 shrink-0">
-        {isPicked ? (
-          <CheckCircle size={16} weight="fill" className="text-[var(--content-positive)]" />
-        ) : isFlagged ? (
-          <Flag size={16} weight="fill" className="text-[var(--content-negative)]" />
-        ) : (
-          <MapPin size={14} weight="regular" className="text-[var(--content-tertiary)]" />
-        )}
-        <span className="font-mono text-xs font-bold text-[var(--content-primary)] min-w-12">
-          {row.rackNo ?? '—'}
-        </span>
-      </div>
+      {showRackColumn ? (
+        <div className="flex w-12 shrink-0 items-center gap-1">
+          {isPicked ? (
+            <CheckCircle size={14} weight="fill" className="text-[var(--content-positive)]" />
+          ) : isFlagged ? (
+            <Flag size={14} weight="fill" className="text-[var(--content-negative)]" />
+          ) : (
+            <MapPin size={12} weight="regular" className="text-[var(--content-tertiary)]" />
+          )}
+          <span className="truncate font-mono text-[10px] font-bold text-[var(--content-tertiary)]">
+            {row.rackNo ?? '—'}
+          </span>
+        </div>
+      ) : (
+        <div className="flex shrink-0 items-center">
+          {isPicked ? (
+            <CheckCircle size={14} weight="fill" className="text-[var(--content-positive)]" />
+          ) : isFlagged ? (
+            <Flag size={14} weight="fill" className="text-[var(--content-negative)]" />
+          ) : (
+            <MapPin size={12} weight="regular" className="text-[var(--content-tertiary)]" />
+          )}
+        </div>
+      )}
+
       <div className="min-w-0 flex-1">
-        <p className="font-mono text-xs text-[var(--content-secondary)] truncate">
+        <p className="truncate font-mono text-xs font-bold text-[var(--content-primary)]">
           {row.itemCode ?? row.itemId}
         </p>
-        <p className="text-xs text-[var(--content-tertiary)] truncate">
+        <p className="truncate text-[10px] leading-tight text-[var(--content-tertiary)]">
           {row.brandLabel ? (
-            <span className="mr-1.5 rounded bg-[var(--bg-tertiary)] px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--content-quaternary)]">
+            <span className="mr-1 rounded bg-[var(--bg-tertiary)] px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[var(--content-quaternary)]">
               {row.brandLabel}
             </span>
           ) : null}
-          {row.itemName}
+          {truncatePickDescription(row.itemName)}
         </p>
       </div>
-      <div className="text-right shrink-0">
-        <p className="font-mono text-sm font-semibold text-[var(--content-primary)] tabular-nums">
-          {row.targetQty} pcs
-        </p>
+
+      <div className="shrink-0 text-right">
+        <div className="flex items-center justify-end gap-1.5">
+          <span className="font-mono text-xs font-bold tabular-nums text-[var(--content-primary)]">
+            {row.targetQty}
+          </span>
+          <UomBadge uom={uomNorm} />
+        </div>
+        {priceLabel ? (
+          <p className="mt-0.5 font-mono text-[9px] tabular-nums text-[var(--content-quaternary)]">
+            {priceLabel}
+          </p>
+        ) : null}
       </div>
     </>
   );
@@ -441,6 +541,7 @@ function rowSurfaceClass(highlighted: boolean, isSkipped: boolean): string {
 function StaticQueueRow({
   row,
   highlighted,
+  showRackColumn = true,
   isPicked,
   isFlagged,
   isSkipped,
@@ -449,6 +550,7 @@ function StaticQueueRow({
 }: {
   row: QueueSheetRow;
   highlighted: boolean;
+  showRackColumn?: boolean;
   isPicked: boolean;
   isFlagged: boolean;
   isSkipped: boolean;
@@ -456,7 +558,12 @@ function StaticQueueRow({
   onJump?: (itemId: number) => void;
 }) {
   const inner = (
-    <QueueRowContent row={row} isPicked={isPicked} isFlagged={isFlagged} />
+    <QueueRowContent
+      row={row}
+      isPicked={isPicked}
+      isFlagged={isFlagged}
+      showRackColumn={showRackColumn}
+    />
   );
 
   if (canJump && onJump) {
@@ -489,6 +596,7 @@ function StaticQueueRow({
 function SwipeableQueueRow({
   row,
   highlighted,
+  showRackColumn = true,
   isSkipped,
   canJump,
   onJump,
@@ -499,6 +607,7 @@ function SwipeableQueueRow({
 }: {
   row: QueueSheetRow;
   highlighted: boolean;
+  showRackColumn?: boolean;
   isSkipped: boolean;
   canJump: boolean;
   onJump?: (itemId: number) => void;
@@ -580,7 +689,12 @@ function SwipeableQueueRow({
           }
         } : undefined}
       >
-        <QueueRowContent row={row} isPicked={false} isFlagged={false} />
+        <QueueRowContent
+          row={row}
+          isPicked={false}
+          isFlagged={false}
+          showRackColumn={showRackColumn}
+        />
       </div>
     </div>
   );

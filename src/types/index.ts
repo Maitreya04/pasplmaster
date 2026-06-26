@@ -261,7 +261,13 @@ export interface ScanResult {
   /** @deprecated Use suggestedMrpAtPick — kept for older scan_result rows. */
   stockMrpAtPick?: number | null;
   /** Where confirmed MRP came from: history band, custom entry, or items fallback. */
-  mrpSource?: 'stock_mrpwise' | 'custom' | 'items_fallback' | null;
+  mrpSource?:
+    | 'picker_30d'
+    | 'picker_verified'
+    | 'stock_mrpwise'
+    | 'custom'
+    | 'items_fallback'
+    | null;
   mrpHistoryCount?: number;
   /** Per-MRP batch picks when line was split at pick time. */
   mrpSegments?: Array<{ mrp: number; qty: number; orderItemId: number }>;
@@ -540,13 +546,28 @@ export interface StockMrpHistoryEntry {
   source?: StockMrpHistoryEntrySource;
   /** Picker overlay only — how many times this label MRP was confirmed. */
   confirmation_count?: number;
+  /** Picks at this MRP in the last 30 days. */
+  recent_pick_count?: number;
 }
+
+export type MrpSuggestionSource =
+  | 'picker_30d'
+  | 'picker_verified'
+  | 'stock_mrpwise'
+  | 'items_fallback'
+  | 'empty';
 
 export interface StockMrpHistoryResult {
   success: boolean;
   busy_code: number | null;
   stock_location_code: string | null;
+  /** Back-compat alias — equals suggested_mrp when present. */
   latest_mrp: number | null;
+  /** Pre-fill candidate: 30-day top pick frequency, else stock MRPwise. */
+  suggested_mrp: number | null;
+  /** Latest stock_mrpwise band (secondary display). */
+  stock_mrp: number | null;
+  suggestion_source: MrpSuggestionSource;
   history: StockMrpHistoryEntry[];
   reason?: string;
   source: 'stock_mrpwise' | 'items_fallback' | 'empty';
@@ -640,3 +661,33 @@ export interface BillingCustomerUpdate {
   sent_at: string | null;
   sent_by_user_id: number | null;
 }
+
+// ── Picker Flow Redesign (in-memory draft + committed price groups) ───────────
+
+/** In-memory draft while picker is typing MRP or qty. */
+export type PriceGroupDraft = {
+  mrp: number | null;
+  qty: number | null;
+  stage: 'mrp' | 'qty';
+};
+
+/** A confirmed price group (maps to a split order_items row after commit). */
+export type ConfirmedPriceGroup = {
+  id: string;
+  orderItemId: number;
+  mrp: number;
+  qty: number;
+  isOverTarget: boolean;
+  pickerNote: string | null;
+};
+
+/** Draft state for one order line while picker is working. */
+export type LineDraft = {
+  rootOrderItemId: number;
+  targetQty: number;
+  uom: string;
+  confirmedGroups: ConfirmedPriceGroup[];
+  inProgress: PriceGroupDraft | null;
+  editingGroupId: string | null;
+  noteText: string;
+};

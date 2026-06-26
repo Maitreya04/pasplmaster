@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { SignOut } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
+import { branchDisplayName } from '../../lib/auth/phoneAuth';
 
 const ROLE_HOME: Record<string, string> = {
   sales: '/sales',
@@ -11,7 +12,7 @@ const ROLE_HOME: Record<string, string> = {
 
 export function ImpersonationBanner(): React.JSX.Element | null {
   const navigate = useNavigate();
-  const { isImpersonating, userName, role, exitImpersonation } = useAuth();
+  const { isImpersonating, userName, role, branch, exitImpersonation } = useAuth();
 
   if (!isImpersonating || !userName || !role) return null;
 
@@ -24,7 +25,11 @@ export function ImpersonationBanner(): React.JSX.Element | null {
     <div className="sticky top-0 z-50 flex items-center justify-between gap-3 border-b border-amber-300/40 bg-amber-50 px-4 py-2 text-sm text-amber-950">
       <p>
         Viewing as <span className="font-semibold">{userName}</span>
-        <span className="text-amber-800 capitalize"> ({role})</span>
+        <span className="text-amber-800 capitalize">
+          {' '}
+          ({role}
+          {branch ? ` · ${branchDisplayName(branch)}` : ''})
+        </span>
       </p>
       <button
         type="button"

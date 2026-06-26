@@ -53,6 +53,7 @@ export function PickerV10Flow({
 }: PickerV10FlowProps): React.JSX.Element {
   const total = lines.length;
   const [itemIdx, setItemIdx] = useState(0);
+  const safeItemIdx = total === 0 ? 0 : Math.min(itemIdx, total - 1);
   const [phase, setPhase] = useState<PickerV10Phase>('rack_list');
   const [lineProgress, setLineProgress] = useState<Record<number, PickerV10LineProgress>>({});
   const [doneEntries, setDoneEntries] = useState<PickerV10DoneEntry[]>([]);
@@ -73,7 +74,7 @@ export function PickerV10Flow({
   const [flagOpen, setFlagOpen] = useState(false);
   const [flagRsn, setFlagRsn] = useState('');
 
-  const item = lines[itemIdx % Math.max(total, 1)] ?? lines[0];
+  const item = lines[safeItemIdx] ?? lines[0];
   const progress = lineProgress[item?.id ?? 0] ?? emptyProgress();
 
   const { data: fetchedMrp, isLoading: mrpLoading } = useStockMrpHistory(
@@ -90,15 +91,19 @@ export function PickerV10Flow({
     return [];
   }, [item, fetchedMrp?.history]);
 
-  const latestMrp = mrpHistory[0]?.mrp ?? fetchedMrp?.latest_mrp ?? null;
+  const latestMrp =
+    fetchedMrp?.suggested_mrp ??
+    mrpHistory[0]?.mrp ??
+    fetchedMrp?.latest_mrp ??
+    null;
 
   const nextItem = useMemo(() => {
-    for (let i = itemIdx + 1; i < lines.length; i++) {
+    for (let i = safeItemIdx + 1; i < lines.length; i++) {
       const p = lineProgress[lines[i]!.id];
       if (p?.status !== 'done' && p?.status !== 'flagged') return lines[i]!;
     }
     return null;
-  }, [itemIdx, lineProgress, lines]);
+  }, [safeItemIdx, lineProgress, lines]);
 
   const resetLineEntry = useCallback((): void => {
     setMrpBuf('');
@@ -203,27 +208,32 @@ export function PickerV10Flow({
         picker_note: batchNote?.trim() || undefined,
       };
 
-      const prev = lineProgress[item.id] ?? emptyProgress();
-      const newLogged = prev.loggedQty + batchQty;
-      const newBatches = [...prev.batches, batch];
-      const batchTarget = Math.max(0, item.qty - prev.loggedQty);
-      const isOver = batchQty > batchTarget;
-      const isPartial = newLogged < item.qty && !isOver;
+      let newLogged = 0;
+      let newBatches: PickerV10LoggedBatch[] = [];
 
-      setLineProgress((map) => ({
-        ...map,
-        [item.id]: {
-          ...prev,
-          status: 'in_progress',
-          loggedQty: newLogged,
-          batches: newBatches,
-        },
-      }));
+      setLineProgress((map) => {
+        const prev = map[item.id] ?? emptyProgress();
+        newLogged = prev.loggedQty + batchQty;
+        newBatches = [...prev.batches, batch];
+        return {
+          ...map,
+          [item.id]: {
+            ...prev,
+            status: 'in_progress',
+            loggedQty: newLogged,
+            batches: newBatches,
+          },
+        };
+      });
 
       appHaptics.selection();
 
       resetLineEntry();
       setCurrentMrp(null);
+
+      const batchTarget = Math.max(0, item.qty - (newLogged - batchQty));
+      const isOver = batchQty > batchTarget;
+      const isPartial = newLogged < item.qty && !isOver;
 
       if (isPartial) {
         setRemainingQty(item.qty - newLogged);
@@ -233,7 +243,7 @@ export function PickerV10Flow({
 
       await finishLine(item.id, newLogged, newBatches, false);
     },
-    [finishLine, item, lineProgress, resetLineEntry],
+    [finishLine, item, resetLineEntry],
   );
 
   const handleLogBatch = useCallback((): void => {
@@ -319,7 +329,7 @@ export function PickerV10Flow({
 
   const partNo = item.code;
   const uom = item.uom ?? 'PCS';
-  const pos = positionLabel(itemIdx, total);
+  const pos = positionLabel(safeItemIdx, total);
 
   return (
     <div className="role-picking relative mx-auto flex h-[min(100dvh,900px)] max-w-[390px] flex-col overflow-hidden bg-[var(--bg-primary)]">

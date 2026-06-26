@@ -13,7 +13,11 @@ interface BottomSheetProps {
   footer?: ReactNode;
   sheetClassName?: string;
   contentClassName?: string;
+  /** e.g. z-[70] when stacking above another bottom sheet */
+  rootClassName?: string;
   keyboardBehavior?: 'adjust' | 'static';
+  /** Keep DOM mounted when closed to avoid remount flicker on reopen (pick modals). */
+  keepMounted?: boolean;
 }
 
 export function BottomSheet({
@@ -25,7 +29,9 @@ export function BottomSheet({
   footer,
   sheetClassName = '',
   contentClassName = '',
+  rootClassName = '',
   keyboardBehavior = 'adjust',
+  keepMounted = false,
 }: BottomSheetProps): React.JSX.Element | null {
   const hasTitle = Boolean(title?.trim());
   const showHeader = hasTitle || closeOnly;
@@ -158,19 +164,25 @@ export function BottomSheet({
     currentTranslate.current = 0;
   }, [handleClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen && !keepMounted) return null;
+
+  const hidden = !isOpen;
 
   return (
-    <div ref={containerRef} className="fixed inset-0 z-[60] flex items-end">
+    <div
+      ref={containerRef}
+      className={`fixed inset-0 z-[60] flex items-end ${hidden ? 'pointer-events-none invisible' : ''} ${rootClassName}`}
+      aria-hidden={hidden}
+    >
       <div
-        className="absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-md transition-opacity duration-300"
-        onClick={handleClose}
+        className={`absolute inset-0 bg-[var(--bg-overlay)] backdrop-blur-md transition-opacity duration-300 ${hidden ? 'opacity-0' : ''}`}
+        onClick={hidden ? undefined : handleClose}
         aria-hidden="true"
       />
 
       <div
         ref={sheetRef}
-        className={`relative z-10 flex w-full max-h-[min(85dvh,85vh)] min-h-0 flex-col overflow-hidden bg-[var(--bg-secondary)]/95 backdrop-blur-xl rounded-t-2xl shadow-2xl ring-1 ring-white/10 animate-slide-up ${sheetClassName}`}
+        className={`relative z-10 flex w-full max-h-[min(85dvh,85vh)] min-h-0 flex-col overflow-hidden bg-[var(--bg-secondary)]/95 backdrop-blur-xl rounded-t-2xl shadow-2xl ring-1 ring-white/10 ${hidden ? '' : 'animate-slide-up'} ${sheetClassName}`}
       >
         <div
           className="flex justify-center mt-3 mb-2"

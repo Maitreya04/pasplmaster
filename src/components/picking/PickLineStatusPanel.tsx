@@ -7,6 +7,14 @@ import {
   Minus,
 } from '@phosphor-icons/react';
 import { useCallback, useRef } from 'react';
+import { UomBadge } from './UomBadge';
+import {
+  formatPickLineTotalPrice,
+  groupPickLinesByRack,
+  truncatePickDescription,
+  type PickLineListEntry,
+} from '../../lib/picking/pickLineListDisplay';
+import { normalizeUom } from '../../lib/picking/pickerMicrocopy';
 
 export type PickLineStatusKind = 'now' | 'pending' | 'partial' | 'picked' | 'flagged' | 'skipped';
 
@@ -17,6 +25,8 @@ export interface PickLineStatusRow {
   itemName: string;
   targetQty: number;
   pickedQty: number;
+  uom?: string;
+  unitPrice?: number | null;
   status: PickLineStatusKind;
   flagReason?: string | null;
   brandLabel?: string | null;
@@ -102,6 +112,10 @@ function statusLabel(status: PickLineStatusKind): string {
   }
 }
 
+function rowUom(row: PickLineStatusRow): string {
+  return normalizeUom(row.uom);
+}
+
 function qtyDisplay(row: PickLineStatusRow): { text: string; className: string } {
   if (row.status === 'flagged') {
     return { text: 'Flag', className: 'text-[10px] font-bold uppercase tracking-wide text-[var(--content-negative)]' };
@@ -128,16 +142,81 @@ function qtyDisplay(row: PickLineStatusRow): { text: string; className: string }
   if (row.status === 'now') {
     const started = row.pickedQty > 0;
     return {
-      text: started ? `${row.pickedQty}/${row.targetQty}` : `${row.targetQty} pcs`,
+      text: started ? `${row.pickedQty}/${row.targetQty}` : String(row.targetQty),
       className: started
         ? 'font-mono text-xs font-bold tabular-nums text-[var(--content-warning-on-light)]'
         : 'font-mono text-xs font-semibold tabular-nums text-[var(--role-primary)]',
     };
   }
   return {
-    text: `${row.targetQty} pcs`,
+    text: String(row.targetQty),
     className: 'font-mono text-xs font-semibold tabular-nums text-[var(--content-secondary)]',
   };
+}
+
+function toListEntry(row: PickLineStatusRow): PickLineListEntry {
+  return {
+    itemId: row.itemId,
+    rackNo: row.rackNo,
+    partCode: row.code,
+    itemName: row.itemName,
+    targetQty: row.targetQty,
+    pickedQty: row.pickedQty,
+    uom: rowUom(row),
+    unitPrice: row.unitPrice,
+    status: row.awaitingAdvance ? 'picked' : row.status,
+    flagReason: row.flagReason,
+  };
+}
+
+function RackGroupHeader({ label, count }: { label: string; count: number }): React.JSX.Element {
+  return (
+    <li className="sticky top-0 z-[1] border-b border-[var(--border-faint)] bg-[var(--bg-secondary)] px-3 py-1.5">
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-xs font-extrabold tabular-nums text-[var(--role-primary)]">
+          {label}
+        </span>
+        <span className="h-px flex-1 bg-[var(--border-faint)]" aria-hidden />
+        <span className="text-[9px] font-semibold tabular-nums text-[var(--content-quaternary)]">
+          {count} line{count === 1 ? '' : 's'}
+        </span>
+      </div>
+    </li>
+  );
+}
+
+function renderGroupedRows(
+  rows: PickLineStatusRow[],
+  currentItemId: number | null,
+  onJump: (itemId: number) => void,
+): React.JSX.Element[] {
+  const entries = rows.map(toListEntry);
+  const groups = groupPickLinesByRack(entries);
+  const useRackGrouping = groups.some((g) => g.rows.length > 1);
+  const out: React.JSX.Element[] = [];
+
+  for (const group of groups) {
+    if (useRackGrouping) {
+      out.push(
+        <RackGroupHeader key={`rack-${group.rackKey}`} label={group.rackLabel} count={group.rows.length} />,
+      );
+    }
+    for (const entry of group.rows) {
+      const row = rows.find((r) => r.itemId === entry.itemId);
+      if (!row) continue;
+      out.push(
+        <StatusRow
+          key={row.itemId}
+          row={row}
+          isViewing={currentItemId === row.itemId}
+          showRackColumn={!useRackGrouping}
+          onJump={onJump}
+        />,
+      );
+    }
+  }
+
+  return out;
 }
 
 /**
@@ -306,7 +385,7 @@ export function PickLineStatusPanel({
               {currentRow.code}
             </p>
             <span className="shrink-0 font-mono text-[11px] font-semibold tabular-nums text-[var(--content-secondary)]">
-              {currentRow.targetQty} pcs
+              {currentRow.targetQty} {rowUom(currentRow).toLowerCase()}
             </span>
             <ArrowRight size={12} weight="bold" className="shrink-0 text-[var(--content-quaternary)]" />
           </button>
@@ -325,14 +404,7 @@ export function PickLineStatusPanel({
                     Done
                   </p>
                 </li>
-                {doneRows.map((row) => (
-                  <StatusRow
-                    key={row.itemId}
-                    row={row}
-                    isViewing={currentItemId === row.itemId}
-                    onJump={onJump}
-                  />
-                ))}
+                {renderGroupedRows(doneRows, currentItemId, onJump)}
               </>
             )}
             {activeRows.length > 0 && (
@@ -342,14 +414,7 @@ export function PickLineStatusPanel({
                     {doneRows.length > 0 ? 'To pick' : 'All lines'}
                   </p>
                 </li>
-                {activeRows.map((row) => (
-                  <StatusRow
-                    key={row.itemId}
-                    row={row}
-                    isViewing={currentItemId === row.itemId}
-                    onJump={onJump}
-                  />
-                ))}
+                {renderGroupedRows(activeRows, currentItemId, onJump)}
               </>
             )}
           </ul>
@@ -362,23 +427,27 @@ export function PickLineStatusPanel({
 function StatusRow({
   row,
   isViewing,
+  showRackColumn = true,
   onJump,
 }: {
   row: PickLineStatusRow;
   isViewing: boolean;
+  showRackColumn?: boolean;
   onJump: (itemId: number) => void;
 }): React.JSX.Element {
   const isNow = row.status === 'now';
   const isPicked = row.status === 'picked';
   const awaitingAdvance = row.awaitingAdvance === true;
   const qty = qtyDisplay(row);
+  const priceLabel = formatPickLineTotalPrice(row.targetQty, row.unitPrice);
+  const uomNorm = rowUom(row);
 
   return (
     <li className="border-b border-[var(--border-faint)] last:border-b-0">
       <button
         type="button"
         onClick={() => onJump(row.itemId)}
-        className={`flex w-full min-h-[44px] items-center gap-2 px-3 py-2 text-left pick-pressable transition-colors ${
+        className={`flex w-full min-h-[44px] items-center gap-2 px-3 py-1.5 text-left pick-pressable transition-colors ${
           awaitingAdvance
             ? 'bg-[var(--bg-positive-subtle)]'
             : isNow
@@ -389,7 +458,14 @@ function StatusRow({
         }`}
         aria-label={`${statusLabel(row.status)}: ${row.code}, rack ${row.rackNo ?? 'unknown'}.`}
       >
+        {showRackColumn ? (
+          <span className="w-12 shrink-0 truncate font-mono text-[10px] font-bold tabular-nums text-[var(--content-tertiary)]">
+            {row.rackNo ?? '—'}
+          </span>
+        ) : null}
+
         <StatusIcon status={awaitingAdvance ? 'picked' : row.status} />
+
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <p
@@ -407,14 +483,24 @@ function StatusRow({
               </span>
             )}
           </div>
-          <p className="truncate text-[9px] text-[var(--content-tertiary)]">
-            {row.rackNo ?? '—'}
+          <p className="truncate text-[10px] leading-tight text-[var(--content-tertiary)]">
+            {truncatePickDescription(row.itemName)}
             {row.status === 'flagged' && row.flagReason ? ` · ${row.flagReason}` : ''}
           </p>
         </div>
+
         <div className="shrink-0 text-right">
-          <span className={qty.className}>{qty.text}</span>
+          <div className="flex items-center justify-end gap-1.5">
+            <span className={qty.className}>{qty.text}</span>
+            <UomBadge uom={uomNorm} />
+          </div>
+          {priceLabel ? (
+            <p className="mt-0.5 font-mono text-[9px] tabular-nums text-[var(--content-quaternary)]">
+              {priceLabel}
+            </p>
+          ) : null}
         </div>
+
         <ArrowRight
           size={12}
           weight="bold"

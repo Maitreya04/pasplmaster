@@ -99,3 +99,19 @@ export function notePlaceholder(isOver: boolean): string {
 export function noteButtonLabel(hasNote: boolean): string {
   return hasNote ? 'noted ✓' : '+ note';
 }
+
+/** One-tap reasons when picking over the line balance — shown in over-pick note sheet. */
+export const OVER_PICK_QUICK_ACTIONS = [
+  'Standard packing',
+  'Extra on shelf',
+  'Damaged — replaced',
+  'Customer asked for more',
+] as const;
+
+export type OverPickQuickAction = (typeof OVER_PICK_QUICK_ACTIONS)[number];
+
+/** Batch label for split MRP rows: MRP, MRP1, MRP2, … */
+export function mrpBatchLabel(batchIndex: number): string {
+  if (batchIndex <= 0) return 'MRP';
+  return `MRP${batchIndex}`;
+}

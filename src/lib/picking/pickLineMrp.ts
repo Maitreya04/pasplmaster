@@ -332,7 +332,11 @@ export function mergeMrpIntoScanResult(
     mrpSegments,
     splitFromId: state?.rootOrderItemId ?? undefined,
     billingRateAtPick:
-      resolvedBilling != null && resolvedBilling > 0 ? resolvedBilling : undefined,
+      labelRounded != null && labelRounded > 0
+        ? labelRounded
+        : resolvedBilling != null && resolvedBilling > 0
+          ? resolvedBilling
+          : undefined,
     suggestedMrpAtPick: stockRounded ?? undefined,
     stockMrpAtPick: stockRounded ?? undefined,
   };

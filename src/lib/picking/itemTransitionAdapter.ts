@@ -53,10 +53,12 @@ function toUpdatePayload(input: PickItemTransition): Record<string, unknown> {
   switch (input.kind) {
     case 'picked': {
       const confirmed = confirmedMrpFromScan(input.scanResult);
+      const billMrp = confirmed != null ? Math.round(confirmed) : null;
       return {
         state: 'picked',
         scan_result: (input.scanResult ?? null) as unknown as Record<string, unknown> | null,
         ...(confirmed != null ? { confirmed_mrp: confirmed } : {}),
+        ...(billMrp != null ? { price_quoted: billMrp } : {}),
       };
     }
     case 'scan_saved': {
@@ -68,6 +70,7 @@ function toUpdatePayload(input: PickItemTransition): Record<string, unknown> {
     }
     case 'flagged': {
       const confirmed = confirmedMrpFromScan(input.scanResult);
+      const billMrp = confirmed != null ? Math.round(confirmed) : null;
       return {
         state: 'flagged',
         flag_reason: input.reason,
@@ -75,6 +78,7 @@ function toUpdatePayload(input: PickItemTransition): Record<string, unknown> {
         flag_box_price: input.boxPrice,
         scan_result: (input.scanResult ?? null) as unknown as Record<string, unknown> | null,
         ...(confirmed != null ? { confirmed_mrp: confirmed } : {}),
+        ...(billMrp != null ? { price_quoted: billMrp } : {}),
       };
     }
   }

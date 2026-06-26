@@ -5,6 +5,7 @@ import {
   isPickLabelVsStockAtPick,
   roundPickMrp,
 } from '../billing/pickMrpBillingContext';
+import { scanMrpSourceFromSuggestion, stockMrpFromHistory } from '../stockMrpSuggestion';
 import type { PickLineMrpState } from './pickLineMrp';
 import { pickLineMrpFinal } from './pickLineMrp';
 
@@ -70,10 +71,9 @@ export function pickMrpMergeInputs(
   }
   return {
     billingRate,
-    stockMrp: history?.latest_mrp ?? null,
+    stockMrp: stockMrpFromHistory(history),
     historyCount: history?.history.length ?? 0,
-    mrpSource:
-      history?.source === 'empty' ? null : (history?.source ?? 'stock_mrpwise'),
+    mrpSource: scanMrpSourceFromSuggestion(history?.suggestion_source ?? 'empty'),
   };
 }
 

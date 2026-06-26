@@ -34,6 +34,7 @@ import {
   resolvePickLineStatus,
   resolveQueueSheetLineStatus,
 } from '../../lib/picking/pickLineStatus';
+import { orderItemUnitPrice } from '../../lib/picking/pickLineListDisplay';
 import { JumpListSheet } from '../../components/picking/JumpListSheet';
 import { TransportChip } from '../../components/picking/TransportChip';
 import { formatBilledLabel } from '../../lib/picking/pickQueueDisplay';
@@ -88,6 +89,7 @@ import { PickQtySheet } from '../../components/picking/PickQtySheet';
 import { PickMrpBatchSheet } from '../../components/picking/PickMrpBatchSheet';
 import { useStockMrpHistory } from '../../hooks/useStockMrpHistory';
 import { STOCK_MRP_HISTORY_QUERY_KEY } from '../../lib/stockMrpwise';
+import { scanMrpSourceFromSuggestion, stockMrpFromHistory } from '../../lib/stockMrpSuggestion';
 import {
   commitActiveSegment,
   createDefaultPickLineMrpState,
@@ -406,39 +408,39 @@ export function PickFlowPanel({
     [order?.items],
   );
 
-  // Hydrate per-order state from sessionStorage so a refresh doesn't force the
-  // picker to re-scan racks mid-flow. Offline picks prefer the IDB session copy
-  // of MRP split state so a tab reload still matches what will sync to billing.
+  const offlineMrpSnapshotKey = useMemo(() => {
+    if (!offlinePickActive || !offlinePickSession?.lineMrpByItemId) return '';
+    return JSON.stringify(offlinePickSession.lineMrpByItemId);
+  }, [offlinePickActive, offlinePickSession?.lineMrpByItemId]);
+
+  // Hydrate per-order walk state once per order — not when offline session object identity changes.
   useEffect(() => {
     if (!orderId) return;
     setRackVerifiedIds(readIdSet(storageKeys.rackVerified, orderId));
     setSkippedIds(readIdSet(storageKeys.skipped, orderId));
     setCurrentCardIndex(readCardIndex(storageKeys.cardIndex, orderId));
-
-    const offlineMrpEntries =
-      offlinePickActive && offlinePickSession?.lineMrpByItemId
-        ? Object.entries(offlinePickSession.lineMrpByItemId)
-        : [];
-    if (offlineMrpEntries.length > 0) {
-      const mrpMap = new Map<number, PickLineMrpState>();
-      for (const [key, state] of offlineMrpEntries) {
-        const id = Number(key);
-        if (Number.isFinite(id)) mrpMap.set(id, state);
-      }
-      setLineMrpMap(mrpMap);
-      return;
+    if (!offlinePickActive) {
+      setLineMrpMap(readPickLineMrpMap(orderId, isLab ? 'lab' : 'production'));
     }
-
-    setLineMrpMap(readPickLineMrpMap(orderId, isLab ? 'lab' : 'production'));
   }, [
     orderId,
     isLab,
     offlinePickActive,
-    offlinePickSession?.lineMrpByItemId,
     storageKeys.cardIndex,
     storageKeys.rackVerified,
     storageKeys.skipped,
   ]);
+
+  // Offline MRP split map — separate so rack/card index are not reset mid-pick.
+  useEffect(() => {
+    if (!orderId || !offlinePickActive || !offlinePickSession?.lineMrpByItemId) return;
+    const mrpMap = new Map<number, PickLineMrpState>();
+    for (const [key, state] of Object.entries(offlinePickSession.lineMrpByItemId)) {
+      const id = Number(key);
+      if (Number.isFinite(id)) mrpMap.set(id, state);
+    }
+    setLineMrpMap(mrpMap);
+  }, [orderId, offlinePickActive, offlineMrpSnapshotKey, offlinePickSession?.lineMrpByItemId]);
 
   useEffect(() => {
     writePickLineMrpMap(orderId, lineMrpMap, isLab ? 'lab' : 'production');
@@ -569,7 +571,8 @@ export function PickFlowPanel({
   const mountedDeckIndices = useMemo(() => {
     const len = deckItems.length;
     if (len === 0) return new Set<number>();
-    if (len <= 3) return new Set(Array.from({ length: len }, (_, i) => i));
+    // Keep more cards mounted to avoid remount flicker when swiping the deck.
+    if (len <= 7) return new Set(Array.from({ length: len }, (_, i) => i));
     return new Set([
       safeCardIndex,
       wrapIndex(safeCardIndex - 1, len),
@@ -633,6 +636,9 @@ export function PickFlowPanel({
         itemName: pi.orderItem.item_name,
         brandLabel: orderItemBrandLabel(pi.orderItem),
         targetQty,
+        pickedQty,
+        uom: pi.orderItem.sales_unit ?? 'pcs',
+        unitPrice: orderItemUnitPrice(pi.orderItem.price_quoted, pi.orderItem.price_system),
         status,
       });
     }
@@ -898,6 +904,25 @@ export function PickFlowPanel({
 
   /* ─── Mutations ──────────────────────────────────────────── */
 
+  const invalidateOrderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleOrderInvalidate = useCallback(() => {
+    if (isLab || offlinePickActive || orderId == null) return;
+    if (invalidateOrderTimerRef.current) clearTimeout(invalidateOrderTimerRef.current);
+    invalidateOrderTimerRef.current = setTimeout(() => {
+      invalidateOrderTimerRef.current = null;
+      void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      void queryClient.invalidateQueries({ queryKey: [STOCK_MRP_HISTORY_QUERY_KEY] });
+    }, 200);
+  }, [isLab, offlinePickActive, orderId, queryClient]);
+
+  useEffect(
+    () => () => {
+      if (invalidateOrderTimerRef.current) clearTimeout(invalidateOrderTimerRef.current);
+    },
+    [],
+  );
+
   const itemTransitionMutation = useMutation({
     mutationFn: async ({
       transition,
@@ -995,8 +1020,12 @@ export function PickFlowPanel({
         return;
       }
       const itemId = vars.transition.itemId;
-      const previous = localItems.get(itemId);
-      updateLocalItem(itemId, { uiState: previous?.uiState ?? 'pending' });
+      setLocalItems((prev) => {
+        const previous = prev.get(itemId);
+        const next = new Map(prev);
+        next.set(itemId, { ...previous, uiState: previous?.uiState ?? 'pending' });
+        return next;
+      });
       if (vars.transition.kind === 'flagged') {
         toast.error(
           message === 'offline_session_missing'
@@ -1010,10 +1039,7 @@ export function PickFlowPanel({
       }
     },
     onSuccess: () => {
-      if (!isLab && !offlinePickActive) {
-        queryClient.invalidateQueries({ queryKey: ['order', orderId] });
-        queryClient.invalidateQueries({ queryKey: [STOCK_MRP_HISTORY_QUERY_KEY] });
-      }
+      scheduleOrderInvalidate();
     },
   });
 
@@ -1107,9 +1133,11 @@ export function PickFlowPanel({
         },
         lineMrpMap.get(itemId),
         pickLineBillingRate(orderItem),
-        itemId === mrpFocusItem?.id ? (mrpHistoryData?.latest_mrp ?? null) : null,
+        itemId === mrpFocusItem?.id ? stockMrpFromHistory(mrpHistoryData) : null,
         itemId === mrpFocusItem?.id ? (mrpHistoryData?.history.length ?? 0) : 0,
-        mrpHistoryData?.source === 'empty' ? null : (mrpHistoryData?.source ?? 'stock_mrpwise'),
+        itemId === mrpFocusItem?.id
+          ? scanMrpSourceFromSuggestion(mrpHistoryData?.suggestion_source ?? 'empty')
+          : null,
         undefined,
         orderItem,
       );
@@ -1792,9 +1820,11 @@ export function PickFlowPanel({
         },
         lineMrpMap.get(itemId),
         pickLineBillingRate(orderItem),
-        itemId === mrpFocusItem?.id ? (mrpHistoryData?.latest_mrp ?? null) : null,
+        itemId === mrpFocusItem?.id ? stockMrpFromHistory(mrpHistoryData) : null,
         itemId === mrpFocusItem?.id ? (mrpHistoryData?.history.length ?? 0) : 0,
-        mrpHistoryData?.source === 'empty' ? null : (mrpHistoryData?.source ?? 'stock_mrpwise'),
+        itemId === mrpFocusItem?.id
+          ? scanMrpSourceFromSuggestion(mrpHistoryData?.suggestion_source ?? 'empty')
+          : null,
         undefined,
         orderItem,
       );
@@ -1915,10 +1945,11 @@ export function PickFlowPanel({
       if (inv === 'abort') return false;
 
       const segmentMrp = active.mrp;
-      const latestMrp = mrpHistoryData?.latest_mrp ?? null;
+      const stockMrp = stockMrpFromHistory(mrpHistoryData);
       const historyCount = mrpHistoryData?.history.length ?? 0;
-      const mrpSource =
-        mrpHistoryData?.source === 'empty' ? null : (mrpHistoryData?.source ?? 'stock_mrpwise');
+      const mrpSource = scanMrpSourceFromSuggestion(
+        mrpHistoryData?.suggestion_source ?? 'empty',
+      );
 
       const committedCount = pickLineSegmentsCommittedQty(lineMrp) + qty;
       const scanResult = mergeMrpIntoScanResult(
@@ -1945,7 +1976,7 @@ export function PickFlowPanel({
         },
         lineMrp,
         pickLineBillingRate(orderItem),
-        latestMrp,
+        stockMrp,
         historyCount,
         mrpSource,
         segmentMrp,
@@ -2385,6 +2416,8 @@ export function PickFlowPanel({
         itemName: pi.orderItem.item_name,
         targetQty,
         pickedQty,
+        uom: pi.orderItem.sales_unit ?? 'pcs',
+        unitPrice: orderItemUnitPrice(pi.orderItem.price_quoted, pi.orderItem.price_system),
         status,
         flagReason: pi.orderItem.flag_reason,
         brandLabel: orderItemBrandLabel(pi.orderItem),
