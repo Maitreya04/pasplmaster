@@ -176,7 +176,8 @@ export const PickCard = memo(function PickCard({
     !splitActive &&
     !showSplitChooser;
   const mrpGateOk = splitActive ? mrpConfirmed : !hasMrpBands || mrpConfirmed;
-  const qtyGateOk = splitActive ? activeBatchQty > 0 : effectivePickedQty > 0;
+  // Mark picked applies remaining qty in one tap — do not require a prior qty entry.
+  const qtyGateOk = splitActive ? activeBatchQty > 0 : remainingQty > 0;
   const markPickedReady = isVerified && mrpGateOk && qtyGateOk && !isDone && !showingOutcome;
   const singlePendingMrp =
     needsMrpConfirm && mrpHistory.length === 1 ? mrpHistory[0]!.mrp : null;

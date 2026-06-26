@@ -97,6 +97,7 @@ import {
   enterSingleModeFromSplit,
   enterSplitMode,
   getActiveSegment,
+  isPickLineMrpConfirmed,
   isSplitInProgress,
   isSplitMode,
   mergeMrpIntoScanResult,
@@ -295,9 +296,13 @@ export function PickFlowPanel({
   const offlinePicksHydrated = useOfflinePicksHydrated();
   const offlinePickActive = !isLab && isOfflinePickUsable(offlinePickSession);
   const offlinePickPreparing = offlinePickSession?.status === 'preparing';
+  const offlineOrderSnapshot = useMemo(
+    () => offlinePickSession?.orderSnapshot ?? null,
+    [offlinePickSession?.orderSnapshot],
+  );
   const orderQuery = useOrderDetail(orderId);
   const order = offlinePickActive
-    ? offlinePickSession?.orderSnapshot ?? orderQuery.data ?? null
+    ? offlineOrderSnapshot ?? orderQuery.data ?? null
     : orderQuery.data ?? null;
   const isLoading = orderQuery.isLoading && !offlinePickSession;
   const error = orderQuery.error && !offlinePickSession ? orderQuery.error : null;
@@ -408,10 +413,10 @@ export function PickFlowPanel({
     [order?.items],
   );
 
-  const offlineMrpSnapshotKey = useMemo(() => {
-    if (!offlinePickActive || !offlinePickSession?.lineMrpByItemId) return '';
-    return JSON.stringify(offlinePickSession.lineMrpByItemId);
-  }, [offlinePickActive, offlinePickSession?.lineMrpByItemId]);
+  const offlineMrpHydratedKeyRef = useRef<string | null>(null);
+  const offlineMrpSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lineMrpMapRef = useRef(lineMrpMap);
+  lineMrpMapRef.current = lineMrpMap;
 
   // Hydrate per-order walk state once per order — not when offline session object identity changes.
   useEffect(() => {
@@ -431,16 +436,34 @@ export function PickFlowPanel({
     storageKeys.skipped,
   ]);
 
-  // Offline MRP split map — separate so rack/card index are not reset mid-pick.
+  // Offline MRP map — hydrate once per offline session. Local lineMrpMap is source of truth
+  // during the pick; never mirror IDB writes back or confirmed MRP flickers away mid-line.
   useEffect(() => {
-    if (!orderId || !offlinePickActive || !offlinePickSession?.lineMrpByItemId) return;
-    const mrpMap = new Map<number, PickLineMrpState>();
-    for (const [key, state] of Object.entries(offlinePickSession.lineMrpByItemId)) {
-      const id = Number(key);
-      if (Number.isFinite(id)) mrpMap.set(id, state);
-    }
-    setLineMrpMap(mrpMap);
-  }, [orderId, offlinePickActive, offlineMrpSnapshotKey, offlinePickSession?.lineMrpByItemId]);
+    offlineMrpHydratedKeyRef.current = null;
+  }, [orderId]);
+
+  useEffect(() => {
+    if (!orderId || !offlinePickActive || !offlinePickSession) return;
+    const hydrateKey = `${orderId}:${offlinePickSession.clientPickKey}`;
+    if (offlineMrpHydratedKeyRef.current === hydrateKey) return;
+    offlineMrpHydratedKeyRef.current = hydrateKey;
+
+    const fromOffline = offlinePickSession.lineMrpByItemId;
+    if (!fromOffline || Object.keys(fromOffline).length === 0) return;
+
+    setLineMrpMap((prev) => {
+      const merged = new Map(prev);
+      for (const [key, state] of Object.entries(fromOffline)) {
+        const id = Number(key);
+        if (!Number.isFinite(id)) continue;
+        const existing = merged.get(id);
+        if (!existing || !isPickLineMrpConfirmed(existing)) {
+          merged.set(id, state);
+        }
+      }
+      return merged;
+    });
+  }, [orderId, offlinePickActive, offlinePickSession?.clientPickKey, offlinePickSession]);
 
   useEffect(() => {
     writePickLineMrpMap(orderId, lineMrpMap, isLab ? 'lab' : 'production');
@@ -484,7 +507,17 @@ export function PickFlowPanel({
 
   useEffect(() => {
     if (!orderId || !offlinePickActive) return;
-    void saveOfflinePickLineMrpMap(orderId, lineMrpMap);
+    if (offlineMrpSaveTimerRef.current) clearTimeout(offlineMrpSaveTimerRef.current);
+    offlineMrpSaveTimerRef.current = setTimeout(() => {
+      offlineMrpSaveTimerRef.current = null;
+      void saveOfflinePickLineMrpMap(orderId, lineMrpMapRef.current);
+    }, 400);
+    return () => {
+      if (offlineMrpSaveTimerRef.current) {
+        clearTimeout(offlineMrpSaveTimerRef.current);
+        offlineMrpSaveTimerRef.current = null;
+      }
+    };
   }, [lineMrpMap, offlinePickActive, orderId]);
 
   useEffect(() => {
@@ -878,6 +911,14 @@ export function PickFlowPanel({
   const openMrpSheet = useCallback((itemId: number) => {
     setMrpSheetItemId(itemId);
   }, []);
+
+  const confirmSingleShelfMrp = useCallback(
+    (itemId: number, mrp: number) => {
+      updateLineMrp(itemId, { confirmedMrp: mrp, customMrp: null });
+      appHaptics.success();
+    },
+    [updateLineMrp],
+  );
 
   const closeMrpSheet = useCallback(() => {
     setMrpSheetItemId(null);
@@ -2700,6 +2741,13 @@ export function PickFlowPanel({
                           setMrpBatchSheetItemId(pi.orderItem.id);
                           return;
                         }
+                        if (
+                          history.length === 1 &&
+                          !isPickLineMrpConfirmed(cardLineMrp)
+                        ) {
+                          confirmSingleShelfMrp(pi.orderItem.id, history[0]!.mrp);
+                          return;
+                        }
                         openMrpSheet(pi.orderItem.id);
                       }}
                       onConfirmMrp={() => {
@@ -2710,6 +2758,10 @@ export function PickFlowPanel({
                           shouldSuggestMrpSplit(history.length, targetQty, cardShelfMrpBands)
                         ) {
                           handlePickFirstBatch(pi.orderItem);
+                          return;
+                        }
+                        if (history.length === 1) {
+                          confirmSingleShelfMrp(pi.orderItem.id, history[0]!.mrp);
                           return;
                         }
                         openMrpSheet(pi.orderItem.id);

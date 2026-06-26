@@ -115,7 +115,6 @@ export function MrpHistorySheet({
   const selectMrp = (mrp: number): void => {
     appHaptics.success();
     onSelectMrp(mrp);
-    handleClose();
   };
 
   const submitCustom = (): void => {
@@ -123,7 +122,9 @@ export function MrpHistorySheet({
     if (v > 0) {
       appHaptics.warning();
       onSelectCustomMrp(v);
-      handleClose();
+      setMode('list');
+      setLocalBuf('');
+      setDiscardPrompt(false);
     }
   };
 
@@ -143,6 +144,7 @@ export function MrpHistorySheet({
       onClose={handleClose}
       title={batchLabel}
       closeOnly
+      keepMounted
       keyboardBehavior="static"
       sheetClassName="max-h-[min(92dvh,92vh)] pick-sheet-compact"
       contentClassName="pick-sheet-compact"

@@ -387,7 +387,7 @@ export function PickCardCTAs({
 
         {showMarkPicked && !canMarkPicked ? (
           <p className="text-center text-[10px] font-medium text-[var(--content-tertiary)]">
-            Confirm MRP and enter qty to unlock Mark picked
+            Confirm label price to unlock Mark picked
           </p>
         ) : null}
       </div>

@@ -41,6 +41,36 @@ function getServerSnapshot(): OfflinePickSession[] {
   return [];
 }
 
+/** UI-relevant queue equality — ignore lineMrpByItemId-only writes (live MRP lives in React). */
+function offlinePickQueueEqualForUi(
+  prev: OfflinePickSession[],
+  next: OfflinePickSession[],
+): boolean {
+  if (prev.length !== next.length) return false;
+  for (let i = 0; i < prev.length; i += 1) {
+    const a = prev[i]!;
+    const b = next[i]!;
+    if (
+      a.orderId !== b.orderId ||
+      a.status !== b.status ||
+      a.clientPickKey !== b.clientPickKey ||
+      a.claimId !== b.claimId ||
+      a.offlineLeaseExpiresAt !== b.offlineLeaseExpiresAt ||
+      a.orderSnapshot !== b.orderSnapshot
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function applyOfflinePickSnapshot(next: OfflinePickSession[]): boolean {
+  if (offlinePickQueueEqualForUi(cachedPicks, next)) return false;
+  cachedPicks = next;
+  hydrated = true;
+  return true;
+}
+
 export function useOfflinePicks(): OfflinePickSession[] {
   useEffect(() => {
     void hydrate();
@@ -49,14 +79,20 @@ export function useOfflinePicks(): OfflinePickSession[] {
   return useSyncExternalStore(
     (listener) => {
       const unsubscribe = subscribeOfflinePicks(() => {
-        void readOfflinePicks().then((rows) => {
-          cachedPicks = rows;
-          hydrated = true;
+        // Mirror is updated synchronously in writeQueue — use it first so we do not
+        // re-render the pick UI on lineMrpByItemId-only persistence loops.
+        const mirror = readOfflinePicksMirror();
+        if (mirror.length > 0 && applyOfflinePickSnapshot(mirror)) {
           listener();
+        }
+        void readOfflinePicks().then((rows) => {
+          if (applyOfflinePickSnapshot(rows)) listener();
         });
       });
       if (!hydrated) {
-        void hydrate().then(listener);
+        void hydrate().then(() => {
+          if (hydrated) listener();
+        });
       }
       return unsubscribe;
     },

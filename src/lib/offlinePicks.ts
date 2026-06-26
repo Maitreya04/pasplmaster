@@ -569,6 +569,19 @@ export async function resetOfflinePickLine(args: {
   });
 }
 
+function lineMrpRecordEqual(
+  a: Record<string, PickLineMrpState>,
+  b: Record<string, PickLineMrpState>,
+): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (JSON.stringify(a[key]) !== JSON.stringify(b[key])) return false;
+  }
+  return true;
+}
+
 export async function saveOfflinePickLineMrpMap(
   orderId: number,
   lineMrpMap: Map<number, PickLineMrpState>,
@@ -582,6 +595,7 @@ export async function saveOfflinePickLineMrpMap(
     );
     const next = queue.map((row) => {
       if (row.orderId !== orderId || row.status === 'applied') return row;
+      if (lineMrpRecordEqual(row.lineMrpByItemId ?? {}, record)) return row;
       changed = true;
       return { ...row, lineMrpByItemId: record, updatedAt: changedAt };
     });
