@@ -12,7 +12,7 @@ export type PickLineUiState =
 export function derivePickLineUiState(
   markedStatus: 'picked' | 'partial' | 'flagged' | undefined,
   totalLogged: number,
-  targetQty: number,
+  _targetQty: number,
   isComplete: boolean,
 ): PickLineUiState {
   if (markedStatus === 'flagged') return 'flagged';

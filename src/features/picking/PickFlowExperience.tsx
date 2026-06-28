@@ -17,7 +17,7 @@ import type { ConfirmedPriceGroup, MrpSuggestionSource, OrderItem, OrderWithItem
 import { ItemDetailScreen } from './components/ItemDetailScreen';
 import { PickLineListView } from './components/PickLineListView';
 import { PickOrderProgressBar } from './components/PickOrderProgressBar';
-import type { PickLineChip } from './components/PickLineChipStrip';
+import type { PickLineChip, PickLineChipStatus } from './components/PickLineChipStrip';
 import type { PickLineListEntry } from '../../lib/picking/pickLineListDisplay';
 import { orderItemUnitPrice } from '../../lib/picking/pickLineListDisplay';
 import { PickEntryModal, type LedgerEditField, type PickModalView } from './components/PickEntryModal';
@@ -548,10 +548,13 @@ export function PickFlowExperience({
   );
 
   const lineChips = useMemo((): PickLineChip[] => {
-    return listRows.map((row, index) => ({
-      index,
-      status: row.status === 'now' ? 'now' : row.status,
-    }));
+    return listRows.map((row, index) => {
+      let status: PickLineChipStatus;
+      if (row.status === 'now') status = 'now';
+      else if (row.status === 'skipped') status = 'pending';
+      else status = row.status;
+      return { index, status };
+    });
   }, [listRows]);
 
   const markedStatus = currentItem ? completedLines[currentItem.id] : undefined;
