@@ -10,6 +10,7 @@ export interface PickLineResolvedDockProps {
   nextPreview: NextPickLinePreview | null;
   onNext: () => void;
   onUndoPick?: () => void;
+  undoDisabled?: boolean;
 }
 
 /**
@@ -22,9 +23,11 @@ export function PickLineResolvedDock({
   nextPreview,
   onNext,
   onUndoPick,
+  undoDisabled = false,
 }: PickLineResolvedDockProps): React.JSX.Element {
   const tone =
     kind === 'picked' ? 'success' : kind === 'partial' ? 'warning' : 'warning';
+  const undoLabel = kind === 'flagged' ? 'Undo flag' : 'Undo pick · change MRP or qty';
 
   return (
     <PickLineAdvanceCTA
@@ -34,6 +37,8 @@ export function PickLineResolvedDock({
       nextPreview={nextPreview}
       onConfirmNext={onNext}
       onUndoPick={onUndoPick}
+      undoLabel={undoLabel}
+      undoDisabled={undoDisabled}
     />
   );
 }

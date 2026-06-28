@@ -12,6 +12,8 @@ export interface PickLineAdvanceCTAProps {
   nextPreview: NextPickLinePreview | null;
   onConfirmNext: () => void;
   onUndoPick?: () => void;
+  undoLabel?: string;
+  undoDisabled?: boolean;
 }
 
 function toneStyles(tone: PickLineAdvanceTone): {
@@ -84,6 +86,8 @@ export function PickLineAdvanceCTA({
   nextPreview,
   onConfirmNext,
   onUndoPick,
+  undoLabel = 'Undo pick · change MRP or qty',
+  undoDisabled = false,
 }: PickLineAdvanceCTAProps): React.JSX.Element {
   const styles = toneStyles(tone);
   const confirmLabel = nextPreview ? 'Next line' : 'Finish pick';
@@ -124,10 +128,11 @@ export function PickLineAdvanceCTA({
         <button
           type="button"
           onClick={onUndoPick}
-          className="mt-2 flex w-full min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-2.5 text-xs font-semibold text-[var(--content-secondary)] pick-pressable"
+          disabled={undoDisabled}
+          className="mt-2 flex w-full min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-2.5 text-xs font-semibold text-[var(--content-secondary)] pick-pressable disabled:opacity-50"
         >
           <ArrowCounterClockwise size={16} weight="bold" />
-          Undo pick · change MRP or qty
+          {undoLabel}
         </button>
       ) : null}
 

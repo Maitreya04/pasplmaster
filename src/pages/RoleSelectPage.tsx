@@ -54,7 +54,7 @@ const ROLES = [
 export default function RoleSelectPage(): React.JSX.Element | null {
   const [sheetMode, setSheetMode] = useState<SheetMode>(null);
   const navigate = useNavigate();
-  const { selectRole } = useAuth();
+  const { selectRole, canSwitchRoles, adminUnlocked } = useAuth();
 
   // Fetch user names from DB, fall back to hardcoded constants
   const { data: salesUsers } = useTeamUsers('sales');
@@ -148,7 +148,7 @@ export default function RoleSelectPage(): React.JSX.Element | null {
       <button
         onClick={() => {
           selectRole('admin');
-          navigate('/admin-passcode');
+          navigate(canSwitchRoles && adminUnlocked ? '/admin' : '/admin-passcode');
         }}
         className="mx-auto mt-6 min-h-11 min-w-11 flex items-center justify-center text-xs text-[var(--content-tertiary)] hover:text-[var(--content-primary)] transition-colors duration-[var(--transition-ui)] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--content-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] rounded"
       >

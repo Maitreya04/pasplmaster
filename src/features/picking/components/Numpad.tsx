@@ -1,9 +1,14 @@
+import { Backspace } from '@phosphor-icons/react';
+import { appHaptics } from '../../../lib/haptics';
+
 export type NumpadTone = 'default' | 'money' | 'amber' | 'danger' | 'success';
+export type NumpadLayout = 'default' | 'deck';
 
 export interface NumpadProps {
   display: string;
   onKey: (key: string) => void;
   tone?: NumpadTone;
+  layout?: NumpadLayout;
   /** Prefix shown before display (e.g. ₹ for MRP entry). */
   prefix?: string;
   /** Placeholder when display is empty. */
@@ -16,9 +21,13 @@ export interface NumpadProps {
   heroSupporting?: React.ReactNode;
   /** Tighter hero panel for pinned footer deck. */
   compactHero?: boolean;
+  /** Hint under hero display (e.g. suggested value replace cue). */
+  heroHint?: string;
   hideDisplay?: boolean;
   hideKeys?: boolean;
 }
+
+const NUMPAD_KEYS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 'C', 0, '⌫'] as const;
 
 function displayToneClass(tone: NumpadTone): string {
   switch (tone) {
@@ -35,45 +44,82 @@ function displayToneClass(tone: NumpadTone): string {
   }
 }
 
-function keyToneClass(tone: NumpadTone, key: string | number): string {
+function keyClass(tone: NumpadTone, key: string | number, layout: NumpadLayout): string {
   const isClear = key === 'C';
   const isBackspace = key === '⌫';
+  const isUtility = isClear || isBackspace;
 
-  if (isBackspace || isClear) {
-    return tone === 'amber' || tone === 'danger'
-      ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]'
-      : 'border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--content-secondary)]';
+  if (isUtility) {
+    return `pick-numpad-key pick-numpad-key--utility ${
+      isClear ? 'pick-numpad-key--clear ' : ''
+    }${
+      tone === 'danger'
+        ? 'pick-numpad-key--utility-danger'
+        : tone === 'amber'
+          ? 'pick-numpad-key--utility-warn'
+          : ''
+    }`;
   }
 
-  if (tone === 'amber') {
-    return 'border-[var(--border-warning)] bg-white text-[var(--content-warning-on-light)]';
+  if (tone === 'danger') {
+    return 'pick-numpad-key pick-numpad-key--digit pick-numpad-key--digit-danger';
+  }
+  if (tone === 'success') {
+    return 'pick-numpad-key pick-numpad-key--digit pick-numpad-key--digit-success';
+  }
+  if (tone === 'amber' || tone === 'money') {
+    return 'pick-numpad-key pick-numpad-key--digit';
   }
 
-  return 'border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--content-primary)]';
+  return layout === 'deck'
+    ? 'pick-numpad-key pick-numpad-key--digit'
+    : 'pick-numpad-key pick-numpad-key--digit pick-numpad-key--legacy';
+}
+
+function keyLabel(key: string | number): React.ReactNode {
+  if (key === 'C') {
+    return <span className="pick-numpad-clear-label">Clear</span>;
+  }
+  if (key === '⌫') {
+    return <Backspace size={20} weight="bold" aria-hidden />;
+  }
+  return key;
+}
+
+function keyAriaLabel(key: string | number): string {
+  if (key === 'C') return 'Clear';
+  if (key === '⌫') return 'Backspace';
+  return String(key);
 }
 
 export function Numpad({
   display,
   onKey,
   tone = 'default',
+  layout = 'default',
   prefix,
   emptyPlaceholder = '—',
   heroMoney = false,
   heroQty = false,
   heroSupporting,
   compactHero = false,
+  heroHint,
   hideDisplay = false,
   hideKeys = false,
 }: NumpadProps): React.JSX.Element {
-  const keys = [1, 2, 3, 4, 5, 6, 7, 8, 9, 'C', 0, '⌫'] as const;
   const shown = display || emptyPlaceholder;
   const isEmpty = !display;
+
+  const handleKey = (key: string): void => {
+    appHaptics.impactLight();
+    onKey(key);
+  };
 
   const displayBlock =
     hideDisplay ? null : heroMoney && tone === 'money' ? (
       <div
         className={`pick-mrp-entry-panel mx-auto max-w-sm rounded-2xl border text-center ${
-          compactHero ? 'mb-2 px-3 py-3' : 'mb-3 px-4 py-5'
+          compactHero ? 'mb-2 px-3 py-2.5' : 'mb-3 px-4 py-5'
         } ${
           isEmpty
             ? 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)]'
@@ -84,48 +130,65 @@ export function Numpad({
         <div
           className={`pick-mrp-entry-value mt-1 inline-flex items-baseline justify-center gap-1 font-mono font-extrabold tabular-nums tracking-tight ${displayToneClass(tone)} ${compactHero ? 'pick-mrp-entry-value-compact' : ''} ${isEmpty ? 'opacity-70' : ''}`}
         >
-          <span className={`pick-mrp-entry-symbol ${compactHero ? 'pick-mrp-entry-symbol-compact' : ''}`} aria-hidden>
+          <span
+            className={`pick-mrp-entry-symbol ${compactHero ? 'pick-mrp-entry-symbol-compact' : ''}`}
+            aria-hidden
+          >
             ₹
           </span>
           <span>{shown}</span>
         </div>
-        {isEmpty && !compactHero ? (
+        {heroHint ? (
+          <p className="mt-1.5 font-ds-micro text-[var(--content-tertiary)]">{heroHint}</p>
+        ) : isEmpty && !compactHero ? (
           <p className="mt-2 font-ds-micro text-[var(--content-positive)]">Tap the numpad below</p>
         ) : null}
       </div>
     ) : heroQty ? (
       <div
-        className={`pick-qty-entry-panel mx-auto max-w-sm rounded-2xl border text-center ${
-          compactHero ? 'mb-2 px-3 py-3' : 'mb-3 px-4 py-5'
+        className={`pick-qty-entry-panel mx-auto w-full rounded-2xl border text-center ${
+          compactHero ? 'mb-2 px-3 py-2.5' : 'mb-3 px-4 py-4'
         } ${
           tone === 'danger'
-            ? 'border-[var(--border-negative)] bg-[var(--bg-negative-subtle)]'
+            ? 'pick-qty-entry-panel--danger'
             : tone === 'success'
-              ? 'border-[var(--border-positive)] bg-[var(--bg-positive-subtle)]'
+              ? 'pick-qty-entry-panel--success'
               : isEmpty
                 ? 'border-[color-mix(in_srgb,var(--amber-5)_35%,var(--border-subtle))] bg-[color-mix(in_srgb,var(--amber-1)_50%,var(--bg-secondary))]'
                 : 'border-[color-mix(in_srgb,var(--amber-5)_35%,var(--border-subtle))] bg-[var(--bg-secondary)] shadow-sm'
         }`}
       >
-        <p className="pick-identity-label text-[var(--amber-9)]">Enter qty</p>
+        <p
+          className={`pick-identity-label ${
+            tone === 'danger'
+              ? 'text-[var(--content-negative)]'
+              : tone === 'success'
+                ? 'text-[var(--content-positive)]'
+                : 'text-[var(--amber-9)]'
+          }`}
+        >
+          Enter qty
+        </p>
         <div
-          className={`pick-qty-entry-value mt-1 font-mono font-extrabold tabular-nums tracking-tight ${displayToneClass(tone)} ${compactHero ? 'pick-qty-entry-value-compact' : ''} ${isEmpty ? 'opacity-70' : ''}`}
+          className={`pick-qty-entry-value mt-0.5 font-mono font-extrabold tabular-nums tracking-tight ${displayToneClass(tone)} ${compactHero ? 'pick-qty-entry-value-compact' : ''} ${isEmpty ? 'opacity-70' : ''}`}
         >
           {shown}
         </div>
         {heroSupporting ? (
-          <p className="mt-1.5 font-ds-micro leading-snug text-[var(--content-tertiary)]">
+          <p className="mt-1 font-ds-micro leading-snug text-[var(--content-tertiary)]">
             {heroSupporting}
           </p>
         ) : null}
-        {isEmpty && !compactHero ? (
+        {heroHint ? (
+          <p className="mt-1 font-ds-micro text-[var(--content-tertiary)]">{heroHint}</p>
+        ) : isEmpty && !compactHero ? (
           <p className="mt-2 font-ds-micro text-[var(--content-tertiary)]">Tap the numpad below</p>
         ) : null}
       </div>
     ) : (
       <div className={`text-right ${compactHero ? 'mb-1' : 'mb-2 sm:mb-3'}`}>
         <div
-          className={`pick-sheet-display inline-flex items-baseline justify-end gap-1 font-mono font-extrabold tracking-tight ${displayToneClass(tone)} ${isEmpty ? 'opacity-40' : ''}`}
+          className={`pick-sheet-display inline-flex items-baseline justify-end gap-1 font-mono font-extrabold tabular-nums tracking-tight ${displayToneClass(tone)} ${isEmpty ? 'opacity-40' : ''}`}
         >
           {prefix ? (
             <span
@@ -139,23 +202,39 @@ export function Numpad({
       </div>
     );
 
+  const grid = hideKeys ? null : (
+    <div
+      className={`pick-numpad-grid ${layout === 'deck' ? 'pick-numpad-grid--deck' : ''} ${
+        tone === 'danger' ? 'pick-numpad-grid--danger' : tone === 'success' ? 'pick-numpad-grid--success' : ''
+      }`}
+    >
+      {NUMPAD_KEYS.map((k) => (
+        <button
+          key={String(k)}
+          type="button"
+          onClick={() => handleKey(String(k))}
+          aria-label={keyAriaLabel(k)}
+          className={`${keyClass(tone, k, layout)} pick-pressable`}
+        >
+          {keyLabel(k)}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (layout === 'deck' && !hideDisplay) {
+    return (
+      <div className="pick-numpad-deck">
+        {displayBlock}
+        {grid}
+      </div>
+    );
+  }
+
   return (
     <>
       {displayBlock}
-      {hideKeys ? null : (
-        <div className="pick-numpad-grid">
-          {keys.map((k) => (
-            <button
-              key={String(k)}
-              type="button"
-              onClick={() => onKey(String(k))}
-              className={`pick-numpad-key rounded-xl border font-mono font-extrabold pick-pressable ${keyToneClass(tone, k)}`}
-            >
-              {k === 'C' ? 'C' : k}
-            </button>
-          ))}
-        </div>
-      )}
+      {grid}
     </>
   );
 }
@@ -187,31 +266,77 @@ export function NumpadConfirmButton({
     <button
       type="button"
       disabled={disabled}
-      onClick={onConfirm}
-      className={`w-full min-h-[48px] rounded-xl px-2 py-3.5 text-sm font-extrabold leading-snug pick-pressable disabled:opacity-40 sm:min-h-[52px] sm:py-4 sm:text-base ${toneClass}`}
+      onClick={() => {
+        appHaptics.impactMedium();
+        onConfirm();
+      }}
+      className={`pick-numpad-confirm w-full min-h-[44px] rounded-xl px-2 py-3 font-ds-caption-size font-extrabold leading-snug pick-pressable disabled:opacity-40 sm:min-h-[48px] sm:text-base ${toneClass}`}
     >
       <span className="inline-flex items-center justify-center gap-1">
         <span>{labelText}</span>
-        {hasArrowSuffix ? <span aria-hidden="true" className="shrink-0">→</span> : null}
+        {hasArrowSuffix ? (
+          <span aria-hidden="true" className="shrink-0">
+            →
+          </span>
+        ) : null}
       </span>
     </button>
   );
+}
+
+export type NumKeyOptions = {
+  /** When true, the next digit replaces the whole buffer (suggested/prefilled values). */
+  replaceOnNextDigit?: { current: boolean };
+  maxLength?: number;
+};
+
+/** Pure — compute next buffer without setState (avoids stale closures). */
+export function nextNumKey(
+  key: string,
+  buf: string,
+  options?: NumKeyOptions,
+): string {
+  const maxLen = options?.maxLength ?? 6;
+  const replaceRef = options?.replaceOnNextDigit;
+
+  if (key === '⌫') {
+    if (replaceRef) replaceRef.current = false;
+    return buf.slice(0, -1);
+  }
+  if (key === 'C') {
+    if (replaceRef) replaceRef.current = false;
+    return '';
+  }
+  if (!/^\d$/.test(key)) {
+    return buf;
+  }
+  if (replaceRef?.current) {
+    replaceRef.current = false;
+    return key;
+  }
+  if (buf.length >= maxLen) {
+    return buf;
+  }
+  return buf + key;
+}
+
+/** Apply a numpad key and return the next buffer string. */
+export function applyNumKey(
+  key: string,
+  buf: string,
+  setBuf: (v: string | ((p: string) => string)) => void,
+  options?: NumKeyOptions,
+): string {
+  const next = nextNumKey(key, buf, options);
+  setBuf(next);
+  return next;
 }
 
 export function numKey(
   key: string,
   buf: string,
   setBuf: (v: string | ((p: string) => string)) => void,
+  options?: NumKeyOptions,
 ): void {
-  if (key === '⌫') {
-    setBuf((v) => v.slice(0, -1));
-    return;
-  }
-  if (key === 'C') {
-    setBuf('');
-    return;
-  }
-  if (buf.length < 6) {
-    setBuf((v) => v + key);
-  }
+  applyNumKey(key, buf, setBuf, options);
 }

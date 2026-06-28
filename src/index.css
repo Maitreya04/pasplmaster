@@ -356,6 +356,15 @@ select {
   animation: undo-toast-enter 220ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
+@keyframes undo-toast-enter-top {
+  from { transform: translateY(-16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.animate-undo-toast-enter-top {
+  animation: undo-toast-enter-top 220ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
 @keyframes undo-progress {
   from { transform: scaleX(1); }
   to { transform: scaleX(0); }
@@ -400,10 +409,54 @@ select {
   transform: scale(0.97);
 }
 
-/* Picker layout — fluid type + touch targets that survive 320px / short viewports */
+/* Picker layout — fluid type bounded by width AND height for short viewports */
 .pick-hero-rack {
-  font-size: clamp(2.25rem, 10vw, 3.75rem);
+  font-size: clamp(1.75rem, min(10vw, 7dvh), 3.75rem);
   line-height: 1;
+}
+
+/* Pick detail — scroll body + pinned dock (footer always visible) */
+.pick-detail {
+  --pick-dock-pad-x: 1rem;
+  --pick-dock-pad-y: 0.75rem;
+}
+
+.pick-detail-body {
+  -webkit-overflow-scrolling: touch;
+}
+
+.pick-detail-dock {
+  padding: var(--pick-dock-pad-y) var(--pick-dock-pad-x)
+    max(var(--pick-dock-pad-y), env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -4px 16px color-mix(in srgb, var(--gray-9) 6%, transparent);
+}
+
+.pick-detail-nav-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.5rem;
+}
+
+.pick-detail-nav-arrow {
+  display: flex;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  color: var(--content-secondary);
+}
+
+.pick-detail-nav-row .pick-line-chip-strip {
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.pick-detail-cta-row .pick-cta,
+.pick-detail-cta-row button.min-h-12 {
+  min-height: 2.75rem;
 }
 
 /* Pick identity — unified ticket card (one surface, amber accent thread) */
@@ -435,7 +488,7 @@ select {
 }
 
 .pick-ticket-nav {
-  padding: 1rem 1rem 0.875rem 1.25rem;
+  padding: 0.75rem 0.875rem 0.625rem 1.125rem;
   background: linear-gradient(
     165deg,
     color-mix(in srgb, var(--amber-1) 55%, var(--bg-secondary)) 0%,
@@ -444,9 +497,9 @@ select {
 }
 
 .pick-ticket-rack-value {
-  margin-top: 0.375rem;
+  margin-top: 0.25rem;
   padding-left: 1.625rem;
-  font-size: clamp(2.5rem, 14vw, 3.75rem);
+  font-size: clamp(1.75rem, min(14vw, 9dvh), 3.75rem);
   line-height: 0.95;
   letter-spacing: -0.03em;
 }
@@ -458,13 +511,13 @@ select {
 }
 
 .pick-ticket-mission {
-  padding: 0.875rem 1rem 1rem 1.25rem;
+  padding: 0.625rem 0.875rem 0.75rem 1.125rem;
 }
 
 .pick-ticket-part-value {
-  margin-top: 0.375rem;
+  margin-top: 0.25rem;
   padding-left: 1.625rem;
-  font-size: clamp(1.625rem, 8.5vw, 2.5rem);
+  font-size: clamp(1.25rem, min(8.5vw, 5.5dvh), 2.5rem);
   line-height: 1;
   letter-spacing: -0.02em;
 }
@@ -475,9 +528,9 @@ select {
 }
 
 .pick-ticket-qty-panel {
-  margin-top: 0.875rem;
+  margin-top: 0.625rem;
   margin-left: 1.625rem;
-  padding: 0.75rem 0.875rem;
+  padding: 0.5rem 0.75rem;
   border-radius: 0.75rem;
   border: 1px solid color-mix(in srgb, var(--amber-3) 45%, var(--border-subtle));
   background: color-mix(in srgb, var(--amber-1) 40%, var(--bg-tertiary));
@@ -491,7 +544,7 @@ select {
 }
 
 .pick-ticket-qty-value {
-  font-size: clamp(2.25rem, 13vw, 3.25rem);
+  font-size: clamp(1.5rem, min(13vw, 7dvh), 3.25rem);
   line-height: 0.9;
   letter-spacing: -0.03em;
   color: var(--amber-9);
@@ -534,6 +587,306 @@ select {
   border-radius: 0.875rem;
   border: 1px dashed var(--border-subtle);
   background: color-mix(in srgb, var(--bg-tertiary) 60%, var(--bg-secondary));
+}
+
+.pick-ticket-zero {
+  padding-top: 0.25rem;
+}
+
+.pick-ticket--complete {
+  border-color: color-mix(in srgb, var(--border-positive) 45%, var(--border-subtle));
+}
+
+.pick-ticket--complete::before {
+  background: linear-gradient(180deg, var(--green-5) 0%, var(--green-7) 100%);
+}
+
+.pick-ticket--partial {
+  border-color: color-mix(in srgb, var(--border-warning) 40%, var(--border-subtle));
+}
+
+.pick-ticket-qty-panel--complete {
+  border-color: color-mix(in srgb, var(--border-positive) 40%, var(--border-subtle));
+  background: color-mix(in srgb, var(--bg-positive-subtle) 55%, var(--bg-tertiary));
+}
+
+.pick-ticket-qty-panel--complete .pick-ticket-qty-value {
+  color: var(--content-positive);
+}
+
+.pick-ticket-qty-panel--partial {
+  border-color: color-mix(in srgb, var(--border-warning) 45%, var(--border-subtle));
+  background: color-mix(in srgb, var(--bg-warning-subtle) 50%, var(--bg-tertiary));
+}
+
+.pick-ticket-qty-panel--partial .pick-ticket-qty-value {
+  color: var(--content-warning-on-light);
+}
+
+/* Qty progress meter — always visible fill inside ticket */
+.pick-qty-meter-track {
+  height: 0.375rem;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--amber-2) 50%, var(--bg-tertiary));
+}
+
+.pick-qty-meter-fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, var(--amber-6) 0%, var(--amber-8) 100%);
+  transition: width 280ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.pick-qty-meter-fill--complete {
+  background: linear-gradient(90deg, var(--green-5) 0%, var(--green-7) 100%);
+}
+
+/* Order-level progress — persistent context strip */
+.pick-order-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.pick-order-progress-track {
+  height: 0.3125rem;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--bg-tertiary);
+}
+
+.pick-order-progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--role-primary);
+  transition: width 320ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.pick-order-progress-label {
+  font-size: var(--ds-caption-size, 0.75rem);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--content-secondary);
+}
+
+/* Line chip strip — jump nav above footer */
+.pick-line-chip-strip {
+  display: flex;
+  gap: 0.375rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.25rem;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.pick-line-chip-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.pick-line-chip {
+  display: inline-flex;
+  min-height: 2rem;
+  min-width: 2rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  border-radius: 0.625rem;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-primary);
+  padding: 0 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--content-secondary);
+}
+
+.pick-line-chip--current {
+  border-color: var(--role-primary);
+  background: color-mix(in srgb, var(--role-primary) 12%, var(--bg-secondary));
+  color: var(--role-primary);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--role-primary) 25%, transparent);
+}
+
+.pick-line-chip--picked {
+  border-color: color-mix(in srgb, var(--border-positive) 50%, var(--border-subtle));
+  background: var(--bg-positive-subtle);
+  color: var(--content-positive);
+}
+
+.pick-line-chip--partial {
+  border-color: color-mix(in srgb, var(--border-warning) 50%, var(--border-subtle));
+  background: var(--bg-warning-subtle);
+  color: var(--content-warning-on-light);
+}
+
+.pick-line-chip--flagged {
+  border-color: color-mix(in srgb, var(--border-negative) 50%, var(--border-subtle));
+  background: var(--bg-negative-subtle);
+  color: var(--content-negative);
+}
+
+/* Compact line nav — used when order has more than PICK_LINE_CHIP_MAX lines */
+.pick-line-nav-compact {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-primary);
+  padding: 0.375rem 0.625rem 0.5rem;
+  text-align: center;
+}
+
+.pick-line-nav-compact-track {
+  position: relative;
+  height: 0.1875rem;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--bg-tertiary);
+}
+
+.pick-line-nav-compact-thumb {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 0.375rem;
+  border-radius: 9999px;
+  background: var(--role-primary);
+  transform: translateX(-50%);
+  transition: left 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Footer CTAs — semantic variants (action / nav / edit / finish) */
+.pick-cta {
+  border-radius: 1rem;
+  font-size: var(--ds-body-size, 1rem);
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.pick-cta--action {
+  border: none;
+  background: var(--role-primary);
+  color: var(--core-white);
+}
+
+.pick-cta--nav {
+  border: none;
+  background: var(--bg-inverse-primary);
+  color: var(--core-white);
+}
+
+.pick-cta--edit {
+  border: 1.5px solid var(--border-opaque);
+  background: var(--bg-secondary);
+  color: var(--content-primary);
+}
+
+.pick-cta--finish {
+  border: none;
+  background: var(--bg-positive);
+  color: var(--core-white);
+}
+
+/* Line status strip above footer actions */
+.pick-line-status-strip {
+  margin-bottom: 0.75rem;
+  border-radius: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  text-align: center;
+}
+
+.pick-line-status-strip--complete {
+  border: 1px solid color-mix(in srgb, var(--border-positive) 45%, var(--border-subtle));
+  background: var(--bg-positive-subtle);
+  color: var(--content-positive);
+}
+
+.pick-line-status-strip--partial {
+  border: 1px solid color-mix(in srgb, var(--border-warning) 45%, var(--border-subtle));
+  background: var(--bg-warning-subtle);
+  color: var(--content-warning-on-light);
+}
+
+/* Short viewport compaction — ticket scrolls, dock stays pinned */
+@media (max-height: 680px) {
+  .pick-ticket-item-name {
+    -webkit-line-clamp: 1;
+  }
+
+  .pick-ticket-zero {
+    display: none;
+  }
+
+  .pick-line-status-strip {
+    margin-bottom: 0.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .pick-detail-dock {
+    --pick-dock-pad-y: 0.5rem;
+  }
+}
+
+@media (max-height: 640px) {
+  .pick-flow-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .pick-flow-toolbar > div:last-child {
+    margin-top: 0;
+    flex-shrink: 0;
+  }
+
+  .pick-order-progress-label {
+    font-size: 0.6875rem;
+  }
+
+  .pick-detail-line-label {
+    display: none;
+  }
+
+  .role-picking .pick-flow-header-row {
+    padding-top: 0.625rem;
+    padding-bottom: 0.625rem;
+  }
+}
+
+@media (max-height: 560px) {
+  .pick-ticket-rack-value {
+    font-size: clamp(1.5rem, min(12vw, 7dvh), 2.25rem);
+  }
+
+  .pick-ticket-part-value {
+    font-size: clamp(1.125rem, min(7vw, 4.5dvh), 1.75rem);
+  }
+
+  .pick-ticket-qty-value {
+    font-size: clamp(1.25rem, min(11vw, 6dvh), 2rem);
+  }
+
+  .pick-ticket-nav,
+  .pick-ticket-mission {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .pick-ticket-qty-panel {
+    margin-top: 0.5rem;
+    padding: 0.375rem 0.625rem;
+  }
 }
 
 /* Ledger — dashed underline signals tappable MRP / qty (matches qty-step header) */
@@ -618,30 +971,148 @@ select {
 }
 
 .pick-qty-entry-value-compact {
-  font-size: clamp(2rem, 11vw, 2.75rem);
+  font-size: clamp(1.75rem, min(11vw, 8dvh), 2.75rem);
 }
 
-.pick-entry-deck .pick-numpad-grid {
+.pick-qty-entry-panel--danger {
+  border-color: color-mix(in srgb, var(--border-negative) 55%, var(--border-subtle));
+  background: color-mix(in srgb, var(--bg-negative-subtle) 70%, var(--bg-secondary));
+}
+
+.pick-qty-entry-panel--success {
+  border-color: color-mix(in srgb, var(--border-positive) 55%, var(--border-subtle));
+  background: color-mix(in srgb, var(--bg-positive-subtle) 65%, var(--bg-secondary));
+}
+
+/* Entry sheet — scroll body + pinned numpad deck */
+.pick-entry-sheet-body {
+  min-height: 0;
+}
+
+.pick-entry-deck {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pick-entry-deck-hint {
+  min-height: 1rem;
+  line-height: 1.2;
+}
+
+.pick-numpad-deck {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
   gap: 0.375rem;
-}
-
-.pick-entry-deck .pick-numpad-key {
-  min-height: 42px;
-  padding-block: 0.375rem;
-  font-size: 1rem;
 }
 
 .pick-numpad-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(0.375rem, 1.5vw, 0.5rem);
+  gap: clamp(0.3125rem, 1.2vw, 0.4375rem);
+}
+
+.pick-numpad-grid--deck {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: min(34dvh, 13.5rem);
+  grid-template-rows: repeat(4, minmax(2.625rem, 1fr));
 }
 
 .pick-numpad-key {
-  min-height: 44px;
-  padding-block: clamp(0.5rem, 2.2vw, 0.875rem);
-  font-size: clamp(1rem, 4.2vw, 1.125rem);
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1;
   touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 120ms cubic-bezier(0.23, 1, 0.32, 1),
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.pick-numpad-key--digit {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--gray-9) 5%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--core-white) 80%, transparent);
+  color: var(--content-primary);
+  font-size: clamp(1.125rem, 4.8vw, 1.375rem);
+}
+
+.pick-numpad-key--digit-danger {
+  border-color: color-mix(in srgb, var(--border-negative) 35%, var(--border-subtle));
+  background: var(--bg-secondary);
+  color: var(--content-negative);
+}
+
+.pick-numpad-key--digit-success {
+  border-color: color-mix(in srgb, var(--border-positive) 40%, var(--border-subtle));
+  color: var(--content-positive);
+}
+
+.pick-numpad-key--utility {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-tertiary);
+  color: var(--content-secondary);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.pick-numpad-key--clear {
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.pick-numpad-clear-label {
+  line-height: 1.1;
+}
+
+.pick-numpad-key--utility-danger {
+  border-color: color-mix(in srgb, var(--border-negative) 30%, var(--border-subtle));
+  background: color-mix(in srgb, var(--bg-negative-subtle) 50%, var(--bg-tertiary));
+  color: var(--content-negative);
+}
+
+.pick-numpad-key--utility-warn {
+  border-color: color-mix(in srgb, var(--border-warning) 35%, var(--border-subtle));
+  background: var(--bg-warning-subtle);
+  color: var(--content-warning-on-light);
+}
+
+.pick-numpad-key--legacy {
+  padding-block: clamp(0.5rem, 2.2vw, 0.875rem);
+}
+
+.pick-numpad-key:active {
+  transform: scale(0.96);
+  background: var(--bg-tertiary);
+}
+
+.pick-numpad-confirm {
+  letter-spacing: -0.01em;
+}
+
+.pick-entry-deck .pick-numpad-grid {
+  gap: 0.3125rem;
+}
+
+.pick-entry-deck .pick-numpad-key {
+  min-height: 2.625rem;
 }
 
 .pick-deck-height {
@@ -703,12 +1174,57 @@ select {
 
 @media (max-height: 640px) {
   .pick-sheet-compact .pick-numpad-key {
-    min-height: 40px;
-    padding-block: 0.375rem;
+    min-height: 2.375rem;
   }
 
-  .pick-sheet-compact .pick-sheet-display {
-    font-size: clamp(1.5rem, 8vw, 2.25rem);
+  .pick-sheet-compact .pick-numpad-grid--deck {
+    max-height: min(30dvh, 11.5rem);
+    grid-template-rows: repeat(4, minmax(2.375rem, 1fr));
+  }
+
+  .pick-sheet-compact .pick-qty-entry-value-compact,
+  .pick-sheet-compact .pick-mrp-entry-value-compact {
+    font-size: clamp(1.5rem, min(9vw, 7dvh), 2.25rem);
+  }
+
+  .pick-sheet-compact .pick-mrp-entry-panel,
+  .pick-sheet-compact .pick-qty-entry-panel {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .pick-entry-deck-hint {
+    display: none;
+  }
+}
+
+  .price-fix-sheet .price-fix-compare {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .price-fix-sheet .pick-mrp-entry-value-compact {
+    font-size: clamp(1.5rem, 8vw, 2rem);
+  }
+}
+
+@media (max-height: 560px) {
+  .price-fix-sheet .pick-numpad-key {
+    min-height: 2.25rem;
+  }
+
+  .price-fix-sheet .pick-numpad-grid--deck {
+    max-height: min(28dvh, 10.5rem);
+  }
+
+  .pick-entry-sheet .pick-numpad-grid--deck {
+    max-height: min(28dvh, 10.5rem);
+    grid-template-rows: repeat(4, minmax(2.125rem, 1fr));
+  }
+
+  .pick-entry-sheet .pick-numpad-key {
+    min-height: 2.125rem;
+    font-size: 1rem;
   }
 }
 

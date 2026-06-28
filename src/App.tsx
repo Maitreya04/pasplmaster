@@ -111,9 +111,10 @@ function RequireAdminUnlock({ children }: { children: React.ReactNode }) {
 }
 
 function RootRedirect() {
-  const { isAuthenticated, role, authMode, authReady } = useAuth();
+  const { isAuthenticated, role, authMode, authReady, canSwitchRoles } = useAuth();
   if (!authReady) return <AuthBootScreen />;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (canSwitchRoles && !role) return <Navigate to="/select-role" replace />;
   if (authMode === 'supabase' && role && ROLE_HOME[role]) {
     return <Navigate to={ROLE_HOME[role]} replace />;
   }

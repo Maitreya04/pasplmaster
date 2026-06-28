@@ -25,7 +25,7 @@ type LoginMode = 'quick' | 'full' | 'legacy';
 
 export default function LoginPage(): React.JSX.Element | null {
   const navigate = useNavigate();
-  const { loginWithPhone, login, isAuthenticated, role, authMode, authReady } = useAuth();
+  const { loginWithPhone, login, isAuthenticated, role, authMode, authReady, canSwitchRoles } = useAuth();
 
   const savedDevice = loadDeviceProfile();
   const [mode, setMode] = useState<LoginMode>(savedDevice ? 'quick' : 'full');
@@ -46,6 +46,9 @@ export default function LoginPage(): React.JSX.Element | null {
   }, []);
 
   if (authReady && isAuthenticated) {
+    if (canSwitchRoles && !role) {
+      return <Navigate to="/select-role" replace />;
+    }
     if (authMode === 'supabase' && role && ROLE_HOME[role]) {
       return <Navigate to={ROLE_HOME[role]} replace />;
     }

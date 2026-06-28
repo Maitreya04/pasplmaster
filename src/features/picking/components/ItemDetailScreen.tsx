@@ -1,6 +1,15 @@
-import { CaretLeft, CaretRight, Flag, HandTap, List, Package } from '@phosphor-icons/react';
-import { normalizeUom } from '../../../lib/picking/pickerMicrocopy';
+import { CaretLeft, CaretRight, Flag } from '@phosphor-icons/react';
+import {
+  derivePickLineUiState,
+  pickPrimaryCta,
+  pickSecondaryCta,
+  type PickLineUiState,
+} from '../lib/pickLineCta';
 import { PickedLedger } from './PickedLedger';
+import { PickLineNavCenter } from './PickLineNavCenter';
+import type { PickLineChip } from './PickLineChipStrip';
+import { PickQtyMeter } from './PickQtyMeter';
+import { usePickLineChipStrip } from '../lib/pickLineNav';
 import type { LineDraft } from '../../../types';
 
 export interface ItemDetailScreenProps {
@@ -15,12 +24,19 @@ export interface ItemDetailScreenProps {
   isComplete: boolean;
   lineIndex: number;
   totalLines: number;
+  doneCount: number;
+  lineChips: PickLineChip[];
+  markedStatus?: 'picked' | 'partial' | 'flagged';
+  revisitComplete?: boolean;
   onPickItem: () => void;
   onNextItem: () => void;
+  onFinishOrder?: () => void;
   onPrevLine?: () => void;
   onNextLine?: () => void;
+  onGoToLine?: (index: number) => void;
   onSeeAllLines?: () => void;
   onFlag?: () => void;
+  onEditPick?: () => void;
   onEditGroupMrp?: (groupId: string) => void;
   onEditGroupQty?: (groupId: string) => void;
   flashGroupId?: string | null;
@@ -45,33 +61,35 @@ function IdentityStep({
   );
 }
 
-function LineNavDots({
-  lineIndex,
-  totalLines,
+function LineStatusStrip({
+  uiState,
+  totalLogged,
+  targetQty,
+  uom,
 }: {
-  lineIndex: number;
-  totalLines: number;
-}): React.JSX.Element {
-  const maxDots = Math.min(totalLines, 8);
+  uiState: PickLineUiState;
+  totalLogged: number;
+  targetQty: number;
+  uom: string;
+}): React.JSX.Element | null {
+  if (uiState !== 'marked_picked' && uiState !== 'marked_partial' && uiState !== 'complete') {
+    return null;
+  }
+
+  const logged = uiState === 'marked_picked' && totalLogged === 0 ? targetQty : totalLogged;
+  const isPartial = uiState === 'marked_partial';
+
   return (
-    <div className="flex items-center gap-1" aria-hidden>
-      {Array.from({ length: maxDots }, (_, i) => {
-        const dotIndex =
-          totalLines <= maxDots
-            ? i
-            : Math.round((i / Math.max(1, maxDots - 1)) * (totalLines - 1));
-        const isActive = dotIndex === lineIndex;
-        return (
-          <span
-            key={i}
-            className={`h-1.5 rounded-full transition-all ${
-              isActive
-                ? 'w-3 bg-[var(--role-primary)]'
-                : 'w-1.5 bg-[var(--border-opaque)]'
-            }`}
-          />
-        );
-      })}
+    <div
+      className={`pick-line-status-strip ${
+        isPartial ? 'pick-line-status-strip--partial' : 'pick-line-status-strip--complete'
+      }`}
+    >
+      <p className="font-ds-caption-size font-semibold">
+        {isPartial
+          ? `Partial · ${logged} of ${targetQty} ${uom.toLowerCase()} logged`
+          : `Line complete · ${logged} ${uom.toLowerCase()}`}
+      </p>
     </div>
   );
 }
@@ -88,155 +106,222 @@ export function ItemDetailScreen({
   isComplete,
   lineIndex,
   totalLines,
+  doneCount,
+  lineChips,
+  markedStatus,
+  revisitComplete = false,
   onPickItem,
   onNextItem,
+  onFinishOrder,
   onPrevLine,
   onNextLine,
+  onGoToLine,
   onSeeAllLines,
   onFlag,
+  onEditPick,
   onEditGroupMrp,
   onEditGroupQty,
   flashGroupId,
 }: ItemDetailScreenProps): React.JSX.Element {
-  const uomNorm = normalizeUom(uom);
   const hasLogged = totalLogged > 0;
-  const qtyHero = hasLogged && remaining > 0 && !isComplete ? remaining : targetQty;
-  const qtyLabel =
-    hasLogged && remaining > 0 && !isComplete ? 'Still to pick' : 'Pick qty';
-  const qtySubtext =
-    hasLogged && remaining > 0 && !isComplete
-      ? `${totalLogged} of ${targetQty} logged on this line`
-      : `${targetQty} on this line`;
+  const uiState = derivePickLineUiState(markedStatus, totalLogged, targetQty, isComplete);
+  const isTicketComplete =
+    uiState === 'marked_picked' || uiState === 'complete' || uiState === 'marked_partial';
+
+  const primary = pickPrimaryCta(
+    uiState,
+    remaining,
+    targetQty,
+    uom,
+    lineIndex,
+    totalLines,
+    revisitComplete,
+  );
+  const secondary = pickSecondaryCta(uiState, revisitComplete, lineIndex, totalLines);
+
   const canGoPrev = lineIndex > 0;
   const canGoNext = lineIndex < totalLines - 1;
   const lineProgress = `Line ${lineIndex + 1} of ${totalLines}`;
+  const showChipStrip = usePickLineChipStrip(totalLines);
+  const showLineNav = totalLines > 1 && onGoToLine;
+
+  const handlePrimary = () => {
+    if (primary.kind === 'pick') {
+      onPickItem();
+      return;
+    }
+    if (primary.kind === 'edit') {
+      (onEditPick ?? onPickItem)();
+      return;
+    }
+    if (primary.kind === 'finish') {
+      (onFinishOrder ?? onNextItem)();
+      return;
+    }
+    onNextItem();
+  };
+
+  const handleSecondary = () => {
+    onNextItem();
+  };
+
+  const primaryClass =
+    primary.kind === 'pick'
+      ? 'pick-cta pick-cta--action'
+      : primary.kind === 'edit'
+        ? 'pick-cta pick-cta--edit'
+        : primary.kind === 'finish'
+          ? 'pick-cta pick-cta--finish'
+          : 'pick-cta pick-cta--nav';
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <article className="pick-ticket mx-3 mt-2 shrink-0">
-        <div className="pick-ticket-nav">
-          <IdentityStep step={1} label="Walk to rack" labelClassName="text-[var(--amber-9)]" />
-          <p className="pick-ticket-rack-value font-mono font-extrabold text-[var(--content-primary)]">
-            {rackNo ?? '—'}
-          </p>
-        </div>
-
-        <div className="pick-ticket-perforation" aria-hidden />
-
-        <div className="pick-ticket-mission">
-          <IdentityStep step={2} label="Part no" />
-          <p className="pick-ticket-part-value font-mono font-extrabold text-[var(--content-primary)]">
-            {partCode}
-          </p>
-          <p className="pick-ticket-item-name line-clamp-2 font-ds-caption-size leading-snug text-[var(--content-secondary)]">
-            {itemName}
-          </p>
-
-          <div className="pick-ticket-qty-panel">
-            <IdentityStep step={3} label={qtyLabel} labelClassName="text-[var(--amber-9)]" />
-            <div className="pick-ticket-qty-row">
-              <span className="pick-ticket-qty-value font-mono font-extrabold tabular-nums">
-                {qtyHero}
-              </span>
-              <span className="pick-ticket-uom">{uomNorm}</span>
-            </div>
-            <p className="mt-1 font-ds-micro text-[var(--content-tertiary)]">{qtySubtext}</p>
-          </div>
-        </div>
-      </article>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-3">
-        {hasLogged ? (
-          <PickedLedger
-            draft={draft}
-            totalLogged={totalLogged}
-            remaining={remaining}
-            onEditGroupMrp={onEditGroupMrp}
-            onEditGroupQty={onEditGroupQty}
-            flashGroupId={flashGroupId}
-            context="summary"
-          />
-        ) : (
-          <div className="pick-ticket-empty flex flex-col items-center justify-center px-4 py-8 text-center">
-            <div className="relative flex h-14 w-14 items-center justify-center">
-              <div className="absolute inset-0 rounded-2xl bg-[var(--bg-secondary)] ring-1 ring-[var(--border-subtle)]" />
-              <Package
-                size={24}
-                className="relative text-[var(--content-quaternary)]"
-                weight="duotone"
-              />
-              <HandTap
-                size={16}
-                weight="fill"
-                className="absolute -bottom-1 -right-1 text-[var(--role-primary)]"
-              />
-            </div>
-            <p className="mt-3 max-w-[16rem] font-ds-caption-size font-semibold text-[var(--content-secondary)]">
-              Nothing picked yet
+    <div className="pick-detail flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="pick-detail-body min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <article
+          className={`pick-ticket mx-3 mt-2 ${
+            uiState === 'marked_picked' || uiState === 'complete'
+              ? 'pick-ticket--complete'
+              : uiState === 'marked_partial'
+                ? 'pick-ticket--partial'
+                : ''
+          }`}
+        >
+          <div className="pick-ticket-nav">
+            <IdentityStep step={1} label="Walk to rack" labelClassName="text-[var(--amber-9)]" />
+            <p className="pick-ticket-rack-value font-mono font-extrabold text-[var(--content-primary)]">
+              {rackNo ?? '—'}
             </p>
-            <p className="mt-1 max-w-[16rem] font-ds-micro leading-relaxed text-[var(--content-tertiary)]">
-              Grab the part from the shelf, then tap Pick item below.
-            </p>
-            <button
-              type="button"
-              onClick={onPickItem}
-              className="mt-4 min-h-10 rounded-xl border border-dashed border-[var(--border-opaque)] bg-[var(--bg-secondary)] px-5 font-ds-caption-size font-bold text-[var(--content-secondary)] pick-pressable"
-            >
-              Pick item →
-            </button>
           </div>
-        )}
+
+          <div className="pick-ticket-perforation" aria-hidden />
+
+          <div className="pick-ticket-mission">
+            <IdentityStep step={2} label="Part no" />
+            <p className="pick-ticket-part-value font-mono font-extrabold text-[var(--content-primary)]">
+              {partCode}
+            </p>
+            <p className="pick-ticket-item-name line-clamp-2 font-ds-caption-size leading-snug text-[var(--content-secondary)]">
+              {itemName}
+            </p>
+
+            <PickQtyMeter
+              totalLogged={totalLogged}
+              targetQty={targetQty}
+              remaining={remaining}
+              uom={uom}
+              uiState={uiState}
+            />
+          </div>
+        </article>
+
+        <div className="px-3 pb-3 pt-2">
+          {hasLogged ? (
+            <PickedLedger
+              draft={draft}
+              totalLogged={totalLogged}
+              remaining={remaining}
+              onEditGroupMrp={onEditGroupMrp}
+              onEditGroupQty={onEditGroupQty}
+              flashGroupId={flashGroupId}
+              context="summary"
+            />
+          ) : isTicketComplete ? (
+            <p className="pick-ticket-zero font-ds-micro text-[var(--content-tertiary)]">
+              Line marked complete — tap Edit pick below to change batches.
+            </p>
+          ) : (
+            <p className="pick-ticket-zero font-ds-micro text-[var(--content-tertiary)]">
+              No batches logged yet.
+            </p>
+          )}
+        </div>
       </div>
 
-      <div className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
-        <div className="pick-line-nav mb-3 grid min-h-11 grid-cols-[1fr_auto_1fr] items-center">
-          <button
-            type="button"
-            onClick={onPrevLine}
-            disabled={!canGoPrev || !onPrevLine}
-            className="flex min-h-11 items-center justify-start rounded-xl px-2 pick-pressable disabled:opacity-30"
-            aria-label="Previous line"
-          >
-            <CaretLeft size={20} weight="bold" />
-          </button>
+      <div className="pick-detail-dock shrink-0 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
+        <LineStatusStrip
+          uiState={uiState}
+          totalLogged={totalLogged}
+          targetQty={targetQty}
+          uom={uom}
+        />
 
-          <div className="flex flex-col items-center gap-1 px-2">
-            <span className="font-ds-micro font-semibold tabular-nums text-[var(--content-tertiary)]">
-              {lineProgress}
-            </span>
-            <LineNavDots lineIndex={lineIndex} totalLines={totalLines} />
-          </div>
-
-          <button
-            type="button"
-            onClick={onNextLine}
-            disabled={!canGoNext || !onNextLine}
-            className="flex min-h-11 items-center justify-end rounded-xl px-2 pick-pressable disabled:opacity-30"
-            aria-label="Next line"
-          >
-            <CaretRight size={20} weight="bold" />
-          </button>
-        </div>
-
-        <div className="flex gap-2">
-          {isComplete ? (
+        {showLineNav ? (
+          <div className="pick-detail-nav-row">
             <button
               type="button"
-              onClick={onNextItem}
-              className="min-h-12 flex-1 rounded-2xl bg-[var(--bg-inverse-primary)] font-ds-body-size font-extrabold text-white pick-pressable"
+              onClick={onPrevLine}
+              disabled={!canGoPrev || !onPrevLine}
+              className="pick-detail-nav-arrow pick-pressable disabled:opacity-30"
+              aria-label="Previous line"
             >
-              Next item →
+              <CaretLeft size={18} weight="bold" />
             </button>
+
+            <PickLineNavCenter
+              chips={lineChips}
+              currentIndex={lineIndex}
+              totalLines={totalLines}
+              doneCount={doneCount}
+              onSelectLine={onGoToLine}
+              onSeeAllLines={onSeeAllLines ?? (() => {})}
+            />
+
+            <button
+              type="button"
+              onClick={onNextLine}
+              disabled={!canGoNext || !onNextLine}
+              className="pick-detail-nav-arrow pick-pressable disabled:opacity-30"
+              aria-label="Next line"
+            >
+              <CaretRight size={18} weight="bold" />
+            </button>
+          </div>
+        ) : null}
+
+        {showLineNav && showChipStrip ? (
+          <p className="pick-detail-line-label mb-2 text-center font-ds-micro font-semibold tabular-nums text-[var(--content-quaternary)]">
+            {lineProgress}
+          </p>
+        ) : null}
+
+        <div className="pick-detail-cta-row flex gap-2">
+          {secondary ? (
+            <>
+              <button
+                type="button"
+                onClick={handlePrimary}
+                className={`min-h-12 flex-1 ${primaryClass} pick-pressable`}
+              >
+                {primary.label}
+              </button>
+              <button
+                type="button"
+                onClick={handleSecondary}
+                className="pick-cta pick-cta--nav min-h-12 flex-1 pick-pressable"
+              >
+                {secondary.label}
+              </button>
+              {onFlag && uiState !== 'marked_picked' && uiState !== 'marked_partial' ? (
+                <button
+                  type="button"
+                  onClick={onFlag}
+                  className="flex min-h-12 min-w-12 items-center justify-center rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] pick-pressable"
+                  aria-label="Flag item"
+                >
+                  <Flag size={20} weight="fill" className="text-[var(--content-warning-on-light)]" />
+                </button>
+              ) : null}
+            </>
           ) : (
             <>
               <button
                 type="button"
-                onClick={onPickItem}
-                className="min-h-12 flex-1 rounded-2xl bg-[var(--bg-inverse-primary)] font-ds-body-size font-extrabold text-white pick-pressable"
+                onClick={handlePrimary}
+                className={`min-h-12 flex-1 ${primaryClass} pick-pressable`}
               >
-                {hasLogged && remaining > 0 ? 'Continue picking →' : 'Pick item →'}
+                {primary.label}
               </button>
-              {onFlag ? (
+              {onFlag && primary.kind !== 'next' && primary.kind !== 'finish' ? (
                 <button
                   type="button"
                   onClick={onFlag}
@@ -249,17 +334,6 @@ export function ItemDetailScreen({
             </>
           )}
         </div>
-
-        {onSeeAllLines ? (
-          <button
-            type="button"
-            onClick={onSeeAllLines}
-            className="mt-2 flex w-full min-h-10 items-center justify-center gap-2 rounded-xl font-ds-caption-size font-semibold text-[var(--content-secondary)] pick-pressable"
-          >
-            <List size={16} weight="bold" />
-            See all lines as a list
-          </button>
-        ) : null}
       </div>
     </div>
   );

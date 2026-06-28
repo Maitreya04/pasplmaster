@@ -33,10 +33,12 @@ export function FlagReasonSheet({
   const [notesExpanded, setNotesExpanded] = useState(false);
 
   useEffect(() => {
-    if (isOpen && encourageNote) {
-      setNotesExpanded(true);
+    if (!isOpen) {
+      setReason('');
+      setNotes('');
+      setNotesExpanded(false);
     }
-  }, [encourageNote, isOpen]);
+  }, [isOpen]);
 
   function resetAndClose() {
     setReason('');
@@ -45,12 +47,28 @@ export function FlagReasonSheet({
     onClose();
   }
 
-  function handleSubmit() {
-    if (!reason) return;
-    onSubmit({ reason, notes: notes.trim() || null });
+  function submitReason(selected: FlagReason, noteText: string | null = null) {
+    onSubmit({ reason: selected, notes: noteText });
     setReason('');
     setNotes('');
     setNotesExpanded(false);
+  }
+
+  function handleReasonSelect(selected: FlagReason) {
+    setReason(selected);
+    setNotes('');
+    if (selected === 'Out of Stock') {
+      setNotesExpanded(false);
+      return;
+    }
+    if (encourageNote) {
+      setNotesExpanded(true);
+    }
+  }
+
+  function handleSubmit() {
+    if (!reason) return;
+    submitReason(reason, notes.trim() || null);
   }
 
   return (
@@ -72,7 +90,8 @@ export function FlagReasonSheet({
             <button
               key={r}
               type="button"
-              onClick={() => setReason(r)}
+              onClick={() => handleReasonSelect(r)}
+              disabled={loading && r === 'Out of Stock'}
               className={`px-3 py-3 rounded-xl text-sm font-medium text-left min-h-12 transition-colors ${
                 reason === r
                   ? 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] ring-1 ring-[var(--border-negative)]'
@@ -84,13 +103,32 @@ export function FlagReasonSheet({
           ))}
         </div>
 
-        {reason === 'Out of Stock' && (
-          <p className="text-xs text-[var(--content-secondary)] rounded-lg bg-[var(--bg-tertiary)] px-3 py-2">
-            We&apos;ll also add this to pending items so it can be re-ordered.
-          </p>
-        )}
+        <p className="text-xs text-[var(--content-quaternary)]">
+          Out of stock needs a confirm tap — other reasons use the button below.
+        </p>
 
-        {!notesExpanded ? (
+        {reason === 'Out of Stock' ? (
+          <div className="space-y-3 rounded-xl border border-[var(--border-negative)] bg-[var(--bg-negative-subtle)] px-3 py-3">
+            <p className="font-ds-caption-size font-semibold text-[var(--content-negative)]">
+              Confirm nothing on shelf?
+            </p>
+            <p className="font-ds-micro leading-relaxed text-[var(--content-secondary)]">
+              Billing gets notified and this line goes to pending items for re-order. You can undo
+              before leaving the order.
+            </p>
+            <BigButton
+              variant="primary"
+              onClick={() => submitReason('Out of Stock', null)}
+              loading={loading}
+              className="bg-[var(--bg-negative)] text-[var(--content-on-color)]"
+            >
+              <Flag size={18} weight="fill" />
+              Confirm out of stock
+            </BigButton>
+          </div>
+        ) : null}
+
+        {reason && reason !== 'Out of Stock' && !notesExpanded ? (
           <button
             type="button"
             onClick={() => setNotesExpanded(true)}
@@ -98,25 +136,31 @@ export function FlagReasonSheet({
           >
             + Add note (optional)
           </button>
-        ) : (
+        ) : null}
+
+        {reason && reason !== 'Out of Stock' && notesExpanded ? (
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder={encourageNote ? 'Only found partial stock on shelf…' : 'Additional notes (optional)'}
+            placeholder={
+              encourageNote ? 'Only found partial stock on shelf…' : 'Additional notes (optional)'
+            }
             className="w-full h-20 px-4 py-3 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-primary)] border border-[var(--border-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--border-negative)]"
           />
-        )}
+        ) : null}
 
-        <BigButton
-          variant="primary"
-          onClick={handleSubmit}
-          disabled={!reason}
-          loading={loading}
-          className="bg-[var(--bg-negative)] text-[var(--content-on-color)]"
-        >
-          <Flag size={18} weight="fill" />
-          Flag and notify billing
-        </BigButton>
+        {reason && reason !== 'Out of Stock' ? (
+          <BigButton
+            variant="primary"
+            onClick={handleSubmit}
+            disabled={!reason}
+            loading={loading}
+            className="bg-[var(--bg-negative)] text-[var(--content-on-color)]"
+          >
+            <Flag size={18} weight="fill" />
+            Flag and notify billing
+          </BigButton>
+        ) : null}
       </div>
     </BottomSheet>
   );

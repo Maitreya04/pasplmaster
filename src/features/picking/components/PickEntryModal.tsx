@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BottomSheet } from '../../../components/shared';
 import { appHaptics } from '../../../lib/haptics';
 import { mrpBatchLabel } from '../../../lib/picking/pickerMicrocopy';
 import type { StockMrpHistoryEntry } from '../../../types';
 import type { UsePickEntryDraftReturn } from '../hooks/usePickEntryDraft';
 import { GapState, PickCompleteState } from './GapState';
-import { Numpad, NumpadConfirmButton, numKey } from './Numpad';
+import { Numpad, NumpadConfirmButton, nextNumKey } from './Numpad';
 import { OverPickBanner } from './OverPickBanner';
 import { OverPickNoteSheet } from './OverPickNoteSheet';
 import { PickedLedger } from './PickedLedger';
@@ -136,6 +136,15 @@ export function PickEntryModal({
   const editSessionRef = useRef<string | null>(null);
   const qtySessionRef = useRef<string | null>(null);
   const prefillSessionRef = useRef<string | null>(null);
+  const mrpReplaceOnNextDigitRef = useRef(false);
+  const qtyReplaceOnNextDigitRef = useRef(false);
+  const mrpBufRef = useRef(mrpBuf);
+  const qtyBufRef = useRef(qtyBuf);
+  const [mrpReplaceHint, setMrpReplaceHint] = useState(false);
+  const [qtyReplaceHint, setQtyReplaceHint] = useState(false);
+
+  mrpBufRef.current = mrpBuf;
+  qtyBufRef.current = qtyBuf;
 
   const activeBatchIndex =
     ip != null && modalView !== 'gap'
@@ -187,15 +196,28 @@ export function PickEntryModal({
     hadNoteRef.current = hasNote;
   }, [hasNote, noteRequired]);
 
+  const markMrpPrefilled = useCallback((): void => {
+    mrpReplaceOnNextDigitRef.current = true;
+    setMrpReplaceHint(true);
+  }, []);
+
+  const markQtyPrefilled = useCallback((): void => {
+    qtyReplaceOnNextDigitRef.current = true;
+    setQtyReplaceHint(true);
+  }, []);
+
   const seedQtyBalance = (): void => {
     const balance = Math.max(0, effectiveRemaining);
     if (balance <= 0) {
       setQtyBuf('');
       draftState.setQty(null);
+      qtyReplaceOnNextDigitRef.current = false;
+      setQtyReplaceHint(false);
       return;
     }
     setQtyBuf(String(balance));
     draftState.setQty(balance);
+    markQtyPrefilled();
   };
 
   useEffect(() => {
@@ -238,17 +260,24 @@ export function PickEntryModal({
       const sessionKey = draft.editingGroupId;
       if (editSessionRef.current === sessionKey) return;
       editSessionRef.current = sessionKey;
-      if (ip?.mrp != null) setMrpBuf(String(Math.round(ip.mrp)));
-      if (ip?.qty != null) setQtyBuf(String(ip.qty));
+      if (ip?.mrp != null) {
+        setMrpBuf(String(Math.round(ip.mrp)));
+        markMrpPrefilled();
+      }
+      if (ip?.qty != null) {
+        setQtyBuf(String(ip.qty));
+        markQtyPrefilled();
+      }
       return;
     }
     if (modalView === 'mrp' && ip?.mrp != null) {
-      const sessionKey = `mrp-${draft.confirmedGroups.length}-${ip.mrp}`;
+      const sessionKey = `mrp-sync-${draft.confirmedGroups.length}`;
       if (editSessionRef.current === sessionKey) return;
       editSessionRef.current = sessionKey;
       setMrpBuf(String(Math.round(ip.mrp)));
+      markMrpPrefilled();
     }
-  }, [draft.editingGroupId, editQtyOnly, ip, isOpen, modalView, draft.confirmedGroups.length]);
+  }, [draft.editingGroupId, editQtyOnly, ip, isOpen, modalView, draft.confirmedGroups.length, markMrpPrefilled, markQtyPrefilled]);
 
   useEffect(() => {
     if (!isOpen || modalView !== 'mrp' || editQtyOnly || draft.editingGroupId) return;
@@ -260,6 +289,7 @@ export function PickEntryModal({
 
     setMrpBuf(String(Math.round(suggestedMrp)));
     setMrp(Math.round(suggestedMrp));
+    markMrpPrefilled();
     onSuggestedMrpApplied?.(Math.round(suggestedMrp));
   }, [
     draft.confirmedGroups.length,
@@ -267,6 +297,7 @@ export function PickEntryModal({
     editQtyOnly,
     isOpen,
     modalView,
+    markMrpPrefilled,
     mrpSuggestionLoading,
     onSuggestedMrpApplied,
     setMrp,
@@ -277,6 +308,7 @@ export function PickEntryModal({
     const rounded = Math.round(mrp);
     setMrpBuf(String(rounded));
     draftState.setMrp(rounded);
+    markMrpPrefilled();
     appHaptics.selection();
   };
 
@@ -320,15 +352,21 @@ export function PickEntryModal({
   };
 
   const handleMrpKey = (key: string): void => {
-    numKey(key, mrpBuf, setMrpBuf);
-    const next = key === '⌫' ? mrpBuf.slice(0, -1) : key === 'C' ? '' : mrpBuf + key;
+    const next = nextNumKey(key, mrpBufRef.current, {
+      replaceOnNextDigit: mrpReplaceOnNextDigitRef,
+    });
+    setMrpBuf(next);
+    setMrpReplaceHint(false);
     const parsed = parseInt(next, 10);
     draftState.setMrp(Number.isFinite(parsed) && parsed > 0 ? parsed : null);
   };
 
   const handleQtyKey = (key: string): void => {
-    numKey(key, qtyBuf, setQtyBuf);
-    const next = key === '⌫' ? qtyBuf.slice(0, -1) : key === 'C' ? '' : qtyBuf + key;
+    const next = nextNumKey(key, qtyBufRef.current, {
+      replaceOnNextDigit: qtyReplaceOnNextDigitRef,
+    });
+    setQtyBuf(next);
+    setQtyReplaceHint(false);
     const parsed = parseInt(next, 10);
     draftState.setQty(Number.isFinite(parsed) && parsed > 0 ? parsed : null);
   };
@@ -337,6 +375,10 @@ export function PickEntryModal({
     setMrpBuf('');
     setQtyBuf('');
     setNoteSheetOpen(false);
+    mrpReplaceOnNextDigitRef.current = false;
+    qtyReplaceOnNextDigitRef.current = false;
+    setMrpReplaceHint(false);
+    setQtyReplaceHint(false);
     onClose();
   };
 
@@ -390,7 +432,7 @@ export function PickEntryModal({
     modalView === 'mrp' || modalView === 'qty' ? (
       <div className="pick-entry-deck space-y-2">
         {modalView === 'mrp' ? (
-          <>
+          <div className="pick-entry-deck pick-entry-deck--mrp">
             {mrpSuggestionLoading ? (
               <p className="text-center font-ds-micro text-[var(--content-tertiary)]">
                 Loading price suggestions…
@@ -430,36 +472,35 @@ export function PickEntryModal({
             <Numpad
               display={mrpBuf}
               tone="money"
+              layout="deck"
               heroMoney
               compactHero
-              hideKeys
+              heroHint={mrpReplaceHint ? 'Suggested · type a digit to replace, then keep typing' : undefined}
               emptyPlaceholder="—"
               onKey={handleMrpKey}
             />
-            <Numpad display={mrpBuf} hideDisplay onKey={handleMrpKey} />
-          </>
+          </div>
         ) : (
-          <>
+          <div className="pick-entry-deck pick-entry-deck--qty">
             <div className={qtyShake ? 'animate-shake' : undefined}>
               <Numpad
                 display={qtyBuf}
                 tone={qtyTone(qtyValue, effectiveRemaining, overForQty)}
+                layout="deck"
                 heroQty
                 compactHero
-                hideKeys
                 heroSupporting={qtyHeroSupporting}
+                heroHint={
+                  qtyReplaceHint && !editQtyOnly
+                    ? 'Prefilled · type a digit to replace, then keep typing'
+                    : undefined
+                }
                 emptyPlaceholder="—"
                 onKey={handleQtyKey}
               />
             </div>
-            <Numpad
-              display={qtyBuf}
-              tone={qtyTone(qtyValue, effectiveRemaining, overForQty)}
-              hideDisplay
-              onKey={handleQtyKey}
-            />
             <p
-              className={`text-center font-ds-caption-size transition-colors ${
+              className={`pick-entry-deck-hint text-center font-ds-micro transition-colors ${
                 overForQty
                   ? hasNote
                     ? 'text-[var(--content-positive)]'
@@ -471,7 +512,7 @@ export function PickEntryModal({
             >
               {qtyHelper(qtyValue, effectiveRemaining, overForQty, hasNote)}
             </p>
-          </>
+          </div>
         )}
         <div className="grid grid-cols-3 gap-2">
           <button
@@ -547,8 +588,8 @@ export function PickEntryModal({
         title=""
         keepMounted
         keyboardBehavior="static"
-        sheetClassName="max-h-[min(92dvh,92vh)] pick-sheet-compact pick-entry-sheet"
-        contentClassName="pick-sheet-compact !px-3 !pb-2"
+        sheetClassName="max-h-[min(94dvh,94vh)] pick-sheet-compact pick-entry-sheet"
+        contentClassName="pick-sheet-compact pick-entry-sheet-body !px-3 !pb-2"
         footer={entryFooter}
       >
         {modalView === 'gap' ? (
@@ -628,7 +669,6 @@ export function PickEntryModal({
       />
 
       <PriceFixOverlay
-        key={priceFixOpen ? `open-${ledgerEditField ?? 'pick'}` : 'closed'}
         isOpen={priceFixOpen && !editQtyOnly}
         qty={ip?.qty ?? qtyValue ?? 0}
         uom={draft.uom}

@@ -12,6 +12,12 @@ import { supabase } from '../lib/supabase/client';
 import { clearCartDraft } from '../lib/cartDraftStorage';
 import { warmPickQueueRoute } from '../lib/picking/warmPickQueue';
 import { phoneToAuthEmail, normalizePhoneInput, saveDeviceProfile } from '../lib/auth/phoneAuth';
+import {
+  clearTestAdminSession,
+  isTestAdminPhone,
+  isTestAdminSession,
+  markTestAdminSession,
+} from '../lib/auth/testAdmin';
 import type { StockLocationCode, UserRole } from '../types';
 
 type Role = 'sales' | 'billing' | 'picking' | 'admin' | 'partner' | null;
@@ -54,6 +60,7 @@ interface AuthContextValue {
   exitImpersonation: () => void;
   logout: () => Promise<void>;
   switchRole: () => void;
+  canSwitchRoles: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -174,6 +181,41 @@ interface UserProfileRow {
   full_name: string;
   role: UserRole;
   stock_location_code: StockLocationCode | null;
+  phone: string | null;
+}
+
+function activateTestAdminSession(setTestAdminSession: (value: boolean) => void): void {
+  markTestAdminSession();
+  setTestAdminSession(true);
+}
+
+function clearSelectedRoleForTesting(
+  setters: {
+    setActualRole: (value: Role) => void;
+    setActualUserName: (value: string | null) => void;
+    setActualUserId: (value: number | null) => void;
+    setActualBranch: (value: StockLocationCode | null) => void;
+    setPartnerCompanyId: (value: number | null) => void;
+    setImpersonation: (value: StoredImpersonation | null) => void;
+  },
+): void {
+  setters.setActualRole(null);
+  setters.setActualUserName(null);
+  setters.setActualUserId(null);
+  setters.setActualBranch(null);
+  setters.setPartnerCompanyId(null);
+  setters.setImpersonation(null);
+  safeLocalStorageRemove(LS_KEYS.role);
+  safeLocalStorageRemove(LS_KEYS.userName);
+  safeLocalStorageRemove(LS_KEYS.userId);
+  safeLocalStorageRemove(LS_KEYS.branch);
+  safeLocalStorageRemove(LS_KEYS.partnerCompanyId);
+  safeSessionStorageRemove(LS_KEYS.impersonation);
+}
+
+function unlockAdminForTesting(setAdminUnlocked: (value: boolean) => void): void {
+  setAdminUnlocked(true);
+  safeSessionStorageSet(LS_KEYS.adminUnlocked, 'true');
 }
 
 export function AuthProvider({ children }: { children: ReactNode }): React.JSX.Element | null {
@@ -192,6 +234,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     initial.partnerCompanyId,
   );
   const [adminUnlocked, setAdminUnlocked] = useState(initial.adminUnlocked);
+  const [testAdminSession, setTestAdminSession] = useState(isTestAdminSession);
   const [session, setSession] = useState<Session | null>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
   const authModeRef = useRef<AuthMode>(initial.authMode);
@@ -270,6 +313,8 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     safeLocalStorageRemove(LS_KEYS.partnerCompanyId);
     safeSessionStorageRemove(LS_KEYS.adminUnlocked);
     safeSessionStorageRemove(LS_KEYS.impersonation);
+    clearTestAdminSession();
+    setTestAdminSession(false);
   }, []);
 
   // Legacy access-code sessions must not keep a Supabase JWT — branch RLS would hide billing orders.
@@ -287,7 +332,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
 
       const { data: profile, error } = await supabase
         .from('users')
-        .select('id, full_name, role, stock_location_code')
+        .select('id, full_name, role, stock_location_code, phone')
         .eq('auth_id', nextSession.user.id)
         .maybeSingle();
 
@@ -303,6 +348,10 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
       }
 
       applySupabaseProfile(profile as UserProfileRow, nextSession);
+      if (isTestAdminPhone(profile.phone ?? '')) {
+        activateTestAdminSession(setTestAdminSession);
+        unlockAdminForTesting(setAdminUnlocked);
+      }
       void supabase
         .from('users')
         .update({ last_login_at: new Date().toISOString() })
@@ -383,7 +432,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
 
       const { data: profile, error: profileError } = await supabase
         .from('users')
-        .select('id, full_name, role, stock_location_code')
+        .select('id, full_name, role, stock_location_code, phone')
         .eq('auth_id', data.user.id)
         .maybeSingle();
 
@@ -393,7 +442,20 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
       }
 
       applySupabaseProfile(profile as UserProfileRow, data.session);
-      saveDeviceProfile({ phone: normalizePhoneInput(phone), displayName: profile.full_name });
+      const normalizedPhone = normalizePhoneInput(phone);
+      saveDeviceProfile({ phone: normalizedPhone, displayName: profile.full_name });
+      if (isTestAdminPhone(normalizedPhone)) {
+        activateTestAdminSession(setTestAdminSession);
+        unlockAdminForTesting(setAdminUnlocked);
+        clearSelectedRoleForTesting({
+          setActualRole,
+          setActualUserName,
+          setActualUserId,
+          setActualBranch,
+          setPartnerCompanyId,
+          setImpersonation,
+        });
+      }
       void supabase
         .from('users')
         .update({ last_login_at: new Date().toISOString() })
@@ -585,6 +647,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
         exitImpersonation,
         logout,
         switchRole,
+        canSwitchRoles: testAdminSession,
       }}
     >
       {children}

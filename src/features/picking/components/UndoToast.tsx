@@ -12,7 +12,7 @@ export function UndoToast({ toast, onUndo }: UndoToastProps): React.JSX.Element 
 
   return (
     <div
-      className="fixed inset-x-0 bottom-[max(1rem,env(safe-area-inset-bottom))] z-[80] px-3 animate-undo-toast-enter"
+      className="fixed inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] z-[80] px-3 animate-undo-toast-enter-top"
       role="status"
     >
       <div className="mx-auto max-w-lg overflow-hidden rounded-2xl border border-[var(--border-positive)] bg-[var(--bg-secondary)] shadow-[0_8px_32px_rgba(15,23,42,0.14)]">

@@ -7,10 +7,17 @@ import { useAuth } from '../../context/AuthContext';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { pickQuantityTarget, pickableOrderItems } from '../../lib/cartSupply';
+import type { NextPickLinePreview } from '../../lib/picking/deckOrder';
+import { defaultPickItemTransitionAdapter } from '../../lib/picking/itemTransitionAdapter';
 import { revertPickLine } from '../../lib/picking/revertPickLine';
+import { sendInternalNotification } from '../../lib/pickerPush';
+import { supabase } from '../../lib/supabase/client';
+import { appHaptics } from '../../lib/haptics';
 import type { ConfirmedPriceGroup, MrpSuggestionSource, OrderItem, OrderWithItems } from '../../types';
 import { ItemDetailScreen } from './components/ItemDetailScreen';
 import { PickLineListView } from './components/PickLineListView';
+import { PickOrderProgressBar } from './components/PickOrderProgressBar';
+import type { PickLineChip } from './components/PickLineChipStrip';
 import type { PickLineListEntry } from '../../lib/picking/pickLineListDisplay';
 import { orderItemUnitPrice } from '../../lib/picking/pickLineListDisplay';
 import { PickEntryModal, type LedgerEditField, type PickModalView } from './components/PickEntryModal';
@@ -27,6 +34,8 @@ export interface PickFlowExperienceProps {
   demoOrder?: import('../../types').OrderWithItems;
   mode?: 'lab' | 'production';
   onBack: () => void;
+  /** Production: navigate to box-count finalisation. Falls back to onBack. */
+  onFinish?: () => void;
 }
 
 type LineOutcome =
@@ -61,6 +70,7 @@ export function PickFlowExperience({
   demoOrder,
   mode = 'lab',
   onBack,
+  onFinish,
 }: PickFlowExperienceProps): React.JSX.Element {
   const isLab = mode === 'lab';
   const useDemo = isLab && demoOrder != null;
@@ -331,6 +341,7 @@ export function PickFlowExperience({
 
   const handleMarkPicked = useCallback(() => {
     if (!currentItem) return;
+    appHaptics.impactMedium();
     const logged = draftState.totalLogged;
     setModalOpen(false);
     const outcome: LineOutcome =
@@ -348,8 +359,71 @@ export function PickFlowExperience({
   }, [currentItem, draftState.totalLogged, isLab, orderId, queryClient, targetQty, useDemo]);
 
   const handleFlagSubmit = useCallback(
-    (payload: FlagSubmitPayload) => {
+    async (payload: FlagSubmitPayload) => {
       if (!currentItem) return;
+      appHaptics.impactMedium();
+
+      if (!isLab && !useDemo && order) {
+        try {
+          await defaultPickItemTransitionAdapter.applyTransition({
+            kind: 'flagged',
+            itemId: currentItem.id,
+            reason: payload.reason,
+            notes: payload.notes,
+            boxPrice: null,
+            scanResult: currentItem.scan_result ?? null,
+          });
+
+          if (payload.reason === 'Out of Stock') {
+            const qtyPending = pickQuantityTarget(currentItem);
+            if (qtyPending > 0) {
+              const { data: existing, error: existingError } = await supabase
+                .from('pending_items')
+                .select('id')
+                .eq('order_id', order.id)
+                .eq('item_id', currentItem.item_id)
+                .eq('status', 'pending')
+                .eq('source', 'picking')
+                .limit(1)
+                .maybeSingle();
+              if (!existingError && !existing) {
+                await supabase.from('pending_items').insert({
+                  order_id: order.id,
+                  order_number: order.order_number,
+                  customer_id: order.customer_id,
+                  customer_name: order.customer_name,
+                  item_id: currentItem.item_id,
+                  item_name: currentItem.item_name,
+                  qty_pending: qtyPending,
+                  source: 'picking',
+                  created_by: userName || 'Picker',
+                  note: payload.notes || null,
+                });
+              }
+            }
+          }
+
+          try {
+            await sendInternalNotification({
+              eventType: 'item_flagged_by_picker',
+              orderId: order.id,
+              orderNumber: order.order_number,
+              customerName: order.customer_name,
+              itemName: currentItem.item_name,
+              flagReason: payload.reason,
+              pickerName: userName,
+              orderItemId: currentItem.id,
+              flagNotes: payload.notes,
+              flagBoxPrice: null,
+            });
+          } catch {
+            /* notification failure should not block flag */
+          }
+        } catch {
+          return;
+        }
+      }
+
       setFlagOpen(false);
       setModalOpen(false);
       setLineOutcome({
@@ -367,14 +441,26 @@ export function PickFlowExperience({
         void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       }
     },
-    [currentItem, draftState.totalLogged, isLab, orderId, queryClient, targetQty, useDemo],
+    [
+      currentItem,
+      draftState.totalLogged,
+      isLab,
+      order,
+      orderId,
+      queryClient,
+      targetQty,
+      useDemo,
+      userName,
+    ],
   );
 
   const handleUndoFlag = useCallback(async () => {
-    if (!lineOutcome || lineOutcome.kind !== 'flagged' || !order || !userId || !currentItem) return;
+    if (!lineOutcome || lineOutcome.kind !== 'flagged' || !currentItem) return;
+    if (!useDemo && !isLab && (!order || !userId)) return;
+
     setRevertPending(true);
     try {
-      if (!isLab && !useDemo) {
+      if (!isLab && !useDemo && order && userId) {
         await revertPickLine({
           orderId: order.id,
           claimId,
@@ -382,7 +468,9 @@ export function PickFlowExperience({
           orderItemId: currentItem.id,
           mode: 'full',
         });
-        await queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+        if (orderId != null) {
+          await queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+        }
       }
       draftState.reset(
         createLineDraft({
@@ -400,7 +488,19 @@ export function PickFlowExperience({
     } finally {
       setRevertPending(false);
     }
-  }, [claimId, currentItem, draftState, isLab, lineOutcome, order, queryClient, targetQty, userId, orderId]);
+  }, [
+    claimId,
+    currentItem,
+    draftState,
+    isLab,
+    lineOutcome,
+    order,
+    orderId,
+    queryClient,
+    targetQty,
+    useDemo,
+    userId,
+  ]);
 
   const advanceLine = useCallback(() => {
     setLineOutcome(null);
@@ -447,6 +547,18 @@ export function PickFlowExperience({
     [listRows],
   );
 
+  const lineChips = useMemo((): PickLineChip[] => {
+    return listRows.map((row, index) => ({
+      index,
+      status: row.status === 'now' ? 'now' : row.status,
+    }));
+  }, [listRows]);
+
+  const markedStatus = currentItem ? completedLines[currentItem.id] : undefined;
+  const revisitComplete =
+    (markedStatus === 'picked' || markedStatus === 'partial') &&
+    draftState.totalLogged === 0;
+
   if (isLoading) {
     return (
       <div className="role-picking flex min-h-dvh items-center justify-center bg-[var(--bg-primary)]">
@@ -489,7 +601,6 @@ export function PickFlowExperience({
   }
 
   const remaining = Math.max(0, targetQty - draftState.totalLogged);
-  const resumeLabel = `Resume picking — ${partCode(currentItem)}`;
 
   const outcomeHeadline =
     lineOutcome?.kind === 'picked'
@@ -505,10 +616,22 @@ export function PickFlowExperience({
       ? `${lineOutcome.pickedQty} of ${lineOutcome.targetQty} logged`
       : undefined;
 
+  const nextItem = pickItems[lineIndex + 1];
+  const nextPreview: NextPickLinePreview | null = nextItem
+    ? {
+        code: partCode(nextItem),
+        rackNo: nextItem.rack_no,
+        itemName: nextItem.item_name,
+        deckIndex: lineIndex + 1,
+      }
+    : null;
+
+  const finishOrder = onFinish ?? onBack;
+
   return (
-    <div className="role-picking flex min-h-dvh flex-col bg-[var(--bg-primary)]">
+    <div className="role-picking flex h-dvh flex-col overflow-hidden bg-[var(--bg-primary)]">
       <header className="sticky top-0 z-30 shrink-0 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
-        <div className="flex items-center gap-3 px-4 py-3">
+        <div className="pick-flow-header-row flex items-center gap-3 px-4 py-3">
           <button
             type="button"
             onClick={onBack}
@@ -530,58 +653,54 @@ export function PickFlowExperience({
         </div>
 
         {!lineOutcome ? (
-          <div className="flex items-center justify-between gap-3 border-t border-[var(--border-faint)] px-4 py-2">
-            <div className="inline-flex rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-0.5">
-              <button
-                type="button"
-                onClick={() => setViewMode('card')}
-                className={`rounded-full px-3 py-1.5 text-[11px] font-bold pick-pressable ${
-                  viewMode === 'card'
-                    ? 'bg-[var(--role-primary)] text-white'
-                    : 'text-[var(--content-secondary)]'
-                }`}
-              >
-                Card
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('list')}
-                className={`rounded-full px-3 py-1.5 text-[11px] font-bold pick-pressable ${
-                  viewMode === 'list'
-                    ? 'bg-[var(--role-primary)] text-white'
-                    : 'text-[var(--content-secondary)]'
-                }`}
-              >
-                List
-              </button>
+          <div className="pick-flow-toolbar border-t border-[var(--border-faint)] px-4 py-2">
+            <PickOrderProgressBar
+              doneCount={doneCount}
+              totalCount={pickItems.length}
+              onPress={() => setViewMode('list')}
+            />
+            <div className="mt-2 flex justify-center">
+              <div className="inline-flex rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('card')}
+                  className={`rounded-full px-4 py-1.5 text-[11px] font-bold pick-pressable ${
+                    viewMode === 'card'
+                      ? 'bg-[var(--role-primary)] text-white'
+                      : 'text-[var(--content-secondary)]'
+                  }`}
+                >
+                  Card
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className={`rounded-full px-4 py-1.5 text-[11px] font-bold pick-pressable ${
+                    viewMode === 'list'
+                      ? 'bg-[var(--role-primary)] text-white'
+                      : 'text-[var(--content-secondary)]'
+                  }`}
+                >
+                  List
+                </button>
+              </div>
             </div>
-            <p className="font-ds-micro font-semibold tabular-nums text-[var(--content-tertiary)]">
-              {doneCount} / {pickItems.length} done
-            </p>
           </div>
         ) : null}
       </header>
 
+      <div className="pick-flow-body flex min-h-0 flex-1 flex-col overflow-hidden">
       {lineOutcome ? (
         <div className="flex min-h-0 flex-1 flex-col p-4">
           <PickLineResolvedDock
             kind={lineOutcome.kind === 'picked' ? 'picked' : lineOutcome.kind === 'partial' ? 'partial' : 'flagged'}
             headline={outcomeHeadline}
             detail={outcomeDetail}
-            nextPreview={null}
+            nextPreview={nextPreview}
             onNext={advanceLine}
             onUndoPick={lineOutcome.kind === 'flagged' ? () => void handleUndoFlag() : undefined}
+            undoDisabled={revertPending}
           />
-          {lineOutcome.kind === 'flagged' ? (
-            <button
-              type="button"
-              disabled={revertPending}
-              onClick={() => void handleUndoFlag()}
-              className="mt-3 min-h-11 rounded-xl border border-[var(--border-subtle)] font-ds-body-size font-semibold text-[var(--content-secondary)] pick-pressable disabled:opacity-50"
-            >
-              Undo flag
-            </button>
-          ) : null}
         </div>
       ) : viewMode === 'list' ? (
         <PickLineListView
@@ -593,8 +712,6 @@ export function PickFlowExperience({
             const idx = pickItems.findIndex((item) => item.id === itemId);
             if (idx >= 0) goToLine(idx);
           }}
-          onResumeCurrent={() => setViewMode('card')}
-          resumeLabel={resumeLabel}
         />
       ) : (
         <ItemDetailScreen
@@ -609,17 +726,25 @@ export function PickFlowExperience({
           isComplete={draftState.isComplete}
           lineIndex={lineIndex}
           totalLines={pickItems.length}
+          doneCount={doneCount}
+          lineChips={lineChips}
+          markedStatus={markedStatus}
+          revisitComplete={revisitComplete}
           onPickItem={openPickModal}
           onNextItem={advanceLine}
+          onFinishOrder={finishOrder}
           onPrevLine={() => goToLine(lineIndex - 1)}
           onNextLine={() => goToLine(lineIndex + 1)}
+          onGoToLine={goToLine}
           onSeeAllLines={() => setViewMode('list')}
           onFlag={() => setFlagOpen(true)}
+          onEditPick={openPickModal}
           onEditGroupMrp={openEditGroupMrp}
           onEditGroupQty={openEditGroupQty}
           flashGroupId={flashGroupId}
         />
       )}
+      </div>
 
       <PickEntryModal
         isOpen={modalOpen}
