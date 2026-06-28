@@ -81,14 +81,24 @@ const ROLE_HOME: Record<string, string> = {
   partner: '/partner/supply',
 };
 
+function AuthBootScreen(): React.JSX.Element {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[var(--bg-primary)] text-[var(--content-secondary)]">
+      Loading…
+    </div>
+  );
+}
+
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, authReady } = useAuth();
+  if (!authReady) return <AuthBootScreen />;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
 
 function RequireRole({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, role, actualRole } = useAuth();
+  const { isAuthenticated, role, actualRole, authReady } = useAuth();
+  if (!authReady) return <AuthBootScreen />;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (!role && actualRole !== 'admin') return <Navigate to="/select-role" replace />;
   return <>{children}</>;
@@ -101,7 +111,8 @@ function RequireAdminUnlock({ children }: { children: React.ReactNode }) {
 }
 
 function RootRedirect() {
-  const { isAuthenticated, role, authMode } = useAuth();
+  const { isAuthenticated, role, authMode, authReady } = useAuth();
+  if (!authReady) return <AuthBootScreen />;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (authMode === 'supabase' && role && ROLE_HOME[role]) {
     return <Navigate to={ROLE_HOME[role]} replace />;

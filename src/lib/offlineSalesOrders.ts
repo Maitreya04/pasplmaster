@@ -6,6 +6,7 @@ import {
   type OfflineSalesOrderStatus,
   type SalesOrderSubmitResult,
 } from './offlineSalesOrderResult';
+import { resolveCustomerForOfflineSync } from './resolveCustomerForSync';
 import { normalizeSalesLineUnit } from './salesUnit';
 import { supabase } from './supabase/client';
 
@@ -520,13 +521,24 @@ async function syncSingleOfflineSalesOrder(clientOrderKey: string): Promise<Offl
     (await readOfflineSalesOrders()).find((row) => row.clientOrderKey === clientOrderKey) ?? target;
 
   try {
-    const result = await submitSalesOrderPayloadWithTimeout(
-      {
-        ...payloadTarget.payload,
-        client_order_key: payloadTarget.clientOrderKey,
-      },
-      SALES_SYNC_TIMEOUT_MS,
-    );
+    const resolvedPayload = await resolveCustomerForOfflineSync({
+      ...payloadTarget.payload,
+      client_order_key: payloadTarget.clientOrderKey,
+    });
+
+    if (
+      resolvedPayload.customer_id !== payloadTarget.payload.customer_id ||
+      resolvedPayload.customer_name !== payloadTarget.payload.customer_name
+    ) {
+      queue = (await readOfflineSalesOrders()).map((row) =>
+        row.clientOrderKey === clientOrderKey
+          ? { ...row, payload: resolvedPayload, updatedAt: nowIso() }
+          : row,
+      );
+      await writeQueue(queue);
+    }
+
+    const result = await submitSalesOrderPayloadWithTimeout(resolvedPayload, SALES_SYNC_TIMEOUT_MS);
 
     const status = result.success ? offlineOrderStatusFromResult(result) : 'failed';
     const updatedAt = nowIso();

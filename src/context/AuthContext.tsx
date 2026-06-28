@@ -4,6 +4,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useRef,
   type ReactNode,
 } from 'react';
 import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
@@ -193,6 +194,11 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   const [adminUnlocked, setAdminUnlocked] = useState(initial.adminUnlocked);
   const [session, setSession] = useState<Session | null>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
+  const authModeRef = useRef<AuthMode>(initial.authMode);
+
+  useEffect(() => {
+    authModeRef.current = authMode;
+  }, [authMode]);
 
   const role = impersonation ? (impersonation.role as Role) : actualRole;
   const userName = impersonation ? impersonation.userName : actualUserName;
@@ -286,8 +292,12 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
         .maybeSingle();
 
       if (cancelled) return false;
-      if (error || !profile) {
+      if (error) {
         console.error('users lookup by auth_id', error);
+        return false;
+      }
+      if (!profile) {
+        console.error('users lookup by auth_id: profile missing for auth user');
         await supabase.auth.signOut();
         return false;
       }
@@ -315,8 +325,10 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (cancelled) return;
       if (nextSession) {
-        void hydrateFromSession(nextSession);
-      } else if (authMode === 'supabase') {
+        window.setTimeout(() => {
+          if (!cancelled) void hydrateFromSession(nextSession);
+        }, 0);
+      } else if (authModeRef.current === 'supabase') {
         clearAuthState();
       }
     });
@@ -325,7 +337,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
       cancelled = true;
       subscription.subscription.unsubscribe();
     };
-  }, [applySupabaseProfile, authMode, clearAuthState]);
+  }, [applySupabaseProfile, clearAuthState]);
 
   useEffect(() => {
     if (!actualUserName || !actualRole || actualRole === 'admin' || actualRole === 'partner' || actualUserId !== null) return;
