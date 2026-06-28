@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { PickFlowExperience } from '../../features/picking';
+import { PickFlowExperience } from '../../features/picking/PickFlowExperience';
 
 export default function PickPage(): React.JSX.Element | null {
   const { id } = useParams<{ id: string }>();

@@ -36,6 +36,7 @@ export default defineConfig({
           'assets/Picking*.js',
           'assets/QueuePage-*.js',
           'assets/PickPage-*.js',
+          'assets/PickFlowExperience-*.js',
           'assets/PickPreview*.js',
           'assets/ActivePicks*.js',
           // Fonts (woff2 only - modern browsers)
