@@ -5,7 +5,6 @@ import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
 import { OfflineStatusBanner } from '../../components/shared/OfflineStatusBanner';
 import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
-import { useCameraPermissionWarmup } from '../../context/CameraContext';
 import { useAuth } from '../../context/AuthContext';
 import { warmPickQueueRoute } from '../../lib/picking/warmPickQueue';
 import { useOfflinePickStats, useOfflinePickSync } from '../../hooks/useOfflinePicks';
@@ -50,7 +49,6 @@ function PickingLayoutInner(): React.JSX.Element | null {
   const { userId } = useAuth();
   const offlineStats = useOfflinePickStats();
 
-  const { permissionState, requestWarmup } = useCameraPermissionWarmup();
   useOfflinePickSync();
 
   useEffect(() => {
@@ -63,29 +61,6 @@ function PickingLayoutInner(): React.JSX.Element | null {
         pendingCount={offlineStats.waiting + offlineStats.conflict + offlineStats.failed}
         syncing={offlineStats.syncing > 0}
       />
-      {permissionState === 'prompt' && (
-        <div className="px-3 pt-3 pb-1">
-          <div className="rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-3 py-2.5 flex flex-wrap items-center gap-2 justify-between">
-            <p className="text-xs text-emerald-100 min-w-0 flex-1">
-              Enable the camera once for faster barcode scans while picking.
-            </p>
-            <button
-              type="button"
-              onClick={() => void requestWarmup()}
-              className="shrink-0 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-emerald-950 active:scale-[0.98]"
-            >
-              Enable camera
-            </button>
-          </div>
-        </div>
-      )}
-      {permissionState === 'denied' && (
-        <div className="px-3 pt-3 pb-1">
-          <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
-            Camera access is blocked. Allow the camera in browser settings to use the live scanner.
-          </div>
-        </div>
-      )}
       {!isPickPage && (offlineStats.waiting > 0 || offlineStats.conflict > 0 || offlineStats.failed > 0) && (
         <div className="px-3 pt-3 pb-1">
           <Link
