@@ -16,7 +16,9 @@ export default function PickPage(): React.JSX.Element | null {
       orderId={orderId}
       mode="production"
       onBack={() => navigate('/picking')}
-      onFinish={() => navigate(`/picking/pick/${id}/finish`)}
+      onFinish={() =>
+        navigate(`/picking/pick/${id}/finish`, { state: { expectAllDone: true } })
+      }
     />
   );
 }

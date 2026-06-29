@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { FlagReasonSheet, type FlagSubmitPayload } from '../../components/picking/FlagReasonSheet';
 import { PickLineResolvedDock } from '../../components/picking/PickLineResolvedDock';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { pickQuantityTarget, pickableOrderItems } from '../../lib/cartSupply';
@@ -75,6 +76,7 @@ export function PickFlowExperience({
   const isLab = mode === 'lab';
   const useDemo = isLab && demoOrder != null;
   const { userId, userName } = useAuth();
+  const toast = useToast();
   const queryClient = useQueryClient();
   const orderQuery = useOrderDetail(useDemo ? null : (orderId ?? null));
   const order: OrderWithItems | null | undefined = useDemo ? demoOrder : orderQuery.data;
@@ -264,7 +266,15 @@ export function PickFlowExperience({
         },
       });
 
-      if (!result.success) return;
+      if (!result.success) {
+        appHaptics.warning();
+        toast.error(
+          result.error === 'qty_exceeds_line'
+            ? 'Could not save — picked qty is above the order line. Ask admin to apply the latest database update.'
+            : result.error ?? 'Could not save pick — try again',
+        );
+        return;
+      }
       orderItemId = result.order_item_id ?? currentItem.id;
       // Avoid refetching mid-segment — it rebuilds pickItems and flickers the UI.
       // Server sync happens on mark-picked, flag, and undo.
@@ -334,6 +344,7 @@ export function PickFlowExperience({
     undo,
     undoAction,
     userId,
+    toast,
     userName,
     useDemo,
     orderId,
