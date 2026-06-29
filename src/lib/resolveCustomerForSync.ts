@@ -1,6 +1,7 @@
 import type { Customer } from '../types';
-import { getCustomerCity, normalizeCustomerText } from './customerDisplay';
+import { getCustomerCity } from './customerDisplay';
 import { idbGet } from './idb';
+import { matchCustomerByName, matchCustomerFromList } from './resolveCustomerMatch';
 import { supabase } from './supabase/client';
 import type { SalesOrderPayload } from './offlineSalesOrders';
 
@@ -11,26 +12,10 @@ interface PersistedCustomers {
   rows: Array<Customer & { is_active?: boolean | null }>;
 }
 
-function isActiveCustomer(row: Customer & { is_active?: boolean | null }): boolean {
-  return row.is_active !== false;
-}
-
-function matchCustomerByName(
-  customers: Array<Customer & { is_active?: boolean | null }>,
-  customerName: string,
-): Customer | null {
-  const needle = normalizeCustomerText(customerName);
-  const matches = customers.filter(
-    (row) => isActiveCustomer(row) && normalizeCustomerText(row.name) === needle,
-  );
-  if (matches.length === 0) return null;
-  return matches.sort((a, b) => a.id - b.id)[0] ?? null;
-}
-
 async function readCachedCustomers(): Promise<Customer[]> {
   const snapshot = await idbGet<PersistedCustomers>(CUSTOMERS_IDB_KEY);
   if (!snapshot?.rows?.length) return [];
-  return snapshot.rows.filter(isActiveCustomer);
+  return snapshot.rows.filter((row) => row.is_active !== false);
 }
 
 async function lookupCustomerOnServer(customerName: string): Promise<Customer | null> {
@@ -44,8 +29,23 @@ async function lookupCustomerOnServer(customerName: string): Promise<Customer | 
 
   if (error || !data?.length) return null;
 
-  const exact = matchCustomerByName(data as Customer[], customerName);
-  return exact;
+  return matchCustomerByName(data as Customer[], customerName);
+}
+
+/** Resolve stale cart/offline customer ids before submitting an order. */
+export async function resolveCustomerForOrder(customer: Customer): Promise<Customer> {
+  const cached = await readCachedCustomers();
+  const resolved =
+    matchCustomerFromList(cached, customer.id, customer.name) ??
+    (await lookupCustomerOnServer(customer.name));
+
+  if (!resolved) {
+    throw new Error(
+      'Customer was not found. Refresh your customer list and select the customer again.',
+    );
+  }
+
+  return resolved;
 }
 
 /** Refresh stale offline customer ids before replaying an order to the server. */
@@ -53,9 +53,9 @@ export async function resolveCustomerForOfflineSync(
   payload: SalesOrderPayload,
 ): Promise<SalesOrderPayload> {
   const cached = await readCachedCustomers();
-  const byId = cached.find((row) => row.id === payload.customer_id) ?? null;
-  const byName = matchCustomerByName(cached, payload.customer_name);
-  const resolved = byId ?? byName ?? (await lookupCustomerOnServer(payload.customer_name));
+  const resolved =
+    matchCustomerFromList(cached, payload.customer_id, payload.customer_name) ??
+    (await lookupCustomerOnServer(payload.customer_name));
 
   if (!resolved) return payload;
 
@@ -66,3 +66,5 @@ export async function resolveCustomerForOfflineSync(
     customer_city: getCustomerCity(resolved) ?? payload.customer_city,
   };
 }
+
+export { matchCustomerFromList } from './resolveCustomerMatch';

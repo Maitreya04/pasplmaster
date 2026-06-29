@@ -47,6 +47,7 @@ import {
   type SalesOrderSubmitResult,
   type OfflineSalesOrder,
 } from '../../lib/offlineSalesOrders';
+import { resolveCustomerForOrder } from '../../lib/resolveCustomerForSync';
 import { shouldQueueSalesOrderLocally, markDeviceOffline, markDeviceOnline, isBrowserOffline } from '../../lib/networkStatus';
 import {
   PageHeader,
@@ -80,17 +81,25 @@ import {
 } from '../../lib/customerDisplay';
 
 function submitSalesOrderErrorMessage(code: string | undefined, detail?: string): string {
+  const normalizedDetail = detail?.trim() ?? '';
+  if (/orders_customer_id_fkey/i.test(normalizedDetail)) {
+    return 'This customer is no longer valid. Re-select the customer from the list and try again.';
+  }
+
   switch (code) {
     case 'no_lines':
       return 'Add at least one line item before submitting.';
     case 'invalid_customer':
-      return 'Choose a customer before submitting.';
+      return (
+        normalizedDetail ||
+        'Customer was not found. Refresh your customer list and select the customer again.'
+      );
     case 'unknown_item':
       return 'An item in your cart was not found. Refresh the catalog and try again.';
     case 'submit_failed':
-      return detail?.trim() || 'Order could not be submitted. Please try again.';
+      return normalizedDetail || 'Order could not be submitted. Please try again.';
     default:
-      return detail?.trim() || 'Order could not be submitted.';
+      return normalizedDetail || 'Order could not be submitted.';
   }
 }
 
@@ -1250,10 +1259,15 @@ export default function CartPage(): React.JSX.Element | null {
     mutationFn: async () => {
       if (!customer || !userName) throw new Error('Customer and salesperson required');
 
+      const resolvedCustomer = await resolveCustomerForOrder(customer);
+      if (resolvedCustomer.id !== customer.id) {
+        setCustomer(resolvedCustomer);
+      }
+
       const submittedAt = new Date();
       const clientOrderKey = createSalesOrderClientKey();
       const queueArgs = {
-        customer,
+        customer: resolvedCustomer,
         transport,
         userId,
         userName,
@@ -1274,7 +1288,7 @@ export default function CartPage(): React.JSX.Element | null {
       }
 
       const onlinePayload = buildSalesOrderPayload({
-        customer,
+        customer: resolvedCustomer,
         transport,
         userId,
         userName,

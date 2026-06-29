@@ -10,6 +10,8 @@ import {
 } from 'react';
 import type { CartItem as CartItemType, Customer, Item, SalesLineUnit, Transport } from '../types';
 import { normalizeSalesLineUnit } from '../lib/salesUnit';
+import { matchCustomerFromList } from '../lib/resolveCustomerMatch';
+import { useCustomers } from '../hooks/useCustomers';
 import { useOrderAuthor } from './OrderAuthorContext';
 import {
   readCartDraft,
@@ -74,6 +76,19 @@ export function CartProvider({ children }: { children: ReactNode }): React.JSX.E
   );
   const [priority, setPriority] = useState<'normal' | 'urgent'>(() => initialState.priority);
   const [notes, setNotes] = useState(() => initialState.notes);
+  const { data: customers = [] } = useCustomers();
+
+  useEffect(() => {
+    if (!selectedCustomer || customers.length === 0) return;
+    const fresh = matchCustomerFromList(
+      customers,
+      selectedCustomer.id,
+      selectedCustomer.name,
+    );
+    if (fresh && fresh.id !== selectedCustomer.id) {
+      setSelectedCustomer(fresh);
+    }
+  }, [customers, selectedCustomer]);
 
   const addItem = useCallback(
     (
