@@ -18,40 +18,73 @@ async function readCachedCustomers(): Promise<Customer[]> {
   return snapshot.rows.filter((row) => row.is_active !== false);
 }
 
+async function fetchActiveCustomerById(customerId: number): Promise<Customer | null> {
+  const { data, error } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('id', customerId)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return data as Customer;
+}
+
 async function lookupCustomerOnServer(customerName: string): Promise<Customer | null> {
+  const trimmed = customerName.trim();
+  if (!trimmed) return null;
+
   const { data, error } = await supabase
     .from('customers')
     .select('*')
     .eq('is_active', true)
-    .ilike('name', customerName.trim())
+    .ilike('name', trimmed)
     .order('id')
-    .limit(5);
+    .limit(10);
 
   if (error || !data?.length) return null;
 
-  return matchCustomerByName(data as Customer[], customerName);
+  return matchCustomerByName(data as Customer[], trimmed);
 }
 
 /** Resolve stale cart/offline customer ids before submitting an order. */
-export async function resolveCustomerForOrder(customer: Customer): Promise<Customer> {
+export async function resolveCustomerForOrder(
+  customer: Customer,
+  options?: { customers?: Customer[] },
+): Promise<Customer> {
+  const byServerId = await fetchActiveCustomerById(customer.id);
+  if (byServerId) return byServerId;
+
   const cached = await readCachedCustomers();
-  const resolved =
-    matchCustomerFromList(cached, customer.id, customer.name) ??
+  const localCustomers = options?.customers?.length ? options.customers : cached;
+  const byName =
+    matchCustomerByName(localCustomers, customer.name) ??
     (await lookupCustomerOnServer(customer.name));
 
-  if (!resolved) {
+  if (!byName) {
     throw new Error(
       'Customer was not found. Refresh your customer list and select the customer again.',
     );
   }
 
-  return resolved;
+  const verified = await fetchActiveCustomerById(byName.id);
+  return verified ?? byName;
 }
 
 /** Refresh stale offline customer ids before replaying an order to the server. */
 export async function resolveCustomerForOfflineSync(
   payload: SalesOrderPayload,
 ): Promise<SalesOrderPayload> {
+  const byServerId = await fetchActiveCustomerById(payload.customer_id);
+  if (byServerId) {
+    return {
+      ...payload,
+      customer_id: byServerId.id,
+      customer_name: byServerId.name,
+      customer_city: getCustomerCity(byServerId) ?? payload.customer_city,
+    };
+  }
+
   const cached = await readCachedCustomers();
   const resolved =
     matchCustomerFromList(cached, payload.customer_id, payload.customer_name) ??
@@ -59,11 +92,13 @@ export async function resolveCustomerForOfflineSync(
 
   if (!resolved) return payload;
 
+  const verified = (await fetchActiveCustomerById(resolved.id)) ?? resolved;
+
   return {
     ...payload,
-    customer_id: resolved.id,
-    customer_name: resolved.name,
-    customer_city: getCustomerCity(resolved) ?? payload.customer_city,
+    customer_id: verified.id,
+    customer_name: verified.name,
+    customer_city: getCustomerCity(verified) ?? payload.customer_city,
   };
 }
 

@@ -1,7 +1,7 @@
 import type { Customer } from '../types';
 
 function normalizeCustomerText(value: string): string {
-  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+  return value.trim().replace(/\s+/g, ' ').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function isActiveCustomer(row: Customer & { is_active?: boolean | null }): boolean {
@@ -23,11 +23,9 @@ function matchCustomerByName(
 /** Match a customer by current id, then fall back to normalized name. */
 export function matchCustomerFromList(
   customers: Customer[],
-  customerId: number,
+  _customerId: number,
   customerName: string,
 ): Customer | null {
-  const byId = customers.find((row) => row.id === customerId && isActiveCustomer(row)) ?? null;
-  if (byId) return byId;
   return matchCustomerByName(customers, customerName);
 }
 

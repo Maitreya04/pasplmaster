@@ -1034,6 +1034,7 @@ export default function CartPage(): React.JSX.Element | null {
     notes,
     setNotes,
   } = useCart();
+  const { data: customers = [] } = useCustomers();
   const toast = useToast();
   const { userId, userName } = useOrderAuthor();
   const { userId: authUserId, userName: authUserName, branch } = useAuth();
@@ -1259,7 +1260,7 @@ export default function CartPage(): React.JSX.Element | null {
     mutationFn: async () => {
       if (!customer || !userName) throw new Error('Customer and salesperson required');
 
-      const resolvedCustomer = await resolveCustomerForOrder(customer);
+      const resolvedCustomer = await resolveCustomerForOrder(customer, { customers });
       if (resolvedCustomer.id !== customer.id) {
         setCustomer(resolvedCustomer);
       }
@@ -1412,14 +1413,29 @@ export default function CartPage(): React.JSX.Element | null {
     },
   });
 
-  const queueCurrentOrderImmediately = useCallback(() => {
+  const queueCurrentOrderImmediately = useCallback(async () => {
     if (!customer || !userName) {
       toast.error('Customer and salesperson required');
       return;
     }
 
+    let resolvedCustomer = customer;
+    try {
+      resolvedCustomer = await resolveCustomerForOrder(customer, { customers });
+      if (resolvedCustomer.id !== customer.id) {
+        setCustomer(resolvedCustomer);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Customer was not found. Refresh your customer list and select the customer again.';
+      toast.error(message);
+      return;
+    }
+
     const queuedOrder = enqueueOfflineSalesOrderImmediate({
-      customer,
+      customer: resolvedCustomer,
       transport,
       userId,
       userName,
@@ -1445,9 +1461,11 @@ export default function CartPage(): React.JSX.Element | null {
   }, [
     clearCart,
     customer,
+    customers,
     items,
     notes,
     priority,
+    setCustomer,
     toast,
     transport,
     userId,
@@ -1457,7 +1475,7 @@ export default function CartPage(): React.JSX.Element | null {
   const handleSubmit = () => {
     appHaptics.impactMedium();
     if (shouldQueueSalesOrderLocally()) {
-      queueCurrentOrderImmediately();
+      void queueCurrentOrderImmediately();
       return;
     }
     submitMutation.mutate();
