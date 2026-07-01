@@ -96,6 +96,16 @@ function recordChanged(
   return false;
 }
 
+function dedupeRecordsByName(records: Record<string, unknown>[]): Record<string, unknown>[] {
+  const byName = new Map<string, Record<string, unknown>>();
+  for (const record of records) {
+    const name = record.name;
+    if (typeof name !== 'string' || name.trim() === '') continue;
+    byName.set(name, record);
+  }
+  return Array.from(byName.values());
+}
+
 export async function importStock(
   workbook: XLSX.WorkBook,
   fileName: string,
@@ -162,10 +172,14 @@ export async function importStock(
       })
       .filter((r): r is Record<string, unknown> => r !== null);
 
-    const changedRecords = records.filter((record) =>
+    const uniqueRecords = dedupeRecordsByName(records);
+    const changedRecords = uniqueRecords.filter((record) =>
       recordChanged(existingByName.get(record.name as string), record),
     );
     const batchNew = changedRecords.filter(r => !existingNames.has(r.name as string)).length;
+    const batchNewNames = changedRecords
+      .filter(r => !existingNames.has(r.name as string))
+      .map(r => r.name as string);
     const batchUpdated = changedRecords.length - batchNew;
     changedRecords.forEach(r => existingNames.add(r.name as string));
 
@@ -173,7 +187,7 @@ export async function importStock(
       const { error } = await supabase.from('items').upsert(changedRecords, { onConflict: 'name' });
       if (error) {
         failedCount += changedRecords.length;
-        changedRecords.forEach(r => existingNames.delete(r.name as string));
+        batchNewNames.forEach(name => existingNames.delete(name));
         onProgress({
           processed,
           total,

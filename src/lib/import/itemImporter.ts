@@ -77,6 +77,16 @@ function recordChanged(
   return false;
 }
 
+function dedupeRecordsByName(records: Record<string, unknown>[]): Record<string, unknown>[] {
+  const byName = new Map<string, Record<string, unknown>>();
+  for (const record of records) {
+    const name = record.name;
+    if (typeof name !== 'string' || name.trim() === '') continue;
+    byName.set(name, record);
+  }
+  return Array.from(byName.values());
+}
+
 /** Default column indices when header detection doesn't find a column (original spec). */
 const DEFAULT_COLS = {
   name: 0,
@@ -208,10 +218,14 @@ export async function importItems(
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
 
-    const changedRecords = records.filter((record) =>
+    const uniqueRecords = dedupeRecordsByName(records);
+    const changedRecords = uniqueRecords.filter((record) =>
       recordChanged(existingByName.get(record.name as string), record),
     );
     const batchNew = changedRecords.filter(r => !existingNames.has(r.name as string)).length;
+    const batchNewNames = changedRecords
+      .filter(r => !existingNames.has(r.name as string))
+      .map(r => r.name as string);
     const batchUpdated = changedRecords.length - batchNew;
     changedRecords.forEach(r => existingNames.add(r.name as string));
 
@@ -220,7 +234,7 @@ export async function importItems(
       if (error) {
         console.error(`[Import items_price] Batch ${batchIndex} failed:`, error.message, error.details);
         failedCount += changedRecords.length;
-        changedRecords.forEach(r => existingNames.delete(r.name as string));
+        batchNewNames.forEach(name => existingNames.delete(name));
         onProgress({
           processed,
           total,
