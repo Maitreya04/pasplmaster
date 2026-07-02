@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 const STORAGE_KEY = 'billing-desk-split-ratio-v1';
-const DEFAULT_RATIO = 0.4;
-const MIN_RATIO = 0.28;
-const MAX_RATIO = 0.72;
+/** Workspace (order sheet) gets the majority — operators need readable line items. */
+const DEFAULT_RATIO = 0.58;
+const MIN_RATIO = 0.38;
+const MAX_RATIO = 0.78;
 
 function readStoredRatio(): number {
   try {

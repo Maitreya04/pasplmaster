@@ -66,6 +66,35 @@ export function billLineChangeSegments(
     }
   }
 
+  if (item.scan_result?.isOverTarget) {
+    const original = item.scan_result.originalTargetQty ?? item.scan_result.progress?.targetQty;
+    const picked = item.scan_result.progress?.pickedQty ?? item.qty_requested;
+    const extra =
+      item.scan_result.overTargetQty ??
+      (original != null ? Math.max(0, picked - original) : null);
+    const note = item.scan_result.pickerNote?.trim();
+    segments.push({
+      kind: 'text',
+      text: `Overpicked ${picked}${original != null ? ` vs ${original} ordered` : ''}${
+        extra != null && extra > 0 ? ` · +${extra}` : ''
+      }${note ? ` · ${note}` : ''}`,
+    });
+  }
+
+  if (item.scan_result?.isShortPick) {
+    const original = item.scan_result.originalTargetQty ?? item.scan_result.progress?.targetQty;
+    const picked = item.scan_result.progress?.pickedQty ?? item.qty_requested;
+    const short = item.scan_result.shortQty;
+    const reason = item.scan_result.shortReason?.trim();
+    const note = item.scan_result.pickerNote?.trim();
+    segments.push({
+      kind: 'text',
+      text: `Short picked ${picked}${original != null ? ` of ${original}` : ''}${
+        short != null && short > 0 ? ` · ${short} short` : ''
+      }${reason ? ` · ${reason}` : ''}${note ? ` · ${note}` : ''}`,
+    });
+  }
+
   if (flagKind === 'price' && labelPrice != null && !edit?.removed) {
     segments.push({
       kind: 'text',

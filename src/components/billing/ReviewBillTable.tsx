@@ -17,11 +17,14 @@ import {
   buildReviewBillTableGroups,
   reviewProductLabel,
   reviewStatusLabel,
+  type ReviewPartGroupMeta,
   type ReviewTableGroup,
   type ReviewTableGroupId,
   type ReviewTableRow,
 } from '../../lib/billing/reviewBillTableRows';
 import { orderItemConfirmedMrp } from '../../lib/billing/orderItemSplitGroups';
+import { readPickMrpSnapshot } from '../../lib/billing/pickMrpBillingContext';
+import { getBookPrice, getQuotedPrice, isSpecialRateItem } from '../../lib/specialPricing';
 import { SalesUnitBadge } from '../shared/SalesUnitBadge';
 import { effectiveSalesLineUnit } from '../../lib/salesUnit';
 import { BillingFigure } from './shared/BillingFigure';
@@ -37,6 +40,8 @@ function statusTone(row: ReviewTableRow): ReviewStatusTone {
   const flagKind = deskLineFlagKind(row.item.flag_reason);
   if (row.item.state === 'flagged' && flagKind === 'price') return 'flag';
   if (row.item.state === 'flagged' && flagKind === 'oos') return 'oos';
+  if (row.item.scan_result?.isShortPick) return 'warn';
+  if (row.item.scan_result?.isOverTarget) return 'warn';
   switch (row.fulfillment.role) {
     case 'foc':
       return 'foc';
@@ -166,6 +171,65 @@ function GroupHeader({
   );
 }
 
+function PartGroupBanner({ group }: { group: ReviewPartGroupMeta }): React.JSX.Element {
+  return (
+    <div className="review-part-group-banner">
+      <span className="review-part-group-banner__ordered">
+        {group.orderedQty} ordered
+      </span>
+      <span className="review-part-group-banner__split">
+        → {group.size} Busy lines
+      </span>
+      {group.breakdown ? (
+        <span className="review-part-group-banner__mix">{group.breakdown}</span>
+      ) : null}
+    </div>
+  );
+}
+
+type RateReference = {
+  id: 'order' | 'bill' | 'special' | 'label' | 'picker';
+  label: string;
+  value: number;
+};
+
+function rateReferences(row: ReviewTableRow): RateReference[] {
+  const { item, edit } = row;
+  const current = edit.priceQuoted;
+  const quoted = getQuotedPrice(item) ?? 0;
+  const book = getBookPrice(item);
+  const isSpecial = isSpecialRateItem(item);
+  const snapshot = readPickMrpSnapshot(item);
+  const labelMrp = snapshot.labelMrp;
+  const billingAtPick = snapshot.billingRateAtPick;
+  const refs: RateReference[] = [];
+
+  const pushUnique = (ref: RateReference): void => {
+    if (!Number.isFinite(ref.value) || ref.value < 0) return;
+    if (Math.round(ref.value) === Math.round(current)) return;
+    if (refs.some((r) => Math.round(r.value) === Math.round(ref.value))) return;
+    refs.push(ref);
+  };
+
+  if (isSpecial) {
+    if (book != null) pushUnique({ id: 'bill', label: 'Bill', value: book });
+    if (quoted > 0) pushUnique({ id: 'special', label: 'Special', value: quoted });
+  } else {
+    if (quoted > 0) pushUnique({ id: 'order', label: 'Order', value: quoted });
+    if (book != null && book !== quoted) {
+      pushUnique({ id: 'bill', label: 'Bill', value: book });
+    }
+  }
+  if (labelMrp != null) {
+    pushUnique({ id: 'label', label: 'Label', value: labelMrp });
+  }
+  if (billingAtPick != null) {
+    pushUnique({ id: 'picker', label: 'At pick', value: billingAtPick });
+  }
+
+  return refs;
+}
+
 function RateCell({
   row,
   onPriceChange,
@@ -175,9 +239,9 @@ function RateCell({
   onPriceChange: (price: number) => void;
   readOnly?: boolean;
 }): React.JSX.Element {
-  const { item, edit, fulfillment, quotedPrice } = row;
+  const { edit, fulfillment, quotedPrice } = row;
   const edited = edit.priceTouched || edit.resolution === 'manual_override';
-  const qty = billableQtyForTotal(item, fulfillment);
+  const refs = rateReferences(row);
 
   if (fulfillment.excludeFromBusyBill) {
     return <span className="text-sm font-semibold text-[var(--content-tertiary)]">—</span>;
@@ -185,24 +249,19 @@ function RateCell({
 
   if (readOnly) {
     return (
-      <div>
+      <div className="review-rate-cell">
         <BillingFigure
           value={fulfillment.role === 'foc' ? 0 : edit.priceQuoted}
           kind="currency-raw"
           size="md"
         />
-        {qty > 0 ? (
-          <p className="text-[10px] font-medium tabular-nums text-[var(--content-secondary)]">
-            × {qty} pcs
-          </p>
-        ) : null}
       </div>
     );
   }
 
   if (fulfillment.role === 'foc') {
     return (
-      <div>
+      <div className="review-rate-cell">
         <BillingFigure value={0} kind="currency-raw" size="md" className="text-[var(--content-accent)]" />
         <p className="font-ds-micro font-semibold uppercase text-[var(--content-accent)]">FOC rate</p>
       </div>
@@ -210,29 +269,40 @@ function RateCell({
   }
 
   return (
-    <div className="space-y-1">
+    <div className="review-rate-cell">
       <input
         type="number"
         inputMode="decimal"
         aria-label="Bill rate"
         value={edit.priceQuoted}
         onChange={(e) => onPriceChange(parseFloat(e.target.value.replace(/,/g, '')) || 0)}
-        className={`billing-rate-input min-h-10 rounded-lg border-2 px-2.5 text-base font-bold tabular-nums ${
+        className={`review-rate-input billing-rate-input ${
           edited
-            ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-primary)]'
-            : 'border-[var(--border-opaque)] bg-white text-[var(--content-primary)]'
+            ? 'review-rate-input--edited'
+            : ''
         }`}
       />
       {edited && quotedPrice !== edit.priceQuoted ? (
-        <p className="flex items-center gap-1 font-ds-micro font-semibold text-[var(--content-warning-on-light)]">
-          <PencilSimple size={10} weight="bold" />
+        <p className="review-rate-cell__edited-hint">
+          <PencilSimple size={10} weight="bold" aria-hidden />
           Was {formatRoundedRs(quotedPrice)}
         </p>
       ) : null}
-      {qty > 0 ? (
-        <p className="text-[10px] font-medium tabular-nums text-[var(--content-secondary)]">
-          × {qty} pcs
-        </p>
+      {refs.length > 0 ? (
+        <div className="review-rate-refs" role="group" aria-label="Swap bill rate">
+          {refs.map((ref) => (
+            <button
+              key={ref.id}
+              type="button"
+              onClick={() => onPriceChange(ref.value)}
+              className="review-rate-ref-chip"
+              title={`Use ${ref.label.toLowerCase()} rate ${formatRoundedRs(ref.value)}`}
+            >
+              <span className="review-rate-ref-chip__label">{ref.label}</span>
+              <span className="review-rate-ref-chip__value">{formatRoundedRs(ref.value)}</span>
+            </button>
+          ))}
+        </div>
       ) : null}
     </div>
   );
@@ -355,12 +425,12 @@ function TableHeader({ readOnly = false }: { readOnly?: boolean }): React.JSX.El
     <thead>
       <tr className="border-b-2 border-[var(--border-opaque)] bg-[var(--bg-tertiary)] text-left font-ds-label-size font-bold uppercase tracking-wider text-[var(--content-secondary)]">
         <th className="px-3 py-3 w-[108px]">Status</th>
-        <th className="px-2 py-3 w-10 text-center">#</th>
+        <th className="px-1 py-3 w-8 text-center review-col-line-no">#</th>
         <th className="px-3 py-3 min-w-[200px]">Product</th>
         <th className="px-3 py-3 min-w-[160px] hidden lg:table-cell">Notes</th>
         <th className="px-3 py-3 billing-col-qty text-right">Qty</th>
         <th className="px-3 py-3 w-[5.5rem] text-right">Unit</th>
-        <th className="px-3 py-3 billing-col-money">Rate</th>
+        <th className="px-3 py-3 billing-col-rate review-col-rate">Rate</th>
         <th className="px-3 py-3 billing-col-money text-right">Line ₹</th>
         {!readOnly ? <th className="px-3 py-3 w-28 text-right">Actions</th> : null}
       </tr>
@@ -380,43 +450,52 @@ function TableRow({
   readOnly?: boolean;
 }): React.JSX.Element {
   const { item, edit } = row;
-  const { fulfillment, lineTotal, samePartAsPrevious } = row;
+  const { fulfillment, lineTotal, partGroup } = row;
   const product = reviewProductLabel(row);
   const notes = reviewStatusLabel(row).long;
   const labelMrp = orderItemConfirmedMrp(item);
   const qty = fulfillment.excludeFromBusyBill
     ? fulfillment.qtySalesPo || fulfillment.qtyPickerOos || fulfillment.qtyOrdered
     : billableQtyForTotal(item, fulfillment);
+  const isBatchContinuation = partGroup?.isContinuation === true;
 
   const rowBg = fulfillment.excludeFromBusyBill
     ? 'bg-[var(--bg-secondary)]/80'
-    : 'bg-[var(--bg-secondary)] hover:bg-[var(--bg-row-hover)]';
+    : isBatchContinuation
+      ? 'bg-[var(--bg-primary)] hover:bg-[var(--bg-row-hover)] review-row--batch-cont'
+      : 'bg-[var(--bg-secondary)] hover:bg-[var(--bg-row-hover)]';
 
   return (
     <tr className={`border-b border-[var(--border-subtle)] ${rowBg}`}>
       <td className="px-3 py-3 align-top">
         <StatusPill row={row} />
       </td>
-      <td className="px-2 py-3 align-top text-center">
-        <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-md bg-[var(--bg-tertiary)] text-xs font-bold tabular-nums text-[var(--content-primary)]">
-          {row.lineNo}
-        </span>
+      <td className="px-1 py-3 align-top text-center review-col-line-no">
+        <span className="review-line-no">{row.lineNo}</span>
       </td>
       <td className="px-3 py-3 align-top min-w-0">
-        {samePartAsPrevious ? (
-          <p className="mb-1 font-ds-micro font-bold uppercase tracking-wide text-[var(--content-accent)]">
-            ↳ Same part · separate Busy line
-          </p>
-        ) : null}
-        <p className="text-sm font-bold leading-snug text-[var(--content-primary)]">{product.name}</p>
-        {product.pickCode ? (
-          <p className="mt-1 font-mono text-xs font-semibold text-[var(--content-secondary)]">
-            {product.pickCode}
-            {product.altCode ? (
-              <span className="text-[var(--content-tertiary)]"> · {product.altCode}</span>
+        {partGroup?.isFirst ? <PartGroupBanner group={partGroup} /> : null}
+        {isBatchContinuation ? (
+          <div className="review-part-continuation">
+            <p className="review-part-continuation__label">
+              Batch {partGroup.index + 1} of {partGroup.size}
+              {labelMrp != null ? ` · label ${formatRoundedRs(labelMrp)}` : ''}
+            </p>
+            <p className="text-xs font-medium text-[var(--content-tertiary)]">{product.pickCode}</p>
+          </div>
+        ) : (
+          <>
+            <p className="text-sm font-bold leading-snug text-[var(--content-primary)]">{product.name}</p>
+            {product.pickCode ? (
+              <p className="mt-1 font-mono text-xs font-semibold text-[var(--content-secondary)]">
+                {product.pickCode}
+                {product.altCode ? (
+                  <span className="text-[var(--content-tertiary)]"> · {product.altCode}</span>
+                ) : null}
+              </p>
             ) : null}
-          </p>
-        ) : null}
+          </>
+        )}
         <p className="mt-1 text-xs font-medium text-[var(--content-secondary)] lg:hidden">{notes}</p>
       </td>
       <td className="px-3 py-3 align-top hidden lg:table-cell">
@@ -431,15 +510,15 @@ function TableRow({
         ) : null}
       </td>
       <td className="px-3 py-3 align-top text-right billing-col-qty">
-        <BillingFigure value={qty} kind="integer" size="lg" />
-        <p className="text-[10px] font-bold uppercase text-[var(--content-tertiary)]">
+        <BillingFigure value={qty} kind="integer" size="md" />
+        <p className="review-qty-role">
           {fulfillment.excludeFromBusyBill ? 'skip' : 'bill'}
         </p>
       </td>
       <td className="px-3 py-3 align-top text-right">
         <SalesUnitBadge unit={effectiveSalesLineUnit(item, edit)} />
       </td>
-      <td className="px-3 py-3 align-top billing-col-money">
+      <td className="px-3 py-3 align-top billing-col-rate review-col-rate">
         <RateCell
           row={row}
           readOnly={readOnly}
@@ -489,7 +568,7 @@ function GroupTable({
       {!collapsed && group.rows.length > 0 ? (
         <div className="overflow-x-auto">
           <table
-            className={`w-full border-collapse ${
+            className={`w-full border-collapse review-bill-table ${
               group.id === 'bill' ? 'ds-table ds-table--billing min-w-[880px]' : 'min-w-[880px]'
             }`}
           >
@@ -544,7 +623,10 @@ export function ReviewBillTable({
     setReasonTouched,
   } = billSheet;
 
-  const flaggedItemIds = new Set(flaggedItems.map((i) => i.id));
+  const flaggedItemIds = useMemo(
+    () => new Set(flaggedItems.map((i) => i.id)),
+    [flaggedItems],
+  );
   const displayLines = sortedLines.filter(
     (item) =>
       item.state !== 'flagged' ||

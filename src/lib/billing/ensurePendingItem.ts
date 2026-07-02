@@ -12,6 +12,7 @@ export interface EnsurePendingItemInput {
   createdBy: string;
   note: string | null;
   issueCategory: string | null;
+  source?: PendingItem['source'];
 }
 
 /**
@@ -73,7 +74,7 @@ export async function ensurePendingItem(input: EnsurePendingItemInput): Promise<
     item_id: input.itemId,
     item_name: input.itemName,
     qty_pending: input.qtyPending,
-    source: 'billing',
+    source: input.source ?? 'billing',
     created_by: input.createdBy,
     note: input.note,
     issue_category: input.issueCategory,

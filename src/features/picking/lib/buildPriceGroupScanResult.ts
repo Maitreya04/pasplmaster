@@ -59,6 +59,8 @@ export function buildPriceGroupScanResult(options: {
   const reason = isOverTarget
     ? `Over-target pick · label ₹${labelRounded} × ${qty}${pickerNote ? ` · ${pickerNote}` : ''}`
     : `Label ₹${labelRounded} × ${qty}`;
+  const overTargetQty = Math.max(0, totalLogged - targetQty);
+  const cleanPickerNote = pickerNote?.trim() || null;
 
   return {
     scannedText: 'PRICE_GROUP',
@@ -82,10 +84,46 @@ export function buildPriceGroupScanResult(options: {
       remainingQty: Math.max(0, targetQty - totalLogged),
       targetQty,
     },
+    originalTargetQty: targetQty,
+    isOverTarget: isOverTarget === true || undefined,
+    overTargetQty: isOverTarget ? overTargetQty : undefined,
+    pickerNote: cleanPickerNote,
     operatorContext: {
       pickerName,
       pickerUserId,
       source: 'manual',
     },
+  };
+}
+
+export function applyShortPickScanResult(
+  scanResult: ScanResult | null | undefined,
+  options: {
+    pickedQty: number;
+    targetQty: number;
+    reason: string;
+    note?: string | null;
+  },
+): ScanResult | null {
+  if (!scanResult) return null;
+  const pickedQty = Math.max(0, Math.floor(options.pickedQty));
+  const targetQty = Math.max(0, Math.floor(options.targetQty));
+  const shortQty = Math.max(0, targetQty - pickedQty);
+  const note = options.note?.trim() || null;
+  const reason = options.reason.trim() || 'Short pick';
+
+  return {
+    ...scanResult,
+    reason: `Short pick · ${pickedQty} of ${targetQty} · ${reason}${note ? ` · ${note}` : ''}`,
+    progress: {
+      pickedQty,
+      remainingQty: shortQty,
+      targetQty,
+    },
+    originalTargetQty: targetQty,
+    isShortPick: true,
+    shortQty,
+    shortReason: reason,
+    pickerNote: note,
   };
 }

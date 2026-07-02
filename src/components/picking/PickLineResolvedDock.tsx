@@ -14,7 +14,7 @@ export interface PickLineResolvedDockProps {
 }
 
 /**
- * Closure beat after a line is picked or flagged — confirm before advancing.
+ * Closure beat after a line is flagged — confirm before advancing (exceptions only).
  */
 export function PickLineResolvedDock({
   kind,

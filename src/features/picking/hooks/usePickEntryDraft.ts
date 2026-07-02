@@ -140,12 +140,13 @@ export function createLineDraft(options: {
   rootOrderItemId: number;
   targetQty: number;
   uom: string;
+  confirmedGroups?: ConfirmedPriceGroup[];
 }): LineDraft {
   return {
     rootOrderItemId: options.rootOrderItemId,
     targetQty: options.targetQty,
     uom: options.uom,
-    confirmedGroups: [],
+    confirmedGroups: options.confirmedGroups ?? [],
     inProgress: null,
     editingGroupId: null,
     noteText: '',

@@ -11,6 +11,7 @@ describe('pickLineCta', () => {
     expect(derivePickLineUiState(undefined, 4, 10, false)).toBe('in_progress');
     expect(derivePickLineUiState(undefined, 10, 10, true)).toBe('complete');
     expect(derivePickLineUiState('picked', 0, 10, false)).toBe('marked_picked');
+    expect(derivePickLineUiState('partial', 1, 2, false)).toBe('in_progress');
   });
 
   it('uses quantity-specific pick labels without arrows', () => {
@@ -28,6 +29,17 @@ describe('pickLineCta', () => {
     expect(pickPrimaryCta('marked_picked', 0, 10, 'pcs', 0, 3, false)).toEqual({
       kind: 'next',
       label: 'Next line →',
+    });
+  });
+
+  it('keeps picking when a partial line still owes qty', () => {
+    expect(pickPrimaryCta('marked_partial', 1, 2, 'pcs', 0, 3, false)).toEqual({
+      kind: 'pick',
+      label: 'Pick 1 more pcs',
+    });
+    expect(pickPrimaryCta('in_progress', 1, 2, 'pcs', 0, 3, false)).toEqual({
+      kind: 'pick',
+      label: 'Pick 1 more pcs',
     });
   });
 

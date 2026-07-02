@@ -1,4 +1,5 @@
 import { CaretLeft, CaretRight, Flag } from '@phosphor-icons/react';
+import { pickQtyStripCopy } from '../lib/pickQtyDisplay';
 import {
   derivePickLineUiState,
   pickPrimaryCta,
@@ -77,7 +78,7 @@ function LineStatusStrip({
   }
 
   const logged = uiState === 'marked_picked' && totalLogged === 0 ? targetQty : totalLogged;
-  const isPartial = uiState === 'marked_partial';
+  const isPartial = uiState === 'marked_partial' || logged < targetQty;
 
   return (
     <div
@@ -86,9 +87,7 @@ function LineStatusStrip({
       }`}
     >
       <p className="font-ds-caption-size font-semibold">
-        {isPartial
-          ? `Partial · ${logged} of ${targetQty} ${uom.toLowerCase()} logged`
-          : `Line complete · ${logged} ${uom.toLowerCase()}`}
+        {pickQtyStripCopy(logged, targetQty, uom)}
       </p>
     </div>
   );

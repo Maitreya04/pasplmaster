@@ -231,6 +231,20 @@ export interface ScanResult {
     remainingQty: number;
     targetQty: number;
   };
+  /** Actual pick was above the original requested pick quantity. */
+  isOverTarget?: boolean;
+  /** Original requested pick quantity before picker split/over/short adjustments. */
+  originalTargetQty?: number;
+  /** Qty picked above originalTargetQty. */
+  overTargetQty?: number;
+  /** Picker-entered reason for over/short variance. */
+  pickerNote?: string | null;
+  /** Actual pick was below the original requested pick quantity. */
+  isShortPick?: boolean;
+  /** Qty not picked from originalTargetQty. */
+  shortQty?: number;
+  /** Picker-selected reason for a short pick. */
+  shortReason?: string | null;
   packAssist?: {
     packType: 'inner' | 'outer';
     packQty: number;

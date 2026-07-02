@@ -29,6 +29,18 @@ export interface BuildBusyPasteTextOptions {
   flags?: Record<number, BillingLiveQueueFlag>;
 }
 
+export function formatBusyPasteLine(
+  item: OrderItem,
+  qty: number,
+  lineEdit?: BusyPasteLineEditPatch,
+): string | null {
+  if (qty <= 0) return null;
+  const unitLabel = busyPasteUnitLabel(effectiveSalesLineUnit(item, lineEdit));
+  return unitLabel
+    ? `${orderItemDisplayName(item)}\t${qty}\t${unitLabel}`
+    : `${orderItemDisplayName(item)}\t${qty}`;
+}
+
 /** Tab-separated lines for Busy paste: item name + qty + sales-selected unit in `bill_line_no` order. */
 export function buildBusyPasteText(
   items: OrderItem[],
@@ -45,11 +57,7 @@ export function buildBusyPasteText(
       const qty = flags
         ? busyBillableQty(item, flag, edit)
         : edit?.qtyRequested ?? item.qty_requested;
-      if (qty <= 0) return null;
-      const unitLabel = busyPasteUnitLabel(effectiveSalesLineUnit(item, edit));
-      return unitLabel
-        ? `${orderItemDisplayName(item)}\t${qty}\t${unitLabel}`
-        : `${orderItemDisplayName(item)}\t${qty}`;
+      return formatBusyPasteLine(item, qty, edit);
     })
     .filter((line): line is string => line != null)
     .join('\n');

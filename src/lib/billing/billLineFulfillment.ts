@@ -40,6 +40,15 @@ function salesPendingQty(rows: PendingItem[]): number {
     .reduce((sum, r) => sum + Math.max(0, r.qty_pending), 0);
 }
 
+function pickerShortBillQty(item: OrderItem): number | null {
+  if (item.scan_result?.isShortPick !== true) return null;
+  const picked = item.scan_result.progress?.pickedQty;
+  if (picked != null && Number.isFinite(picked) && picked >= 0) {
+    return Math.floor(picked);
+  }
+  return Math.max(0, item.qty_shippable ?? item.qty_requested ?? 0);
+}
+
 /**
  * Classify a warehouse bill row for the billing review screen.
  * Separates: ship-today, sales PO backlog, picker OOS, FOC, and MRP splits.
@@ -133,7 +142,8 @@ export function deriveBillLineFulfillment(
 
   // Picker marked partial OOS via pending_items while line shows picked (edge case).
   if (pickerPending > 0 && (item.state === 'picked' || item.state === 'overridden')) {
-    const billQty = Math.max(0, qtyOrdered - pickerPending);
+    const shortBillQty = pickerShortBillQty(item);
+    const billQty = shortBillQty ?? Math.max(0, qtyOrdered - pickerPending);
     return {
       ...base,
       role: 'mixed',

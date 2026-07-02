@@ -1,45 +1,28 @@
 import { CheckCircle } from '@phosphor-icons/react';
-import { normalizeUom, uomLabel } from '../../../lib/picking/pickerMicrocopy';
+import { normalizeUom } from '../../../lib/picking/pickerMicrocopy';
+import { pickQtyOrderCopy, pickQtyVariance } from '../lib/pickQtyDisplay';
 import type { PickLineUiState } from '../lib/pickLineCta';
 
 export interface PickQtyMeterProps {
   totalLogged: number;
+  /** Billing-approved qty on the order line — never the shrunk segment row qty. */
   targetQty: number;
   remaining: number;
   uom: string;
   uiState: PickLineUiState;
 }
 
-function panelLabel(uiState: PickLineUiState, remaining: number): string {
+function panelLabel(uiState: PickLineUiState, remaining: number, isOver: boolean): string {
+  if (isOver) return 'Over order qty';
   if (uiState === 'marked_picked' || uiState === 'complete') return 'Complete';
   if (uiState === 'marked_partial') return 'Partial pick';
   if (uiState === 'in_progress' && remaining > 0) return 'Still to pick';
   return 'Pick qty';
 }
 
-function subtext(
-  uiState: PickLineUiState,
-  totalLogged: number,
-  targetQty: number,
-  remaining: number,
-  uom: string,
-): string {
-  const u = uomLabel(uom, remaining > 0 ? remaining : targetQty);
-  if (uiState === 'marked_picked' || uiState === 'complete') {
-    return `All ${targetQty} ${uomLabel(uom, targetQty)} logged`;
-  }
-  if (uiState === 'marked_partial') {
-    return `${totalLogged > 0 ? totalLogged : targetQty} logged — billing will review`;
-  }
-  if (totalLogged > 0 && remaining > 0) {
-    return `${remaining} ${u} left on this line`;
-  }
-  return `${targetQty} on this line`;
-}
-
 export function PickQtyMeter({
   totalLogged,
-  targetQty,
+  targetQty: orderedQty,
   remaining,
   uom,
   uiState,
@@ -47,20 +30,25 @@ export function PickQtyMeter({
   const uomNorm = normalizeUom(uom);
   const isDone = uiState === 'marked_picked' || uiState === 'complete';
   const isPartialMarked = uiState === 'marked_partial';
-  const displayLogged = isDone && totalLogged === 0 ? targetQty : totalLogged;
-  const pct = targetQty > 0 ? Math.min(100, Math.round((displayLogged / targetQty) * 100)) : 0;
-  const heroQty =
-    uiState === 'in_progress' && remaining > 0 && !isDone
-      ? remaining
-      : isDone
-        ? targetQty
-        : targetQty;
+  const loggedQty = isDone && totalLogged === 0 ? orderedQty : totalLogged;
+  const { isOver, isUnder } = pickQtyVariance(loggedQty, orderedQty);
+  const pct =
+    orderedQty > 0 ? Math.min(100, Math.round((loggedQty / orderedQty) * 100)) : 0;
 
-  const panelClass = isDone
-    ? 'pick-ticket-qty-panel pick-ticket-qty-panel--complete'
-    : isPartialMarked
-      ? 'pick-ticket-qty-panel pick-ticket-qty-panel--partial'
-      : 'pick-ticket-qty-panel';
+  const panelClass = isOver
+    ? 'pick-ticket-qty-panel pick-ticket-qty-panel--partial'
+    : isDone
+      ? 'pick-ticket-qty-panel pick-ticket-qty-panel--complete'
+      : isPartialMarked
+        ? 'pick-ticket-qty-panel pick-ticket-qty-panel--partial'
+        : 'pick-ticket-qty-panel';
+
+  const subtext =
+    isDone || isPartialMarked
+      ? pickQtyOrderCopy(loggedQty, orderedQty, uom)
+      : totalLogged > 0 && remaining > 0
+        ? `${remaining} ${uomNorm.toLowerCase()} left · ${orderedQty} on order`
+        : `${orderedQty} ${uomNorm.toLowerCase()} on order`;
 
   return (
     <div className={panelClass}>
@@ -70,16 +58,18 @@ export function PickQtyMeter({
         </span>
         <p
           className={`pick-identity-label ${
-            isDone
-              ? 'text-[var(--content-positive)]'
-              : isPartialMarked
-                ? 'text-[var(--content-warning-on-light)]'
-                : 'text-[var(--amber-9)]'
+            isOver
+              ? 'text-[var(--content-warning-on-light)]'
+              : isDone
+                ? 'text-[var(--content-positive)]'
+                : isPartialMarked
+                  ? 'text-[var(--content-warning-on-light)]'
+                  : 'text-[var(--amber-9)]'
           }`}
         >
-          {panelLabel(uiState, remaining)}
+          {panelLabel(uiState, remaining, isOver)}
         </p>
-        {isDone ? (
+        {isDone && !isOver ? (
           <CheckCircle
             size={14}
             weight="fill"
@@ -92,28 +82,39 @@ export function PickQtyMeter({
       <div
         className="pick-qty-meter-track mt-2"
         role="progressbar"
-        aria-valuenow={displayLogged}
+        aria-valuenow={loggedQty}
         aria-valuemin={0}
-        aria-valuemax={targetQty}
-        aria-label={`${displayLogged} of ${targetQty} picked`}
+        aria-valuemax={orderedQty}
+        aria-label={`${loggedQty} logged of ${orderedQty} on order`}
       >
         <div
-          className={`pick-qty-meter-fill ${isDone ? 'pick-qty-meter-fill--complete' : ''}`}
+          className={`pick-qty-meter-fill ${isDone && !isOver ? 'pick-qty-meter-fill--complete' : ''}`}
           style={{ width: `${pct}%` }}
         />
       </div>
 
       <div className="pick-ticket-qty-row mt-2">
         <span className="pick-ticket-qty-value font-mono font-extrabold tabular-nums">
-          {heroQty}
+          {loggedQty}
         </span>
         <span className="font-mono text-sm font-bold tabular-nums text-[var(--content-tertiary)]">
-          / {targetQty}
+          / {orderedQty}
         </span>
         <span className="pick-ticket-uom">{uomNorm}</span>
+        <span className="ml-1 font-ds-micro font-semibold text-[var(--content-quaternary)]">
+          on order
+        </span>
       </div>
-      <p className="mt-1 font-ds-micro text-[var(--content-tertiary)]">
-        {subtext(uiState, displayLogged, targetQty, remaining, uom)}
+      <p
+        className={`mt-1 font-ds-micro ${
+          isOver
+            ? 'font-semibold text-[var(--content-warning-on-light)]'
+            : isUnder && (isPartialMarked || isDone)
+              ? 'text-[var(--content-warning-on-light)]'
+              : 'text-[var(--content-tertiary)]'
+        }`}
+      >
+        {subtext}
       </p>
     </div>
   );

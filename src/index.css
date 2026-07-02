@@ -1307,6 +1307,9 @@ select {
   --ds-font-prose: 0.875rem;   /* 14px — dense prose */
   --ds-font-lead: 1.0625rem;   /* 17px — identity customer name */
   --ds-font-stat: 1.5rem;      /* 24px — summary hero numbers */
+  --busy-entry-check-w: 2.5rem;
+  --busy-entry-rate-w: 5.25rem;
+  --busy-entry-qty-w: 3.75rem;
 }
 
 /* Billing chrome + table scale inside work density */
@@ -1366,43 +1369,64 @@ select {
 
 .density-billing-work .busy-entry-code {
   font-size: var(--ds-font-body);
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
-/* Busy entry row — scan: CODE (anchor) → name (context) → rate · qty unit (entry) */
+/* Busy entry row — code (anchor) → description (context) → rate · qty (entry) */
+.density-billing-work .busy-entry-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.density-billing-work .busy-entry-item__identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+}
+
 .density-billing-work .busy-entry-brand {
-  display: block;
-  margin-top: 0.125rem;
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0;
   font-size: var(--ds-font-micro);
-  font-weight: 500;
-  letter-spacing: 0.045em;
+  font-weight: 600;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--content-tertiary);
   line-height: 1.2;
 }
 
 .density-billing-work .busy-entry-desc {
-  font-size: var(--ds-font-prose);
-  font-weight: 400;
-  line-height: 1.35;
-  color: var(--content-secondary);
+  font-size: var(--ds-font-body);
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--content-primary);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .density-billing-work .busy-entry-entry-strip {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--busy-entry-rate-w) var(--busy-entry-qty-w);
+  column-gap: 0;
   flex-shrink: 0;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 1rem;
-  padding-left: 0.75rem;
+  align-items: start;
+  padding-left: 0.625rem;
   border-left: 0.5px solid var(--border-faint);
 }
 
 .density-billing-work .busy-entry-entry-strip--plain {
   border-left: none;
   padding-left: 0;
-  gap: 0.75rem;
 }
 
 .density-billing-work .busy-entry-rate-value {
@@ -1459,9 +1483,10 @@ select {
   color: var(--content-quaternary);
 }
 
-.density-billing-work .busy-entry-brand--inline {
-  display: inline;
-  margin-top: 0;
+.density-billing-work .busy-entry-item--muted .busy-entry-desc,
+.busy-entry-item--muted .busy-entry-desc {
+  color: var(--content-tertiary);
+  font-weight: 400;
 }
 
 .density-billing-work .busy-entry-col-header {
@@ -1470,6 +1495,154 @@ select {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--content-quaternary);
+}
+
+/* Busy entry sheet — one row grid for header + data alignment */
+.busy-entry-lines {
+  container-type: inline-size;
+  container-name: busy-entry;
+  --busy-entry-check-w: 2.5rem;
+  --busy-entry-rate-w: 5.25rem;
+  --busy-entry-qty-w: 3.75rem;
+}
+
+.busy-entry-line-row {
+  display: grid;
+  grid-template-columns:
+    var(--busy-entry-check-w)
+    minmax(0, 1fr)
+    var(--busy-entry-rate-w)
+    var(--busy-entry-qty-w);
+  align-items: start;
+}
+
+.busy-entry-line-row--header {
+  align-items: center;
+  min-height: 1.75rem;
+}
+
+.busy-entry-line-row--skip {
+  grid-template-columns: minmax(0, 1fr) var(--busy-entry-rate-w) var(--busy-entry-qty-w);
+  padding-inline: 0.625rem;
+}
+
+.busy-entry-col-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--busy-entry-check-w);
+  border-right: 0.5px solid var(--border-opaque);
+}
+
+.busy-entry-col-rate,
+.busy-entry-col-qty,
+table.ds-table.ds-table--billing th.billing-col-rate,
+table.ds-table.ds-table--billing td.billing-col-rate,
+table.ds-table.ds-table--billing th.billing-col-qty,
+table.ds-table.ds-table--billing td.billing-col-qty {
+  text-align: right;
+  vertical-align: top;
+  font-variant-numeric: tabular-nums;
+}
+
+.busy-entry-col-rate,
+table.ds-table.ds-table--billing th.billing-col-rate,
+table.ds-table.ds-table--billing td.billing-col-rate {
+  border-left: 0.5px solid var(--border-faint);
+  padding: 0.5rem 0.5rem 0.5rem 0.375rem;
+}
+
+.busy-entry-col-qty,
+table.ds-table.ds-table--billing th.billing-col-qty,
+table.ds-table.ds-table--billing td.billing-col-qty {
+  padding: 0.5rem 0.625rem 0.5rem 0.375rem;
+}
+
+.busy-entry-col-item,
+table.ds-table.ds-table--billing th.billing-col-item,
+table.ds-table.ds-table--billing td.billing-col-item {
+  min-width: 0;
+  padding: 0.5rem 0.625rem;
+  text-align: left;
+}
+
+.busy-entry-line-row:not(.busy-entry-line-row--skip) > :first-child {
+  border-right: 0.5px solid var(--border-opaque);
+}
+
+.busy-entry-line-row--header .busy-entry-col-item,
+.busy-entry-line-row--header .busy-entry-col-rate,
+.busy-entry-line-row--header .busy-entry-col-qty {
+  padding-block: 0;
+}
+
+.busy-entry-col-rate > *,
+.busy-entry-col-qty > * {
+  width: 100%;
+}
+
+@container busy-entry (max-width: 34rem) {
+  .busy-entry-line-row:not(.busy-entry-line-row--skip) {
+    grid-template-rows: auto auto;
+  }
+
+  .busy-entry-line-row:not(.busy-entry-line-row--skip) .busy-entry-col-check {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    align-self: start;
+  }
+
+  .busy-entry-line-row:not(.busy-entry-line-row--skip) .busy-entry-col-item {
+    grid-column: 2 / -1;
+    grid-row: 1;
+  }
+
+  .busy-entry-line-row:not(.busy-entry-line-row--skip) .busy-entry-col-rate {
+    grid-column: 3;
+    grid-row: 2;
+    border-top: 0.5px solid var(--border-faint);
+  }
+
+  .busy-entry-line-row:not(.busy-entry-line-row--skip) .busy-entry-col-qty {
+    grid-column: 4;
+    grid-row: 2;
+    border-top: 0.5px solid var(--border-faint);
+  }
+
+  .busy-entry-line-row--header {
+    grid-template-rows: auto;
+  }
+
+  .busy-entry-line-row--header .busy-entry-col-check {
+    grid-row: 1;
+  }
+
+  .busy-entry-line-row--header .busy-entry-col-item {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .busy-entry-line-row--header .busy-entry-col-rate,
+  .busy-entry-line-row--header .busy-entry-col-qty {
+    grid-row: 1;
+    border-top: none;
+  }
+
+  .density-billing-work .busy-entry-desc {
+    -webkit-line-clamp: 3;
+  }
+}
+
+@container busy-entry (min-width: 34.01rem) and (max-width: 42rem) {
+  .density-billing-work .busy-entry-desc {
+    -webkit-line-clamp: 2;
+  }
+}
+
+@container busy-entry (min-width: 42.01rem) {
+  .density-billing-work .busy-entry-desc {
+    -webkit-line-clamp: 2;
+  }
 }
 
 /* Line status chips — legible at desk distance; matches header exception chip family */
@@ -2113,12 +2286,6 @@ table.ds-table.ds-table--billing td:first-child {
 table.ds-table.ds-table--billing td.billing-col-qty,
 table.ds-table.ds-table--billing td.billing-col-rate {
   font-size: var(--ds-font-body);
-  font-variant-numeric: tabular-nums;
-}
-
-table.ds-table.ds-table--billing th.billing-col-rate,
-table.ds-table.ds-table--billing td.billing-col-rate {
-  border-left: 0.5px solid var(--border-faint);
 }
 
 table.ds-table.ds-table--billing tbody tr {
@@ -2129,31 +2296,270 @@ table.ds-table.ds-table--billing tbody tr:last-child {
   border-bottom: none;
 }
 
-/* Alias 1 — full code always visible; item column absorbs shrink */
-table.ds-table.ds-table--billing th.billing-col-alias1,
-table.ds-table.ds-table--billing td.billing-col-alias1 {
-  width: 1%;
-  white-space: nowrap;
-  vertical-align: middle;
+/* Billing order table — item column owns remaining width; entry cols stay fixed */
+.busy-entry-lines table.ds-table.ds-table--billing {
+  table-layout: fixed;
+  width: 100%;
 }
 
 table.ds-table.ds-table--billing th.billing-col-item,
 table.ds-table.ds-table--billing td.billing-col-item {
   width: auto;
   min-width: 0;
-  max-width: 1px;
+  vertical-align: top;
+}
+
+table.ds-table.ds-table--billing th.billing-col-rate,
+table.ds-table.ds-table--billing td.billing-col-rate {
+  width: var(--busy-entry-rate-w, 5.25rem);
+  white-space: nowrap;
+}
+
+table.ds-table.ds-table--billing th.billing-col-qty,
+table.ds-table.ds-table--billing td.billing-col-qty {
+  width: var(--busy-entry-qty-w, 3.75rem);
+  white-space: nowrap;
+}
+
+.billing-col-item {
+  flex: 1 1 0%;
+  min-width: 0;
+}
+
+.busy-entry-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.busy-entry-item__identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+}
+
+.busy-entry-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.4;
 }
 
 .busy-entry-code {
   font-family: "Geist Mono", monospace;
-  font-size: var(--ds-font-caption);
-  font-weight: 500;
-  white-space: nowrap;
+  font-size: var(--ds-font-body);
+  font-weight: 700;
+  line-height: 1.25;
   color: var(--content-primary);
+  overflow-wrap: anywhere;
 }
 
 .busy-entry-code--muted {
   color: var(--content-quaternary);
+}
+
+/* Resolve / review bill table — line index, batch groups, rate swap refs */
+.review-bill-table {
+  --review-rate-w: 6.75rem;
+}
+
+.review-bill-table th.review-col-line-no,
+.review-bill-table td.review-col-line-no {
+  width: 2rem;
+  padding-inline: 0.25rem;
+}
+
+.review-line-no {
+  display: inline-block;
+  font-size: var(--ds-font-micro);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--content-quaternary);
+}
+
+.review-bill-table th.review-col-rate,
+.review-bill-table td.review-col-rate {
+  width: var(--review-rate-w);
+  min-width: var(--review-rate-w);
+  vertical-align: top;
+}
+
+.review-qty-role {
+  margin-top: 0.125rem;
+  font-size: var(--ds-font-micro);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--content-tertiary);
+}
+
+.review-part-group-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  margin-bottom: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-opaque);
+  background: var(--bg-primary);
+}
+
+.review-part-group-banner__ordered {
+  font-size: var(--ds-font-body);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--content-primary);
+}
+
+.review-part-group-banner__split {
+  font-size: var(--ds-font-micro);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--content-accent);
+}
+
+.review-part-group-banner__mix {
+  flex-basis: 100%;
+  font-size: var(--ds-font-micro);
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--content-secondary);
+}
+
+.review-part-continuation {
+  padding-left: 0.625rem;
+  border-left: 3px solid var(--content-accent);
+}
+
+.review-part-continuation__label {
+  font-size: var(--ds-font-micro);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--content-accent);
+}
+
+.review-row--batch-cont td:first-child {
+  box-shadow: inset 3px 0 0 var(--border-opaque);
+}
+
+.review-rate-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3125rem;
+  min-width: 0;
+}
+
+.review-rate-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 2.25rem;
+  padding: 0.3125rem 0.5rem;
+  border-radius: 0.5rem;
+  border: 1.5px solid var(--border-opaque);
+  background: var(--bg-secondary);
+  font-family: "Geist Mono", monospace;
+  font-size: var(--ds-font-body);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-align: right;
+  color: var(--content-primary);
+  field-sizing: fixed;
+  transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.review-rate-input:focus-visible {
+  outline: none;
+  border-color: var(--border-selected);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--border-selected) 18%, transparent);
+}
+
+.review-rate-input--edited {
+  border-color: var(--border-warning);
+  background: var(--bg-warning-subtle);
+}
+
+.review-rate-cell__edited-hint {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.1875rem;
+  margin: 0;
+  font-size: var(--ds-font-micro);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--content-warning-on-light);
+}
+
+.review-rate-refs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  max-width: 100%;
+}
+
+.review-rate-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 1.375rem;
+  padding: 0.0625rem 0.4375rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-opaque);
+  background: var(--bg-primary);
+  font-size: var(--ds-font-micro);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--content-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+}
+
+.review-rate-ref-chip:hover {
+  border-color: var(--border-selected);
+  background: var(--bg-row-hover);
+  color: var(--content-primary);
+}
+
+.review-rate-ref-chip:focus-visible {
+  outline: none;
+  border-color: var(--border-selected);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--border-selected) 18%, transparent);
+}
+
+.review-rate-ref-chip:active {
+  transform: scale(0.98);
+}
+
+.review-rate-ref-chip__label {
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.review-rate-ref-chip__value {
+  font-family: "Geist Mono", monospace;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-decoration: line-through;
+  color: var(--content-quaternary);
+}
+
+.review-rate-ref-chip:hover .review-rate-ref-chip__value {
+  color: var(--content-secondary);
+  text-decoration: none;
 }
 
 /* ─── D) DS Form fields ─── */

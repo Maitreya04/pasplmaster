@@ -15,13 +15,20 @@ import {
   BusyEntryCheckbox,
   BusyEntryMasterCheckbox,
 } from './BusyEntryCheckbox';
-import { BusyEntryCode } from './BusyEntryCode';
+import { BusyEntryItemCell } from './BusyEntryItemCell';
 import { BusyEntryLineChips } from './BusyEntryLineChips';
 import { BusyEntryRateCell } from './BusyEntryRateCell';
-import { SalesUnitBadge } from '../../shared/SalesUnitBadge';
 import { BusyEntryQtyUnit } from './BusyEntryQtyUnit';
 import { BusyBillableEmptyState } from './BusyBillableEmptyState';
-import { effectiveSalesLineUnit } from '../../../lib/salesUnit';
+import {
+  BUSY_ENTRY_COL_CHECK,
+  BUSY_ENTRY_COL_ITEM,
+  BUSY_ENTRY_COL_QTY,
+  BUSY_ENTRY_COL_RATE,
+  BUSY_ENTRY_LINE_ROW,
+  BUSY_ENTRY_LINE_ROW_HEADER,
+  BUSY_ENTRY_LINE_ROW_SKIP,
+} from './busyEntryLayout';
 
 function busyEntryAccentColor(
   nature: BusyEntryLineNature,
@@ -59,7 +66,7 @@ export function BusyPasteLineList({
   } = model;
 
   return (
-    <div className="flex flex-col min-h-0">
+    <div className="busy-entry-lines flex flex-col min-h-0">
       <section>
         {billable.length === 0 && skip.length > 0 ? (
           <BusyBillableEmptyState skipCount={skip.length} compact />
@@ -67,23 +74,19 @@ export function BusyPasteLineList({
         <ul>
           {billable.length > 0 ? (
             <li
-              className="flex items-center h-7 px-0 border-b border-[var(--border-faint)] bg-[var(--bg-secondary)]"
+              className={`${BUSY_ENTRY_LINE_ROW_HEADER} px-0 border-b border-[var(--border-faint)] bg-[var(--bg-secondary)]`}
               aria-hidden
             >
-              <span className="w-10 shrink-0 border-r border-[var(--border-opaque)]">
+              <div className={BUSY_ENTRY_COL_CHECK}>
                 <BusyEntryMasterCheckbox
                   enteredCount={enteredCount}
                   totalCount={billable.length}
                   onToggleAll={toggleAllEntered}
                 />
-              </span>
-              <span className="busy-entry-col-header w-[148px] shrink-0 px-3">Part no.</span>
-              <span className="busy-entry-col-header min-w-0 flex-1 px-2.5">Description</span>
-              <div className="busy-entry-entry-strip shrink-0 pr-2.5">
-                <span className="busy-entry-col-header w-[5.5rem] text-right">Bill rate</span>
-                <span className="busy-entry-col-header w-[5.25rem] text-right">Unit</span>
-                <span className="busy-entry-col-header w-[4.5rem] text-right">Qty</span>
               </div>
+              <span className={`busy-entry-col-header ${BUSY_ENTRY_COL_ITEM}`}>Item</span>
+              <span className={`busy-entry-col-header ${BUSY_ENTRY_COL_RATE}`}>Bill rate</span>
+              <span className={`busy-entry-col-header ${BUSY_ENTRY_COL_QTY}`}>Qty</span>
             </li>
           ) : null}
           {billable.map((item) => {
@@ -100,7 +103,7 @@ export function BusyPasteLineList({
                 key={item.id}
                 ref={(el) => registerLineRef(item.id, el)}
                 onClick={() => toggleEntered(item.id)}
-                className="group relative flex items-center cursor-pointer transition-colors duration-150 hover:bg-[var(--bg-secondary)]"
+                className={`${BUSY_ENTRY_LINE_ROW} group relative cursor-pointer transition-colors duration-150 hover:bg-[var(--bg-secondary)]`}
                 style={{
                   minHeight: '44px',
                   borderBottom: '0.5px solid var(--border-opaque)',
@@ -115,36 +118,25 @@ export function BusyPasteLineList({
                   itemName={orderItemDisplayName(item)}
                   onToggle={() => toggleEntered(item.id)}
                 />
-                <div className="w-[148px] shrink-0 px-3 py-2 border-r border-[var(--border-opaque)]">
-                  <BusyEntryCode item={item} />
-                  {brand ? (
-                    <span className="busy-entry-brand truncate">{brand}</span>
-                  ) : null}
-                </div>
-                <div className="min-w-0 flex-1 px-2.5 py-2">
-                  <span
-                    className="busy-entry-desc truncate block"
-                    title={orderItemDisplayName(item)}
-                  >
-                    {orderItemDisplayName(item)}
-                  </span>
-                  <BusyEntryLineChips
-                    nature={nature}
-                    flag={flag}
-                    pendingQty={pendingQty}
-                    isSkip={false}
+                <div className={BUSY_ENTRY_COL_ITEM}>
+                  <BusyEntryItemCell
+                    item={item}
+                    brandName={brand}
+                    chips={
+                      <BusyEntryLineChips
+                        nature={nature}
+                        flag={flag}
+                        pendingQty={pendingQty}
+                        isSkip={false}
+                      />
+                    }
                   />
                 </div>
-                <div className="busy-entry-entry-strip shrink-0 py-2 pr-2.5">
-                  <span className="w-[5.5rem] shrink-0 px-1">
-                    <BusyEntryRateCell item={item} edit={edit} nature={nature} />
-                  </span>
-                  <span className="w-[5.25rem] shrink-0 px-1 flex justify-end">
-                    <SalesUnitBadge unit={effectiveSalesLineUnit(item, edit)} />
-                  </span>
-                  <span className="w-[4.5rem] shrink-0 px-1">
-                    <BusyEntryQtyUnit item={item} lineEdit={edit} qty={qty} pendingQty={pendingQty} />
-                  </span>
+                <div className={BUSY_ENTRY_COL_RATE}>
+                  <BusyEntryRateCell item={item} edit={edit} nature={nature} />
+                </div>
+                <div className={BUSY_ENTRY_COL_QTY}>
+                  <BusyEntryQtyUnit item={item} lineEdit={edit} qty={qty} pendingQty={pendingQty} />
                 </div>
               </li>
             );
@@ -171,37 +163,29 @@ export function BusyPasteLineList({
                 <li
                   key={item.id}
                   ref={(el) => registerLineRef(item.id, el)}
-                  className="flex items-center gap-3 px-2.5 py-2.5 opacity-70"
+                  className={`${BUSY_ENTRY_LINE_ROW_SKIP} py-2 opacity-70`}
                   style={{
                     borderBottom: '0.5px dashed var(--border-opaque)',
                     background: 'var(--bg-secondary)',
                   }}
                 >
-                  <BusyEntryCode item={item} muted />
-                  <div className="min-w-0 flex-1">
-                    <span className="busy-entry-desc truncate block text-[var(--content-tertiary)]">
-                      {orderItemDisplayName(item)}
-                    </span>
-                    <div className="flex items-center gap-1 min-w-0">
-                      {brand ? (
-                        <span className="busy-entry-brand busy-entry-brand--inline truncate">
-                          {brand}
-                        </span>
-                      ) : null}
-                      <BusyEntryLineChips nature={nature} flag={flag} isSkip />
-                    </div>
+                  <div className={BUSY_ENTRY_COL_ITEM}>
+                    <BusyEntryItemCell
+                      item={item}
+                      brandName={brand}
+                      muted
+                      chips={<BusyEntryLineChips nature={nature} flag={flag} isSkip />}
+                    />
                   </div>
-                  <div className="busy-entry-entry-strip busy-entry-entry-strip--plain shrink-0">
-                    <span className="w-[5.5rem] shrink-0">
-                      <BusyEntryRateCell item={item} edit={edit} nature={nature} />
-                    </span>
-                    <span className="w-[4.5rem] shrink-0">
-                      <BusyEntryQtyUnit
-                        item={item}
-                        qty={busyPendingQty(item, flag, edit)}
-                        muted
-                      />
-                    </span>
+                  <div className={BUSY_ENTRY_COL_RATE}>
+                    <BusyEntryRateCell item={item} edit={edit} nature={nature} />
+                  </div>
+                  <div className={BUSY_ENTRY_COL_QTY}>
+                    <BusyEntryQtyUnit
+                      item={item}
+                      qty={busyPendingQty(item, flag, edit)}
+                      muted
+                    />
                   </div>
                 </li>
               );

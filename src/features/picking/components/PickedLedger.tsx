@@ -154,7 +154,7 @@ function PickProgressStrip({
     <div className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-3 py-2">
       <span className="font-mono font-ds-caption-size font-semibold tabular-nums text-[var(--content-secondary)]">
         {totalLogged}
-        {inProgressQty > 0 ? ` + ${inProgressQty}` : ''} / {targetQty} picked
+        {inProgressQty > 0 ? ` + ${inProgressQty}` : ''} / {targetQty} on order
       </span>
       {remaining > 0 ? (
         <span className="font-ds-caption-size font-bold text-[var(--content-warning-on-light)]">
@@ -238,7 +238,7 @@ export function PickedLedger({
         </p>
         <p className="font-mono font-ds-caption-size text-[var(--content-secondary)]">
           {totalLogged}
-          {ipQty > 0 ? ` + ${ipQty}` : ''} / {draft.targetQty}
+          {ipQty > 0 ? ` + ${ipQty}` : ''} / {draft.targetQty} on order
         </p>
       </div>
       {canEdit && context === 'modal' ? (

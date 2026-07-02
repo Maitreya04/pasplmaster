@@ -227,7 +227,7 @@ export function ProcessView({ orderName, items, activeIndex, isSubmitting, manua
                       </p>
                       {activeHasSpecialRate && activeBookPrice != null && (
                         <p className="mt-1 text-xs text-[var(--content-quaternary)]">
-                          Book {formatCurrency(activeBookPrice)}
+                          Bill {formatCurrency(activeBookPrice)}
                         </p>
                       )}
                     </div>

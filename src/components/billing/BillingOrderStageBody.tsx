@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useState } from 'react';
-import { buildBusyPasteText } from '../../lib/billing/sortBillLines';
 import { deriveReviewWorkMetrics } from '../../lib/billing/deriveReviewWorkMetrics';
 import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
 import type { RejectionKind } from '../../types';
@@ -27,8 +26,15 @@ import type { BillSheetEdits } from '../../hooks/useBillSheetEdits';
 import type { DeskOrderRow } from '../../hooks/useBillingDeskOrders';
 import type { OrderWithItems } from '../../types';
 import type { BillingLineEdit, ItemFlag } from '../../hooks/useBillingFlow';
-import { formatCurrencyRaw } from '../../utils/formatters';
+import { formatCurrencyRaw, orderItemDisplayName } from '../../utils/formatters';
 import { useOrderHandoff } from '../../hooks/useOrderHandoff';
+import {
+  buildFinalBillCopyRows,
+  buildFinalBillPasteText,
+  finalBillCopyTotals,
+  type FinalBillCopyRow,
+} from '../../lib/billing/finalBillCopy';
+import { formatRoundedRs } from '../../lib/billing/mrpWorkflowCopy';
 
 interface BillingOrderStageBodyProps {
   order: DeskOrderRow;
@@ -48,12 +54,78 @@ interface BillingOrderStageBodyProps {
   };
 }
 
+function FinalBillCopyPreview({
+  rows,
+  pendingCount,
+  unresolvedCount,
+}: {
+  rows: FinalBillCopyRow[];
+  pendingCount: number;
+  unresolvedCount: number;
+}): React.JSX.Element | null {
+  const totals = finalBillCopyTotals(rows);
+  if (rows.length === 0 && unresolvedCount === 0 && pendingCount === 0) return null;
+  const previewRows = rows.slice(0, 3);
+
+  return (
+    <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase tracking-wide text-[var(--content-secondary)]">
+            Final bill copy
+          </p>
+          <p className="text-[11px] font-medium text-[var(--content-tertiary)]">
+            {totals.lineCount} Busy row{totals.lineCount === 1 ? '' : 's'} · {totals.qtyTotal} pcs ·
+            resolved rates in paste
+            {pendingCount > 0 ? ` · ${pendingCount} pending/skipped` : ''}
+            {unresolvedCount > 0 ? ` · ${unresolvedCount} unresolved` : ''}
+          </p>
+        </div>
+        <p className="text-xs font-bold tabular-nums text-[var(--content-primary)]">
+          {formatCurrencyRaw(totals.valueTotal)}
+        </p>
+      </div>
+
+      {previewRows.length > 0 ? (
+        <div className="mt-2 grid gap-1">
+          {previewRows.map((row) => (
+            <div
+              key={row.item.id}
+              className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 text-[11px]"
+            >
+              <span className="min-w-0 truncate font-medium text-[var(--content-primary)]">
+                {orderItemDisplayName(row.item)}
+              </span>
+              <span className="whitespace-nowrap tabular-nums text-[var(--content-secondary)]">
+                {row.qty} {row.unitLabel}
+              </span>
+              <span className="whitespace-nowrap tabular-nums font-semibold text-[var(--content-primary)]">
+                {formatRoundedRs(row.rate)}
+              </span>
+              <span className="whitespace-nowrap rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 font-semibold text-[var(--content-secondary)]">
+                {row.status}
+              </span>
+            </div>
+          ))}
+          {rows.length > previewRows.length ? (
+            <p className="text-[10px] font-medium text-[var(--content-tertiary)]">
+              +{rows.length - previewRows.length} more row{rows.length - previewRows.length === 1 ? '' : 's'} in the table
+            </p>
+          ) : null}
+        </div>
+      ) : unresolvedCount > 0 ? (
+        <p className="mt-2 text-[11px] font-semibold text-[var(--content-warning-on-light)]">
+          Resolve flagged lines before copying the final bill.
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 export function BillingOrderStageBody({
   order,
   orderDetail,
   billSheet,
-  flaggedMode: _flaggedMode,
   embedded = false,
   deskEmbedded = false,
   onClose,
@@ -170,17 +242,20 @@ export function BillingOrderStageBody({
     () => (showReviewDock ? deriveReviewWorkMetrics(billSheet) : null),
     [showReviewDock, billSheet],
   );
+  const finalBillRows = useMemo(
+    () =>
+      buildFinalBillCopyRows({
+        sortedLines: billSheet.sortedLines,
+        edits: billSheet.edits,
+        pendingByItemId: billSheet.pendingByItemId,
+        flaggedItems: billSheet.flaggedItems,
+      }),
+    [billSheet.sortedLines, billSheet.edits, billSheet.pendingByItemId, billSheet.flaggedItems],
+  );
 
   const copyForBusy = useCallback(() => {
-    const { visibleItems, edits } = billSheet;
-    const billable = visibleItems.filter((item) => {
-      const edit = edits[item.id];
-      if (edit?.removed) return false;
-      if (item.state === 'flagged' && edit?.resolution == null) return false;
-      return true;
-    });
-    copy(buildBusyPasteText(billable, { lineEdits: edits }), 'busy-final');
-  }, [billSheet, copy]);
+    copy(buildFinalBillPasteText(finalBillRows), 'busy-final');
+  }, [copy, finalBillRows]);
 
   const copyJustCopied = copiedId === 'busy-final';
   const [hasCopiedForBusy, setHasCopiedForBusy] = useState(false);
@@ -293,7 +368,9 @@ export function BillingOrderStageBody({
               specialRateCount={reviewWorkMetrics.specialRateCount}
               focCount={reviewWorkMetrics.focCount}
               pendingCount={reviewWorkMetrics.pendingCount}
+              copyLabel="Copy final bill"
               onCopy={handleCopyForBusy}
+              copyDisabled={isReviewStage ? finaliseBlocked : false}
               copyJustCopied={copyJustCopied}
               hasCopiedOnce={hasCopiedForBusy}
               {...(isReviewStage
@@ -330,11 +407,23 @@ export function BillingOrderStageBody({
         ) : null}
 
         {isReviewStage && !showAssign ? (
-          <PostPickReviewStage billSheet={billSheet} readOnly={resolveBlocked} />
+          <>
+            <FinalBillCopyPreview
+              rows={finalBillRows}
+              pendingCount={reviewWorkMetrics?.pendingCount ?? 0}
+              unresolvedCount={unresolvedReviewCount}
+            />
+            <PostPickReviewStage billSheet={billSheet} readOnly={resolveBlocked} />
+          </>
         ) : null}
 
         {stage === 'done' && !showAssign ? (
           <>
+            <FinalBillCopyPreview
+              rows={finalBillRows}
+              pendingCount={reviewWorkMetrics?.pendingCount ?? 0}
+              unresolvedCount={0}
+            />
             <PostPickReviewStage billSheet={billSheet} readOnly />
             <CompleteHandoffStage
               variant="bill_save"

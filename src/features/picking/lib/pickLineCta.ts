@@ -17,9 +17,10 @@ export function derivePickLineUiState(
 ): PickLineUiState {
   if (markedStatus === 'flagged') return 'flagged';
   if (markedStatus === 'picked') return 'marked_picked';
-  if (markedStatus === 'partial') return 'marked_partial';
   if (isComplete) return 'complete';
-  if (totalLogged > 0) return 'in_progress';
+  // Active multi-batch pick — still owe qty even if session marks the line partial.
+  if (totalLogged > 0 && totalLogged < _targetQty) return 'in_progress';
+  if (markedStatus === 'partial') return 'marked_partial';
   return 'fresh';
 }
 
@@ -44,6 +45,9 @@ export function pickPrimaryCta(
   if (state === 'marked_picked' || state === 'marked_partial') {
     if (revisitComplete) {
       return { kind: 'edit', label: 'Edit pick' };
+    }
+    if (remaining > 0) {
+      return { kind: 'pick', label: `Pick ${remaining} more ${u}` };
     }
     if (isLastLine) {
       return { kind: 'finish', label: 'Finish order' };

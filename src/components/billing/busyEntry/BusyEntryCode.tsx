@@ -16,7 +16,12 @@ export function BusyEntryCode({ item, muted = false }: BusyEntryCodeProps): Reac
   const display = code || '—';
 
   return (
-    <span className={`busy-entry-code ${muted ? 'busy-entry-code--muted' : ''}`}>{display}</span>
+    <span
+      className={`busy-entry-code ${muted ? 'busy-entry-code--muted' : ''}`}
+      title={code || undefined}
+    >
+      {display}
+    </span>
   );
 }
 

@@ -10,6 +10,8 @@ import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { pickQuantityTarget, pickableOrderItems } from '../../lib/cartSupply';
 import type { NextPickLinePreview } from '../../lib/picking/deckOrder';
 import { defaultPickItemTransitionAdapter } from '../../lib/picking/itemTransitionAdapter';
+import { ensurePendingItem } from '../../lib/billing/ensurePendingItem';
+import { deskLineIssueCategory } from '../../lib/billing/deskLineFlagKind';
 import {
   isPickNoLongerActiveError,
   pickNoLongerActiveMessage,
@@ -30,6 +32,18 @@ import { SyncStatusPill } from './components/SyncStatusPill';
 import { UndoToast } from './components/UndoToast';
 import { useCommitPriceGroup } from './hooks/useCommitPriceGroup';
 import { createLineDraft, usePickEntryDraft } from './hooks/usePickEntryDraft';
+import { applyShortPickScanResult } from './lib/buildPriceGroupScanResult';
+import {
+  buildLineDraftFromOrderItem,
+  deriveCompletedLinesFromOrder,
+  sumLineDraftLogged,
+} from './lib/hydrateLineDraft';
+import {
+  readPickFlowSession,
+  writePickFlowSession,
+} from './lib/pickFlowSession';
+import { findNextPendingLineIndex } from './lib/pickLineNavigation';
+import { pickQtyOrderCopy, pickQtyVariance } from './lib/pickQtyDisplay';
 import { useMrpSuggestion } from './hooks/useMrpSuggestion';
 import { useUndoableAction } from './hooks/useUndoableAction';
 
@@ -51,6 +65,7 @@ type LineOutcome =
 type CompletedLineStatus = 'picked' | 'partial' | 'flagged';
 
 type PickViewMode = 'card' | 'list';
+type FlagSheetMode = 'issue' | 'short';
 
 type UndoPayload = {
   group: ConfirmedPriceGroup;
@@ -93,19 +108,25 @@ export function PickFlowExperience({
     [order?.items],
   );
 
-  const [lineIndex, setLineIndex] = useState(0);
+  const [lineIndex, setLineIndex] = useState(() => {
+    if (useDemo || orderId == null) return 0;
+    const session = readPickFlowSession(orderId, isLab ? 'lab' : 'production');
+    return session?.lineIndex ?? 0;
+  });
   const [viewMode, setViewMode] = useState<PickViewMode>('card');
   const [completedLines, setCompletedLines] = useState<Record<number, CompletedLineStatus>>({});
   const [modalOpen, setModalOpen] = useState(false);
   const [modalView, setModalView] = useState<PickModalView>('mrp');
   const [priceFixOpen, setPriceFixOpen] = useState(false);
   const [flagOpen, setFlagOpen] = useState(false);
+  const [flagSheetMode, setFlagSheetMode] = useState<FlagSheetMode>('issue');
   const [lineOutcome, setLineOutcome] = useState<LineOutcome | null>(null);
   const [flashGroupId, setFlashGroupId] = useState<string | null>(null);
   const [revertPending, setRevertPending] = useState(false);
   const [ledgerEditField, setLedgerEditField] = useState<LedgerEditField>(null);
   const editSnapshotRef = useRef<ConfirmedPriceGroup | null>(null);
   const closedPickToastShownRef = useRef(false);
+  const pickSessionBootstrappedRef = useRef<number | null>(null);
   const sessionSuggestedRef = useRef<{
     mrp: number | null;
     source: MrpSuggestionSource;
@@ -150,17 +171,39 @@ export function PickFlowExperience({
     }
   }, [isLab, onBack, order, orderId, toast, useDemo]);
 
+  useEffect(() => {
+    if (useDemo || !order || orderId == null || pickItems.length === 0) return;
+    if (pickSessionBootstrappedRef.current === orderId) return;
+    pickSessionBootstrappedRef.current = orderId;
+
+    const sessionScope = isLab ? 'lab' : 'production';
+    const session = readPickFlowSession(orderId, sessionScope);
+    const serverCompleted = deriveCompletedLinesFromOrder(pickItems, order.items);
+    setCompletedLines({ ...serverCompleted, ...(session?.completedLines ?? {}) });
+
+    const restoredIndex =
+      session?.lineIndex != null &&
+      session.lineIndex >= 0 &&
+      session.lineIndex < pickItems.length
+        ? session.lineIndex
+        : 0;
+    setLineIndex(restoredIndex);
+  }, [isLab, order, orderId, pickItems, useDemo]);
+
+  useEffect(() => {
+    if (useDemo || orderId == null) return;
+    writePickFlowSession(
+      orderId,
+      { lineIndex, completedLines },
+      isLab ? 'lab' : 'production',
+    );
+  }, [completedLines, isLab, lineIndex, orderId, useDemo]);
+
   // Reset draft when the picker navigates to a different line — not when the
   // server refetches and swaps order_item ids after an MRP split on the same line.
   useEffect(() => {
-    if (!currentItem) return;
-    draftState.reset(
-      createLineDraft({
-        rootOrderItemId: currentItem.id,
-        targetQty: pickQuantityTarget(currentItem),
-        uom: salesUom(currentItem),
-      }),
-    );
+    if (!currentItem || !order) return;
+    draftState.reset(buildLineDraftFromOrderItem(currentItem, order.items));
     setLineOutcome(null);
     setModalOpen(false);
     setModalView('mrp');
@@ -170,12 +213,15 @@ export function PickFlowExperience({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset when line index changes only
   }, [lineIndex]);
 
+  /** Frozen when the line opens — do not use live order_item qty after MRP splits. */
+  const lineTargetQty = draftState.draft.targetQty;
+
   const shortFlagContext = useMemo(() => {
     if (!currentItem) return undefined;
     const logged = draftState.totalLogged;
-    const rem = Math.max(0, targetQty - logged);
-    return `You've logged ${logged} of ${targetQty} ${salesUom(currentItem)}. What's wrong with the remaining ${rem}?`;
-  }, [currentItem, draftState.totalLogged, targetQty]);
+    const rem = Math.max(0, lineTargetQty - logged);
+    return `You've logged ${logged} of ${lineTargetQty} ${salesUom(currentItem)}. What's wrong with the remaining ${rem}?`;
+  }, [currentItem, draftState.totalLogged, lineTargetQty]);
 
   const openPickModal = useCallback(() => {
     editSnapshotRef.current = null;
@@ -253,9 +299,13 @@ export function PickFlowExperience({
 
     const isFirstSegment = draftState.draft.confirmedGroups.length === 0;
     const totalAfter = draftState.totalLogged + ip.qty;
-    const isOverTarget = totalAfter > targetQty;
+    const isOverTarget = totalAfter > lineTargetQty;
 
-    if (isOverTarget && !draftState.draft.noteText.trim()) return;
+    if (isOverTarget && !draftState.draft.noteText.trim()) {
+      appHaptics.warning();
+      toast.error('Add a reason before picking above the order qty.');
+      return;
+    }
 
     const roundedMrp = Math.round(ip.mrp);
     const sessionSuggested = sessionSuggestedRef.current;
@@ -275,7 +325,7 @@ export function PickFlowExperience({
         confirmedMrp: ip.mrp,
         isFirstSegment,
         totalLogged: totalAfter,
-        targetQty,
+        targetQty: lineTargetQty,
         pickerName: userName,
         pickerNote: isOverTarget ? draftState.draft.noteText.trim() : null,
         isOverTarget,
@@ -324,7 +374,7 @@ export function PickFlowExperience({
     editSnapshotRef.current = null;
     setLedgerEditField(null);
 
-    const remainingAfter = Math.max(0, targetQty - totalAfter);
+    const remainingAfter = Math.max(0, lineTargetQty - totalAfter);
     setModalView('gap');
 
     await undoAction.trigger({
@@ -346,11 +396,11 @@ export function PickFlowExperience({
             rootOrderItemId: payload.rootOrderItemId,
             segmentOrderItemId: payload.group.orderItemId,
             restoreQty:
-              payload.group.qty === totalAfter && isFirstSegment ? targetQty : null,
+              payload.group.qty === totalAfter && isFirstSegment ? lineTargetQty : null,
           });
           await queryClient.invalidateQueries({ queryKey: ['order', orderId] });
         }
-        const remainingAfterUndo = Math.max(0, targetQty - (totalAfter - payload.group.qty));
+        const remainingAfterUndo = Math.max(0, lineTargetQty - (totalAfter - payload.group.qty));
         if (remainingAfterUndo > 0) {
           setModalView('gap');
           setModalOpen(true);
@@ -371,7 +421,11 @@ export function PickFlowExperience({
     isLab,
     order,
     queryClient,
-    targetQty,
+    lineTargetQty,
+    mrpSuggestion.historyCount,
+    mrpSuggestion.stockMrp,
+    mrpSuggestion.suggestedMrp,
+    mrpSuggestion.suggestionSource,
     undo,
     undoAction,
     userId,
@@ -382,28 +436,197 @@ export function PickFlowExperience({
     onBack,
   ]);
 
+  const finishOrder = onFinish ?? onBack;
+
+  const advanceLine = useCallback(() => {
+    setLineOutcome(null);
+    setViewMode('card');
+    setLineIndex((from) => {
+      const next = findNextPendingLineIndex(pickItems, from, completedLines);
+      return next ?? from;
+    });
+  }, [completedLines, pickItems]);
+
+  /** After a line is done: toast + jump to next rack. No full-screen stop for normal picks. */
+  const continueAfterLineClose = useCallback(
+    (outcome: Exclude<LineOutcome, { kind: 'flagged' }>) => {
+      if (!currentItem) return;
+
+      const status: CompletedLineStatus = outcome.kind === 'picked' ? 'picked' : 'partial';
+      const nextCompleted = { ...completedLines, [outcome.itemId]: status };
+      setCompletedLines(nextCompleted);
+
+      const code = partCode(currentItem);
+      const uom = salesUom(currentItem);
+      const nextIdx = findNextPendingLineIndex(pickItems, lineIndex, nextCompleted);
+      const nextItem = nextIdx != null ? pickItems[nextIdx] : null;
+      const { isOver } = pickQtyVariance(outcome.pickedQty, outcome.targetQty);
+
+      if (outcome.kind === 'partial' || isOver) {
+        toast.warning(`${code}: ${pickQtyOrderCopy(outcome.pickedQty, outcome.targetQty, uom)}`);
+      } else if (nextItem) {
+        toast.success(`${outcome.pickedQty} ${uom} ✓ · Next: ${partCode(nextItem)}`);
+      } else {
+        toast.success('All lines picked — pack & finish', {
+          action: { label: 'Finish', onClick: finishOrder },
+        });
+      }
+
+      if (nextIdx != null) {
+        setLineIndex(nextIdx);
+      }
+      setViewMode('card');
+    },
+    [completedLines, currentItem, finishOrder, lineIndex, pickItems, toast],
+  );
+
+  const handleShortPickSubmit = useCallback(
+    async (payload: FlagSubmitPayload) => {
+      if (!currentItem) return;
+      const pickedQty = draftState.totalLogged;
+      const shortQty = Math.max(0, lineTargetQty - pickedQty);
+      if (pickedQty <= 0 || shortQty <= 0) return;
+
+      appHaptics.impactMedium();
+
+      if (!isLab && !useDemo && order) {
+        try {
+          const segmentIds = [
+            ...new Set(
+              draftState.draft.confirmedGroups
+                .map((group) => group.orderItemId)
+                .filter((id) => Number.isFinite(id)),
+            ),
+          ];
+          if (segmentIds.length === 0) segmentIds.push(currentItem.id);
+
+          const { data: scanRows, error: scanRowsError } = await supabase
+            .from('order_items')
+            .select('id, scan_result')
+            .in('id', segmentIds);
+          if (scanRowsError) {
+            toast.error(scanRowsError.message);
+            return;
+          }
+
+          const updates = (scanRows ?? [])
+            .map((row) => {
+              const scanResult = applyShortPickScanResult(
+                row.scan_result as OrderItem['scan_result'],
+                {
+                  pickedQty,
+                  targetQty: lineTargetQty,
+                  reason: payload.reason,
+                  note: payload.notes,
+                },
+              );
+              return scanResult ? { id: row.id as number, scanResult } : null;
+            })
+            .filter(
+              (row): row is { id: number; scanResult: NonNullable<OrderItem['scan_result']> } =>
+                row != null,
+            );
+
+          for (const update of updates) {
+            const { error: updateError } = await supabase
+              .from('order_items')
+              .update({ scan_result: update.scanResult as unknown as Record<string, unknown> })
+              .eq('id', update.id);
+            if (updateError) {
+              toast.error(updateError.message);
+              return;
+            }
+          }
+
+          await ensurePendingItem({
+            orderId: order.id,
+            orderNumber: order.order_number,
+            customerId: order.customer_id,
+            customerName: order.customer_name,
+            itemId: currentItem.item_id,
+            itemName: currentItem.item_name,
+            qtyPending: shortQty,
+            source: 'picking',
+            createdBy: userName || 'Picker',
+            note: `Picker short ${shortQty} of ${lineTargetQty} — ${payload.reason}${
+              payload.notes ? `: ${payload.notes}` : ''
+            }`,
+            issueCategory: deskLineIssueCategory(payload.reason) ?? 'out_of_stock',
+          });
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Could not save short pick');
+          return;
+        }
+      }
+
+      setFlagOpen(false);
+      setFlagSheetMode('issue');
+      setModalOpen(false);
+      continueAfterLineClose({
+        kind: 'partial',
+        itemId: currentItem.id,
+        pickedQty,
+        targetQty: lineTargetQty,
+      });
+      if (!isLab && !useDemo && orderId != null) {
+        void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+        void queryClient.invalidateQueries({ queryKey: ['pending-items'] });
+      }
+    },
+    [
+      continueAfterLineClose,
+      currentItem,
+      draftState.draft.confirmedGroups,
+      draftState.totalLogged,
+      isLab,
+      lineTargetQty,
+      order,
+      orderId,
+      queryClient,
+      toast,
+      useDemo,
+      userName,
+    ],
+  );
+
   const handleMarkPicked = useCallback(() => {
     if (!currentItem) return;
     appHaptics.impactMedium();
     const logged = draftState.totalLogged;
+    if (logged > 0 && logged < lineTargetQty) {
+      setFlagSheetMode('short');
+      setFlagOpen(true);
+      return;
+    }
     setModalOpen(false);
     const outcome: LineOutcome =
-      logged >= targetQty
-        ? { kind: 'picked', itemId: currentItem.id, pickedQty: logged, targetQty }
-        : { kind: 'partial', itemId: currentItem.id, pickedQty: logged, targetQty };
-    setLineOutcome(outcome);
-    setCompletedLines((prev) => ({
-      ...prev,
-      [currentItem.id]: outcome.kind === 'picked' ? 'picked' : 'partial',
-    }));
+      logged >= lineTargetQty
+        ? { kind: 'picked', itemId: currentItem.id, pickedQty: logged, targetQty: lineTargetQty }
+        : { kind: 'partial', itemId: currentItem.id, pickedQty: logged, targetQty: lineTargetQty };
+
     if (!isLab && !useDemo && orderId != null) {
       void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
     }
-  }, [currentItem, draftState.totalLogged, isLab, orderId, queryClient, targetQty, useDemo]);
+
+    continueAfterLineClose(outcome);
+  }, [
+    continueAfterLineClose,
+    currentItem,
+    draftState.totalLogged,
+    isLab,
+    lineTargetQty,
+    orderId,
+    queryClient,
+    useDemo,
+  ]);
 
   const handleFlagSubmit = useCallback(
     async (payload: FlagSubmitPayload) => {
       if (!currentItem) return;
+      if (flagSheetMode === 'short') {
+        await handleShortPickSubmit(payload);
+        return;
+      }
       appHaptics.impactMedium();
 
       if (!isLab && !useDemo && order) {
@@ -468,13 +691,14 @@ export function PickFlowExperience({
       }
 
       setFlagOpen(false);
+      setFlagSheetMode('issue');
       setModalOpen(false);
       setLineOutcome({
         kind: 'flagged',
         itemId: currentItem.id,
         reason: payload.reason,
         pickedQty: draftState.totalLogged,
-        targetQty,
+        targetQty: lineTargetQty,
       });
       setCompletedLines((prev) => ({
         ...prev,
@@ -487,11 +711,13 @@ export function PickFlowExperience({
     [
       currentItem,
       draftState.totalLogged,
+      flagSheetMode,
+      handleShortPickSubmit,
       isLab,
       order,
       orderId,
       queryClient,
-      targetQty,
+      lineTargetQty,
       useDemo,
       userName,
     ],
@@ -518,7 +744,7 @@ export function PickFlowExperience({
       draftState.reset(
         createLineDraft({
           rootOrderItemId: currentItem.id,
-          targetQty,
+          targetQty: lineTargetQty,
           uom: salesUom(currentItem),
         }),
       );
@@ -540,16 +766,10 @@ export function PickFlowExperience({
     order,
     orderId,
     queryClient,
-    targetQty,
+    lineTargetQty,
     useDemo,
     userId,
   ]);
-
-  const advanceLine = useCallback(() => {
-    setLineOutcome(null);
-    setLineIndex((i) => Math.min(i + 1, pickItems.length - 1));
-    setViewMode('card');
-  }, [pickItems.length]);
 
   const goToLine = useCallback((index: number) => {
     setLineOutcome(null);
@@ -558,11 +778,14 @@ export function PickFlowExperience({
   }, [pickItems.length]);
 
   const listRows = useMemo((): PickLineListEntry[] => {
+    if (!order) return [];
     return pickItems.map((item, index) => {
-      const itemTargetQty = pickQuantityTarget(item);
+      const itemDraft = buildLineDraftFromOrderItem(item, order.items);
+      const itemTargetQty = itemDraft.targetQty;
+      const itemLogged = sumLineDraftLogged(itemDraft);
       const completed = completedLines[item.id];
       const isCurrent = index === lineIndex;
-      const loggedOnCurrent = isCurrent ? draftState.totalLogged : 0;
+      const loggedOnCurrent = isCurrent ? draftState.totalLogged : itemLogged;
 
       let status: PickLineListEntry['status'] = 'pending';
       if (completed === 'picked') status = 'picked';
@@ -577,13 +800,13 @@ export function PickFlowExperience({
         partCode: partCode(item),
         itemName: item.item_name,
         targetQty: itemTargetQty,
-        pickedQty: completed === 'partial' || (isCurrent && loggedOnCurrent > 0) ? loggedOnCurrent : undefined,
+        pickedQty: completed === 'partial' || loggedOnCurrent > 0 ? loggedOnCurrent : undefined,
         uom: salesUom(item),
         unitPrice: orderItemUnitPrice(item.price_quoted, item.price_system),
         status,
       };
     });
-  }, [completedLines, draftState.totalLogged, lineIndex, pickItems]);
+  }, [completedLines, draftState.totalLogged, lineIndex, order, pickItems]);
 
   const doneCount = useMemo(
     () => listRows.filter((row) => row.status === 'picked' || row.status === 'flagged').length,
@@ -646,33 +869,29 @@ export function PickFlowExperience({
     );
   }
 
-  const remaining = Math.max(0, targetQty - draftState.totalLogged);
+  const remaining = Math.max(0, lineTargetQty - draftState.totalLogged);
 
   const outcomeHeadline =
-    lineOutcome?.kind === 'picked'
-      ? `${lineOutcome.pickedQty} ${salesUom(currentItem)} picked ✓`
-      : lineOutcome?.kind === 'partial'
-        ? `${lineOutcome.pickedQty} of ${lineOutcome.targetQty} picked — billing will review`
-        : lineOutcome?.kind === 'flagged'
-          ? `Flagged · ${lineOutcome.reason}`
-          : '';
+    lineOutcome?.kind === 'flagged' ? `Flagged · ${lineOutcome.reason}` : '';
 
   const outcomeDetail =
-    lineOutcome && lineOutcome.kind !== 'picked'
+    lineOutcome?.kind === 'flagged'
       ? `${lineOutcome.pickedQty} of ${lineOutcome.targetQty} logged`
       : undefined;
 
-  const nextItem = pickItems[lineIndex + 1];
-  const nextPreview: NextPickLinePreview | null = nextItem
+  const nextPendingIdx =
+    lineOutcome?.kind === 'flagged'
+      ? findNextPendingLineIndex(pickItems, lineIndex, completedLines)
+      : null;
+  const nextPendingItem = nextPendingIdx != null ? pickItems[nextPendingIdx] : null;
+  const nextPreview: NextPickLinePreview | null = nextPendingItem
     ? {
-        code: partCode(nextItem),
-        rackNo: nextItem.rack_no,
-        itemName: nextItem.item_name,
-        deckIndex: lineIndex + 1,
+        code: partCode(nextPendingItem),
+        rackNo: nextPendingItem.rack_no,
+        itemName: nextPendingItem.item_name,
+        deckIndex: nextPendingIdx ?? 0,
       }
     : null;
-
-  const finishOrder = onFinish ?? onBack;
 
   return (
     <div className="role-picking flex h-dvh flex-col overflow-hidden bg-[var(--bg-primary)]">
@@ -698,7 +917,7 @@ export function PickFlowExperience({
           <SyncStatusPill status={useDemo ? 'saved' : syncStatus} pendingCount={pendingCount} />
         </div>
 
-        {!lineOutcome ? (
+        {!lineOutcome || lineOutcome.kind !== 'flagged' ? (
           <div className="pick-flow-toolbar border-t border-[var(--border-faint)] px-4 py-2">
             <PickOrderProgressBar
               doneCount={doneCount}
@@ -736,15 +955,15 @@ export function PickFlowExperience({
       </header>
 
       <div className="pick-flow-body flex min-h-0 flex-1 flex-col overflow-hidden">
-      {lineOutcome ? (
+      {lineOutcome?.kind === 'flagged' ? (
         <div className="flex min-h-0 flex-1 flex-col p-4">
           <PickLineResolvedDock
-            kind={lineOutcome.kind === 'picked' ? 'picked' : lineOutcome.kind === 'partial' ? 'partial' : 'flagged'}
+            kind="flagged"
             headline={outcomeHeadline}
             detail={outcomeDetail}
             nextPreview={nextPreview}
             onNext={advanceLine}
-            onUndoPick={lineOutcome.kind === 'flagged' ? () => void handleUndoFlag() : undefined}
+            onUndoPick={() => void handleUndoFlag()}
             undoDisabled={revertPending}
           />
         </div>
@@ -764,7 +983,7 @@ export function PickFlowExperience({
           rackNo={currentItem.rack_no}
           partCode={partCode(currentItem)}
           itemName={currentItem.item_name}
-          targetQty={targetQty}
+          targetQty={lineTargetQty}
           uom={salesUom(currentItem)}
           draft={draftState.draft}
           totalLogged={draftState.totalLogged}
@@ -783,7 +1002,10 @@ export function PickFlowExperience({
           onNextLine={() => goToLine(lineIndex + 1)}
           onGoToLine={goToLine}
           onSeeAllLines={() => setViewMode('list')}
-          onFlag={() => setFlagOpen(true)}
+          onFlag={() => {
+            setFlagSheetMode('issue');
+            setFlagOpen(true);
+          }}
           onEditPick={openPickModal}
           onEditGroupMrp={openEditGroupMrp}
           onEditGroupQty={openEditGroupQty}
@@ -826,7 +1048,10 @@ export function PickFlowExperience({
           draftState.startPick();
           setModalView('mrp');
         }}
-        onShortStock={() => setFlagOpen(true)}
+        onShortStock={() => {
+          setFlagSheetMode('issue');
+          setFlagOpen(true);
+        }}
         onMarkPicked={handleMarkPicked}
         onOpenPriceFix={() => setPriceFixOpen(true)}
         onPriceFixConfirm={(mrp) => {
@@ -853,7 +1078,10 @@ export function PickFlowExperience({
 
       <FlagReasonSheet
         isOpen={flagOpen}
-        onClose={() => setFlagOpen(false)}
+        onClose={() => {
+          setFlagOpen(false);
+          setFlagSheetMode('issue');
+        }}
         onSubmit={handleFlagSubmit}
         contextBanner={shortFlagContext}
         encourageNote

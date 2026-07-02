@@ -3,17 +3,21 @@ import { useState } from 'react';
 import { Trash } from '@phosphor-icons/react';
 import type { BusyEntryLineNature } from '../../../lib/billing/busyEntryLineNature';
 import { BusyEntryCheckbox, BusyEntryCheckboxHeader } from './BusyEntryCheckbox';
-import { BusyEntryCode } from './BusyEntryCode';
 import type { BillingFreshnessRow } from '../../../hooks/useBillingStockFreshness';
-import { SalesUnitBadge } from '../../shared/SalesUnitBadge';
 import { busyPasteUnitLabel, effectiveSalesLineUnit } from '../../../lib/salesUnit';
 import type { BillingLineEdit } from '../../../lib/billing/liveQueueDraft';
 import type { ItemFlag } from '../../../hooks/useBillingFlow';
 import type { OrderItem } from '../../../types';
 import { orderItemReadableName } from '../../../utils/formatters';
 import { BusyEntryLineChips } from './BusyEntryLineChips';
+import { BusyEntryItemCell } from './BusyEntryItemCell';
 import { BusyEntryRateCell } from './BusyEntryRateCell';
 import { BusyEntryQtyUnit } from './BusyEntryQtyUnit';
+import {
+  BUSY_ENTRY_COL_ITEM,
+  BUSY_ENTRY_COL_QTY,
+  BUSY_ENTRY_COL_RATE,
+} from './busyEntryLayout';
 
 export type LineNature = BusyEntryLineNature;
 export type LineStatus = 'active' | 'pending' | 'removed';
@@ -109,22 +113,13 @@ export function BusyEntryTableHeader({
           totalCount={totalCount}
           onToggleAll={onToggleAll}
         />
-        <th
-          className="billing-col-alias1 w-[148px] px-3 text-left busy-entry-col-header"
-          style={{ borderRight: '0.5px solid var(--border-opaque)' }}
-        >
-          Part no.
+        <th className={`${BUSY_ENTRY_COL_ITEM} text-left busy-entry-col-header`}>
+          Item
         </th>
-        <th className="billing-col-item min-w-0 px-2.5 text-left busy-entry-col-header">
-          Description
-        </th>
-        <th className="billing-col-rate w-24 px-2.5 text-right busy-entry-col-header">
+        <th className={`${BUSY_ENTRY_COL_RATE} busy-entry-col-header`}>
           Bill rate
         </th>
-        <th className="billing-col-unit w-[5.25rem] px-2.5 text-right busy-entry-col-header">
-          Unit
-        </th>
-        <th className="billing-col-qty w-[4.5rem] px-2.5 text-right busy-entry-col-header">
+        <th className={`${BUSY_ENTRY_COL_QTY} busy-entry-col-header`}>
           Qty
         </th>
       </tr>
@@ -215,46 +210,33 @@ export function BusyEntryLineRow({
         ) : null}
       </td>
 
-      <td
-        className="billing-col-alias1 w-[148px] px-3 align-middle"
-        style={{ borderRight: '0.5px solid var(--border-opaque)' }}
-      >
-        <div className="flex flex-col gap-0.5">
-          <BusyEntryCode item={item} muted={isSkip || isPending} />
-          {brandName && (
-            <span className="busy-entry-brand truncate">{brandName}</span>
-          )}
-        </div>
-      </td>
-
-      <td className="billing-col-item min-w-0 py-2 px-2.5 align-middle relative">
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <p
-            className="busy-entry-desc truncate leading-snug"
-            title={orderItemReadableName(item)}
-          >
-            {isSplitSibling ? '↳ ' : ''}
-            {orderItemReadableName(item)}
-          </p>
-          <BusyEntryLineChips
-            nature={nature}
-            flag={flag}
-            pendingQty={pendingQty}
-            isPending={isPending}
-            isSkip={isSkip}
-            isNew={isNew}
-            isEdited={isEdited}
-            fresh={fresh}
-            onUndoFlag={onUndoFlag}
-            onApplyLiveStock={onApplyLiveStock}
-          />
-        </div>
+      <td className={`${BUSY_ENTRY_COL_ITEM} pr-10 relative`}>
+        <BusyEntryItemCell
+          item={item}
+          brandName={brandName}
+          isSplitSibling={isSplitSibling}
+          muted={isSkip || isPending}
+          chips={
+            <BusyEntryLineChips
+              nature={nature}
+              flag={flag}
+              pendingQty={pendingQty}
+              isPending={isPending}
+              isSkip={isSkip}
+              isNew={isNew}
+              isEdited={isEdited}
+              fresh={fresh}
+              onUndoFlag={onUndoFlag}
+              onApplyLiveStock={onApplyLiveStock}
+            />
+          }
+        />
 
         {!isSkip && !showDeleteConfirm && (
           <button
             type="button"
             aria-label="Remove line"
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-[var(--content-negative)] opacity-0 group-hover:opacity-100 transition-opacity"
+            className="absolute right-2.5 top-2 p-1 rounded-md text-[var(--content-negative)] opacity-0 group-hover:opacity-100 transition-opacity"
             onClick={(e) => {
               e.stopPropagation();
               setShowDeleteConfirm(true);
@@ -266,7 +248,7 @@ export function BusyEntryLineRow({
 
         {showDeleteConfirm && (
           <div
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5"
+            className="absolute right-2.5 top-2 flex items-center gap-1.5"
             onClick={(e) => e.stopPropagation()}
           >
             <span className="font-ds-caption-size text-[var(--content-negative)]">Remove?</span>
@@ -291,17 +273,11 @@ export function BusyEntryLineRow({
         )}
       </td>
 
-      <td className="billing-col-rate w-24 px-2.5 text-right align-middle">
+      <td className={BUSY_ENTRY_COL_RATE}>
         <BusyEntryRateCell item={item} nature={nature} />
       </td>
 
-      <td className="billing-col-unit w-[5.25rem] px-2.5 text-right align-middle">
-        <div className="flex justify-end">
-          <SalesUnitBadge unit={unit} />
-        </div>
-      </td>
-
-      <td className="billing-col-qty w-[4.5rem] px-2.5 text-right align-middle">
+      <td className={BUSY_ENTRY_COL_QTY}>
         {isPartialInput ? (
           <div className="inline-flex items-baseline justify-end gap-1" onClick={(e) => e.stopPropagation()}>
             <input

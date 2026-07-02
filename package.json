@@ -11,6 +11,7 @@
     "test:contrast": "node scripts/contrast-test.mjs",
     "test:bill-outcome": "npx tsx src/lib/billing/billLineOutcome.test.ts",
     "test:sort-bill-lines": "npx tsx src/lib/billing/sortBillLines.test.ts",
+    "test:final-bill-copy": "npx tsx src/lib/billing/finalBillCopy.test.ts",
     "test:busy-line-split": "npx tsx src/lib/billing/busyLineSplit.test.ts",
     "test:derive-operator-stage": "npx tsx src/lib/billing/deriveBillingOperatorStage.test.ts",
     "test:order-age-tier": "npx tsx src/lib/billing/orderAgeTier.test.ts",

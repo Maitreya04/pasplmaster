@@ -1,8 +1,9 @@
 import { busyEntryLineNature } from './busyEntryLineNature';
 import {
-  deriveBillLineFulfillment,
-  summarizeBillFulfillment,
-} from './billLineFulfillment';
+  buildFinalBillCopyRows,
+  countFinalBillPendingRows,
+  finalBillCopyTotals,
+} from './finalBillCopy';
 import type { BillSheetEdits } from '../../hooks/useBillSheetEdits';
 
 export interface ReviewWorkMetrics {
@@ -15,18 +16,15 @@ export interface ReviewWorkMetrics {
 
 /** Stats for the shared billing work dock on verify / finalise stages. */
 export function deriveReviewWorkMetrics(billSheet: BillSheetEdits): ReviewWorkMetrics {
-  const { visibleItems, pendingByItemId, edits } = billSheet;
-
-  const fulfillment = summarizeBillFulfillment(visibleItems, pendingByItemId);
-
-  const copyableItems = visibleItems.filter((item) => {
-    const edit = edits[item.id];
-    if (edit?.removed) return false;
-    if (item.state === 'flagged' && edit?.resolution == null) return false;
-    const pending =
-      item.item_id != null ? pendingByItemId.get(item.item_id) ?? [] : [];
-    return !deriveBillLineFulfillment(item, pending).excludeFromBusyBill;
+  const { sortedLines, pendingByItemId, edits, flaggedItems } = billSheet;
+  const rows = buildFinalBillCopyRows({
+    sortedLines,
+    edits,
+    pendingByItemId,
+    flaggedItems,
   });
+  const totals = finalBillCopyTotals(rows);
+  const copyableItems = rows.map((row) => row.item);
 
   const specialRateCount = copyableItems.filter(
     (item) => busyEntryLineNature(item) === 'special_rate',
@@ -34,17 +32,15 @@ export function deriveReviewWorkMetrics(billSheet: BillSheetEdits): ReviewWorkMe
   const focCount = copyableItems.filter(
     (item) => busyEntryLineNature(item) === 'foc',
   ).length;
-  const pendingLineCount = visibleItems.filter((item) => {
-    if (edits[item.id]?.removed) return false;
-    const pending =
-      item.item_id != null ? pendingByItemId.get(item.item_id) ?? [] : [];
-    const f = deriveBillLineFulfillment(item, pending);
-    return f.excludeFromBusyBill || f.qtySalesPo > 0 || f.qtyPickerOos > 0;
-  }).length;
+  const pendingLineCount = countFinalBillPendingRows({
+    sortedLines,
+    edits,
+    pendingByItemId,
+  });
 
   return {
-    billableCount: copyableItems.length,
-    qtyTotal: fulfillment.billTodayQty,
+    billableCount: totals.lineCount,
+    qtyTotal: totals.qtyTotal,
     specialRateCount,
     focCount: focCount,
     pendingCount: pendingLineCount,

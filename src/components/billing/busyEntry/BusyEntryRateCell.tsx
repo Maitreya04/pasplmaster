@@ -31,7 +31,6 @@ export function BusyEntryRateCell({
 
   return (
     <span className="block text-right">
-      {isSpecial && showBook ? <span className="busy-entry-rate-label">Special</span> : null}
       {billedRate == null ? (
         <span className="busy-entry-rate-value text-[var(--content-tertiary)]">—</span>
       ) : (
@@ -46,7 +45,7 @@ export function BusyEntryRateCell({
       )}
       {showBook && bookRate != null ? (
         <span className="busy-entry-rate-book">
-          Book{' '}
+          Bill{' '}
           <BillingFigure
             value={bookRate}
             kind="currency-raw"

@@ -620,12 +620,12 @@ export function OrderSheetView({
     : 'density-compact min-h-screen bg-[var(--bg-primary)] flex flex-col animate-slide-up';
 
   const tableClass = embedded
-    ? 'ds-table ds-table--billing w-full'
-    : 'ds-table ds-table--billing w-full max-w-3xl mx-auto';
+    ? 'ds-table ds-table--billing w-full min-w-[40rem]'
+    : 'ds-table ds-table--billing w-full min-w-[40rem] max-w-[min(100%,72rem)] mx-auto';
 
   const bodyWrapClass = embedded
     ? 'flex flex-col min-h-0 gap-2 p-3'
-    : 'max-w-3xl mx-auto px-4 lg:px-6 py-4 space-y-2';
+    : 'w-full max-w-[min(100%,72rem)] mx-auto px-4 lg:px-6 py-4 space-y-2';
 
   return (
     <div className={shellClass}>
@@ -718,7 +718,7 @@ export function OrderSheetView({
                 : 'rounded-xl border border-[var(--border-subtle)] overflow-hidden shadow-sm'
             }`}
           >
-            <div className="overflow-x-auto min-w-0">
+            <div className="busy-entry-lines overflow-x-auto min-w-0">
             {billableForBusyCount === 0 && skipRowCount > 0 ? (
               <BusyBillableEmptyState skipCount={skipRowCount} />
             ) : null}
@@ -743,7 +743,7 @@ export function OrderSheetView({
                         key={`removed-${serverItem.id}`}
                         className="bg-[var(--bg-tertiary)]"
                       >
-                        <td colSpan={5} className="py-2.5 px-3">
+                        <td colSpan={4} className="py-2.5 px-3">
                           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2">
                             <div className="min-w-0 flex items-start gap-2">
                               <span className="ds-chip ds-chip--sm shrink-0 mt-0.5 bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] border-[var(--border-negative)]">
@@ -794,7 +794,7 @@ export function OrderSheetView({
                     skipRowCount > 0 &&
                     serverItem.id === tableItemOrder.skipSectionStartId ? (
                       <tr key="skip-section-header">
-                        <td colSpan={5} className="p-0 border-t border-[var(--border-opaque)]">
+                        <td colSpan={4} className="p-0 border-t border-[var(--border-opaque)]">
                           <QueueSectionHeader
                             label="Pending stock"
                             count={skipRowCount}

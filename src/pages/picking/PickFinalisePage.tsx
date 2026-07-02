@@ -25,6 +25,7 @@ import {
   pickNoLongerActiveMessage,
 } from '../../lib/picking/pickSessionErrors';
 import { appHaptics } from '../../lib/haptics';
+import { clearPickFlowSession } from '../../features/picking/lib/pickFlowSession';
 import { PickCompleteScreen } from './PickCompleteScreen';
 
 export default function PickFinalisePage(): React.JSX.Element | null {
@@ -195,6 +196,9 @@ export default function PickFinalisePage(): React.JSX.Element | null {
       };
     },
     onSuccess: (snapshot) => {
+      if (orderId != null) {
+        clearPickFlowSession(orderId, isLab ? 'lab' : 'production');
+      }
       if (!isLab && !offlinePickActive) {
         void queryClient.invalidateQueries({ queryKey: ['orders'] });
         void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
