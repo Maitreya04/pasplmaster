@@ -26,13 +26,15 @@ import type { BillSheetEdits } from '../../hooks/useBillSheetEdits';
 import type { DeskOrderRow } from '../../hooks/useBillingDeskOrders';
 import type { OrderWithItems } from '../../types';
 import type { BillingLineEdit, ItemFlag } from '../../hooks/useBillingFlow';
-import { formatCurrencyRaw, orderItemDisplayName } from '../../utils/formatters';
+import { formatCurrencyRaw } from '../../utils/formatters';
 import { useOrderHandoff } from '../../hooks/useOrderHandoff';
 import {
   buildFinalBillCopyRows,
   buildFinalBillPasteText,
   finalBillCopyTotals,
+  finalBillCopyWarningLabel,
   type FinalBillCopyRow,
+  type FinalBillCopyWarning,
 } from '../../lib/billing/finalBillCopy';
 import { formatRoundedRs } from '../../lib/billing/mrpWorkflowCopy';
 
@@ -66,6 +68,16 @@ function FinalBillCopyPreview({
   const totals = finalBillCopyTotals(rows);
   if (rows.length === 0 && unresolvedCount === 0 && pendingCount === 0) return null;
   const previewRows = rows.slice(0, 3);
+  const warningCounts = rows.reduce(
+    (acc, row) => {
+      for (const warning of row.warnings) {
+        acc.set(warning, (acc.get(warning) ?? 0) + 1);
+      }
+      return acc;
+    },
+    new Map<FinalBillCopyWarning, number>(),
+  );
+  const hasWarnings = warningCounts.size > 0;
 
   return (
     <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
@@ -76,9 +88,12 @@ function FinalBillCopyPreview({
           </p>
           <p className="text-[11px] font-medium text-[var(--content-tertiary)]">
             {totals.lineCount} Busy row{totals.lineCount === 1 ? '' : 's'} · {totals.qtyTotal} pcs ·
-            resolved rates in paste
+            Item · Qty · Unit · MRP in paste
             {pendingCount > 0 ? ` · ${pendingCount} pending/skipped` : ''}
             {unresolvedCount > 0 ? ` · ${unresolvedCount} unresolved` : ''}
+          </p>
+          <p className="mt-0.5 text-[10px] font-medium text-[var(--content-tertiary)]">
+            Copy → open Busy voucher (Item cell) → Ctrl+Alt+B → review totals → F2 save
           </p>
         </div>
         <p className="text-xs font-bold tabular-nums text-[var(--content-primary)]">
@@ -86,21 +101,40 @@ function FinalBillCopyPreview({
         </p>
       </div>
 
+      {hasWarnings ? (
+        <p className="mt-1.5 text-[10px] font-semibold text-[var(--content-warning-on-light)]">
+          {Array.from(warningCounts.entries())
+            .map(([warning, count]) => `${count} ${finalBillCopyWarningLabel(warning).toLowerCase()}`)
+            .join(' · ')}
+          {' — paste may still work; verify in Busy'}
+        </p>
+      ) : null}
+
       {previewRows.length > 0 ? (
         <div className="mt-2 grid gap-1">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-[var(--content-tertiary)]">
+            <span>Item</span>
+            <span>Qty</span>
+            <span>Unit</span>
+            <span>MRP</span>
+            <span>Status</span>
+          </div>
           {previewRows.map((row) => (
             <div
               key={row.item.id}
-              className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 text-[11px]"
+              className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] items-center gap-2 text-[11px]"
             >
-              <span className="min-w-0 truncate font-medium text-[var(--content-primary)]">
-                {orderItemDisplayName(row.item)}
+              <span className="min-w-0 truncate font-medium text-[var(--content-primary)]" title={row.pasteName}>
+                {row.pasteName}
               </span>
               <span className="whitespace-nowrap tabular-nums text-[var(--content-secondary)]">
-                {row.qty} {row.unitLabel}
+                {row.qty}
+              </span>
+              <span className="whitespace-nowrap text-[var(--content-secondary)]">
+                {row.unitLabel}
               </span>
               <span className="whitespace-nowrap tabular-nums font-semibold text-[var(--content-primary)]">
-                {formatRoundedRs(row.rate)}
+                {formatRoundedRs(row.pasteMrp)}
               </span>
               <span className="whitespace-nowrap rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 font-semibold text-[var(--content-secondary)]">
                 {row.status}

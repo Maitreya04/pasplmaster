@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import {
   buildFinalBillCopyRows,
   buildFinalBillPasteText,
+  busyPasteItemName,
   finalBillCopyTotals,
+  resolveBusyPasteMrp,
 } from './finalBillCopy';
 import type { OrderItem, PendingItem } from '../../types';
 import type { OverlayLineEdit } from '../../pages/billing/BillingDesk/types';
@@ -65,11 +67,19 @@ function pending(item: OrderItem, qty: number): PendingItem {
 }
 
 function runTests(): void {
-  const alpha = stubItem({ id: 1, bill_line_no: 1, item_name: 'Alpha', qty_requested: 5 });
+  const alpha = stubItem({
+    id: 1,
+    bill_line_no: 1,
+    item_name: 'USHA2 Alpha Widget',
+    catalog_alias1: 'USHA2',
+    catalog_busy_code: 1001,
+    qty_requested: 5,
+  });
   const setLine = stubItem({
     id: 2,
     bill_line_no: 2,
     item_name: 'Set line',
+    catalog_busy_code: 1002,
     qty_requested: 2,
     sales_unit: 'set',
     price_quoted: 120,
@@ -86,6 +96,7 @@ function runTests(): void {
     id: 4,
     bill_line_no: 4,
     item_name: 'Short line',
+    catalog_busy_code: 1004,
     qty_requested: 3,
     scan_result: {
       scannedText: 'PRICE_GROUP',
@@ -102,6 +113,7 @@ function runTests(): void {
       shortQty: 2,
       shortReason: "Can't Find",
       pickerNote: 'Only 3 on shelf',
+      suggestedMrpAtPick: 504,
     },
   });
   const removed = stubItem({ id: 5, bill_line_no: 5, item_name: 'Removed', qty_requested: 9 });
@@ -109,6 +121,7 @@ function runTests(): void {
     id: 6,
     bill_line_no: 6,
     item_name: 'Over line',
+    catalog_busy_code: 1006,
     qty_requested: 9,
     price_quoted: 80,
     scan_result: {
@@ -128,6 +141,12 @@ function runTests(): void {
     },
   });
 
+  assert.equal(
+    busyPasteItemName(alpha),
+    'USHA2 Alpha Widget',
+    'paste uses full item_name, not stripped display name',
+  );
+
   const items = [removed, shortLine, unresolvedOos, setLine, over, alpha];
   const edits: Record<number, OverlayLineEdit> = Object.fromEntries(
     items.map((item) => [item.id, edit(item)]),
@@ -146,18 +165,21 @@ function runTests(): void {
   });
 
   assert.deepEqual(
-    rows.map((row) => row.item.item_name),
-    ['Alpha', 'Set line', 'Short line', 'Over line'],
+    rows.map((row) => row.pasteName),
+    ['USHA2 Alpha Widget', 'Set line', 'Short line', 'Over line'],
   );
   assert.equal(
     buildFinalBillPasteText(rows),
-    'Alpha\t5\t\t100\nSet line\t2\tSet\t120\nShort line\t3\t\t100\nOver line\t9\t\t80',
+    'USHA2 Alpha Widget\t5\t\t100\nSet line\t2\tSet\t120\nShort line\t3\t\t504\nOver line\t9\t\t80',
   );
+  assert.equal(rows.find((row) => row.item.id === shortLine.id)?.pasteMrp, 504);
+  assert.equal(rows.find((row) => row.item.id === shortLine.id)?.mrpSource, 'stock_at_pick');
 
   const labelMrpLine = stubItem({
     id: 7,
     bill_line_no: 7,
     item_name: 'Label MRP line',
+    catalog_busy_code: 1007,
     qty_requested: 2,
     price_quoted: 200,
     price_system: 200,
@@ -176,6 +198,31 @@ function runTests(): void {
     flaggedItems: [],
   });
   assert.equal(buildFinalBillPasteText(labelMrpRows), 'Label MRP line\t2\t\t181');
+  assert.equal(labelMrpRows[0]?.mrpSource, 'confirmed_mrp');
+
+  const focLine = stubItem({
+    id: 8,
+    bill_line_no: 8,
+    item_name: 'FOC gift',
+    catalog_busy_code: 1008,
+    qty_requested: 1,
+    is_foc: true,
+    price_quoted: 0,
+  });
+  const focRows = buildFinalBillCopyRows({
+    sortedLines: [focLine],
+    edits: { [focLine.id]: edit(focLine, { priceQuoted: 0 }) },
+    pendingByItemId: new Map(),
+    flaggedItems: [],
+  });
+  assert.equal(buildFinalBillPasteText(focRows), 'FOC gift\t1\t\t0');
+  assert.equal(focRows[0]?.mrpSource, 'foc');
+
+  assert.deepEqual(resolveBusyPasteMrp(alpha, edit(alpha), false), {
+    mrp: 100,
+    source: 'quoted_fallback',
+  });
+
   assert.equal(rows.find((row) => row.item.id === shortLine.id)?.qty, 3);
   assert.equal(rows.find((row) => row.item.id === shortLine.id)?.status, 'Short pick');
   assert.equal(rows.find((row) => row.item.id === over.id)?.status, 'Overpick');
