@@ -1,5 +1,6 @@
 ; Busy 21 — Finalise bill paste from PASPL clipboard
-; Requires AutoHotkey v1.1.29+ (https://www.autohotkey.com/)
+; Requires AutoHotkey v1.1 (NOT v2) — https://www.autohotkey.com/download/ahk-install.exe
+#Requires AutoHotkey v1.1.33+
 ;
 ; Clipboard format (tab-separated, one line per item):
 ;   ItemName<TAB>Qty<TAB>Unit<TAB>MRP
@@ -72,7 +73,8 @@ PasteFinalBillFromClipboard() {
     if (gStopRequested)
       break
 
-    fields := StrSplit(lineText, "`t", , 4)
+    ; Split on tab only (no MaxParts — older AHK builds reject a 4th StrSplit arg)
+    fields := StrSplit(lineText, "`t")
     fieldCount := fields.Length()
     if (fieldCount < 4) {
       MsgBox, 48, Busy paste, Line %index% has %fieldCount% columns (need 4).`nAborting.`n`n%lineText%

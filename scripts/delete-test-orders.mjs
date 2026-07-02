@@ -7,10 +7,11 @@ import { resolve } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 
 const ORDER_NUMBERS = [
-  'PA-260602-0038',
-  'PA-260602-0035',
-  'PA-260602-0016',
-  'PA-260602-0011',
+  'PA-260702-0036',
+  'PA-260702-0019',
+  'PA-260702-0012',
+  'PA-260702-0009',
+  'PA-260702-0002',
 ];
 
 function loadEnvLocal() {
@@ -148,7 +149,7 @@ async function main() {
   if (verify?.length) {
     throw new Error(`Verify failed: still present: ${verify.map((v) => v.order_number).join(', ')}`);
   }
-  console.log('Verified: all four order numbers gone from orders table.');
+  console.log('Verified: all order numbers gone from orders table.');
 }
 
 main().catch((e) => {
