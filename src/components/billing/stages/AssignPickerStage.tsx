@@ -57,8 +57,6 @@ export function AssignPickerStage({
   const sorted = useMemo(() => sortPickersForAssign(pickers), [pickers]);
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const confirmRowRef = useRef<HTMLDivElement | null>(null);
-  const confirming = sorted.find((p) => p.userId === confirmingId) ?? null;
-  const assignLoading = confirming != null && busyPickerId === confirming.userId;
   const assignVerb = reassign ? 'Re-assign' : 'Assign';
 
   useEffect(() => {
