@@ -45,6 +45,7 @@ export default function PickFinalisePage(): React.JSX.Element | null {
   const order = offlinePickActive
     ? offlinePickSession?.orderSnapshot ?? orderQuery.data ?? null
     : orderQuery.data ?? null;
+  const refetchOrder = orderQuery.refetch;
   const isLoading = orderQuery.isLoading && !offlinePickSession;
   const error = orderQuery.error && !offlinePickSession ? orderQuery.error : null;
   const workClaim = useWorkClaim(
@@ -72,17 +73,27 @@ export default function PickFinalisePage(): React.JSX.Element | null {
     return Number.isFinite(parsed) ? parsed : 0;
   }, [boxCountInput]);
 
+  const expectAllDone =
+    (location.state as { expectAllDone?: boolean } | null)?.expectAllDone === true;
+
   const canFinalise =
-    boxCount >= 1 && (isLab || isClaimedByMe) && order?.workflow_status === 'picking';
+    boxCount >= 1 &&
+    (isLab || isClaimedByMe) &&
+    order?.workflow_status === 'picking' &&
+    (isLab || offlinePickActive || counts.allDone);
+
+  const waitingForFinalLineSync =
+    expectAllDone &&
+    !counts.allDone &&
+    !isLab &&
+    !offlinePickActive &&
+    order?.workflow_status === 'picking';
 
   useEffect(() => {
     if (!orderId || !Number.isFinite(orderId)) {
       navigate('/picking', { replace: true });
     }
   }, [navigate, orderId]);
-
-  const expectAllDone =
-    (location.state as { expectAllDone?: boolean } | null)?.expectAllDone === true;
 
   useEffect(() => {
     if (completionSnapshot) return;
@@ -118,6 +129,15 @@ export default function PickFinalisePage(): React.JSX.Element | null {
   ]);
 
   useEffect(() => {
+    if (!waitingForFinalLineSync) return;
+    void refetchOrder();
+    const id = window.setInterval(() => {
+      void refetchOrder();
+    }, 1_000);
+    return () => window.clearInterval(id);
+  }, [refetchOrder, waitingForFinalLineSync]);
+
+  useEffect(() => {
     if (isLab || offlinePickActive) return;
     if (order?.workflow_status === 'picking' && !isClaimedByMe && !claimError) {
       void claim?.();
@@ -139,7 +159,7 @@ export default function PickFinalisePage(): React.JSX.Element | null {
         order,
         counts,
         boxCount,
-        billingNotified: !isLab && !offlinePickActive,
+        billingNotified: false,
       });
       pendingCompletionSnapshotRef.current = snapshot;
       if (offlinePickActive) {
@@ -155,7 +175,7 @@ export default function PickFinalisePage(): React.JSX.Element | null {
         }
         return snapshot;
       }
-      await completePickSession({
+      const completion = await completePickSession({
         orderId,
         orderNumber: order.order_number,
         customerName: order.customer_name,
@@ -168,7 +188,11 @@ export default function PickFinalisePage(): React.JSX.Element | null {
         completedAt: order.completed_at,
         isLab,
       });
-      return snapshot;
+      return {
+        ...snapshot,
+        billingNotified: completion.billingNotified,
+        billingNotificationError: completion.notificationError,
+      };
     },
     onSuccess: (snapshot) => {
       if (!isLab && !offlinePickActive) {
@@ -176,6 +200,9 @@ export default function PickFinalisePage(): React.JSX.Element | null {
         void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
         void queryClient.invalidateQueries({ queryKey: ['picker-daily-stats'] });
         void queryClient.invalidateQueries({ queryKey: ['picker-completed-orders'] });
+      }
+      if (snapshot.billingNotificationError) {
+        toast.warning(`Pick saved, but billing notification failed: ${snapshot.billingNotificationError}`);
       }
       appHaptics.success();
       setCompletionSnapshot(snapshot);
@@ -315,6 +342,11 @@ export default function PickFinalisePage(): React.JSX.Element | null {
           {!isLab && order.workflow_status === 'picking' && !isClaimedByMe && (
             <p className="mt-3 text-center text-xs font-semibold text-[var(--content-warning)]">
               Securing pick lock before finalise...
+            </p>
+          )}
+          {waitingForFinalLineSync && (
+            <p className="mt-3 text-center text-xs font-semibold text-[var(--content-warning)]">
+              Syncing final picked line...
             </p>
           )}
         </div>

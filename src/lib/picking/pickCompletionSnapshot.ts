@@ -16,6 +16,7 @@ export interface PickCompletionSnapshot {
   totalPieceCount: number;
   boxCount: number;
   billingNotified: boolean;
+  billingNotificationError: string | null;
   billingHandoffLine: string;
   finishedAtIso: string;
   startedAtIso: string | null;
@@ -52,6 +53,7 @@ export function buildPickCompletionSnapshot(options: {
   counts: PickFinalisationCounts;
   boxCount: number;
   billingNotified: boolean;
+  billingNotificationError?: string | null;
   finishedAtIso?: string;
   saveState?: PickCompletionSaveState;
 }): PickCompletionSnapshot {
@@ -68,6 +70,7 @@ export function buildPickCompletionSnapshot(options: {
     totalPieceCount: counts.pieceTarget,
     boxCount: options.boxCount,
     billingNotified: options.billingNotified,
+    billingNotificationError: options.billingNotificationError ?? null,
     billingHandoffLine: pickerBillingHandoffLine(counts.flagged > 0),
     finishedAtIso: options.finishedAtIso ?? new Date().toISOString(),
     startedAtIso: order.picked_at ?? null,

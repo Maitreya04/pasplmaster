@@ -1,6 +1,10 @@
 import { supabase } from '../supabase/client';
 import { notifyBillingPickReady } from './notifyBillingPickReady';
 import { pickNoLongerActiveMessage } from './pickSessionErrors';
+import {
+  formatInternalNotificationError,
+  type InternalNotificationResult,
+} from '../pickerPush';
 
 export interface CompletePickSessionParams {
   orderId: number;
@@ -16,11 +20,37 @@ export interface CompletePickSessionParams {
   isLab?: boolean;
 }
 
-export async function completePickSession(params: CompletePickSessionParams): Promise<void> {
+export interface CompletePickSessionResult {
+  billingNotified: boolean;
+  notificationResult: InternalNotificationResult | null;
+  notificationError: string | null;
+}
+
+function pickReadyNotificationError(result: InternalNotificationResult | null): string | null {
+  if (!result) return 'No notification response from Supabase';
+  if (result.error) return result.error;
+  if (result.success === false) return 'Notification function reported failure';
+  const inboxCount = result.inboxCount ?? 0;
+  const sentCount = result.sentCount ?? 0;
+  if (inboxCount < 1 && sentCount < 1) {
+    return 'No active billing users or push subscriptions received the notification';
+  }
+  return null;
+}
+
+export async function completePickSession(
+  params: CompletePickSessionParams,
+): Promise<CompletePickSessionResult> {
   if (params.boxCount < 1) {
     throw new Error('Box count must be at least 1');
   }
-  if (params.isLab) return;
+  if (params.isLab) {
+    return {
+      billingNotified: false,
+      notificationResult: null,
+      notificationError: null,
+    };
+  }
 
   if (!params.claimId || !params.userId) {
     throw new Error(pickNoLongerActiveMessage('claim_lost'));
@@ -43,7 +73,7 @@ export async function completePickSession(params: CompletePickSessionParams): Pr
   }
 
   try {
-    await notifyBillingPickReady({
+    const notificationResult = await notifyBillingPickReady({
       orderId: params.orderId,
       orderNumber: params.orderNumber,
       customerName: params.customerName,
@@ -51,7 +81,18 @@ export async function completePickSession(params: CompletePickSessionParams): Pr
       flaggedLineCount: params.flaggedLineCount,
       pickerName: params.pickerName,
     });
-  } catch {
+    const notificationError = pickReadyNotificationError(notificationResult);
+    return {
+      billingNotified: notificationError == null,
+      notificationResult,
+      notificationError,
+    };
+  } catch (error) {
     // Pick is already complete — billing can still see the order in queue.
+    return {
+      billingNotified: false,
+      notificationResult: null,
+      notificationError: formatInternalNotificationError(error),
+    };
   }
 }

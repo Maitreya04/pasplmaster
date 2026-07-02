@@ -51,6 +51,7 @@ export function PickCompleteScreen({ snapshot, orderId }: PickCompleteScreenProp
     totalPieceCount,
     boxCount,
     billingNotified,
+    billingNotificationError,
     billingHandoffLine,
     finishedAtIso,
     startedAtIso,
@@ -177,6 +178,8 @@ export function PickCompleteScreen({ snapshot, orderId }: PickCompleteScreenProp
               ? 'Saved on this device. It will sync automatically when network returns.'
               : saveState === 'needs_review'
                 ? 'Saved on this device. Billing/admin review is needed before this pick can be applied.'
+                : billingNotificationError
+                  ? `Pick saved. Tell billing to refresh queue: ${billingNotificationError}`
                 : billingHandoffLine}
             {billingNotified && saveState === 'saved' && (
               <span className="block pt-1 text-xs text-[var(--content-secondary)]">

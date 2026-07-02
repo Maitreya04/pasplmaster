@@ -1,4 +1,8 @@
-import { sendInternalNotification, type PickReadyForBillingPayload } from '../pickerPush';
+import {
+  sendInternalNotification,
+  type InternalNotificationResult,
+  type PickReadyForBillingPayload,
+} from '../pickerPush';
 
 export type NotifyBillingPickReadyParams = {
   orderId: number;
@@ -11,7 +15,7 @@ export type NotifyBillingPickReadyParams = {
 
 export async function notifyBillingPickReady(
   params: NotifyBillingPickReadyParams,
-): Promise<void> {
+): Promise<InternalNotificationResult | null> {
   const payload: PickReadyForBillingPayload = {
     eventType: 'pick_ready_for_billing',
     orderId: params.orderId,
@@ -21,5 +25,5 @@ export async function notifyBillingPickReady(
     flaggedLineCount: params.flaggedLineCount,
     pickerName: params.pickerName,
   };
-  await sendInternalNotification(payload);
+  return sendInternalNotification(payload);
 }

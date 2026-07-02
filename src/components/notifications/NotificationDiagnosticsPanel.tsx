@@ -68,7 +68,7 @@ export function NotificationDiagnosticsPanel(): React.JSX.Element {
         <code className="text-[var(--content-tertiary)]">
           select * from notification_events order by created_at desc limit 10;
         </code>{' '}
-        — confirms the function wrote audit rows after billing approved.{' '}
+        — confirms the function wrote audit rows after pick-ready/billing sends.{' '}
         <code className="text-[var(--content-tertiary)]">
           select * from user_notifications order by created_at desc limit 10;
         </code>{' '}

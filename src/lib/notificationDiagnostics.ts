@@ -169,14 +169,29 @@ export async function runNotificationDiagnostics(opts: {
     });
   }
 
+  const { count: billingCount, error: billingErr } = await supabase
+    .from('users')
+    .select('*', { count: 'exact', head: true })
+    .eq('role', 'billing')
+    .eq('is_active', true);
+
+  checks.push({
+    id: 'active_billing_users',
+    ok: !billingErr && (billingCount ?? 0) > 0,
+    label: 'Active billing recipients',
+    detail: billingErr
+      ? `${billingErr.code ?? 'error'}: ${billingErr.message}`
+      : `${billingCount ?? 0} active billing user(s). Pick-ready notifications create inbox rows for these users.`,
+  });
+
   checks.push(await probeEdgeFunctionHttp());
 
   checks.push({
-    id: 'billing_path',
+    id: 'pick_ready_path',
     ok: true,
-    label: 'Billing: when is sales notified?',
+    label: 'Picking completion path',
     detail:
-      'Only after Live Queue → Communicate → “Copy & Approve Order”. “Skip notification” does not call the sales update.',
+      'Finalise pick calls complete_picking first, then send-internal-notification with eventType=pick_ready_for_billing. If notification fails, the pick is still saved and the picker receipt shows the warning.',
   });
 
   return checks;
