@@ -151,7 +151,7 @@ function runTests(): void {
   );
   assert.equal(
     buildFinalBillPasteText(rows),
-    'Alpha\t5\t100\nSet line\t2\tSet\t120\nShort line\t3\t100\nOver line\t9\t80',
+    'Alpha\t5\t\t100\nSet line\t2\tSet\t120\nShort line\t3\t\t100\nOver line\t9\t\t80',
   );
 
   const labelMrpLine = stubItem({
@@ -175,7 +175,7 @@ function runTests(): void {
     pendingByItemId: new Map(),
     flaggedItems: [],
   });
-  assert.equal(buildFinalBillPasteText(labelMrpRows), 'Label MRP line\t2\t181');
+  assert.equal(buildFinalBillPasteText(labelMrpRows), 'Label MRP line\t2\t\t181');
   assert.equal(rows.find((row) => row.item.id === shortLine.id)?.qty, 3);
   assert.equal(rows.find((row) => row.item.id === shortLine.id)?.status, 'Short pick');
   assert.equal(rows.find((row) => row.item.id === over.id)?.status, 'Overpick');

@@ -6,8 +6,9 @@ import {
   buildReviewBillTableGroups,
   reviewStatusLabel,
 } from './reviewBillTableRows';
-import { formatBusyPasteLine, sortBillLines } from './sortBillLines';
-import { effectiveSalesLineUnit, salesLineUnitLabel } from '../salesUnit';
+import { sortBillLines } from './sortBillLines';
+import { busyPasteUnitLabel, effectiveSalesLineUnit, salesLineUnitLabel } from '../salesUnit';
+import { orderItemDisplayName } from '../../utils/formatters';
 import type { OrderItem, PendingItem } from '../../types';
 import type { OverlayLineEdit } from '../../pages/billing/BillingDesk/types';
 
@@ -77,9 +78,10 @@ export function buildFinalBillCopyRows({
 
 /** Final bill paste adds resolved bill rate (label MRP, special rate, manual override). */
 export function formatFinalBillPasteLine(row: FinalBillCopyRow): string | null {
-  const base = formatBusyPasteLine(row.item, row.qty, row.edit);
-  if (base == null) return null;
-  return `${base}\t${Math.round(row.rate)}`;
+  if (row.qty <= 0) return null;
+  const unitLabel = busyPasteUnitLabel(effectiveSalesLineUnit(row.item, row.edit));
+  // Always preserve the unit column (blank for default pcs) so resolved rate lands in price.
+  return `${orderItemDisplayName(row.item)}\t${row.qty}\t${unitLabel}\t${Math.round(row.rate)}`;
 }
 
 /** Tab-separated lines for Busy paste at finalise: name + qty + unit + resolved rate. */
