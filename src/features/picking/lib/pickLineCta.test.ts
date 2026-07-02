@@ -11,7 +11,7 @@ describe('pickLineCta', () => {
     expect(derivePickLineUiState(undefined, 4, 10, false)).toBe('in_progress');
     expect(derivePickLineUiState(undefined, 10, 10, true)).toBe('complete');
     expect(derivePickLineUiState('picked', 0, 10, false)).toBe('marked_picked');
-    expect(derivePickLineUiState('partial', 1, 2, false)).toBe('in_progress');
+    expect(derivePickLineUiState('partial', 1, 2, false)).toBe('marked_partial');
   });
 
   it('uses quantity-specific pick labels without arrows', () => {
@@ -32,10 +32,10 @@ describe('pickLineCta', () => {
     });
   });
 
-  it('keeps picking when a partial line still owes qty', () => {
+  it('treats marked partial as closed but keeps active partial picks open', () => {
     expect(pickPrimaryCta('marked_partial', 1, 2, 'pcs', 0, 3, false)).toEqual({
-      kind: 'pick',
-      label: 'Pick 1 more pcs',
+      kind: 'next',
+      label: 'Next line →',
     });
     expect(pickPrimaryCta('in_progress', 1, 2, 'pcs', 0, 3, false)).toEqual({
       kind: 'pick',
@@ -58,6 +58,13 @@ describe('pickLineCta', () => {
     expect(pickPrimaryCta('marked_picked', 0, 10, 'pcs', 2, 3, false)).toEqual({
       kind: 'finish',
       label: 'Finish order',
+    });
+  });
+
+  it('never offers finish order on a non-last line, even once every line is closed', () => {
+    expect(pickPrimaryCta('marked_partial', 4, 10, 'pcs', 0, 3, false)).toEqual({
+      kind: 'next',
+      label: 'Next line →',
     });
   });
 });

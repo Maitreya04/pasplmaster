@@ -112,6 +112,7 @@ import {
 } from '../../lib/picking/pickLineMrp';
 import { pickLineBillingRate } from '../../lib/picking/pickMrpDisplay';
 import { commitPickMrpSegment, undoPickMrpSegment } from '../../lib/picking/splitMrpSegment';
+import { applyShortPickScanResult } from '../../features/picking/lib/buildPriceGroupScanResult';
 import {
   applyOfflinePickTransition,
   extendOfflinePickLease,
@@ -2181,17 +2182,59 @@ export function PickFlowPanel({
     (orderItem: OrderItem) => {
       const lineMrp = lineMrpMap.get(orderItem.id);
       const committed = pickLineSegmentsCommittedQty(lineMrp);
+      const targetQty = lineMrp?.originalTargetQty ?? pickQuantityTarget(orderItem);
       if (committed <= 0) {
         toast.error('Pick at least one batch before finishing short.');
         return;
       }
-      beginLineOutcome({
-        itemId: orderItem.id,
-        kind: 'partial',
+      if (committed >= targetQty) {
+        toast.info('This line is already fully picked.');
+        return;
+      }
+      const currentScanResult =
+        localItems.get(orderItem.id)?.scanResult ?? orderItem.scan_result;
+      const shortScanResult = applyShortPickScanResult(currentScanResult, {
         pickedQty: committed,
+        targetQty,
+        reason: 'Short pick',
       });
+      if (!shortScanResult) {
+        toast.error('Could not save short pick. Confirm at least one MRP batch first.');
+        return;
+      }
+      itemTransitionMutation.mutate(
+        {
+          transition: {
+            kind: 'picked',
+            itemId: orderItem.id,
+            scanResult: shortScanResult,
+          },
+          optimisticState: 'picked',
+        },
+        {
+          onSuccess: () => {
+            updateLocalItem(orderItem.id, {
+              uiState: 'picked',
+              scanResult: shortScanResult,
+            });
+            beginLineOutcome({
+              itemId: orderItem.id,
+              kind: 'partial',
+              pickedQty: committed,
+            });
+            toast.info(`${committed} of ${targetQty} pcs picked — billing will see the short pick`);
+          },
+        },
+      );
     },
-    [beginLineOutcome, lineMrpMap, toast],
+    [
+      beginLineOutcome,
+      itemTransitionMutation,
+      lineMrpMap,
+      localItems,
+      toast,
+      updateLocalItem,
+    ],
   );
 
   const handleUndoLastSegment = useCallback(

@@ -17,10 +17,10 @@ export function derivePickLineUiState(
 ): PickLineUiState {
   if (markedStatus === 'flagged') return 'flagged';
   if (markedStatus === 'picked') return 'marked_picked';
-  if (isComplete) return 'complete';
-  // Active multi-batch pick — still owe qty even if session marks the line partial.
-  if (totalLogged > 0 && totalLogged < _targetQty) return 'in_progress';
   if (markedStatus === 'partial') return 'marked_partial';
+  if (isComplete) return 'complete';
+  // Active multi-batch pick that has not been short-closed yet.
+  if (totalLogged > 0 && totalLogged < _targetQty) return 'in_progress';
   return 'fresh';
 }
 
@@ -40,13 +40,17 @@ export function pickPrimaryCta(
   revisitComplete: boolean,
 ): PickPrimaryCta {
   const u = uomLabel(uom, remaining > 0 ? remaining : targetQty);
+  // Deliberately index-based only — do not fall back to "any line once the
+  // whole order is closed", or every already-done line would show "Finish
+  // order" the moment you browse back to it. The order-level finish action
+  // lives in a persistent banner instead (see PickFlowExperience).
   const isLastLine = lineIndex >= totalLines - 1;
 
   if (state === 'marked_picked' || state === 'marked_partial') {
     if (revisitComplete) {
       return { kind: 'edit', label: 'Edit pick' };
     }
-    if (remaining > 0) {
+    if (state === 'marked_picked' && remaining > 0) {
       return { kind: 'pick', label: `Pick ${remaining} more ${u}` };
     }
     if (isLastLine) {

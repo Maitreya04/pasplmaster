@@ -85,6 +85,12 @@ function salesUom(item: OrderItem): string {
   return item.sales_unit ?? 'pcs';
 }
 
+function requestedLineQty(item: OrderItem): number {
+  const requested = Number(item.qty_requested ?? 0);
+  if (Number.isFinite(requested) && requested > 0) return Math.floor(requested);
+  return pickQuantityTarget(item);
+}
+
 export function PickFlowExperience({
   orderId,
   demoOrder,
@@ -136,7 +142,7 @@ export function PickFlowExperience({
 
   const currentItem = pickItems[lineIndex] ?? null;
   const mrpSuggestion = useMrpSuggestion(currentItem);
-  const targetQty = currentItem ? pickQuantityTarget(currentItem) : 0;
+  const targetQty = currentItem ? requestedLineQty(currentItem) : 0;
 
   const initialDraft = useMemo(
     () =>
@@ -438,14 +444,19 @@ export function PickFlowExperience({
 
   const finishOrder = onFinish ?? onBack;
 
+  /** Advance past the current line — finishes the order instead of stalling
+   * when nothing is left to pick (e.g. flagging the last outstanding line). */
   const advanceLine = useCallback(() => {
+    const next = findNextPendingLineIndex(pickItems, lineIndex, completedLines);
+    if (next == null) {
+      setLineOutcome(null);
+      finishOrder();
+      return;
+    }
     setLineOutcome(null);
     setViewMode('card');
-    setLineIndex((from) => {
-      const next = findNextPendingLineIndex(pickItems, from, completedLines);
-      return next ?? from;
-    });
-  }, [completedLines, pickItems]);
+    setLineIndex(next);
+  }, [completedLines, finishOrder, lineIndex, pickItems]);
 
   /** After a line is done: toast + jump to next rack. No full-screen stop for normal picks. */
   const continueAfterLineClose = useCallback(
@@ -641,7 +652,7 @@ export function PickFlowExperience({
           });
 
           if (payload.reason === 'Out of Stock') {
-            const qtyPending = pickQuantityTarget(currentItem);
+            const qtyPending = lineTargetQty;
             if (qtyPending > 0) {
               const { data: existing, error: existingError } = await supabase
                 .from('pending_items')
@@ -809,9 +820,14 @@ export function PickFlowExperience({
   }, [completedLines, draftState.totalLogged, lineIndex, order, pickItems]);
 
   const doneCount = useMemo(
-    () => listRows.filter((row) => row.status === 'picked' || row.status === 'flagged').length,
+    () =>
+      listRows.filter(
+        (row) =>
+          row.status === 'picked' || row.status === 'partial' || row.status === 'flagged',
+      ).length,
     [listRows],
   );
+  const allLinesClosed = pickItems.length > 0 && doneCount >= pickItems.length;
 
   const lineChips = useMemo((): PickLineChip[] => {
     return listRows.map((row, index) => {
@@ -950,6 +966,15 @@ export function PickFlowExperience({
                 </button>
               </div>
             </div>
+            {allLinesClosed ? (
+              <button
+                type="button"
+                onClick={finishOrder}
+                className="mt-2 flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-[var(--bg-positive)] px-4 font-ds-caption-size font-extrabold text-[var(--content-on-color)] pick-pressable"
+              >
+                All lines handled · Finish order →
+              </button>
+            ) : null}
           </div>
         ) : null}
       </header>
@@ -1049,7 +1074,12 @@ export function PickFlowExperience({
           setModalView('mrp');
         }}
         onShortStock={() => {
-          setFlagSheetMode('issue');
+          // Close the pick-entry sheet before opening the flag sheet — otherwise
+          // both bottom sheets render at once ("double dialog"). Preserve
+          // already-logged qty as a short pick; only treat it as a fresh
+          // out-of-stock flag when nothing has been logged yet.
+          setFlagSheetMode(draftState.totalLogged > 0 ? 'short' : 'issue');
+          setModalOpen(false);
           setFlagOpen(true);
         }}
         onMarkPicked={handleMarkPicked}

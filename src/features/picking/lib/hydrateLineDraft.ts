@@ -35,6 +35,12 @@ function originalTargetFromGroup(root: OrderItem, siblings: OrderItem[]): number
   return best;
 }
 
+function requestedTargetQty(item: OrderItem): number {
+  const requested = Number(item.qty_requested ?? 0);
+  if (Number.isFinite(requested) && requested > 0) return Math.floor(requested);
+  return pickQuantityTarget(item);
+}
+
 function segmentRows(root: OrderItem, siblings: OrderItem[]): OrderItem[] {
   const rows: OrderItem[] = [];
   if (hasCommittedPickSegment(root)) rows.push(root);
@@ -67,7 +73,7 @@ function groupToConfirmedPriceGroup(row: OrderItem, targetQty: number): Confirme
 /** Rebuild picker draft for one sales line from committed order_items rows (incl. MRP splits). */
 export function buildLineDraftFromOrderItem(item: OrderItem, allItems: OrderItem[]): LineDraft {
   const { root, siblings } = pickMrpGroupForItem(item, allItems);
-  const billingTarget = pickQuantityTarget(root);
+  const billingTarget = requestedTargetQty(root);
   const persistedTarget = originalTargetFromGroup(root, siblings);
   const targetQty = persistedTarget ?? billingTarget;
 

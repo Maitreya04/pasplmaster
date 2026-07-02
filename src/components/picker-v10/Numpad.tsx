@@ -42,14 +42,14 @@ export function Numpad({
             key={String(k)}
             type="button"
             onClick={() => onKey(String(k))}
-            className={`pick-numpad-key rounded-xl border font-mono font-extrabold pick-pressable ${
+            className={`pick-numpad-key rounded-xl border shadow-sm font-mono font-extrabold pick-pressable ${
               k === '⌫'
                 ? isAmber
-                  ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]'
-                  : 'border-[var(--border-subtle)] bg-[var(--bg-tertiary)]'
+                  ? 'border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)]'
+                  : 'border-[var(--border-opaque)] bg-[var(--gray-3)] text-[var(--content-primary)]'
                 : isAmber
                   ? 'border-[var(--border-warning)] bg-white text-[var(--content-warning-on-light)]'
-                  : 'border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--content-primary)]'
+                  : 'border-[var(--border-opaque)] bg-[var(--bg-secondary)] text-[var(--content-primary)]'
             }`}
           >
             {k}
