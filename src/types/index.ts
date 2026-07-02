@@ -291,7 +291,7 @@ export interface CartItem {
 
 export interface AuthState {
   isAuthenticated: boolean;
-  authMode?: 'supabase' | 'legacy' | null;
+  authMode?: 'supabase' | null;
   role: 'sales' | 'billing' | 'picking' | 'admin' | 'partner' | null;
   userName: string | null;
   userId: number | null;

@@ -1,6 +1,5 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { useNavigate, Navigate, Link } from 'react-router-dom';
-import { Backspace } from '@phosphor-icons/react';
+import { useState, useCallback } from 'react';
+import { Navigate, Link } from 'react-router-dom';
 import { PinPad } from '../components/auth/PinPad';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -19,13 +18,10 @@ const ROLE_HOME: Record<string, string> = {
   partner: '/partner/supply',
 };
 
-const LEGACY_LOGIN_ENABLED = true;
-
-type LoginMode = 'quick' | 'full' | 'legacy';
+type LoginMode = 'quick' | 'full';
 
 export default function LoginPage(): React.JSX.Element | null {
-  const navigate = useNavigate();
-  const { loginWithPhone, login, isAuthenticated, role, authMode, authReady, canSwitchRoles } = useAuth();
+  const { loginWithPhone, isAuthenticated, role, authMode, authReady, canSwitchRoles } = useAuth();
 
   const savedDevice = loadDeviceProfile();
   const [mode, setMode] = useState<LoginMode>(savedDevice ? 'quick' : 'full');
@@ -33,27 +29,6 @@ export default function LoginPage(): React.JSX.Element | null {
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  const [legacyCode, setLegacyCode] = useState('');
-  const [legacyError, setLegacyError] = useState(false);
-  const [legacyChecking, setLegacyChecking] = useState(false);
-  const legacyErrorTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  useEffect(() => {
-    return () => {
-      if (legacyErrorTimeout.current) clearTimeout(legacyErrorTimeout.current);
-    };
-  }, []);
-
-  if (authReady && isAuthenticated) {
-    if (canSwitchRoles && !role) {
-      return <Navigate to="/select-role" replace />;
-    }
-    if (authMode === 'supabase' && role && ROLE_HOME[role]) {
-      return <Navigate to={ROLE_HOME[role]} replace />;
-    }
-    return <Navigate to="/select-role" replace />;
-  }
 
   const handleQuickUnlock = useCallback(
     async (candidatePin: string): Promise<boolean> => {
@@ -70,6 +45,16 @@ export default function LoginPage(): React.JSX.Element | null {
     },
     [loginWithPhone, savedDevice],
   );
+
+  if (authReady && isAuthenticated) {
+    if (canSwitchRoles && !role) {
+      return <Navigate to="/select-role" replace />;
+    }
+    if (authMode === 'supabase' && role && ROLE_HOME[role]) {
+      return <Navigate to={ROLE_HOME[role]} replace />;
+    }
+    return <Navigate to="/select-role" replace />;
+  }
 
   const handlePhoneLogin = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -95,32 +80,6 @@ export default function LoginPage(): React.JSX.Element | null {
     }
   };
 
-  const handleLegacyDigit = useCallback(
-    async (digit: string) => {
-      if (legacyChecking || legacyError) return;
-
-      const next = legacyCode + digit;
-      if (next.length > 4) return;
-      setLegacyCode(next);
-
-      if (next.length === 4) {
-        setLegacyChecking(true);
-        const success = await login(next);
-        if (success) {
-          navigate('/select-role', { replace: true });
-        } else {
-          setLegacyError(true);
-          legacyErrorTimeout.current = setTimeout(() => {
-            setLegacyError(false);
-            setLegacyCode('');
-            setLegacyChecking(false);
-          }, 1000);
-        }
-      }
-    },
-    [legacyChecking, legacyError, legacyCode, login, navigate],
-  );
-
   const switchToFullLogin = () => {
     clearDeviceProfile();
     setMode('full');
@@ -129,7 +88,6 @@ export default function LoginPage(): React.JSX.Element | null {
     setError(null);
   };
 
-  const legacyDigits = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
   const quickDevice = mode === 'quick' ? savedDevice ?? loadDeviceProfile() : null;
 
   return (
@@ -142,9 +100,7 @@ export default function LoginPage(): React.JSX.Element | null {
         <p className="text-sm font-medium text-[var(--content-secondary)] mt-2">
           {mode === 'quick' && quickDevice
             ? `Welcome back, ${quickDevice.displayName}`
-            : mode === 'full'
-              ? 'Sign in with phone + PIN'
-              : 'Legacy access code'}
+            : 'Sign in with phone + PIN'}
         </p>
         {mode === 'quick' && quickDevice && (
           <p className="text-xs text-[var(--content-tertiary)] mt-1">Enter your PIN to continue</p>
@@ -176,21 +132,9 @@ export default function LoginPage(): React.JSX.Element | null {
                 Reset PIN
               </Link>
             </p>
-            {LEGACY_LOGIN_ENABLED && (
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('legacy');
-                  setError(null);
-                }}
-                className="text-xs text-[var(--content-tertiary)] hover:text-[var(--content-secondary)]"
-              >
-                Use legacy access code
-              </button>
-            )}
           </div>
         </div>
-      ) : mode === 'full' ? (
+      ) : (
         <form
           onSubmit={handlePhoneLogin}
           className="w-full max-w-sm relative z-10 space-y-4"
@@ -264,86 +208,8 @@ export default function LoginPage(): React.JSX.Element | null {
                 Back to quick unlock
               </button>
             )}
-            {LEGACY_LOGIN_ENABLED && (
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('legacy');
-                  setError(null);
-                }}
-                className="text-xs text-[var(--content-tertiary)] hover:text-[var(--content-secondary)]"
-              >
-                Use legacy access code
-              </button>
-            )}
           </div>
         </form>
-      ) : (
-        <div className="w-full max-w-xs relative z-10">
-          <div className="flex flex-col items-center gap-6 mb-8">
-            <div className={`flex gap-4 ${legacyError ? 'animate-shake' : ''}`}>
-              {[0, 1, 2, 3].map((i) => (
-                <div
-                  key={i}
-                  className={`w-4 h-4 rounded-full transition-all duration-150 ${
-                    i < legacyCode.length
-                      ? legacyError
-                        ? 'bg-[var(--content-negative)] scale-110'
-                        : 'bg-[var(--content-primary)] scale-110'
-                      : 'border-2 border-[var(--border-opaque)]'
-                  }`}
-                />
-              ))}
-            </div>
-            <div className="h-5">
-              {legacyError && <p className="text-sm text-[var(--content-negative)]">Incorrect code</p>}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            {legacyDigits.map((d) => (
-              <button
-                key={d}
-                type="button"
-                onClick={() => void handleLegacyDigit(d)}
-                className="w-16 h-16 mx-auto rounded-full flex items-center justify-center font-mono text-xl text-[var(--content-primary)] bg-[var(--bg-secondary)] border border-[var(--border-opaque)]"
-              >
-                {d}
-              </button>
-            ))}
-            <div />
-            <button
-              type="button"
-              onClick={() => void handleLegacyDigit('0')}
-              className="w-16 h-16 mx-auto rounded-full flex items-center justify-center font-mono text-xl text-[var(--content-primary)] bg-[var(--bg-secondary)] border border-[var(--border-opaque)]"
-            >
-              0
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (legacyChecking || legacyError) return;
-                setLegacyCode((prev) => prev.slice(0, -1));
-              }}
-              className="w-16 h-16 mx-auto rounded-full flex items-center justify-center text-[var(--content-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-opaque)]"
-              aria-label="Backspace"
-            >
-              <Backspace size={24} weight="regular" />
-            </button>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setMode(savedDevice ? 'quick' : 'full');
-              setLegacyCode('');
-              setLegacyError(false);
-            }}
-            className="mt-8 w-full text-sm text-[var(--content-tertiary)] hover:text-[var(--content-secondary)]"
-          >
-            Back to phone login
-          </button>
-        </div>
       )}
 
       <div className="h-8" />

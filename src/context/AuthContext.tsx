@@ -21,7 +21,7 @@ import {
 import type { StockLocationCode, UserRole } from '../types';
 
 type Role = 'sales' | 'billing' | 'picking' | 'admin' | 'partner' | null;
-type AuthMode = 'supabase' | 'legacy' | null;
+type AuthMode = 'supabase' | null;
 
 export interface PhoneLoginResult {
   success: boolean;
@@ -52,8 +52,6 @@ interface AuthContextValue {
   actualUserId: number | null;
   actualUserName: string | null;
   loginWithPhone: (phone: string, pin: string) => Promise<PhoneLoginResult>;
-  /** Legacy shared access code (transition period). */
-  login: (code: string) => Promise<boolean>;
   unlockAdmin: (code: string) => boolean;
   selectRole: (role: NonNullable<Role>, name?: string, partnerCompanyId?: number) => void;
   startImpersonation: (target: ImpersonationTarget) => boolean;
@@ -159,13 +157,42 @@ function loadImpersonationFromStorage(): StoredImpersonation | null {
   return null;
 }
 
+function clearLegacySessionStorage(): void {
+  safeLocalStorageRemove(LS_KEYS.authenticated);
+  safeLocalStorageRemove(LS_KEYS.authMode);
+  safeLocalStorageRemove(LS_KEYS.role);
+  safeLocalStorageRemove(LS_KEYS.userName);
+  safeLocalStorageRemove(LS_KEYS.userId);
+  safeLocalStorageRemove(LS_KEYS.branch);
+  safeLocalStorageRemove(LS_KEYS.partnerCompanyId);
+  safeSessionStorageRemove(LS_KEYS.adminUnlocked);
+  safeSessionStorageRemove(LS_KEYS.impersonation);
+}
+
 function loadFromStorage() {
+  const authModeRaw = safeLocalStorageGet(LS_KEYS.authMode);
+  if (authModeRaw === 'legacy') {
+    clearLegacySessionStorage();
+    return {
+      isAuthenticated: false,
+      authMode: null as AuthMode,
+      role: null as Role,
+      userName: null,
+      userId: null,
+      branch: null as StockLocationCode | null,
+      partnerCompanyId: null,
+      adminUnlocked: false,
+      impersonation: null,
+    };
+  }
+
   const userIdStr = safeLocalStorageGet(LS_KEYS.userId);
   const partnerIdStr = safeLocalStorageGet(LS_KEYS.partnerCompanyId);
-  const authModeRaw = safeLocalStorageGet(LS_KEYS.authMode);
+  const isSupabaseSession =
+    authModeRaw === 'supabase' && safeLocalStorageGet(LS_KEYS.authenticated) === 'true';
   return {
-    isAuthenticated: safeLocalStorageGet(LS_KEYS.authenticated) === 'true',
-    authMode: (authModeRaw === 'supabase' || authModeRaw === 'legacy' ? authModeRaw : null) as AuthMode,
+    isAuthenticated: isSupabaseSession,
+    authMode: isSupabaseSession ? ('supabase' as AuthMode) : null,
     role: (safeLocalStorageGet(LS_KEYS.role) as Role) || null,
     userName: safeLocalStorageGet(LS_KEYS.userName),
     userId: userIdStr ? parseInt(userIdStr, 10) : null,
@@ -317,13 +344,6 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     setTestAdminSession(false);
   }, []);
 
-  // Legacy access-code sessions must not keep a Supabase JWT — branch RLS would hide billing orders.
-  useEffect(() => {
-    if (safeLocalStorageGet(LS_KEYS.authMode) !== 'legacy') return;
-    if (safeLocalStorageGet(LS_KEYS.authenticated) !== 'true') return;
-    void supabase.auth.signOut();
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
 
@@ -389,34 +409,6 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   }, [applySupabaseProfile, clearAuthState]);
 
   useEffect(() => {
-    if (!actualUserName || !actualRole || actualRole === 'admin' || actualRole === 'partner' || actualUserId !== null) return;
-    if (authMode === 'supabase') return;
-
-    let cancelled = false;
-    void supabase
-      .from('users')
-      .select('id, full_name, stock_location_code')
-      .eq('role', actualRole)
-      .eq('is_active', true)
-      .then(({ data: rows }) => {
-        if (cancelled) return;
-        const needle = actualUserName.trim().toLowerCase();
-        const match = (rows ?? []).find((u) => u.full_name.trim().toLowerCase() === needle);
-        if (match?.id != null) {
-          setActualUserId(match.id);
-          safeLocalStorageSet(LS_KEYS.userId, String(match.id));
-          if (match.stock_location_code) {
-            setActualBranch(match.stock_location_code as StockLocationCode);
-            safeLocalStorageSet(LS_KEYS.branch, match.stock_location_code);
-          }
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [authMode, actualUserName, actualRole, actualUserId]);
-
-  useEffect(() => {
     if (role !== 'picking') return;
     warmPickQueueRoute(userId, branch);
   }, [branch, role, userId]);
@@ -465,27 +457,6 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     },
     [applySupabaseProfile],
   );
-
-  const login = useCallback(async (code: string): Promise<boolean> => {
-    await supabase.auth.signOut();
-
-    const { data, error } = await supabase
-      .from('app_config')
-      .select('value')
-      .eq('key', 'access_code')
-      .single();
-
-    if (error || !data) return false;
-
-    if (data.value === code) {
-      setIsAuthenticated(true);
-      setAuthMode('legacy');
-      safeLocalStorageSet(LS_KEYS.authenticated, 'true');
-      safeLocalStorageSet(LS_KEYS.authMode, 'legacy');
-      return true;
-    }
-    return false;
-  }, []);
 
   const unlockAdmin = useCallback((code: string): boolean => {
     if (code === ADMIN_PASSCODE) {
@@ -640,7 +611,6 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
         actualUserId,
         actualUserName,
         loginWithPhone,
-        login,
         unlockAdmin,
         selectRole,
         startImpersonation,

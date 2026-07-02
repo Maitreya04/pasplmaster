@@ -10,6 +10,10 @@ import { useWorkClaim } from '../../hooks/useWorkClaim';
 import { pickQuantityTarget, pickableOrderItems } from '../../lib/cartSupply';
 import type { NextPickLinePreview } from '../../lib/picking/deckOrder';
 import { defaultPickItemTransitionAdapter } from '../../lib/picking/itemTransitionAdapter';
+import {
+  isPickNoLongerActiveError,
+  pickNoLongerActiveMessage,
+} from '../../lib/picking/pickSessionErrors';
 import { revertPickLine } from '../../lib/picking/revertPickLine';
 import { sendInternalNotification } from '../../lib/pickerPush';
 import { supabase } from '../../lib/supabase/client';
@@ -101,6 +105,7 @@ export function PickFlowExperience({
   const [revertPending, setRevertPending] = useState(false);
   const [ledgerEditField, setLedgerEditField] = useState<LedgerEditField>(null);
   const editSnapshotRef = useRef<ConfirmedPriceGroup | null>(null);
+  const closedPickToastShownRef = useRef(false);
   const sessionSuggestedRef = useRef<{
     mrp: number | null;
     source: MrpSuggestionSource;
@@ -127,6 +132,23 @@ export function PickFlowExperience({
   const draftState = usePickEntryDraft(initialDraft);
   const { commit, undo, syncStatus, pendingCount } = useCommitPriceGroup();
   const undoAction = useUndoableAction<UndoPayload>();
+
+  useEffect(() => {
+    if (isLab || useDemo || !orderId || !order) return;
+    if (order.workflow_status !== 'picking') {
+      if (!closedPickToastShownRef.current) {
+        closedPickToastShownRef.current = true;
+        toast.info(
+          pickNoLongerActiveMessage(
+            order.workflow_status === 'completed' || order.workflow_status === 'flagged'
+              ? 'already_finalised'
+              : 'not_picking',
+          ),
+        );
+      }
+      onBack();
+    }
+  }, [isLab, onBack, order, orderId, toast, useDemo]);
 
   // Reset draft when the picker navigates to a different line — not when the
   // server refetches and swaps order_item ids after an MRP split on the same line.
@@ -268,10 +290,19 @@ export function PickFlowExperience({
 
       if (!result.success) {
         appHaptics.warning();
+        const errorCode = result.error ?? 'commit_failed';
+        if (isPickNoLongerActiveError(errorCode)) {
+          toast.info(pickNoLongerActiveMessage(errorCode));
+          if (orderId != null) {
+            void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+          }
+          onBack();
+          return;
+        }
         toast.error(
-          result.error === 'qty_exceeds_line'
+          errorCode === 'qty_exceeds_line'
             ? 'Could not save — picked qty is above the order line. Ask admin to apply the latest database update.'
-            : result.error ?? 'Could not save pick — try again',
+            : 'Could not save pick — try again',
         );
         return;
       }
@@ -348,6 +379,7 @@ export function PickFlowExperience({
     userName,
     useDemo,
     orderId,
+    onBack,
   ]);
 
   const handleMarkPicked = useCallback(() => {
