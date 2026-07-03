@@ -1,4 +1,5 @@
 import type { LineCompletionStatus } from './hydrateLineDraft';
+import type { LineDraft } from '../../../types';
 
 const STORAGE_PREFIX = 'paspl.pick.flow.v1';
 const LAB_STORAGE_PREFIX = 'paspl.pick.flow.lab.v1';
@@ -6,6 +7,7 @@ const LAB_STORAGE_PREFIX = 'paspl.pick.flow.lab.v1';
 export type PickFlowSessionSnapshot = {
   lineIndex: number;
   completedLines: Record<number, LineCompletionStatus>;
+  lineDrafts?: Record<number, LineDraft>;
 };
 
 function storageKey(orderId: number, scope: 'production' | 'lab'): string {

@@ -21,3 +21,12 @@ export function pickNoLongerActiveMessage(error?: string | null): string {
   return 'This order is no longer active for picking. Refreshing the queue.';
 }
 
+export function pickMutationErrorMessage(
+  error?: string | null,
+  fallback = 'Could not complete action',
+): string {
+  if (!error) return fallback;
+  if (isPickNoLongerActiveError(error)) return pickNoLongerActiveMessage(error);
+  return error;
+}
+

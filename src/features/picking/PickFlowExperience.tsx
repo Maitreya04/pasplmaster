@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { CaretLeft } from '@phosphor-icons/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { FlagReasonSheet, type FlagSubmitPayload } from '../../components/picking/FlagReasonSheet';
 import { PickLineResolvedDock } from '../../components/picking/PickLineResolvedDock';
+import { ConfirmDialog } from '../../components/admin/ConfirmDialog';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useOrderDetail } from '../../hooks/useOrderDetail';
+import { useOfflinePickSession, useOfflinePicksHydrated } from '../../hooks/useOfflinePicks';
 import { useWorkClaim } from '../../hooks/useWorkClaim';
+import {
+  bootstrapOfflinePickSession,
+  isOfflinePickUsable,
+  persistSessionPatch,
+  readOfflinePickSessionFromMirror,
+} from '../../lib/offlinePicks';
+import { ensurePickingClaim } from '../../lib/picking/ensurePickingClaim';
 import { pickQuantityTarget, pickableOrderItems } from '../../lib/cartSupply';
 import type { NextPickLinePreview } from '../../lib/picking/deckOrder';
 import { defaultPickItemTransitionAdapter } from '../../lib/picking/itemTransitionAdapter';
@@ -14,9 +24,10 @@ import { ensurePendingItem } from '../../lib/billing/ensurePendingItem';
 import { deskLineIssueCategory } from '../../lib/billing/deskLineFlagKind';
 import {
   isPickNoLongerActiveError,
+  pickMutationErrorMessage,
   pickNoLongerActiveMessage,
 } from '../../lib/picking/pickSessionErrors';
-import { revertPickLine } from '../../lib/picking/revertPickLine';
+import { revertPickLine, type RevertPickLineMode } from '../../lib/picking/revertPickLine';
 import { sendInternalNotification } from '../../lib/pickerPush';
 import { supabase } from '../../lib/supabase/client';
 import { appHaptics } from '../../lib/haptics';
@@ -36,6 +47,8 @@ import { applyShortPickScanResult } from './lib/buildPriceGroupScanResult';
 import {
   buildLineDraftFromOrderItem,
   deriveCompletedLinesFromOrder,
+  mergeLineDrafts,
+  snapshotLineDraft,
   sumLineDraftLogged,
 } from './lib/hydrateLineDraft';
 import {
@@ -100,14 +113,79 @@ export function PickFlowExperience({
 }: PickFlowExperienceProps): React.JSX.Element {
   const isLab = mode === 'lab';
   const useDemo = isLab && demoOrder != null;
+  const navigate = useNavigate();
   const { userId, userName } = useAuth();
   const toast = useToast();
   const queryClient = useQueryClient();
+  const offlinePickSession = useOfflinePickSession(
+    isLab || useDemo ? null : (orderId ?? null),
+  );
+  const offlinePickSessionFromMirror = useMemo(
+    () =>
+      isLab || useDemo || orderId == null
+        ? null
+        : readOfflinePickSessionFromMirror(orderId),
+    [isLab, orderId, offlinePickSession, useDemo],
+  );
+  const effectiveOfflineSession = offlinePickSession ?? offlinePickSessionFromMirror;
+  const offlinePicksHydrated = useOfflinePicksHydrated();
+  const offlinePickActive = !isLab && !useDemo && isOfflinePickUsable(effectiveOfflineSession);
+  const offlineOrderSnapshot = useMemo(
+    () => effectiveOfflineSession?.orderSnapshot ?? null,
+    [effectiveOfflineSession?.orderSnapshot],
+  );
   const orderQuery = useOrderDetail(useDemo ? null : (orderId ?? null));
-  const order: OrderWithItems | null | undefined = useDemo ? demoOrder : orderQuery.data;
-  const isLoading = useDemo ? false : orderQuery.isLoading;
-  const error = useDemo ? null : orderQuery.error;
-  const { claimId } = useWorkClaim(useDemo ? null : (orderId ?? null), 'picking');
+  const order: OrderWithItems | null | undefined = useDemo
+    ? demoOrder
+    : offlinePickActive
+      ? offlineOrderSnapshot ?? orderQuery.data ?? null
+      : orderQuery.data ?? null;
+  const isLoading =
+    useDemo ? false : orderQuery.isLoading && !effectiveOfflineSession;
+  const error =
+    useDemo ? null : orderQuery.error && !effectiveOfflineSession ? orderQuery.error : null;
+  const workClaim = useWorkClaim(
+    isLab || useDemo || offlinePickActive || !offlinePicksHydrated ? null : (orderId ?? null),
+    'picking',
+  );
+
+  const resolveClaimForWrite = useCallback(async (): Promise<number | null> => {
+    if (isLab || useDemo || orderId == null || !userId) return null;
+
+    if (offlinePickActive && effectiveOfflineSession) {
+      let session = await bootstrapOfflinePickSession(effectiveOfflineSession);
+      const ensured = await ensurePickingClaim({
+        orderId,
+        userId,
+        claimId: session.claimId,
+      });
+      if (ensured.claimId && ensured.claimId !== session.claimId) {
+        session =
+          (await persistSessionPatch(session.clientPickKey, {
+            claimId: ensured.claimId,
+            lastError: null,
+          })) ?? { ...session, claimId: ensured.claimId };
+      } else if (ensured.claimId && session.lastError) {
+        session =
+          (await persistSessionPatch(session.clientPickKey, { lastError: null })) ?? session;
+      }
+      return ensured.claimId ?? session.claimId;
+    }
+
+    const claimResult = await workClaim.claim();
+    if (claimResult.success && claimResult.claim_id) {
+      return claimResult.claim_id;
+    }
+    return workClaim.claimId;
+  }, [
+    effectiveOfflineSession,
+    isLab,
+    offlinePickActive,
+    orderId,
+    useDemo,
+    userId,
+    workClaim,
+  ]);
 
   const pickItems = useMemo(
     () => (order?.items ? pickableOrderItems(order.items) : []),
@@ -129,6 +207,12 @@ export function PickFlowExperience({
   const [lineOutcome, setLineOutcome] = useState<LineOutcome | null>(null);
   const [flashGroupId, setFlashGroupId] = useState<string | null>(null);
   const [revertPending, setRevertPending] = useState(false);
+  const [revertConfirm, setRevertConfirm] = useState<{
+    itemId: number;
+    mode: RevertPickLineMode;
+    itemName: string;
+    kind: 'flag' | 'pick';
+  } | null>(null);
   const [ledgerEditField, setLedgerEditField] = useState<LedgerEditField>(null);
   const editSnapshotRef = useRef<ConfirmedPriceGroup | null>(null);
   const closedPickToastShownRef = useRef(false);
@@ -159,9 +243,41 @@ export function PickFlowExperience({
   const draftState = usePickEntryDraft(initialDraft);
   const { commit, undo, syncStatus, pendingCount } = useCommitPriceGroup();
   const undoAction = useUndoableAction<UndoPayload>();
+  const sessionScope = isLab ? 'lab' : 'production';
+  const lineDraftsRef = useRef<Record<number, ReturnType<typeof snapshotLineDraft>>>({});
+
+  const persistLineDraft = useCallback(
+    (itemId: number, draft: ReturnType<typeof snapshotLineDraft>) => {
+      if (useDemo || orderId == null) return;
+      lineDraftsRef.current = { ...lineDraftsRef.current, [itemId]: draft };
+      const session = readPickFlowSession(orderId, sessionScope);
+      writePickFlowSession(
+        orderId,
+        {
+          lineIndex,
+          completedLines,
+          lineDrafts: { ...(session?.lineDrafts ?? {}), [itemId]: draft },
+        },
+        sessionScope,
+      );
+    },
+    [completedLines, lineIndex, orderId, sessionScope, useDemo],
+  );
 
   useEffect(() => {
     if (isLab || useDemo || !orderId || !order) return;
+    // Local offline session is authoritative right after Start — server cache may still say approved.
+    if (offlinePickActive) return;
+    if (!offlinePicksHydrated && !readOfflinePickSessionFromMirror(orderId)) {
+      if (orderQuery.isLoading || orderQuery.isFetching) return;
+    } else if (orderQuery.isLoading || orderQuery.isFetching) {
+      return;
+    }
+
+    if (order.workflow_status === 'approved') {
+      navigate(`/picking/preview/${orderId}?source=assigned`, { replace: true });
+      return;
+    }
     if (order.workflow_status !== 'picking') {
       if (!closedPickToastShownRef.current) {
         closedPickToastShownRef.current = true;
@@ -175,17 +291,46 @@ export function PickFlowExperience({
       }
       onBack();
     }
-  }, [isLab, onBack, order, orderId, toast, useDemo]);
+  }, [
+    isLab,
+    navigate,
+    offlinePickActive,
+    offlinePicksHydrated,
+    onBack,
+    order,
+    orderId,
+    orderQuery.isFetching,
+    orderQuery.isLoading,
+    toast,
+    useDemo,
+  ]);
+
+  useEffect(() => {
+    if (isLab || useDemo || offlinePickActive) return;
+    if (order?.workflow_status === 'picking' && !workClaim.isClaimedByMe && !workClaim.error) {
+      void workClaim.claim();
+    }
+  }, [
+    isLab,
+    offlinePickActive,
+    order?.workflow_status,
+    useDemo,
+    workClaim.claim,
+    workClaim.error,
+    workClaim.isClaimedByMe,
+  ]);
 
   useEffect(() => {
     if (useDemo || !order || orderId == null || pickItems.length === 0) return;
     if (pickSessionBootstrappedRef.current === orderId) return;
     pickSessionBootstrappedRef.current = orderId;
 
-    const sessionScope = isLab ? 'lab' : 'production';
     const session = readPickFlowSession(orderId, sessionScope);
     const serverCompleted = deriveCompletedLinesFromOrder(pickItems, order.items);
     setCompletedLines({ ...serverCompleted, ...(session?.completedLines ?? {}) });
+    if (session?.lineDrafts) {
+      lineDraftsRef.current = session.lineDrafts;
+    }
 
     const restoredIndex =
       session?.lineIndex != null &&
@@ -194,22 +339,30 @@ export function PickFlowExperience({
         ? session.lineIndex
         : 0;
     setLineIndex(restoredIndex);
-  }, [isLab, order, orderId, pickItems, useDemo]);
+  }, [isLab, order, orderId, pickItems, sessionScope, useDemo]);
 
   useEffect(() => {
     if (useDemo || orderId == null) return;
+    const session = readPickFlowSession(orderId, sessionScope);
     writePickFlowSession(
       orderId,
-      { lineIndex, completedLines },
-      isLab ? 'lab' : 'production',
+      {
+        lineIndex,
+        completedLines,
+        lineDrafts: session?.lineDrafts ?? lineDraftsRef.current,
+      },
+      sessionScope,
     );
-  }, [completedLines, isLab, lineIndex, orderId, useDemo]);
+  }, [completedLines, isLab, lineIndex, orderId, sessionScope, useDemo]);
 
   // Reset draft when the picker navigates to a different line — not when the
   // server refetches and swaps order_item ids after an MRP split on the same line.
   useEffect(() => {
     if (!currentItem || !order) return;
-    draftState.reset(buildLineDraftFromOrderItem(currentItem, order.items));
+    const serverDraft = buildLineDraftFromOrderItem(currentItem, order.items);
+    const sessionDraft =
+      lineDraftsRef.current[currentItem.id] ?? readPickFlowSession(orderId ?? 0, sessionScope)?.lineDrafts?.[currentItem.id];
+    draftState.reset(mergeLineDrafts(serverDraft, sessionDraft));
     setLineOutcome(null);
     setModalOpen(false);
     setModalView('mrp');
@@ -219,15 +372,30 @@ export function PickFlowExperience({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset when line index changes only
   }, [lineIndex]);
 
+  useEffect(() => {
+    if (!currentItem || useDemo || orderId == null) return;
+    if (draftState.draft.confirmedGroups.length === 0 && draftState.totalLogged === 0) return;
+    persistLineDraft(currentItem.id, snapshotLineDraft(draftState.draft));
+  }, [
+    currentItem,
+    draftState.draft.confirmedGroups,
+    draftState.draft.targetQty,
+    draftState.totalLogged,
+    orderId,
+    persistLineDraft,
+    useDemo,
+  ]);
+
   /** Frozen when the line opens — do not use live order_item qty after MRP splits. */
   const lineTargetQty = draftState.draft.targetQty;
 
   const shortFlagContext = useMemo(() => {
-    if (!currentItem) return undefined;
+    if (!currentItem || flagSheetMode !== 'short') return undefined;
     const logged = draftState.totalLogged;
     const rem = Math.max(0, lineTargetQty - logged);
+    if (rem <= 0) return undefined;
     return `You've logged ${logged} of ${lineTargetQty} ${salesUom(currentItem)}. What's wrong with the remaining ${rem}?`;
-  }, [currentItem, draftState.totalLogged, lineTargetQty]);
+  }, [currentItem, draftState.totalLogged, flagSheetMode, lineTargetQty]);
 
   const openPickModal = useCallback(() => {
     editSnapshotRef.current = null;
@@ -238,10 +406,26 @@ export function PickFlowExperience({
       stockMrp: null,
       historyCount: 0,
     };
-    draftState.startPick();
-    setModalView('mrp');
+
+    const groups = draftState.draft.confirmedGroups;
+    const lastGroup = groups[groups.length - 1];
+    const rem = Math.max(0, lineTargetQty - draftState.totalLogged);
+
+    if (lastGroup && rem > 0) {
+      draftState.resumePick(lastGroup.mrp, rem);
+      sessionSuggestedRef.current = {
+        mrp: lastGroup.mrp,
+        source: 'empty',
+        stockMrp: null,
+        historyCount: 0,
+      };
+      setModalView('qty');
+    } else {
+      draftState.startPick();
+      setModalView('mrp');
+    }
     setModalOpen(true);
-  }, [draftState]);
+  }, [draftState, lineTargetQty]);
 
   const handleSuggestedMrpApplied = useCallback(
     (mrp: number) => {
@@ -321,9 +505,10 @@ export function PickFlowExperience({
     let orderItemId = currentItem.id;
 
     if (!isLab && !useDemo && order && orderId != null && userId) {
+      const activeClaimId = await resolveClaimForWrite();
       const result = await commit({
         orderId: order.id,
-        claimId,
+        claimId: activeClaimId,
         userId,
         orderItem: currentItem,
         rootOrderItemId: draftState.draft.rootOrderItemId,
@@ -395,9 +580,10 @@ export function PickFlowExperience({
       onUndo: async (payload) => {
         draftState.popLastGroup();
         if (!isLab && !useDemo && order && userId && orderId != null) {
+          const activeClaimId = await resolveClaimForWrite();
           await undo({
             orderId: order.id,
-            claimId,
+            claimId: activeClaimId,
             userId,
             rootOrderItemId: payload.rootOrderItemId,
             segmentOrderItemId: payload.group.orderItemId,
@@ -405,6 +591,15 @@ export function PickFlowExperience({
               payload.group.qty === totalAfter && isFirstSegment ? lineTargetQty : null,
           });
           await queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+        }
+        if (currentItem) {
+          const groupsAfter = draftState.draft.confirmedGroups.filter(
+            (g) => g.id !== payload.group.id,
+          );
+          persistLineDraft(
+            currentItem.id,
+            snapshotLineDraft({ ...draftState.draft, confirmedGroups: groupsAfter }),
+          );
         }
         const remainingAfterUndo = Math.max(0, lineTargetQty - (totalAfter - payload.group.qty));
         if (remainingAfterUndo > 0) {
@@ -420,7 +615,6 @@ export function PickFlowExperience({
       // gap view shows Mark picked CTA
     }
   }, [
-    claimId,
     commit,
     currentItem,
     draftState,
@@ -440,6 +634,8 @@ export function PickFlowExperience({
     useDemo,
     orderId,
     onBack,
+    persistLineDraft,
+    resolveClaimForWrite,
   ]);
 
   const finishOrder = onFinish ?? onBack;
@@ -735,24 +931,49 @@ export function PickFlowExperience({
   );
 
   const handleUndoFlag = useCallback(async () => {
-    if (!lineOutcome || lineOutcome.kind !== 'flagged' || !currentItem) return;
+    if (!currentItem) return;
+    const isFlagged =
+      completedLines[currentItem.id] === 'flagged' || lineOutcome?.kind === 'flagged';
+    if (!isFlagged) return;
     if (!useDemo && !isLab && (!order || !userId)) return;
 
     setRevertPending(true);
     try {
       if (!isLab && !useDemo && order && userId) {
-        await revertPickLine({
+        const activeClaimId = await resolveClaimForWrite();
+        const result = await revertPickLine({
           orderId: order.id,
-          claimId,
+          claimId: activeClaimId,
           userId,
           orderItemId: currentItem.id,
           mode: 'full',
         });
+        if (!result.success) {
+          const errorCode = result.error ?? 'revert_failed';
+          if (isPickNoLongerActiveError(errorCode)) {
+            toast.info(pickNoLongerActiveMessage(errorCode));
+            if (orderId != null) {
+              void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+            }
+            onBack();
+            return;
+          }
+          toast.error(pickMutationErrorMessage(errorCode, 'Could not remove flag'));
+          return;
+        }
         if (orderId != null) {
           await queryClient.invalidateQueries({ queryKey: ['order', orderId] });
         }
       }
       draftState.reset(
+        createLineDraft({
+          rootOrderItemId: currentItem.id,
+          targetQty: lineTargetQty,
+          uom: salesUom(currentItem),
+        }),
+      );
+      persistLineDraft(
+        currentItem.id,
         createLineDraft({
           rootOrderItemId: currentItem.id,
           targetQty: lineTargetQty,
@@ -765,22 +986,210 @@ export function PickFlowExperience({
         return next;
       });
       setLineOutcome(null);
+      appHaptics.impactLight();
+      toast.info('Flag removed — pick this line again');
     } finally {
       setRevertPending(false);
     }
   }, [
-    claimId,
+    completedLines,
     currentItem,
     draftState,
     isLab,
     lineOutcome,
+    lineTargetQty,
+    onBack,
     order,
     orderId,
+    persistLineDraft,
     queryClient,
-    lineTargetQty,
+    resolveClaimForWrite,
+    toast,
     useDemo,
     userId,
   ]);
+
+  const handleUndoGroup = useCallback(
+    async (groupId: string) => {
+      if (!currentItem || !order) return;
+      const groups = draftState.draft.confirmedGroups;
+      const targetGroup = groups.find((g) => g.id === groupId);
+      const lastGroup = groups[groups.length - 1];
+      if (!targetGroup || !lastGroup || targetGroup.id !== lastGroup.id) {
+        toast.error('Undo the most recent batch first');
+        return;
+      }
+
+      const isFirstSegment = groups.length === 1;
+      const totalAfterUndo = draftState.totalLogged - targetGroup.qty;
+
+      setRevertPending(true);
+      try {
+        if (!isLab && !useDemo && userId && orderId != null) {
+          const activeClaimId = await resolveClaimForWrite();
+          const result = await undo({
+            orderId: order.id,
+            claimId: activeClaimId,
+            userId,
+            rootOrderItemId: draftState.draft.rootOrderItemId,
+            segmentOrderItemId: targetGroup.orderItemId,
+            restoreQty:
+              isFirstSegment && totalAfterUndo === 0 ? lineTargetQty : null,
+          });
+          if (!result.success) {
+            toast.error(
+              pickMutationErrorMessage(result.error, 'Could not undo batch'),
+            );
+            return;
+          }
+          await queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+        }
+
+        draftState.popLastGroup();
+        const nextDraft = snapshotLineDraft({
+          ...draftState.draft,
+          confirmedGroups: groups.slice(0, -1),
+        });
+        persistLineDraft(currentItem.id, nextDraft);
+        appHaptics.impactLight();
+        toast.info('Last batch removed');
+        undoAction.dismiss();
+
+        if (totalAfterUndo > 0) {
+          setModalView('gap');
+          setModalOpen(true);
+        } else {
+          setModalOpen(false);
+        }
+      } finally {
+        setRevertPending(false);
+      }
+    },
+    [
+      currentItem,
+      draftState,
+      isLab,
+      lineTargetQty,
+      order,
+      orderId,
+      persistLineDraft,
+      queryClient,
+      resolveClaimForWrite,
+      toast,
+      undo,
+      undoAction,
+      useDemo,
+      userId,
+    ],
+  );
+
+  const executeClearPick = useCallback(
+    async (itemId: number, mode: RevertPickLineMode) => {
+      if (!order || !currentItem || currentItem.id !== itemId) return;
+      if (!useDemo && !isLab && !userId) return;
+
+      const wasFlagged = completedLines[itemId] === 'flagged';
+
+      setRevertPending(true);
+      setRevertConfirm(null);
+      try {
+        if (!isLab && !useDemo && userId) {
+          const activeClaimId = await resolveClaimForWrite();
+          const result = await revertPickLine({
+            orderId: order.id,
+            claimId: activeClaimId,
+            userId,
+            orderItemId: draftState.draft.rootOrderItemId,
+            mode,
+            restoreQty: mode === 'full' ? lineTargetQty : null,
+          });
+          if (!result.success) {
+            const errorCode = result.error ?? 'revert_failed';
+            if (isPickNoLongerActiveError(errorCode)) {
+              toast.info(pickNoLongerActiveMessage(errorCode));
+              if (orderId != null) {
+                void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+              }
+              onBack();
+              return;
+            }
+            toast.error(pickMutationErrorMessage(errorCode, 'Could not reset this line'));
+            return;
+          }
+          if (orderId != null) {
+            await queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+          }
+        }
+
+        const freshDraft = createLineDraft({
+          rootOrderItemId: currentItem.id,
+          targetQty: lineTargetQty,
+          uom: salesUom(currentItem),
+        });
+        draftState.reset(freshDraft);
+        persistLineDraft(currentItem.id, freshDraft);
+        setCompletedLines((prev) => {
+          const next = { ...prev };
+          delete next[currentItem.id];
+          return next;
+        });
+        setLineOutcome(null);
+        setModalOpen(false);
+        undoAction.dismiss();
+        appHaptics.impactLight();
+        toast.info(
+          mode === 'full' && wasFlagged
+            ? 'Flag removed — pick this line again'
+            : mode === 'full'
+              ? 'Pick removed — start over'
+              : 'Qty reset',
+        );
+      } finally {
+        setRevertPending(false);
+      }
+    },
+    [
+      completedLines,
+      currentItem,
+      draftState,
+      isLab,
+      lineTargetQty,
+      onBack,
+      order,
+      orderId,
+      persistLineDraft,
+      queryClient,
+      resolveClaimForWrite,
+      toast,
+      undoAction,
+      useDemo,
+      userId,
+    ],
+  );
+
+  const requestClearPick = useCallback(() => {
+    if (!currentItem) return;
+    appHaptics.selection();
+    setRevertConfirm({
+      itemId: currentItem.id,
+      mode: 'full',
+      itemName: currentItem.item_name,
+      kind: 'pick',
+    });
+  }, [currentItem]);
+
+  const requestRevertClosedLine = useCallback(() => {
+    if (!currentItem) return;
+    const status = completedLines[currentItem.id];
+    if (status !== 'flagged' && status !== 'picked' && status !== 'partial') return;
+    appHaptics.selection();
+    setRevertConfirm({
+      itemId: currentItem.id,
+      mode: 'full',
+      itemName: currentItem.item_name,
+      kind: status === 'flagged' ? 'flag' : 'pick',
+    });
+  }, [completedLines, currentItem]);
 
   const goToLine = useCallback((index: number) => {
     setLineOutcome(null);
@@ -790,8 +1199,13 @@ export function PickFlowExperience({
 
   const listRows = useMemo((): PickLineListEntry[] => {
     if (!order) return [];
+    const sessionDrafts = readPickFlowSession(orderId ?? null, sessionScope)?.lineDrafts;
     return pickItems.map((item, index) => {
-      const itemDraft = buildLineDraftFromOrderItem(item, order.items);
+      const serverDraft = buildLineDraftFromOrderItem(item, order.items);
+      const itemDraft = mergeLineDrafts(
+        serverDraft,
+        lineDraftsRef.current[item.id] ?? sessionDrafts?.[item.id],
+      );
       const itemTargetQty = itemDraft.targetQty;
       const itemLogged = sumLineDraftLogged(itemDraft);
       const completed = completedLines[item.id];
@@ -817,7 +1231,7 @@ export function PickFlowExperience({
         status,
       };
     });
-  }, [completedLines, draftState.totalLogged, lineIndex, order, pickItems]);
+  }, [completedLines, draftState.totalLogged, lineIndex, order, orderId, pickItems, sessionScope]);
 
   const doneCount = useMemo(
     () =>
@@ -1034,6 +1448,16 @@ export function PickFlowExperience({
           onEditPick={openPickModal}
           onEditGroupMrp={openEditGroupMrp}
           onEditGroupQty={openEditGroupQty}
+          onUndoGroup={(groupId) => void handleUndoGroup(groupId)}
+          onClearPick={requestClearPick}
+          onUndoLine={
+            markedStatus === 'flagged' ||
+            markedStatus === 'picked' ||
+            markedStatus === 'partial'
+              ? requestRevertClosedLine
+              : undefined
+          }
+          undoLinePending={revertPending}
           flashGroupId={flashGroupId}
         />
       )}
@@ -1048,6 +1472,8 @@ export function PickFlowExperience({
         ledgerEditField={ledgerEditField}
         onEditGroupMrp={openEditGroupMrp}
         onEditGroupQty={openEditGroupQty}
+        onUndoGroup={(groupId) => void handleUndoGroup(groupId)}
+        onClearPick={requestClearPick}
         onClose={() => {
           if (ledgerEditField) {
             cancelLedgerEdit();
@@ -1114,13 +1540,32 @@ export function PickFlowExperience({
         }}
         onSubmit={handleFlagSubmit}
         contextBanner={shortFlagContext}
-        encourageNote
       />
 
       {undoAction.toast ? (
         <UndoToast
           toast={undoAction.toast}
           onUndo={() => void undoAction.runUndo()}
+        />
+      ) : null}
+
+      {revertConfirm ? (
+        <ConfirmDialog
+          title={revertConfirm.kind === 'flag' ? 'Undo this flag?' : 'Remove this pick?'}
+          description={
+            revertConfirm.kind === 'flag'
+              ? `Put ${revertConfirm.itemName} back on your pick list. Billing won't keep this flag.`
+              : `Clear all logged qty and MRP on ${revertConfirm.itemName}. You'll pick this line again from scratch.`
+          }
+          confirmLabel={revertConfirm.kind === 'flag' ? 'Undo flag' : 'Remove pick'}
+          cancelLabel={revertConfirm.kind === 'flag' ? 'Keep flag' : 'Keep pick'}
+          tone="danger"
+          isSubmitting={revertPending}
+          onCancel={() => {
+            if (revertPending) return;
+            setRevertConfirm(null);
+          }}
+          onConfirm={() => void executeClearPick(revertConfirm.itemId, revertConfirm.mode)}
         />
       ) : null}
     </div>

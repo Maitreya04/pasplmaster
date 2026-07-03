@@ -4,7 +4,9 @@ import {
   buildLineDraftFromOrderItem,
   deriveCompletedLinesFromOrder,
   deriveLineCompletionStatus,
+  mergeLineDrafts,
 } from './hydrateLineDraft';
+import { createLineDraft } from '../hooks/usePickEntryDraft';
 
 function stubItem(partial: Partial<OrderItem> & Pick<OrderItem, 'id'>): OrderItem {
   return {
@@ -139,6 +141,68 @@ describe('deriveLineCompletionStatus', () => {
     });
 
     expect(deriveLineCompletionStatus(root, [root, split])).toBe('picked');
+  });
+});
+
+describe('mergeLineDrafts', () => {
+  it('prefers local draft when it has more committed qty than stale server cache', () => {
+    const server = createLineDraft({ rootOrderItemId: 1, targetQty: 6, uom: 'pcs' });
+    const local = createLineDraft({
+      rootOrderItemId: 1,
+      targetQty: 6,
+      uom: 'pcs',
+      confirmedGroups: [
+        {
+          id: 'local-1',
+          orderItemId: 1,
+          mrp: 589,
+          qty: 1,
+          isOverTarget: false,
+          pickerNote: null,
+        },
+      ],
+    });
+
+    const merged = mergeLineDrafts(server, local);
+    expect(merged.confirmedGroups).toHaveLength(1);
+    expect(merged.confirmedGroups[0]?.mrp).toBe(589);
+    expect(merged.confirmedGroups[0]?.qty).toBe(1);
+  });
+
+  it('uses server draft when it is ahead of local session', () => {
+    const server = createLineDraft({
+      rootOrderItemId: 1,
+      targetQty: 6,
+      uom: 'pcs',
+      confirmedGroups: [
+        {
+          id: 'server-1',
+          orderItemId: 1,
+          mrp: 589,
+          qty: 2,
+          isOverTarget: false,
+          pickerNote: null,
+        },
+      ],
+    });
+    const local = createLineDraft({
+      rootOrderItemId: 1,
+      targetQty: 6,
+      uom: 'pcs',
+      confirmedGroups: [
+        {
+          id: 'local-1',
+          orderItemId: 1,
+          mrp: 589,
+          qty: 1,
+          isOverTarget: false,
+          pickerNote: null,
+        },
+      ],
+    });
+
+    const merged = mergeLineDrafts(server, local);
+    expect(merged.confirmedGroups[0]?.qty).toBe(2);
   });
 });
 

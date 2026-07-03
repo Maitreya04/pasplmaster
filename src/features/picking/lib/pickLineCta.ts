@@ -59,6 +59,13 @@ export function pickPrimaryCta(
     return { kind: 'next', label: 'Next line →' };
   }
 
+  if (state === 'flagged') {
+    if (isLastLine) {
+      return { kind: 'finish', label: 'Finish order' };
+    }
+    return { kind: 'next', label: 'Next line →' };
+  }
+
   if (state === 'complete') {
     if (isLastLine) {
       return { kind: 'finish', label: 'Finish order' };
@@ -83,4 +90,11 @@ export function pickSecondaryCta(
   if (state !== 'marked_picked' && state !== 'marked_partial') return null;
   if (lineIndex >= totalLines - 1) return null;
   return { kind: 'next', label: 'Next line →' };
+}
+
+/** Undo a closed line (flag or full pick) when revisiting from the chip strip. */
+export function pickUndoLineLabel(state: PickLineUiState): string | null {
+  if (state === 'flagged') return 'Undo flag';
+  if (state === 'marked_picked' || state === 'marked_partial') return 'Undo pick';
+  return null;
 }

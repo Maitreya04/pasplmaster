@@ -605,6 +605,14 @@ select {
   border-color: color-mix(in srgb, var(--border-warning) 40%, var(--border-subtle));
 }
 
+.pick-ticket--flagged {
+  border-color: color-mix(in srgb, var(--border-negative) 45%, var(--border-subtle));
+}
+
+.pick-ticket--flagged::before {
+  background: linear-gradient(180deg, var(--red-4) 0%, var(--red-7) 100%);
+}
+
 .pick-ticket-qty-panel--complete {
   border-color: color-mix(in srgb, var(--border-positive) 40%, var(--border-subtle));
   background: color-mix(in srgb, var(--bg-positive-subtle) 55%, var(--bg-tertiary));
@@ -796,6 +804,14 @@ select {
   color: var(--core-white);
 }
 
+.pick-cta--flag {
+  border: 1.5px solid var(--border-warning);
+  background: var(--bg-warning-subtle);
+  color: var(--content-warning-on-light);
+  font-size: var(--ds-caption-size, 0.875rem);
+  font-weight: 700;
+}
+
 /* Line status strip above footer actions */
 .pick-line-status-strip {
   margin-bottom: 0.75rem;
@@ -814,6 +830,12 @@ select {
   border: 1px solid color-mix(in srgb, var(--border-warning) 45%, var(--border-subtle));
   background: var(--bg-warning-subtle);
   color: var(--content-warning-on-light);
+}
+
+.pick-line-status-strip--flagged {
+  border: 1px solid color-mix(in srgb, var(--border-negative) 45%, var(--border-subtle));
+  background: var(--bg-negative-subtle);
+  color: var(--content-negative);
 }
 
 /* Short viewport compaction — ticket scrolls, dock stays pinned */

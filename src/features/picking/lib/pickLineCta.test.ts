@@ -3,6 +3,7 @@ import {
   derivePickLineUiState,
   pickPrimaryCta,
   pickSecondaryCta,
+  pickUndoLineLabel,
 } from './pickLineCta';
 
 describe('pickLineCta', () => {
@@ -12,6 +13,7 @@ describe('pickLineCta', () => {
     expect(derivePickLineUiState(undefined, 10, 10, true)).toBe('complete');
     expect(derivePickLineUiState('picked', 0, 10, false)).toBe('marked_picked');
     expect(derivePickLineUiState('partial', 1, 2, false)).toBe('marked_partial');
+    expect(derivePickLineUiState('flagged', 0, 1, false)).toBe('flagged');
   });
 
   it('uses quantity-specific pick labels without arrows', () => {
@@ -66,5 +68,23 @@ describe('pickLineCta', () => {
       kind: 'next',
       label: 'Next line →',
     });
+  });
+
+  it('routes flagged lines to next line instead of pick again', () => {
+    expect(pickPrimaryCta('flagged', 1, 1, 'pcs', 0, 4, false)).toEqual({
+      kind: 'next',
+      label: 'Next line →',
+    });
+    expect(pickPrimaryCta('flagged', 0, 1, 'pcs', 3, 4, false)).toEqual({
+      kind: 'finish',
+      label: 'Finish order',
+    });
+  });
+
+  it('offers undo labels for closed lines', () => {
+    expect(pickUndoLineLabel('flagged')).toBe('Undo flag');
+    expect(pickUndoLineLabel('marked_picked')).toBe('Undo pick');
+    expect(pickUndoLineLabel('marked_partial')).toBe('Undo pick');
+    expect(pickUndoLineLabel('fresh')).toBeNull();
   });
 });

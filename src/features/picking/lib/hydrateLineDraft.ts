@@ -93,6 +93,32 @@ export function sumLineDraftLogged(draft: LineDraft): number {
   return draft.confirmedGroups.reduce((sum, group) => sum + group.qty, 0);
 }
 
+/** Prefer whichever draft has more committed qty — local session can lead stale server cache. */
+export function mergeLineDrafts(server: LineDraft, local: LineDraft | undefined | null): LineDraft {
+  if (!local || local.rootOrderItemId !== server.rootOrderItemId) return server;
+  const serverLogged = sumLineDraftLogged(server);
+  const localLogged = sumLineDraftLogged(local);
+  if (localLogged <= serverLogged) return server;
+  return {
+    ...local,
+    targetQty: server.targetQty,
+    uom: server.uom,
+    inProgress: null,
+    editingGroupId: null,
+    noteText: '',
+  };
+}
+
+/** Strip in-flight entry state before persisting to session storage. */
+export function snapshotLineDraft(draft: LineDraft): LineDraft {
+  return {
+    ...draft,
+    inProgress: null,
+    editingGroupId: null,
+    noteText: '',
+  };
+}
+
 /** Infer whether a queue line was picked, partially logged, or flagged. */
 export function deriveLineCompletionStatus(
   item: OrderItem,

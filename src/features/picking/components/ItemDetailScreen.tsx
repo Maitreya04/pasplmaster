@@ -4,6 +4,7 @@ import {
   derivePickLineUiState,
   pickPrimaryCta,
   pickSecondaryCta,
+  pickUndoLineLabel,
   type PickLineUiState,
 } from '../lib/pickLineCta';
 import { PickedLedger } from './PickedLedger';
@@ -40,6 +41,10 @@ export interface ItemDetailScreenProps {
   onEditPick?: () => void;
   onEditGroupMrp?: (groupId: string) => void;
   onEditGroupQty?: (groupId: string) => void;
+  onUndoGroup?: (groupId: string) => void;
+  onClearPick?: () => void;
+  onUndoLine?: () => void;
+  undoLinePending?: boolean;
   flashGroupId?: string | null;
 }
 
@@ -73,6 +78,14 @@ function LineStatusStrip({
   targetQty: number;
   uom: string;
 }): React.JSX.Element | null {
+  if (uiState === 'flagged') {
+    return (
+      <div className="pick-line-status-strip pick-line-status-strip--flagged">
+        <p className="font-ds-caption-size font-semibold">Flagged for billing — no pick needed</p>
+      </div>
+    );
+  }
+
   if (uiState !== 'marked_picked' && uiState !== 'marked_partial' && uiState !== 'complete') {
     return null;
   }
@@ -120,12 +133,19 @@ export function ItemDetailScreen({
   onEditPick,
   onEditGroupMrp,
   onEditGroupQty,
+  onUndoGroup,
+  onClearPick,
+  onUndoLine,
+  undoLinePending = false,
   flashGroupId,
 }: ItemDetailScreenProps): React.JSX.Element {
   const hasLogged = totalLogged > 0;
   const uiState = derivePickLineUiState(markedStatus, totalLogged, targetQty, isComplete);
   const isTicketComplete =
-    uiState === 'marked_picked' || uiState === 'complete' || uiState === 'marked_partial';
+    uiState === 'marked_picked' ||
+    uiState === 'complete' ||
+    uiState === 'marked_partial' ||
+    uiState === 'flagged';
 
   const primary = pickPrimaryCta(
     uiState,
@@ -137,6 +157,7 @@ export function ItemDetailScreen({
     revisitComplete,
   );
   const secondary = pickSecondaryCta(uiState, revisitComplete, lineIndex, totalLines);
+  const undoLineLabel = pickUndoLineLabel(uiState);
 
   const canGoPrev = lineIndex > 0;
   const canGoNext = lineIndex < totalLines - 1;
@@ -173,6 +194,14 @@ export function ItemDetailScreen({
           ? 'pick-cta pick-cta--finish'
           : 'pick-cta pick-cta--nav';
 
+  const showFlag =
+    onFlag &&
+    uiState !== 'marked_picked' &&
+    uiState !== 'marked_partial' &&
+    uiState !== 'flagged' &&
+    primary.kind !== 'next' &&
+    primary.kind !== 'finish';
+
   return (
     <div className="pick-detail flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="pick-detail-body min-h-0 flex-1 overflow-y-auto overscroll-contain">
@@ -182,7 +211,9 @@ export function ItemDetailScreen({
               ? 'pick-ticket--complete'
               : uiState === 'marked_partial'
                 ? 'pick-ticket--partial'
-                : ''
+                : uiState === 'flagged'
+                  ? 'pick-ticket--flagged'
+                  : ''
           }`}
         >
           <div className="pick-ticket-nav">
@@ -221,12 +252,16 @@ export function ItemDetailScreen({
               remaining={remaining}
               onEditGroupMrp={onEditGroupMrp}
               onEditGroupQty={onEditGroupQty}
+              onUndoGroup={onUndoGroup}
+              onClearPick={onClearPick}
               flashGroupId={flashGroupId}
               context="summary"
             />
           ) : isTicketComplete ? (
             <p className="pick-ticket-zero font-ds-micro text-[var(--content-tertiary)]">
-              Line marked complete — tap Edit pick below to change batches.
+              {uiState === 'flagged'
+                ? 'Line flagged — undo below if this was a mistake.'
+                : 'Line marked complete — tap Edit pick below to change batches.'}
             </p>
           ) : (
             <p className="pick-ticket-zero font-ds-micro text-[var(--content-tertiary)]">
@@ -283,55 +318,55 @@ export function ItemDetailScreen({
           </p>
         ) : null}
 
-        <div className="pick-detail-cta-row flex gap-2">
-          {secondary ? (
-            <>
+        <div className="pick-detail-cta-stack space-y-2">
+          <div className="pick-detail-cta-row flex gap-2">
+            {secondary ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handlePrimary}
+                  className={`min-h-12 flex-1 ${primaryClass} pick-pressable`}
+                >
+                  {primary.label}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSecondary}
+                  className="pick-cta pick-cta--nav min-h-12 flex-1 pick-pressable"
+                >
+                  {secondary.label}
+                </button>
+              </>
+            ) : (
               <button
                 type="button"
                 onClick={handlePrimary}
-                className={`min-h-12 flex-1 ${primaryClass} pick-pressable`}
+                className={`min-h-12 w-full ${primaryClass} pick-pressable`}
               >
                 {primary.label}
               </button>
-              <button
-                type="button"
-                onClick={handleSecondary}
-                className="pick-cta pick-cta--nav min-h-12 flex-1 pick-pressable"
-              >
-                {secondary.label}
-              </button>
-              {onFlag && uiState !== 'marked_picked' && uiState !== 'marked_partial' ? (
-                <button
-                  type="button"
-                  onClick={onFlag}
-                  className="flex min-h-12 min-w-12 items-center justify-center rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] pick-pressable"
-                  aria-label="Flag item"
-                >
-                  <Flag size={20} weight="fill" className="text-[var(--content-warning-on-light)]" />
-                </button>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={handlePrimary}
-                className={`min-h-12 flex-1 ${primaryClass} pick-pressable`}
-              >
-                {primary.label}
-              </button>
-              {onFlag && primary.kind !== 'next' && primary.kind !== 'finish' ? (
-                <button
-                  type="button"
-                  onClick={onFlag}
-                  className="flex min-h-12 min-w-12 items-center justify-center rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] pick-pressable"
-                  aria-label="Flag item"
-                >
-                  <Flag size={20} weight="fill" className="text-[var(--content-warning-on-light)]" />
-                </button>
-              ) : null}
-            </>
-          )}
+            )}
+          </div>
+          {showFlag ? (
+            <button
+              type="button"
+              onClick={onFlag}
+              className="pick-cta pick-cta--flag flex min-h-11 w-full items-center justify-center gap-2 pick-pressable"
+            >
+              <Flag size={18} weight="fill" aria-hidden />
+              <span>Flag issue</span>
+            </button>
+          ) : null}
+          {onUndoLine && undoLineLabel ? (
+            <button
+              type="button"
+              onClick={onUndoLine}
+              disabled={undoLinePending}
+              className="flex min-h-10 w-full items-center justify-center gap-1.5 font-ds-caption-size font-semibold text-[var(--content-negative)] pick-pressable disabled:opacity-50"
+            >
+              {undoLinePending ? 'Undoing…' : undoLineLabel}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

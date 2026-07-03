@@ -22,7 +22,7 @@ import {
   beginOfflinePickSession,
   beginOfflinePickSessionErrorMessage,
 } from '../../lib/picking/beginOfflinePickSession';
-import { readOfflinePickSession } from '../../lib/offlinePicks';
+import { readOfflinePickSession, readOfflinePickSessionFromMirror } from '../../lib/offlinePicks';
 import type { OrderItem } from '../../types';
 
 function getLineMrp(line: OrderItem): number | null {
@@ -47,7 +47,7 @@ export default function PickPreviewPage(): React.JSX.Element | null {
   const [poolConfirmOpen, setPoolConfirmOpen] = useState(false);
   const skippedPreviewRef = useRef(false);
 
-  const { data: order, isLoading, error } = useOrderDetail(orderId);
+  const { data: order, isLoading, isFetching, error } = useOrderDetail(orderId);
   const { data: handoffSummary } = useOrderHandoff(orderId, Boolean(orderId), {
     picker_name: order?.picker_name,
     reviewer_name: order?.reviewer_name,
@@ -58,17 +58,28 @@ export default function PickPreviewPage(): React.JSX.Element | null {
     workflowStatus: ['approved', 'picking'],
   });
 
-  const alreadyStarted = order != null && isPickStarted(order.workflow_status);
+  const offlineMirrorSession = useMemo(
+    () => (orderId != null ? readOfflinePickSessionFromMirror(orderId) : null),
+    [orderId],
+  );
+
+  const alreadyStarted = useMemo(() => {
+    if (order != null && isPickStarted(order.workflow_status)) return true;
+    return (
+      offlineMirrorSession != null &&
+      isPickStarted(offlineMirrorSession.orderSnapshot.workflow_status)
+    );
+  }, [offlineMirrorSession, order]);
 
   // Resume path — never show the trip brief twice for the same order.
   useEffect(() => {
     if (!orderId || !Number.isFinite(orderId) || orderId <= 0) return;
-    if (isLoading || skippedPreviewRef.current) return;
-    if (order && alreadyStarted) {
+    if (isLoading || isFetching || skippedPreviewRef.current) return;
+    if (alreadyStarted) {
       skippedPreviewRef.current = true;
       navigate(`/picking/pick/${orderId}`, { replace: true });
     }
-  }, [alreadyStarted, isLoading, navigate, order, orderId]);
+  }, [alreadyStarted, isFetching, isLoading, navigate, orderId]);
 
   const rows = useMemo(() => {
     if (!order?.items?.length) return [];
@@ -173,6 +184,15 @@ export default function PickPreviewPage(): React.JSX.Element | null {
       });
     },
     onSuccess: (result) => {
+      queryClient.setQueryData(['order', orderId], (prev: typeof order | undefined) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          workflow_status: 'picking' as const,
+          picked_at: prev.picked_at ?? result.session.startedAt,
+          picker_name: userName ?? prev.picker_name,
+        };
+      });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       queryClient.invalidateQueries({ queryKey: ['picker-daily-stats'] });
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowsLeftRight } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
+import { useTeamUsers } from '../../hooks/useTeamUsers';
 import type { AuthState } from '../../types';
 
 type RoleKey = Exclude<AuthState['role'], null>;
@@ -23,11 +24,22 @@ const ROLE_LABEL: Record<RoleKey, string> = {
 };
 
 export function DevRoleSwitcher(): React.JSX.Element | null {
-  const { isAuthenticated, role, selectRole, canSwitchRoles, switchRole } = useAuth();
+  const { isAuthenticated, role, selectRole, canSwitchRoles, switchRole, startImpersonation, adminUnlocked, actualRole } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const { data: pickingUsers } = useTeamUsers('picking');
 
   const isDev = !import.meta.env.PROD;
+
+  const devPickerTarget = useMemo(() => {
+    const users = pickingUsers ?? [];
+    return (
+      users.find((user) => user.full_name === 'Test') ??
+      users.find((user) => user.full_name === 'Demo Picker') ??
+      users[0] ??
+      null
+    );
+  }, [pickingUsers]);
 
   if (!isAuthenticated) return null;
   if (!isDev && !canSwitchRoles) return null;
@@ -36,7 +48,16 @@ export function DevRoleSwitcher(): React.JSX.Element | null {
     if (target === 'sales') {
       selectRole('sales', 'Demo Sales');
     } else if (target === 'picking') {
-      selectRole('picking', 'Demo Picker');
+      if (actualRole === 'admin' && adminUnlocked && devPickerTarget) {
+        startImpersonation({
+          userId: devPickerTarget.id,
+          userName: devPickerTarget.full_name,
+          role: 'picking',
+          branch: devPickerTarget.stock_location_code,
+        });
+      } else {
+        selectRole('picking', devPickerTarget?.full_name ?? 'Demo Picker');
+      }
     } else if (target === 'billing') {
       selectRole('billing', 'Demo Billing');
     } else {

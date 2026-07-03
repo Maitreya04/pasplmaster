@@ -1,3 +1,4 @@
+import { startPicking } from './picking/startPicking';
 import type { PickItemTransition } from './picking/itemTransitionAdapter';
 import type { PickLineMrpState } from './picking/pickLineMrp';
 import { pickQuantityTarget, pickableOrderItems } from './cartSupply';
@@ -172,6 +173,15 @@ export async function readOfflinePicks(): Promise<OfflinePickSession[]> {
 
 export function readOfflinePicksMirror(): OfflinePickSession[] {
   return readLocalQueueMirror();
+}
+
+/** Synchronous read — available before IDB hydrate (right after Start on preview). */
+export function readOfflinePickSessionFromMirror(
+  orderId: number | null,
+): OfflinePickSession | null {
+  if (!orderId) return null;
+  const rows = readLocalQueueMirror();
+  return rows.find((row) => row.orderId === orderId && row.status !== 'applied') ?? null;
 }
 
 export async function readOfflinePickSession(
@@ -364,6 +374,41 @@ export async function bootstrapOfflinePickSession(
   }
 
   let working = session;
+  if (!working.claimId) {
+    try {
+      const claimResponse = await withTimeout(
+        Promise.resolve(
+          supabase.rpc('claim_order', {
+            p_order_id: working.orderId,
+            p_stage: 'picking',
+            p_user_id: working.pickerUserId,
+          }),
+        ),
+        BOOTSTRAP_TIMEOUT_MS,
+        'bootstrap_claim',
+      );
+      const { data, error } = claimResponse;
+      if (error) throw error;
+      const claimResult = data as {
+        success?: boolean;
+        reason?: string;
+        claim_id?: number;
+      };
+      if (claimResult?.success && claimResult.claim_id) {
+        working =
+          (await persistSessionPatch(working.clientPickKey, { claimId: claimResult.claim_id })) ??
+          { ...working, claimId: claimResult.claim_id };
+      }
+    } catch (err) {
+      if (!isNetworkPickSyncError(err)) {
+        const message = err instanceof Error ? err.message : 'bootstrap_claim_failed';
+        return (
+          (await persistSessionPatch(working.clientPickKey, { lastError: message })) ?? working
+        );
+      }
+      return working;
+    }
+  }
   if (working.fromPool && !working.claimId) {
     try {
       const claimResponse = await withTimeout(
@@ -402,6 +447,55 @@ export async function bootstrapOfflinePickSession(
   }
 
   if (!working.claimId) {
+    return working;
+  }
+
+  try {
+    const startResult = await withTimeout(
+      Promise.resolve(
+        startPicking({
+          orderId: working.orderId,
+          userId: working.pickerUserId,
+        }),
+      ),
+      BOOTSTRAP_TIMEOUT_MS,
+      'bootstrap_start',
+    );
+    if (!startResult.success) {
+      const reason = startResult.reason ?? 'start_failed';
+      const canProceed =
+        reason === 'not_ready' ||
+        startResult.already_started === true;
+      if (!canProceed) {
+        return (
+          (await persistSessionPatch(working.clientPickKey, { lastError: reason })) ?? working
+        );
+      }
+    } else {
+      const resolvedClaimId = startResult.claim_id ?? working.claimId;
+      if (resolvedClaimId !== working.claimId) {
+        working =
+          (await persistSessionPatch(working.clientPickKey, { claimId: resolvedClaimId })) ??
+          { ...working, claimId: resolvedClaimId };
+      }
+      if (working.orderSnapshot.workflow_status !== 'picking') {
+        const orderSnapshot = {
+          ...working.orderSnapshot,
+          workflow_status: 'picking' as const,
+          picked_at: working.orderSnapshot.picked_at ?? working.startedAt,
+        };
+        working =
+          (await persistSessionPatch(working.clientPickKey, { orderSnapshot })) ??
+          { ...working, orderSnapshot };
+      }
+    }
+  } catch (err) {
+    if (!isNetworkPickSyncError(err)) {
+      const message = err instanceof Error ? err.message : 'bootstrap_start_failed';
+      return (
+        (await persistSessionPatch(working.clientPickKey, { lastError: message })) ?? working
+      );
+    }
     return working;
   }
 

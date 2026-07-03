@@ -1,6 +1,4 @@
-import { useEffect, useState } from 'react';
-import { Flag } from '@phosphor-icons/react';
-import { BottomSheet, BigButton } from '../shared';
+import { BottomSheet } from '../shared';
 import { FLAG_REASONS, type FlagReason } from '../../utils/constants';
 import { FLAG_SHEET_PRICE_HINT } from '../../lib/billing/mrpWorkflowCopy';
 
@@ -16,8 +14,6 @@ interface FlagReasonSheetProps {
   loading?: boolean;
   /** Optional context shown above reason grid (e.g. short-pick remaining qty). */
   contextBanner?: string;
-  /** When true, show note field expanded by default for short-pick flows. */
-  encourageNote?: boolean;
 }
 
 export function FlagReasonSheet({
@@ -26,49 +22,19 @@ export function FlagReasonSheet({
   onSubmit,
   loading = false,
   contextBanner,
-  encourageNote = false,
 }: FlagReasonSheetProps): React.JSX.Element {
-  const [reason, setReason] = useState<FlagReason | ''>('');
-  const [notes, setNotes] = useState('');
-  const [notesExpanded, setNotesExpanded] = useState(false);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setReason('');
-      setNotes('');
-      setNotesExpanded(false);
-    }
-  }, [isOpen]);
-
   function resetAndClose() {
-    setReason('');
-    setNotes('');
-    setNotesExpanded(false);
     onClose();
   }
 
   function submitReason(selected: FlagReason, noteText: string | null = null) {
     onSubmit({ reason: selected, notes: noteText });
-    setReason('');
-    setNotes('');
-    setNotesExpanded(false);
   }
 
   function handleReasonSelect(selected: FlagReason) {
-    setReason(selected);
-    setNotes('');
-    if (selected === 'Out of Stock') {
-      setNotesExpanded(false);
-      return;
-    }
-    if (encourageNote) {
-      setNotesExpanded(true);
-    }
-  }
-
-  function handleSubmit() {
-    if (!reason) return;
-    submitReason(reason, notes.trim() || null);
+    if (loading) return;
+    // One tap — opening the sheet is already deliberate; undo is available on the line.
+    submitReason(selected, null);
   }
 
   return (
@@ -91,76 +57,13 @@ export function FlagReasonSheet({
               key={r}
               type="button"
               onClick={() => handleReasonSelect(r)}
-              disabled={loading && r === 'Out of Stock'}
-              className={`px-3 py-3 rounded-xl text-sm font-medium text-left min-h-12 transition-colors ${
-                reason === r
-                  ? 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] ring-1 ring-[var(--border-negative)]'
-                  : 'bg-[var(--bg-tertiary)] text-[var(--content-secondary)]'
-              }`}
+              disabled={loading}
+              className="px-3 py-3 rounded-xl text-sm font-medium text-left min-h-12 transition-colors bg-[var(--bg-tertiary)] text-[var(--content-secondary)] hover:bg-[var(--bg-negative-subtle)] hover:text-[var(--content-negative)] active:scale-[0.98] disabled:opacity-50"
             >
               {r}
             </button>
           ))}
         </div>
-
-        <p className="text-xs text-[var(--content-quaternary)]">
-          Out of stock needs a confirm tap — other reasons use the button below.
-        </p>
-
-        {reason === 'Out of Stock' ? (
-          <div className="space-y-3 rounded-xl border border-[var(--border-negative)] bg-[var(--bg-negative-subtle)] px-3 py-3">
-            <p className="font-ds-caption-size font-semibold text-[var(--content-negative)]">
-              Confirm nothing on shelf?
-            </p>
-            <p className="font-ds-micro leading-relaxed text-[var(--content-secondary)]">
-              Billing gets notified and this line goes to pending items for re-order. You can undo
-              before leaving the order.
-            </p>
-            <BigButton
-              variant="primary"
-              onClick={() => submitReason('Out of Stock', null)}
-              loading={loading}
-              className="bg-[var(--bg-negative)] text-[var(--content-on-color)]"
-            >
-              <Flag size={18} weight="fill" />
-              Confirm out of stock
-            </BigButton>
-          </div>
-        ) : null}
-
-        {reason && reason !== 'Out of Stock' && !notesExpanded ? (
-          <button
-            type="button"
-            onClick={() => setNotesExpanded(true)}
-            className="text-xs font-medium text-[var(--content-accent)]"
-          >
-            + Add note (optional)
-          </button>
-        ) : null}
-
-        {reason && reason !== 'Out of Stock' && notesExpanded ? (
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder={
-              encourageNote ? 'Only found partial stock on shelf…' : 'Additional notes (optional)'
-            }
-            className="w-full h-20 px-4 py-3 rounded-xl bg-[var(--bg-tertiary)] text-[var(--content-primary)] border border-[var(--border-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--border-negative)]"
-          />
-        ) : null}
-
-        {reason && reason !== 'Out of Stock' ? (
-          <BigButton
-            variant="primary"
-            onClick={handleSubmit}
-            disabled={!reason}
-            loading={loading}
-            className="bg-[var(--bg-negative)] text-[var(--content-on-color)]"
-          >
-            <Flag size={18} weight="fill" />
-            Flag and notify billing
-          </BigButton>
-        ) : null}
       </div>
     </BottomSheet>
   );

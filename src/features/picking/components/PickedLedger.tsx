@@ -88,6 +88,7 @@ export interface LedgerBatchRowProps {
   mrp: number;
   onEditMrp?: () => void;
   onEditQty?: () => void;
+  onUndo?: () => void;
   flash?: boolean;
 }
 
@@ -99,6 +100,7 @@ export function LedgerBatchRow({
   mrp,
   onEditMrp,
   onEditQty,
+  onUndo,
   flash = false,
 }: LedgerBatchRowProps): React.JSX.Element {
   const isInProgress = variant === 'inProgress';
@@ -130,6 +132,15 @@ export function LedgerBatchRow({
           typing={isInProgress}
         />
       </div>
+      {onUndo ? (
+        <button
+          type="button"
+          onClick={onUndo}
+          className="shrink-0 self-center rounded-lg px-2 py-1 font-ds-micro font-semibold text-[var(--content-secondary)] pick-pressable"
+        >
+          Undo
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -190,6 +201,8 @@ export interface PickedLedgerProps {
   onEditGroupQty?: (groupId: string) => void;
   onEditInProgressMrp?: () => void;
   onEditInProgressQty?: () => void;
+  onUndoGroup?: (groupId: string) => void;
+  onClearPick?: () => void;
   flashGroupId?: string | null;
   context?: 'modal' | 'summary';
   mode?: PickedLedgerMode;
@@ -203,6 +216,8 @@ export function PickedLedger({
   onEditGroupQty,
   onEditInProgressMrp,
   onEditInProgressQty,
+  onUndoGroup,
+  onClearPick,
   flashGroupId,
   context = 'modal',
   mode = 'full',
@@ -217,6 +232,10 @@ export function PickedLedger({
   const ip = draft.inProgress;
   const ipQty = ip?.stage === 'qty' && ip.qty != null ? ip.qty : 0;
   const canEdit = onEditGroupMrp != null || onEditGroupQty != null;
+  const lastGroupId =
+    draft.confirmedGroups.length > 0
+      ? draft.confirmedGroups[draft.confirmedGroups.length - 1]!.id
+      : null;
 
   if (mode === 'strip') {
     return (
@@ -257,6 +276,11 @@ export function PickedLedger({
             mrp={group.mrp}
             onEditMrp={onEditGroupMrp ? () => onEditGroupMrp(group.id) : undefined}
             onEditQty={onEditGroupQty ? () => onEditGroupQty(group.id) : undefined}
+            onUndo={
+              onUndoGroup && group.id === lastGroupId
+                ? () => onUndoGroup(group.id)
+                : undefined
+            }
             flash={flashGroupId === group.id}
           />
         ))}
@@ -273,6 +297,17 @@ export function PickedLedger({
         ) : null}
         {remaining > 0 ? <RemainingRow qty={remaining} uom={draft.uom} /> : null}
       </div>
+      {onClearPick && draft.confirmedGroups.length > 0 ? (
+        <div className="flex justify-end pt-0.5">
+          <button
+            type="button"
+            onClick={onClearPick}
+            className="font-ds-micro font-semibold text-[var(--content-negative)] pick-pressable"
+          >
+            Remove pick · start over
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

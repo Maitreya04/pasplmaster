@@ -10,6 +10,7 @@ export type PickEntryModalPhase = 'idle' | 'mrp' | 'qty' | 'gap' | 'price_fix';
 type DraftAction =
   | { type: 'reset'; draft: LineDraft }
   | { type: 'start_pick' }
+  | { type: 'resume_pick'; mrp: number; qty: number }
   | { type: 'set_mrp'; value: number | null }
   | { type: 'advance_to_qty' }
   | { type: 'set_qty'; value: number | null }
@@ -33,6 +34,13 @@ function draftReducer(state: LineDraft, action: DraftAction): LineDraft {
       return {
         ...state,
         inProgress: { mrp: null, qty: null, stage: 'mrp' },
+        editingGroupId: null,
+        noteText: '',
+      };
+    case 'resume_pick':
+      return {
+        ...state,
+        inProgress: { mrp: action.mrp, qty: action.qty, stage: 'qty' },
         editingGroupId: null,
         noteText: '',
       };
@@ -162,6 +170,10 @@ export function usePickEntryDraft(initial: LineDraft) {
 
   const startPick = useCallback(() => dispatch({ type: 'start_pick' }), []);
 
+  const resumePick = useCallback((mrp: number, qty: number) => {
+    dispatch({ type: 'resume_pick', mrp, qty });
+  }, []);
+
   const setMrp = useCallback((value: number | null) => {
     dispatch({ type: 'set_mrp', value });
   }, []);
@@ -245,6 +257,7 @@ export function usePickEntryDraft(initial: LineDraft) {
       draft,
       reset,
       startPick,
+      resumePick,
       setMrp,
       advanceToQty,
       setQty,
@@ -266,6 +279,7 @@ export function usePickEntryDraft(initial: LineDraft) {
       draft,
       reset,
       startPick,
+      resumePick,
       setMrp,
       advanceToQty,
       setQty,

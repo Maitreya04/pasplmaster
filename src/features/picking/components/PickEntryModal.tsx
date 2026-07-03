@@ -23,6 +23,8 @@ export interface PickEntryModalProps {
   ledgerEditField?: LedgerEditField;
   onEditGroupMrp: (groupId: string) => void;
   onEditGroupQty: (groupId: string) => void;
+  onUndoGroup?: (groupId: string) => void;
+  onClearPick?: () => void;
   onClose: () => void;
   onAdvanceToQty: () => void;
   onSwitchToQty: () => void;
@@ -106,6 +108,8 @@ export function PickEntryModal({
   ledgerEditField = null,
   onEditGroupMrp,
   onEditGroupQty,
+  onUndoGroup,
+  onClearPick,
   onClose,
   onAdvanceToQty,
   onSwitchToQty,
@@ -345,6 +349,8 @@ export function PickEntryModal({
     totalLogged,
     onEditGroupMrp,
     onEditGroupQty,
+    onUndoGroup,
+    onClearPick,
     onEditInProgressMrp: handleEditInProgressMrp,
     onEditInProgressQty: handleEditInProgressQty,
     flashGroupId,
