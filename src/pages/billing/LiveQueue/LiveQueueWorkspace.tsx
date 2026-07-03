@@ -20,6 +20,7 @@ import {
   type BillingLineEdit,
 } from '../../../lib/billing/liveQueueDraft';
 import { billingClaimFailureMessage } from '../../../lib/billing/claimFailureMessage';
+import { clearBusyEnteredIds } from '../../../lib/billing/busyEntrySession';
 import { sortBillLines } from '../../../lib/billing/sortBillLines';
 
 import { useBillingFlow } from '../../../hooks/useBillingFlow';
@@ -65,9 +66,14 @@ function sortByUrgencyAndAge(orders: OrderWithClaimInfo[]): OrderWithClaimInfo[]
 interface LiveQueueWorkspaceProps {
   /** When true, fills a desk panel instead of the full page. */
   embedded?: boolean;
+  /** Desk mode: after warehouse-pick approve, hand off to inline assign instead of report. */
+  onApprovedForAssign?: (orderId: number) => void;
 }
 
-export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps): React.JSX.Element {
+export function LiveQueueWorkspace({
+  embedded = false,
+  onApprovedForAssign,
+}: LiveQueueWorkspaceProps): React.JSX.Element {
   const queryClient = useQueryClient();
   const toast = useToast();
   const { userName, userId } = useAuth();
@@ -623,7 +629,7 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
 
       return reportSnapshot;
     },
-    onSuccess: (snapshot) => {
+    onSuccess: async (snapshot) => {
       billingReportSnapshotRef.current = snapshot;
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
@@ -631,7 +637,28 @@ export function LiveQueueWorkspace({ embedded = false }: LiveQueueWorkspaceProps
       void invalidateLocationwiseStockQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: ['billing-stock-freshness'] });
 
-      // Move to report screen
+      const sentToPick =
+        snapshot.resolvedFulfillmentPath === 'warehouse_pick' &&
+        snapshot.effectivePickLineCount > 0;
+
+      if (embedded && sentToPick && onApprovedForAssign) {
+        clearBusyEnteredIds(snapshot.orderId);
+        billingReportSnapshotRef.current = null;
+
+        if (claimId && userId) {
+          try {
+            await release();
+          } catch {
+            /* best effort */
+          }
+        }
+        claimAttempted.current = null;
+        setCurrentOrderId(null);
+        flow.returnToQueue();
+        onApprovedForAssign(snapshot.orderId);
+        return;
+      }
+
       flow.finishBilling();
     },
     onError: (err: unknown) => {

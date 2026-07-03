@@ -178,17 +178,52 @@ function PickProgressStrip({
   );
 }
 
-function RemainingRow({ qty, uom }: { qty: number; uom: string }): React.JSX.Element {
+function RemainingRow({
+  qty,
+  uom,
+  totalLogged,
+  targetQty,
+  onFinishShort,
+}: {
+  qty: number;
+  uom: string;
+  totalLogged: number;
+  targetQty: number;
+  onFinishShort?: () => void;
+}): React.JSX.Element {
   const uomNorm = normalizeUom(uom);
+  const uomWord = uomNorm.toLowerCase();
+
   return (
-    <div className="flex items-center gap-2.5 rounded-xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2.5">
-      <Clock size={14} weight="fill" className="shrink-0 text-[var(--content-warning-on-light)]" />
-      <div className="min-w-0 flex-1">
-        <p className="pick-identity-label text-[var(--content-warning-on-light)]">Remaining</p>
-        <p className="mt-0.5 font-ds-body-size font-semibold text-[var(--content-warning-on-light)]">
-          {qty} {uomNorm.toLowerCase()} still to pick
-        </p>
+    <div className="rounded-xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2.5">
+      <div className="flex items-start gap-2.5">
+        <Clock
+          size={14}
+          weight="fill"
+          className="mt-0.5 shrink-0 text-[var(--content-warning-on-light)]"
+        />
+        <div className="min-w-0 flex-1">
+          <p className="pick-identity-label text-[var(--content-warning-on-light)]">Remaining</p>
+          <p className="mt-0.5 font-ds-body-size font-semibold text-[var(--content-warning-on-light)]">
+            {qty} {uomWord} still to pick
+          </p>
+          {onFinishShort ? (
+            <p className="mt-1.5 font-ds-micro leading-snug text-[var(--content-warning-on-light)]/85">
+              Can&apos;t find the rest on shelf? Short pick closes this line with{' '}
+              {totalLogged} of {targetQty} {uomWord} — billing ships what you picked.
+            </p>
+          ) : null}
+        </div>
       </div>
+      {onFinishShort ? (
+        <button
+          type="button"
+          onClick={onFinishShort}
+          className="mt-2.5 flex min-h-10 w-full items-center justify-center rounded-lg border border-[var(--border-warning)] bg-[var(--bg-secondary)] px-3 font-ds-caption-size font-bold text-[var(--content-warning-on-light)] pick-pressable active:scale-[0.99]"
+        >
+          Short pick · {qty} won&apos;t ship
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -203,6 +238,7 @@ export interface PickedLedgerProps {
   onEditInProgressQty?: () => void;
   onUndoGroup?: (groupId: string) => void;
   onClearPick?: () => void;
+  onFinishShort?: () => void;
   flashGroupId?: string | null;
   context?: 'modal' | 'summary';
   mode?: PickedLedgerMode;
@@ -218,6 +254,7 @@ export function PickedLedger({
   onEditInProgressQty,
   onUndoGroup,
   onClearPick,
+  onFinishShort,
   flashGroupId,
   context = 'modal',
   mode = 'full',
@@ -295,7 +332,15 @@ export function PickedLedger({
             onEditQty={onEditInProgressQty}
           />
         ) : null}
-        {remaining > 0 ? <RemainingRow qty={remaining} uom={draft.uom} /> : null}
+        {remaining > 0 ? (
+          <RemainingRow
+            qty={remaining}
+            uom={draft.uom}
+            totalLogged={totalLogged}
+            targetQty={draft.targetQty}
+            onFinishShort={onFinishShort}
+          />
+        ) : null}
       </div>
       {onClearPick && draft.confirmedGroups.length > 0 ? (
         <div className="flex justify-end pt-0.5">

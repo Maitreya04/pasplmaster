@@ -14,12 +14,11 @@ export function getBookPrice(item: Pick<OrderItem, 'price_system'>): number | nu
   return isFiniteNumber(item.price_system) ? item.price_system : null;
 }
 
-/** Explicit FOC rows or legacy heuristic (₹0 quoted means free-of-charge). */
+/** True only when sales explicitly marked this row as free-of-charge. */
 export function isFocOrderItem(
-  item: Pick<OrderItem, 'is_foc' | 'price_quoted' | 'price_system'>,
+  item: Pick<OrderItem, 'is_foc'>,
 ): boolean {
-  if (item.is_foc === true) return true;
-  return isFiniteNumber(item.price_quoted) && item.price_quoted === 0;
+  return item.is_foc === true;
 }
 
 export function isSpecialRateItem(

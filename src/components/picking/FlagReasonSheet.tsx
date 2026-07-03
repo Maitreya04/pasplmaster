@@ -12,6 +12,8 @@ interface FlagReasonSheetProps {
   onClose: () => void;
   onSubmit: (payload: FlagSubmitPayload) => void;
   loading?: boolean;
+  title?: string;
+  hint?: string;
   /** Optional context shown above reason grid (e.g. short-pick remaining qty). */
   contextBanner?: string;
 }
@@ -21,6 +23,8 @@ export function FlagReasonSheet({
   onClose,
   onSubmit,
   loading = false,
+  title = 'Report issue',
+  hint = 'Billing will be notified. You can reset this line before leaving the order.',
   contextBanner,
 }: FlagReasonSheetProps): React.JSX.Element {
   function resetAndClose() {
@@ -38,11 +42,9 @@ export function FlagReasonSheet({
   }
 
   return (
-    <BottomSheet isOpen={isOpen} onClose={resetAndClose} title="Report issue">
+    <BottomSheet isOpen={isOpen} onClose={resetAndClose} title={title}>
       <div className="space-y-4">
-        <p className="text-sm text-[var(--content-tertiary)]">
-          Billing will be notified. You can reset this line before leaving the order.
-        </p>
+        <p className="text-sm text-[var(--content-tertiary)]">{hint}</p>
         {contextBanner ? (
           <p className="rounded-lg border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3 py-2 text-sm text-[var(--content-warning-on-light)]">
             {contextBanner}

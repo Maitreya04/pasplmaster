@@ -558,6 +558,7 @@ function GroupTable({
 
   return (
     <section
+      id={group.id === 'skip' ? 'review-bill-skip-section' : undefined}
       className={
         group.id === 'bill'
           ? 'overflow-hidden bg-[var(--bg-primary)]'
@@ -646,9 +647,11 @@ export function ReviewBillTable({
     [displayLines, sortedLines, edits, pendingByItemId, flaggedItemIds],
   );
 
-  const [collapsed, setCollapsed] = useState<Partial<Record<ReviewTableGroupId, boolean>>>({
-    skip: true,
-  });
+  const hasSkipRows = groups.some((group) => group.id === 'skip' && group.rows.length > 0);
+
+  const [collapsed, setCollapsed] = useState<Partial<Record<ReviewTableGroupId, boolean>>>(() =>
+    readOnly && hasSkipRows ? { skip: false } : { skip: true },
+  );
 
   const toggleGroup = (id: ReviewTableGroupId) => {
     setCollapsed((prev) => ({ ...prev, [id]: !prev[id] }));

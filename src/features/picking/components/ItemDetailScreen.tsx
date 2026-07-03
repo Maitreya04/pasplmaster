@@ -1,4 +1,5 @@
 import { CaretLeft, CaretRight, Flag } from '@phosphor-icons/react';
+import { normalizeUom } from '../../../lib/picking/pickerMicrocopy';
 import { pickQtyStripCopy } from '../lib/pickQtyDisplay';
 import {
   derivePickLineUiState,
@@ -38,6 +39,7 @@ export interface ItemDetailScreenProps {
   onGoToLine?: (index: number) => void;
   onSeeAllLines?: () => void;
   onFlag?: () => void;
+  onShortPick?: () => void;
   onEditPick?: () => void;
   onEditGroupMrp?: (groupId: string) => void;
   onEditGroupQty?: (groupId: string) => void;
@@ -72,16 +74,36 @@ function LineStatusStrip({
   totalLogged,
   targetQty,
   uom,
+  onUndoLine,
+  undoLineLabel,
+  undoLinePending = false,
 }: {
   uiState: PickLineUiState;
   totalLogged: number;
   targetQty: number;
   uom: string;
+  onUndoLine?: () => void;
+  undoLineLabel?: string | null;
+  undoLinePending?: boolean;
 }): React.JSX.Element | null {
+  const showUndo = onUndoLine != null && undoLineLabel != null;
+
   if (uiState === 'flagged') {
     return (
-      <div className="pick-line-status-strip pick-line-status-strip--flagged">
-        <p className="font-ds-caption-size font-semibold">Flagged for billing — no pick needed</p>
+      <div className="pick-line-status-strip pick-line-status-strip--flagged pick-line-status-strip--with-action">
+        <p className="min-w-0 flex-1 font-ds-caption-size font-semibold leading-snug">
+          Flagged for billing — no pick needed
+        </p>
+        {showUndo ? (
+          <button
+            type="button"
+            onClick={onUndoLine}
+            disabled={undoLinePending}
+            className="pick-line-status-undo pick-pressable disabled:opacity-50"
+          >
+            {undoLinePending ? 'Undoing…' : undoLineLabel}
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -92,16 +114,30 @@ function LineStatusStrip({
 
   const logged = uiState === 'marked_picked' && totalLogged === 0 ? targetQty : totalLogged;
   const isPartial = uiState === 'marked_partial' || logged < targetQty;
+  const statusCopy =
+    uiState === 'marked_partial'
+      ? `Short pick · shipping ${logged} of ${targetQty} ${normalizeUom(uom).toLowerCase()}`
+      : pickQtyStripCopy(logged, targetQty, uom);
 
   return (
     <div
-      className={`pick-line-status-strip ${
+      className={`pick-line-status-strip pick-line-status-strip--with-action ${
         isPartial ? 'pick-line-status-strip--partial' : 'pick-line-status-strip--complete'
       }`}
     >
-      <p className="font-ds-caption-size font-semibold">
-        {pickQtyStripCopy(logged, targetQty, uom)}
+      <p className="min-w-0 flex-1 text-left font-ds-caption-size font-semibold leading-snug">
+        {statusCopy}
       </p>
+      {showUndo ? (
+        <button
+          type="button"
+          onClick={onUndoLine}
+          disabled={undoLinePending}
+          className="pick-line-status-undo pick-pressable disabled:opacity-50"
+        >
+          {undoLinePending ? 'Undoing…' : undoLineLabel}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -130,6 +166,7 @@ export function ItemDetailScreen({
   onGoToLine,
   onSeeAllLines,
   onFlag,
+  onShortPick,
   onEditPick,
   onEditGroupMrp,
   onEditGroupQty,
@@ -202,6 +239,12 @@ export function ItemDetailScreen({
     primary.kind !== 'next' &&
     primary.kind !== 'finish';
 
+  const showShortPick =
+    onShortPick != null &&
+    uiState === 'in_progress' &&
+    totalLogged > 0 &&
+    remaining > 0;
+
   return (
     <div className="pick-detail flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="pick-detail-body min-h-0 flex-1 overflow-y-auto overscroll-contain">
@@ -253,7 +296,8 @@ export function ItemDetailScreen({
               onEditGroupMrp={onEditGroupMrp}
               onEditGroupQty={onEditGroupQty}
               onUndoGroup={onUndoGroup}
-              onClearPick={onClearPick}
+              onClearPick={isTicketComplete ? undefined : onClearPick}
+              onFinishShort={showShortPick ? onShortPick : undefined}
               flashGroupId={flashGroupId}
               context="summary"
             />
@@ -277,6 +321,9 @@ export function ItemDetailScreen({
           totalLogged={totalLogged}
           targetQty={targetQty}
           uom={uom}
+          onUndoLine={onUndoLine}
+          undoLineLabel={undoLineLabel}
+          undoLinePending={undoLinePending}
         />
 
         {showLineNav ? (
@@ -351,20 +398,10 @@ export function ItemDetailScreen({
             <button
               type="button"
               onClick={onFlag}
-              className="pick-cta pick-cta--flag flex min-h-11 w-full items-center justify-center gap-2 pick-pressable"
+              className="flex min-h-10 w-full items-center justify-center gap-1.5 font-ds-caption-size font-semibold text-[var(--content-tertiary)] pick-pressable hover:text-[var(--content-warning-on-light)]"
             >
-              <Flag size={18} weight="fill" aria-hidden />
+              <Flag size={16} weight="fill" aria-hidden />
               <span>Flag issue</span>
-            </button>
-          ) : null}
-          {onUndoLine && undoLineLabel ? (
-            <button
-              type="button"
-              onClick={onUndoLine}
-              disabled={undoLinePending}
-              className="flex min-h-10 w-full items-center justify-center gap-1.5 font-ds-caption-size font-semibold text-[var(--content-negative)] pick-pressable disabled:opacity-50"
-            >
-              {undoLinePending ? 'Undoing…' : undoLineLabel}
             </button>
           ) : null}
         </div>

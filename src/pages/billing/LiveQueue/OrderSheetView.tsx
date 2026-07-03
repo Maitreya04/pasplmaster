@@ -14,7 +14,7 @@ import type {
 } from '../../../types';
 import { countEffectivePickLinesAfterBilling } from '../../../lib/billing/billLineOutcome';
 import type { BillingLiveQueueFlag } from '../../../lib/billing/liveQueueDraft';
-import { defaultFulfillmentPath } from '../../../lib/billing/fulfillmentPath';
+import { defaultFulfillmentPath, fulfillmentPathLabel } from '../../../lib/billing/fulfillmentPath';
 import { FulfillmentPathSelector } from '../../../components/billing/FulfillmentPathSelector';
 import type { BillingLineEdit, ItemFlag } from '../../../hooks/useBillingFlow';
 import type { BillingFreshnessRow } from '../../../hooks/useBillingStockFreshness';
@@ -174,6 +174,16 @@ export function OrderSheetView({
     setManualFulfillmentPath(null);
   }
   const fulfillmentPath = manualFulfillmentPath ?? autoFulfillmentPath;
+  const finishLabel = fulfillmentPathLabel(fulfillmentPath);
+
+  const cleanSheet =
+    Object.keys(flags).length === 0 &&
+    Object.entries(lineEdits).filter(
+      ([, e]) =>
+        !e.removed && (e.qtyRequested !== undefined || e.priceQuoted !== undefined),
+    ).length === 0 &&
+    items.filter((i) => lineEdits[i.id]?.removed).length === 0 &&
+    addedLinesSessionCount === 0;
 
   const busyModel = useBusyPasteModel({
     orderId,
@@ -184,6 +194,8 @@ export function OrderSheetView({
     isApproving,
     isRejecting,
     hasVisibleRows: mergedVisibleRows.length > 0,
+    cleanSheet,
+    finishLabel,
     copySessionId: 'all-items',
   });
 
@@ -451,6 +463,16 @@ export function OrderSheetView({
         return;
       }
 
+      if (e.code === 'Space' && activeRow !== null && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        const rowItem = mergedVisibleRows[activeRow];
+        if (rowItem && !isFullyPendingBusyLine(flags[rowItem.id])) {
+          toggleEntered(rowItem.id);
+          showHintsTemporarily();
+        }
+        return;
+      }
+
       if (e.key === 'Tab' && !e.shiftKey && activeRow !== null && mergedVisibleRows.length > 0) {
         e.preventDefault();
         for (let i = 1; i <= mergedVisibleRows.length; i++) {
@@ -546,6 +568,7 @@ export function OrderSheetView({
     isRejecting,
     onOpenAddLine,
     handleRemoveLine,
+    toggleEntered,
   ]);
 
   useEffect(() => {

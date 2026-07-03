@@ -60,6 +60,8 @@ interface BillingOrderChromeProps {
   actions?: ReactNode;
   children: ReactNode;
   className?: string;
+  /** Child fills remaining height (e.g. desk assign picker) instead of scrolling as a block. */
+  contentFill?: boolean;
 }
 
 export function BillingOrderChrome({
@@ -86,6 +88,7 @@ export function BillingOrderChrome({
   actions,
   children,
   className = '',
+  contentFill = false,
 }: BillingOrderChromeProps): React.JSX.Element {
   const hasSummary =
     (summaryStats && summaryStats.length > 0) || (summaryChips && summaryChips.length > 0);
@@ -153,7 +156,13 @@ export function BillingOrderChrome({
         />
       ) : null}
 
-      <div className="flex-1 min-h-0 overflow-y-auto bg-[var(--bg-secondary)]">
+      <div
+        className={
+          contentFill
+            ? 'flex flex-1 min-h-0 flex-col overflow-hidden bg-[var(--bg-secondary)]'
+            : 'flex-1 min-h-0 overflow-y-auto bg-[var(--bg-secondary)]'
+        }
+      >
         {children}
       </div>
 

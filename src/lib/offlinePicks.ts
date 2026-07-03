@@ -449,6 +449,7 @@ export async function bootstrapOfflinePickSession(
   if (!working.claimId) {
     return working;
   }
+  const claimId = working.claimId;
 
   try {
     const startResult = await withTimeout(
@@ -503,7 +504,7 @@ export async function bootstrapOfflinePickSession(
     const prepared = await withTimeout(
       prepareOfflinePickSession({
         order: working.orderSnapshot,
-        claimId: working.claimId,
+        claimId,
         userId: working.pickerUserId,
         pickerName: working.pickerName,
         existingClientPickKey: working.clientPickKey,

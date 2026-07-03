@@ -31,6 +31,8 @@ export interface UseBusyPasteModelOptions {
   isRejecting?: boolean;
   /** When false, finish stays disabled with "No items on sheet". Defaults to visible non-removed count. */
   hasVisibleRows?: boolean;
+  /** No flags, edits, or line changes — finish without per-line Busy ticks. */
+  cleanSheet?: boolean;
   copySessionId?: string;
 }
 
@@ -70,7 +72,7 @@ const EMPTY_MODEL: BusyPasteModel = {
   pendingCount: 0,
   skipCount: 0,
   finishAction: {
-    label: 'Done — assign picker',
+    label: 'Send to pick',
     disabled: true,
     gateWarning: null,
     hint: null,
@@ -93,13 +95,14 @@ export function useBusyPasteModel({
   lineEdits,
   flags,
   enabled = true,
-  finishLabel = 'Done — assign picker',
+  finishLabel = 'Send to pick',
   finishDisabled = false,
   finishLoading = false,
   isClaiming = false,
   isApproving = false,
   isRejecting = false,
   hasVisibleRows,
+  cleanSheet = false,
   copySessionId = 'busy-paste',
 }: UseBusyPasteModelOptions): BusyPasteModel {
   const { copy, copiedId } = useCopyToClipboard();
@@ -206,6 +209,8 @@ export function useBusyPasteModel({
     isRejecting,
     hasVisibleRows: hasVisibleRows ?? visibleRowCount > 0,
     enabledLabel: finishLabel,
+    copiedOnce: hasCopiedOnce,
+    cleanSheet,
   });
 
   if (!enabled) return EMPTY_MODEL;

@@ -19,6 +19,9 @@ describe('deriveReviewWorkMetrics', () => {
       specialRateCount: 0,
       focCount: 0,
       pendingCount: 0,
+      pickerOosCount: 0,
+      pickerOosQty: 0,
+      billingOosCount: 0,
     });
   });
 });

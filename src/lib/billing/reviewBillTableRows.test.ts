@@ -41,14 +41,26 @@ function stubEdit(partial: Partial<OverlayLineEdit> = {}): OverlayLineEdit {
 function runTests(): void {
   const paid = stubItem({ id: 1, bill_line_no: 2 });
   const foc = stubItem({ id: 2, bill_line_no: 3, is_foc: true, price_quoted: 0, qty_requested: 4 });
-  const sorted = [paid, foc];
-  const edits = { 1: stubEdit(), 2: stubEdit({ priceQuoted: 0 }) };
+  const zeroPriceNotFoc = stubItem({
+    id: 3,
+    bill_line_no: 4,
+    price_quoted: 0,
+    price_system: 0,
+    qty_requested: 1,
+  });
+  const sorted = [paid, foc, zeroPriceNotFoc];
+  const edits = {
+    1: stubEdit(),
+    2: stubEdit({ priceQuoted: 0 }),
+    3: stubEdit({ priceQuoted: 0 }),
+  };
 
   const groups = buildReviewBillTableGroups(sorted, sorted, edits, new Map(), new Set());
   const billGroup = groups.find((g) => g.id === 'bill');
   assert.ok(billGroup);
-  assert.equal(billGroup!.rows.length, 2);
+  assert.equal(billGroup!.rows.length, 3);
   assert.equal(reviewStatusLabel(billGroup!.rows[1]!).short, 'FOC');
+  assert.notEqual(reviewStatusLabel(billGroup!.rows[2]!).short, 'FOC');
 
   console.log('reviewBillTableRows tests passed');
 }

@@ -394,7 +394,7 @@ export function PickFlowExperience({
     const logged = draftState.totalLogged;
     const rem = Math.max(0, lineTargetQty - logged);
     if (rem <= 0) return undefined;
-    return `You've logged ${logged} of ${lineTargetQty} ${salesUom(currentItem)}. What's wrong with the remaining ${rem}?`;
+    return `Shipping ${logged} of ${lineTargetQty} ${salesUom(currentItem)}. Why are ${rem} missing?`;
   }, [currentItem, draftState.totalLogged, flagSheetMode, lineTargetQty]);
 
   const openPickModal = useCallback(() => {
@@ -1445,6 +1445,10 @@ export function PickFlowExperience({
             setFlagSheetMode('issue');
             setFlagOpen(true);
           }}
+          onShortPick={() => {
+            setFlagSheetMode('short');
+            setFlagOpen(true);
+          }}
           onEditPick={openPickModal}
           onEditGroupMrp={openEditGroupMrp}
           onEditGroupQty={openEditGroupQty}
@@ -1539,6 +1543,12 @@ export function PickFlowExperience({
           setFlagSheetMode('issue');
         }}
         onSubmit={handleFlagSubmit}
+        title={flagSheetMode === 'short' ? 'Short pick' : 'Report issue'}
+        hint={
+          flagSheetMode === 'short'
+            ? 'Pick why the rest is missing. Billing ships what you already logged.'
+            : undefined
+        }
         contextBanner={shortFlagContext}
       />
 

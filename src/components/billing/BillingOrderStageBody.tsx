@@ -31,12 +31,9 @@ import { useOrderHandoff } from '../../hooks/useOrderHandoff';
 import {
   buildFinalBillCopyRows,
   buildFinalBillPasteText,
-  finalBillCopyTotals,
-  finalBillCopyWarningLabel,
-  type FinalBillCopyRow,
-  type FinalBillCopyWarning,
+  buildPickerOosSummaryRows,
 } from '../../lib/billing/finalBillCopy';
-import { formatRoundedRs } from '../../lib/billing/mrpWorkflowCopy';
+import { FinalBillSummary } from './FinalBillSummary';
 
 interface BillingOrderStageBodyProps {
   order: DeskOrderRow;
@@ -54,106 +51,6 @@ interface BillingOrderStageBodyProps {
     onFinish: () => void;
     finishLoading?: boolean;
   };
-}
-
-function FinalBillCopyPreview({
-  rows,
-  pendingCount,
-  unresolvedCount,
-}: {
-  rows: FinalBillCopyRow[];
-  pendingCount: number;
-  unresolvedCount: number;
-}): React.JSX.Element | null {
-  const totals = finalBillCopyTotals(rows);
-  if (rows.length === 0 && unresolvedCount === 0 && pendingCount === 0) return null;
-  const previewRows = rows.slice(0, 3);
-  const warningCounts = rows.reduce(
-    (acc, row) => {
-      for (const warning of row.warnings) {
-        acc.set(warning, (acc.get(warning) ?? 0) + 1);
-      }
-      return acc;
-    },
-    new Map<FinalBillCopyWarning, number>(),
-  );
-  const hasWarnings = warningCounts.size > 0;
-
-  return (
-    <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-xs font-bold uppercase tracking-wide text-[var(--content-secondary)]">
-            Final bill copy
-          </p>
-          <p className="text-[11px] font-medium text-[var(--content-tertiary)]">
-            {totals.lineCount} Busy row{totals.lineCount === 1 ? '' : 's'} · {totals.qtyTotal} pcs ·
-            Item · Qty · Unit · MRP in paste
-            {pendingCount > 0 ? ` · ${pendingCount} pending/skipped` : ''}
-            {unresolvedCount > 0 ? ` · ${unresolvedCount} unresolved` : ''}
-          </p>
-          <p className="mt-0.5 text-[10px] font-medium text-[var(--content-tertiary)]">
-            Copy → open Busy voucher (Item cell) → Ctrl+Alt+B → review totals → F2 save
-          </p>
-        </div>
-        <p className="text-xs font-bold tabular-nums text-[var(--content-primary)]">
-          {formatCurrencyRaw(totals.valueTotal)}
-        </p>
-      </div>
-
-      {hasWarnings ? (
-        <p className="mt-1.5 text-[10px] font-semibold text-[var(--content-warning-on-light)]">
-          {Array.from(warningCounts.entries())
-            .map(([warning, count]) => `${count} ${finalBillCopyWarningLabel(warning).toLowerCase()}`)
-            .join(' · ')}
-          {' — paste may still work; verify in Busy'}
-        </p>
-      ) : null}
-
-      {previewRows.length > 0 ? (
-        <div className="mt-2 grid gap-1">
-          <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-[var(--content-tertiary)]">
-            <span>Item</span>
-            <span>Qty</span>
-            <span>Unit</span>
-            <span>MRP</span>
-            <span>Status</span>
-          </div>
-          {previewRows.map((row) => (
-            <div
-              key={row.item.id}
-              className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] items-center gap-2 text-[11px]"
-            >
-              <span className="min-w-0 truncate font-medium text-[var(--content-primary)]" title={row.pasteName}>
-                {row.pasteName}
-              </span>
-              <span className="whitespace-nowrap tabular-nums text-[var(--content-secondary)]">
-                {row.qty}
-              </span>
-              <span className="whitespace-nowrap text-[var(--content-secondary)]">
-                {row.unitLabel}
-              </span>
-              <span className="whitespace-nowrap tabular-nums font-semibold text-[var(--content-primary)]">
-                {formatRoundedRs(row.pasteMrp)}
-              </span>
-              <span className="whitespace-nowrap rounded-full bg-[var(--bg-tertiary)] px-2 py-0.5 font-semibold text-[var(--content-secondary)]">
-                {row.status}
-              </span>
-            </div>
-          ))}
-          {rows.length > previewRows.length ? (
-            <p className="text-[10px] font-medium text-[var(--content-tertiary)]">
-              +{rows.length - previewRows.length} more row{rows.length - previewRows.length === 1 ? '' : 's'} in the table
-            </p>
-          ) : null}
-        </div>
-      ) : unresolvedCount > 0 ? (
-        <p className="mt-2 text-[11px] font-semibold text-[var(--content-warning-on-light)]">
-          Resolve flagged lines before copying the final bill.
-        </p>
-      ) : null}
-    </div>
-  );
 }
 
 export function BillingOrderStageBody({
@@ -286,6 +183,16 @@ export function BillingOrderStageBody({
       }),
     [billSheet.sortedLines, billSheet.edits, billSheet.pendingByItemId, billSheet.flaggedItems],
   );
+  const pickerOosRows = useMemo(
+    () =>
+      buildPickerOosSummaryRows({
+        sortedLines: billSheet.sortedLines,
+        edits: billSheet.edits,
+        pendingByItemId: billSheet.pendingByItemId,
+        flaggedItems: billSheet.flaggedItems,
+      }),
+    [billSheet.sortedLines, billSheet.edits, billSheet.pendingByItemId, billSheet.flaggedItems],
+  );
 
   const copyForBusy = useCallback(() => {
     copy(buildFinalBillPasteText(finalBillRows), 'busy-final');
@@ -302,6 +209,8 @@ export function BillingOrderStageBody({
   const resolveBlocked = billSheet.resolveBlocked;
   const finaliseBlocked =
     resolveBlocked || unresolvedReviewCount > 0 || !billSheet.allFlagsResolved;
+
+  const isAssignInDesk = deskEmbedded && stage === 'assign_picker';
 
   return (
     <div className="relative flex flex-col min-h-0 flex-1">
@@ -323,12 +232,14 @@ export function BillingOrderStageBody({
         allLinesRemoved={allLinesRemoved}
         skipWarehousePick={skipWarehousePick}
         pickProgress={pickProgressForStage}
-        showNavBar={(deskEmbedded || (!embedded && !!onClose)) && Boolean(onClose)}
+        showNavBar={!deskEmbedded && Boolean(onClose)}
         onBack={onClose}
         onReject={canReject ? () => setShowReject(true) : undefined}
         rejectDisabled={rejectMutation.isPending}
+        suppressContextBar={isAssignInDesk}
+        contentFill={isAssignInDesk}
         billHeader={
-          !embedded || deskEmbedded ? (
+          !embedded || (deskEmbedded && !isAssignInDesk) ? (
             <BillingBillHeader
               customerName={orderDetail.customer_name}
               customerCity={orderDetail.customer_city}
@@ -369,6 +280,15 @@ export function BillingOrderStageBody({
                   value: formatCurrencyRaw(billSheet.total),
                   tone: 'default' as const,
                 },
+                ...(reviewWorkMetrics && reviewWorkMetrics.pickerOosCount > 0
+                  ? [
+                      {
+                        label: 'Picker OOS',
+                        value: `${reviewWorkMetrics.pickerOosCount} · ${reviewWorkMetrics.pickerOosQty} pcs`,
+                        tone: 'warning' as const,
+                      },
+                    ]
+                  : []),
               ]
             : undefined
         }
@@ -402,7 +322,13 @@ export function BillingOrderStageBody({
               specialRateCount={reviewWorkMetrics.specialRateCount}
               focCount={reviewWorkMetrics.focCount}
               pendingCount={reviewWorkMetrics.pendingCount}
+              pickerOosCount={reviewWorkMetrics.pickerOosCount}
               copyLabel="Copy final bill"
+              onPickerOosClick={() =>
+                document
+                  .getElementById('review-bill-skip-section')
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
               onCopy={handleCopyForBusy}
               copyDisabled={isReviewStage ? finaliseBlocked : false}
               copyJustCopied={copyJustCopied}
@@ -442,8 +368,9 @@ export function BillingOrderStageBody({
 
         {isReviewStage && !showAssign ? (
           <>
-            <FinalBillCopyPreview
+            <FinalBillSummary
               rows={finalBillRows}
+              pickerOosRows={pickerOosRows}
               pendingCount={reviewWorkMetrics?.pendingCount ?? 0}
               unresolvedCount={unresolvedReviewCount}
             />
@@ -453,8 +380,9 @@ export function BillingOrderStageBody({
 
         {stage === 'done' && !showAssign ? (
           <>
-            <FinalBillCopyPreview
+            <FinalBillSummary
               rows={finalBillRows}
+              pickerOosRows={pickerOosRows}
               pendingCount={reviewWorkMetrics?.pendingCount ?? 0}
               unresolvedCount={0}
             />
@@ -478,7 +406,7 @@ export function BillingOrderStageBody({
             pickerColors={pickerColors}
             onClose={onClose}
             onAssigned={() => onClose?.()}
-            variant={deskEmbedded ? 'inline' : 'overlay'}
+            variant={deskEmbedded ? 'desk' : 'inline'}
           />
         ) : null}
 

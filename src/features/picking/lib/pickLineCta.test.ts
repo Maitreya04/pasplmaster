@@ -84,7 +84,7 @@ describe('pickLineCta', () => {
   it('offers undo labels for closed lines', () => {
     expect(pickUndoLineLabel('flagged')).toBe('Undo flag');
     expect(pickUndoLineLabel('marked_picked')).toBe('Undo pick');
-    expect(pickUndoLineLabel('marked_partial')).toBe('Undo pick');
+    expect(pickUndoLineLabel('marked_partial')).toBe('Undo short pick');
     expect(pickUndoLineLabel('fresh')).toBeNull();
   });
 });

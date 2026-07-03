@@ -14,7 +14,7 @@ import {
     skipCount: 0,
   });
   assert.equal(a.disabled, true);
-  assert.equal(a.label, 'Done — assign picker');
+  assert.equal(a.label, 'Send to pick');
   assert.equal(a.gateWarning, 'Tick 2 more items in Busy');
   assert.equal(a.hint, null);
 }
@@ -27,9 +27,33 @@ import {
     skipCount: 2,
   });
   assert.equal(a.disabled, false);
-  assert.equal(a.label, 'Done — assign picker');
+  assert.equal(a.label, 'Send to pick');
   assert.equal(a.gateWarning, null);
   assert.equal(a.hint, null);
+}
+
+// Ready, clean sheet — no per-line ticks required
+{
+  const a = deriveBusyFinishAction({
+    billableCount: 5,
+    enteredCount: 0,
+    skipCount: 0,
+    cleanSheet: true,
+  });
+  assert.equal(a.disabled, false);
+  assert.equal(a.hint, 'Clean sheet · Alt+C to copy');
+}
+
+// Ready after copy — skip tick gate
+{
+  const a = deriveBusyFinishAction({
+    billableCount: 5,
+    enteredCount: 2,
+    skipCount: 0,
+    copiedOnce: true,
+  });
+  assert.equal(a.disabled, false);
+  assert.equal(a.gateWarning, null);
 }
 
 // Ready, clean sheet

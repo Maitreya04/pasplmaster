@@ -95,6 +95,7 @@ export function pickSecondaryCta(
 /** Undo a closed line (flag or full pick) when revisiting from the chip strip. */
 export function pickUndoLineLabel(state: PickLineUiState): string | null {
   if (state === 'flagged') return 'Undo flag';
-  if (state === 'marked_picked' || state === 'marked_partial') return 'Undo pick';
+  if (state === 'marked_partial') return 'Undo short pick';
+  if (state === 'marked_picked') return 'Undo pick';
   return null;
 }

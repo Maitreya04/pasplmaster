@@ -20,6 +20,7 @@ export default function BillingDeskPage(): React.JSX.Element {
     order: DeskOrderRow;
     flaggedMode: boolean;
   } | null>(null);
+  const [assignFocusOrderId, setAssignFocusOrderId] = useState<number | null>(null);
   const [dismissedUrlOpen, setDismissedUrlOpen] = useState(false);
   const clearedUrlRef = useRef(false);
 
@@ -69,8 +70,27 @@ export default function BillingDeskPage(): React.JSX.Element {
 
   const handleClearSelection = useCallback(() => {
     setSelectedDesk(null);
+    setAssignFocusOrderId(null);
     setDismissedUrlOpen(true);
   }, []);
+
+  const handleApprovedForAssign = useCallback(
+    (orderId: number) => {
+      setAssignFocusOrderId(orderId);
+      const found = all.find((o) => o.id === orderId);
+      if (found) {
+        setSelectedDesk({ order: found, flaggedMode: false });
+      }
+    },
+    [all],
+  );
+
+  useEffect(() => {
+    if (assignFocusOrderId == null) return;
+    const found = all.find((o) => o.id === assignFocusOrderId);
+    if (!found) return;
+    setSelectedDesk({ order: found, flaggedMode: false });
+  }, [assignFocusOrderId, all]);
 
   const selectedOrderId = selection?.order.id ?? null;
 
@@ -82,7 +102,7 @@ export default function BillingDeskPage(): React.JSX.Element {
       onClearSelection={handleClearSelection}
     />
   ) : (
-    <LiveQueueWorkspace embedded />
+    <LiveQueueWorkspace embedded onApprovedForAssign={handleApprovedForAssign} />
   );
 
   return (
@@ -103,6 +123,8 @@ export default function BillingDeskPage(): React.JSX.Element {
                 completedCount={completedCount}
                 isLoading={isLoading}
                 selectedOrderId={selectedOrderId}
+                assignFocusOrderId={assignFocusOrderId}
+                onAssignFocusHandled={() => setAssignFocusOrderId(null)}
                 onSelectOrder={handleSelectOrder}
               />
             }

@@ -39,7 +39,7 @@ export function GapState({
           onClick={onShortStock}
           className="min-h-11 rounded-xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] font-ds-body-size font-bold text-[var(--content-warning-on-light)] pick-pressable"
         >
-          Short stock
+          Short pick
         </button>
         <button
           type="button"

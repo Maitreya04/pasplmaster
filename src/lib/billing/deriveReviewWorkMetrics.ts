@@ -1,6 +1,8 @@
 import { busyEntryLineNature } from './busyEntryLineNature';
 import {
   buildFinalBillCopyRows,
+  buildFinalBillSkipRows,
+  buildPickerOosSummaryRows,
   countFinalBillPendingRows,
   finalBillCopyTotals,
 } from './finalBillCopy';
@@ -12,6 +14,9 @@ export interface ReviewWorkMetrics {
   specialRateCount: number;
   focCount: number;
   pendingCount: number;
+  pickerOosCount: number;
+  pickerOosQty: number;
+  billingOosCount: number;
 }
 
 /** Stats for the shared billing work dock on verify / finalise stages. */
@@ -37,6 +42,18 @@ export function deriveReviewWorkMetrics(billSheet: BillSheetEdits): ReviewWorkMe
     edits,
     pendingByItemId,
   });
+  const skipRows = buildFinalBillSkipRows({
+    sortedLines,
+    edits,
+    pendingByItemId,
+    flaggedItems,
+  });
+  const pickerOosRows = buildPickerOosSummaryRows({
+    sortedLines,
+    edits,
+    pendingByItemId,
+    flaggedItems,
+  });
 
   return {
     billableCount: totals.lineCount,
@@ -44,5 +61,8 @@ export function deriveReviewWorkMetrics(billSheet: BillSheetEdits): ReviewWorkMe
     specialRateCount,
     focCount: focCount,
     pendingCount: pendingLineCount,
+    pickerOosCount: pickerOosRows.length,
+    pickerOosQty: pickerOosRows.reduce((sum, row) => sum + row.qty, 0),
+    billingOosCount: skipRows.filter((row) => row.role === 'billing_oos').length,
   };
 }

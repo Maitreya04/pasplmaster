@@ -21,7 +21,7 @@ interface AssignPickerStageProps {
   pickerColors: Array<{ bg: string; text: string }>;
   onClose?: () => void;
   onAssigned?: () => void;
-  variant?: 'overlay' | 'inline';
+  variant?: 'overlay' | 'inline' | 'desk';
 }
 
 function loadFill(activeOrders: number): { pct: number; tone: 'green' | 'amber' | 'red' } {
@@ -67,7 +67,9 @@ export function AssignPickerStage({
   const shellClass =
     variant === 'overlay'
       ? 'absolute inset-0 z-20 flex flex-col bg-[var(--bg-primary)] border-l border-[var(--border-subtle)]'
-      : 'flex flex-col border-t border-[var(--border-faint)] bg-[var(--bg-secondary)]';
+      : variant === 'desk'
+        ? 'flex flex-1 min-h-0 flex-col mx-3 mb-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] shadow-sm overflow-hidden'
+        : 'flex flex-col max-h-[min(28rem,55vh)] border-t border-[var(--border-faint)] bg-[var(--bg-secondary)] overflow-hidden';
 
   const beginConfirm = (picker: PickerLoadInfo) => {
     if (picker.isBusy && !reassign) return;
@@ -90,7 +92,7 @@ export function AssignPickerStage({
             Hover a picker for {assignVerb.toLowerCase()} · click to confirm
           </p>
         </div>
-        {onClose ? (
+        {onClose && variant !== 'desk' ? (
           <button
             type="button"
             onClick={onClose}
@@ -160,27 +162,31 @@ export function AssignPickerStage({
                       )}
                     </p>
                   </div>
-                  <div className="hidden sm:block w-20 shrink-0">
-                    <p className="font-ds-micro text-right text-[var(--content-quaternary)] mb-0.5">
-                      Load
-                    </p>
-                    <div className="h-1 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${LOAD_BAR[load.tone]}`}
-                        style={{ width: `${load.pct}%` }}
-                      />
-                    </div>
-                  </div>
-                  <span className="hidden sm:inline-flex ds-chip ds-chip--sm shrink-0 tabular-nums">
-                    {picker.activeOrders} active
-                  </span>
-                  {!isBusy && !isConfirming ? (
-                    <span
-                      className="shrink-0 inline-flex items-center justify-center min-h-8 px-3 rounded-lg font-ds-caption-size font-semibold border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] opacity-0 pointer-events-none group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
-                      aria-hidden
-                    >
-                      {assignVerb}
-                    </span>
+                  {variant !== 'inline' ? (
+                    <>
+                      <div className="hidden @md/billing-order:block w-20 shrink-0">
+                        <p className="font-ds-micro text-right text-[var(--content-quaternary)] mb-0.5">
+                          Load
+                        </p>
+                        <div className="h-1 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${LOAD_BAR[load.tone]}`}
+                            style={{ width: `${load.pct}%` }}
+                          />
+                        </div>
+                      </div>
+                      <span className="hidden @md/billing-order:inline-flex ds-chip ds-chip--sm shrink-0 tabular-nums">
+                        {picker.activeOrders} active
+                      </span>
+                      {!isBusy && !isConfirming ? (
+                        <span
+                          className="shrink-0 hidden @md/billing-order:inline-flex items-center justify-center min-h-8 px-3 rounded-lg font-ds-caption-size font-semibold border border-[var(--border-accent)] bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] opacity-0 pointer-events-none group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+                          aria-hidden
+                        >
+                          {assignVerb}
+                        </span>
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
               </button>
@@ -216,7 +222,7 @@ export function AssignPickerStage({
         })}
       </div>
 
-      {onClose ? (
+      {onClose && variant !== 'desk' ? (
         <footer className="shrink-0 border-t border-[var(--border-faint)] px-4 py-2.5 bg-[var(--bg-secondary)]">
           <button
             type="button"

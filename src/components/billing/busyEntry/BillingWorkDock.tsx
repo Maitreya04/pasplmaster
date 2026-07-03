@@ -1,4 +1,4 @@
-import { Gift, HourglassHigh, Tag } from '@phosphor-icons/react';
+import { Gift, HourglassHigh, Prohibit, Tag } from '@phosphor-icons/react';
 import { BillingHeaderChip } from '../shared/BillingHeaderChip';
 import { BillingWorkStat } from '../shared/BillingWorkStat';
 import { CopyAllItemsButton } from './CopyAllItemsButton';
@@ -10,9 +10,11 @@ export interface BillingWorkDockProps {
   specialRateCount?: number;
   focCount?: number;
   pendingCount?: number;
+  pickerOosCount?: number;
   onSpecialRateClick?: () => void;
   onFocClick?: () => void;
   onPendingClick?: () => void;
+  onPickerOosClick?: () => void;
   copyLabel?: string;
   onCopy: () => void;
   copyDisabled?: boolean;
@@ -33,9 +35,11 @@ export function BillingWorkDock({
   specialRateCount = 0,
   focCount = 0,
   pendingCount = 0,
+  pickerOosCount = 0,
   onSpecialRateClick,
   onFocClick,
   onPendingClick,
+  onPickerOosClick,
   copyLabel = 'Copy for Busy',
   onCopy,
   copyDisabled = false,
@@ -50,7 +54,11 @@ export function BillingWorkDock({
 }: BillingWorkDockProps): React.JSX.Element {
   const hasNothingToBill = billableCount === 0 && skipCount > 0;
   const hasExceptionChips =
-    specialRateCount > 0 || focCount > 0 || pendingCount > 0 || hasNothingToBill;
+    specialRateCount > 0 ||
+    focCount > 0 ||
+    pendingCount > 0 ||
+    pickerOosCount > 0 ||
+    hasNothingToBill;
   const primaryBlocked = primaryDisabled || primaryLoading;
   const gateMessage =
     primaryBlocked && primaryWarning
@@ -103,6 +111,15 @@ export function BillingWorkDock({
                   tone="warning"
                   compact
                   onClick={onPendingClick}
+                />
+                <BillingHeaderChip
+                  icon={Prohibit}
+                  label="Picker OOS"
+                  title="Picker marked out of stock"
+                  count={pickerOosCount}
+                  tone="warning"
+                  compact
+                  onClick={onPickerOosClick}
                 />
               </div>
             </>

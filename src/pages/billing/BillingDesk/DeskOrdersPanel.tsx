@@ -17,6 +17,7 @@ import { DeskTabBadge } from './DeskTabBadge';
 import { DeskTooltip } from './DeskTooltip';
 import { DESK_TAB_TOOLTIPS } from './deskStatusHelp';
 import { filterDeskOrdersByPicker } from './deskPickerMatch';
+import { isAssignTabOrder } from '../../../lib/billing/deskOrderQueue';
 import { deskType } from './deskTypography';
 
 const TAB_STORAGE_KEY = 'billing-desk-tab-v3';
@@ -88,6 +89,9 @@ interface DeskOrdersPanelProps {
   completedCount: number;
   isLoading: boolean;
   selectedOrderId?: number | null;
+  /** After live-queue approve, jump to Assign tab with this order expanded. */
+  assignFocusOrderId?: number | null;
+  onAssignFocusHandled?: () => void;
   onSelectOrder: (order: DeskOrderRow, flaggedMode: boolean) => void;
 }
 
@@ -100,6 +104,8 @@ export function DeskOrdersPanel({
   completedCount,
   isLoading,
   selectedOrderId = null,
+  assignFocusOrderId = null,
+  onAssignFocusHandled,
   onSelectOrder,
 }: DeskOrdersPanelProps): React.JSX.Element {
   const [tab, setTab] = useState<DeskOrderTab>(() =>
@@ -126,6 +132,22 @@ export function DeskOrdersPanel({
       /* ignore */
     }
   }, [tab]);
+
+  useEffect(() => {
+    if (assignFocusOrderId == null) return;
+    const order = allOrders.find((o) => o.id === assignFocusOrderId);
+    if (!order || !isAssignTabOrder(order)) return;
+    setTab('assign');
+    if (selectedOrderId !== assignFocusOrderId) {
+      setAssignTarget(order);
+    }
+    onAssignFocusHandled?.();
+  }, [assignFocusOrderId, allOrders, onAssignFocusHandled, selectedOrderId]);
+
+  useEffect(() => {
+    if (selectedOrderId == null) return;
+    setAssignTarget((prev) => (prev?.id === selectedOrderId ? null : prev));
+  }, [selectedOrderId]);
 
   const pickerFilter = useMemo(
     () => pickers.find((p) => p.userId === pickerFilterId) ?? null,
@@ -335,6 +357,9 @@ export function DeskOrdersPanel({
                       pickProgress={pickProgressMap?.get(order.id)}
                       progressLoading={progressLoading}
                       isSelected={selectedOrderId === order.id}
+                      assignInWorkspace={
+                        selectedOrderId === order.id && isAssignTabOrder(order)
+                      }
                       isAssignExpanded={assignTarget?.id === order.id}
                       onAssignToggle={() => {
                         setAssignTarget((prev) => (prev?.id === order.id ? null : order));

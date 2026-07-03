@@ -53,7 +53,7 @@ export function DevRoleSwitcher(): React.JSX.Element | null {
           userId: devPickerTarget.id,
           userName: devPickerTarget.full_name,
           role: 'picking',
-          branch: devPickerTarget.stock_location_code,
+          branch: devPickerTarget.stock_location_code ?? null,
         });
       } else {
         selectRole('picking', devPickerTarget?.full_name ?? 'Demo Picker');

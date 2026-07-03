@@ -43,6 +43,13 @@ function runTests(): void {
   assert.equal(foc.chipLabel, 'FOC');
   assert.equal(foc.qtyBillToday, 4);
 
+  const zeroPriceNotFoc = deriveBillLineFulfillment(
+    stubItem({ price_quoted: 0, price_system: 0, qty_requested: 2 }),
+    [],
+  );
+  assert.equal(zeroPriceNotFoc.role, 'ship_today');
+  assert.notEqual(zeroPriceNotFoc.chipLabel, 'FOC');
+
   const salesPo = deriveBillLineFulfillment(
     stubItem({
       qty_requested: 4,

@@ -16,7 +16,7 @@ export function isSkipWarehousePick(billableCount: number, skipCount: number): b
 export function busyFinishEnabledLabel(
   billableCount: number,
   skipCount: number,
-  defaultLabel = 'Done — assign picker',
+  defaultLabel = 'Send to pick',
 ): string {
   if (isSkipWarehousePick(billableCount, skipCount)) {
     return 'Done — record pending';
@@ -32,7 +32,9 @@ export function deriveBusyFinishAction({
   isApproving = false,
   isRejecting = false,
   hasVisibleRows = true,
-  enabledLabel = 'Done — assign picker',
+  enabledLabel = 'Send to pick',
+  copiedOnce = false,
+  cleanSheet = false,
 }: {
   billableCount: number;
   enteredCount: number;
@@ -41,13 +43,21 @@ export function deriveBusyFinishAction({
   isApproving?: boolean;
   isRejecting?: boolean;
   hasVisibleRows?: boolean;
-  /** Label when the gate is clear and pick lines exist (default: Done — assign picker). */
+  /** Label when the gate is clear and pick lines exist (default: Send to pick). */
   enabledLabel?: string;
+  /** Copy-to-Busy already ran — skip per-line tick gate. */
+  copiedOnce?: boolean;
+  /** No local edits, flags, or line changes — trust visual review. */
+  cleanSheet?: boolean;
 }): BusyFinishAction {
   const resolvedLabel = busyFinishEnabledLabel(billableCount, skipCount, enabledLabel);
   const noPickHint = isSkipWarehousePick(billableCount, skipCount)
     ? 'Nothing to bill today · no warehouse pick'
     : null;
+  const cleanSheetHint =
+    cleanSheet && !copiedOnce && billableCount > 0 && !noPickHint
+      ? 'Clean sheet · Alt+C to copy'
+      : null;
 
   if (isClaiming) {
     return { label: 'Claiming…', disabled: true, gateWarning: null, hint: null };
@@ -61,9 +71,10 @@ export function deriveBusyFinishAction({
   }
 
   const remaining = Math.max(0, billableCount - enteredCount);
-  const allBillableEntered = billableCount === 0 || remaining === 0;
+  const tickGateClear =
+    billableCount === 0 || remaining === 0 || copiedOnce || cleanSheet;
 
-  if (!allBillableEntered) {
+  if (!tickGateClear) {
     const gateWarning =
       remaining === 1
         ? 'Tick 1 more item in Busy'
@@ -71,7 +82,12 @@ export function deriveBusyFinishAction({
     return { label: resolvedLabel, disabled: true, gateWarning, hint: null };
   }
 
-  return { label: resolvedLabel, disabled: false, gateWarning: null, hint: noPickHint };
+  return {
+    label: resolvedLabel,
+    disabled: false,
+    gateWarning: null,
+    hint: noPickHint ?? cleanSheetHint,
+  };
 }
 
 /** Footer / header sheet summary — operator language, not system jargon. */

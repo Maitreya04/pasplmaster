@@ -1,11 +1,13 @@
 import {
   billableQtyForTotal,
   deriveBillLineFulfillment,
+  type BillLineRole,
 } from './billLineFulfillment';
 import { orderItemConfirmedMrp } from './orderItemSplitGroups';
 import {
   buildReviewBillTableGroups,
   reviewStatusLabel,
+  type ReviewTableRow,
 } from './reviewBillTableRows';
 import { sortBillLines } from './sortBillLines';
 import { busyPasteUnitLabel, effectiveSalesLineUnit, salesLineUnitLabel } from '../salesUnit';
@@ -38,6 +40,15 @@ export interface FinalBillCopyRow {
   lineTotal: number;
   status: string;
   note: string;
+}
+
+export interface FinalBillSkipRow {
+  item: OrderItem;
+  qty: number;
+  status: string;
+  note: string;
+  role: BillLineRole;
+  productName: string;
 }
 
 export interface FinalBillCopyInput {
@@ -108,12 +119,12 @@ export function finalBillCopyWarningLabel(warning: FinalBillCopyWarning): string
   }
 }
 
-export function buildFinalBillCopyRows({
+function reviewBillTableContext({
   sortedLines,
   edits,
   pendingByItemId,
   flaggedItems,
-}: FinalBillCopyInput): FinalBillCopyRow[] {
+}: FinalBillCopyInput) {
   const orderedLines = sortBillLines(sortedLines);
   const flaggedItemIds = new Set(flaggedItems.map((item) => item.id));
   const displayLines = orderedLines.filter(
@@ -129,6 +140,69 @@ export function buildFinalBillCopyRows({
     pendingByItemId,
     flaggedItemIds,
   );
+  return { groups };
+}
+
+function skipQtyForRow(row: ReviewTableRow): number {
+  const { fulfillment } = row;
+  if (fulfillment.qtyPickerOos > 0) return fulfillment.qtyPickerOos;
+  if (fulfillment.qtySalesPo > 0) return fulfillment.qtySalesPo;
+  return fulfillment.qtyOrdered;
+}
+
+function toFinalBillSkipRow(row: ReviewTableRow): FinalBillSkipRow {
+  const status = reviewStatusLabel(row);
+  return {
+    item: row.item,
+    qty: skipQtyForRow(row),
+    status: status.short,
+    note: status.long,
+    role: row.fulfillment.role,
+    productName: busyPasteItemName(row.item),
+  };
+}
+
+/** Lines skipped in Busy today — picker/billing OOS, sales PO backlog. */
+export function buildFinalBillSkipRows(input: FinalBillCopyInput): FinalBillSkipRow[] {
+  const { groups } = reviewBillTableContext(input);
+  const skipRows = groups.find((group) => group.id === 'skip')?.rows ?? [];
+  return skipRows.map(toFinalBillSkipRow);
+}
+
+/** Picker-marked out of stock — full-line skip plus partial picks with pending qty. */
+export function buildPickerOosSummaryRows(input: FinalBillCopyInput): FinalBillSkipRow[] {
+  const { groups } = reviewBillTableContext(input);
+  const skipRows = groups.find((group) => group.id === 'skip')?.rows ?? [];
+  const billRows = groups.find((group) => group.id === 'bill')?.rows ?? [];
+
+  const fullLine = skipRows
+    .filter((row) => row.fulfillment.role === 'picker_oos')
+    .map(toFinalBillSkipRow);
+
+  const partialLine = billRows
+    .filter((row) => row.fulfillment.role === 'mixed' && row.fulfillment.qtyPickerOos > 0)
+    .map((row) => ({
+      ...toFinalBillSkipRow(row),
+      qty: row.fulfillment.qtyPickerOos,
+      status: 'Partial OOS',
+      note: row.fulfillment.summary,
+    }));
+
+  return [...fullLine, ...partialLine];
+}
+
+export function buildFinalBillCopyRows({
+  sortedLines,
+  edits,
+  pendingByItemId,
+  flaggedItems,
+}: FinalBillCopyInput): FinalBillCopyRow[] {
+  const { groups } = reviewBillTableContext({
+    sortedLines,
+    edits,
+    pendingByItemId,
+    flaggedItems,
+  });
   const billRows = groups.find((group) => group.id === 'bill')?.rows ?? [];
 
   return billRows

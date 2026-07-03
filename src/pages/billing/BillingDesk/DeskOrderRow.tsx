@@ -83,6 +83,8 @@ interface DeskOrderRowCardProps {
   showStaleActions?: boolean;
   showVerifyAction?: boolean;
   showCompletedFreshness?: boolean;
+  /** Assign UI is open in the left workspace — keep the queue card compact. */
+  assignInWorkspace?: boolean;
   onEdit: () => void;
 }
 
@@ -99,13 +101,15 @@ export function DeskOrderRowCard({
   showStaleActions = false,
   showVerifyAction = false,
   showCompletedFreshness = false,
+  assignInWorkspace = false,
   onEdit,
 }: DeskOrderRowCardProps): React.JSX.Element {
   const cardRef = useRef<HTMLDivElement>(null);
   const [completeExpanded, setCompleteExpanded] = useState(false);
   const pill = STATUS_PILL[order.deskStatus];
   const timeSource = order.approved_at ?? order.picked_at ?? order.created_at;
-  const showAssignAction = needsPickerAssignStrip(order);
+  const showAssignAction = needsPickerAssignStrip(order) && !assignInWorkspace;
+  const showAssignExpanded = isAssignExpanded && !assignInWorkspace;
   const reassign = isPickerReassign(order);
   const statusPillClass = showCompletedFreshness
     ? 'text-[var(--content-positive)] bg-[var(--bg-positive-subtle)]'
@@ -140,7 +144,7 @@ export function DeskOrderRowCard({
             ? order.deskStatus === 'checking'
               ? 'border-[var(--border-positive)] ring-2 ring-[var(--bg-positive)]/30 shadow-sm'
               : 'border-[var(--role-primary)] ring-2 ring-[var(--role-primary)]/25 shadow-sm'
-            : isAssignExpanded || completeExpanded
+            : showAssignExpanded || completeExpanded
               ? 'border-[var(--role-primary)]/40 shadow-sm'
               : 'border-[var(--border-subtle)]'
         }
@@ -165,6 +169,11 @@ export function DeskOrderRowCard({
                   {statusLabel(order, showCompletedFreshness)}
                 </span>
               </DeskTooltip>
+              {assignInWorkspace ? (
+                <span className={`${deskType.pill} shrink-0 px-2 py-0.5 rounded-full bg-[var(--role-primary-subtle)] text-[var(--role-content)]`}>
+                  Assigning →
+                </span>
+              ) : null}
               {freshCompleted && (
                 <span className={`${deskType.pill} shrink-0 px-2 py-0.5 rounded-full bg-[var(--bg-accent-subtle)] text-[var(--content-accent)]`}>
                   Just completed
@@ -191,7 +200,7 @@ export function DeskOrderRowCard({
               </div>
             ) : null}
 
-            {!isAssignExpanded && !completeExpanded && (
+            {!showAssignExpanded && !completeExpanded && (
               <DeskPickProgress
                 order={order}
                 progress={pickProgress}
@@ -204,7 +213,7 @@ export function DeskOrderRowCard({
           <div className="flex flex-col items-end gap-1.5 shrink-0 pt-0.5">
             {showStaleActions &&
               canDeskStaleComplete(order) &&
-              !isAssignExpanded &&
+              !showAssignExpanded &&
               !completeExpanded && (
                 <DeskStaleCompleteButton
                   order={order}
@@ -214,7 +223,7 @@ export function DeskOrderRowCard({
 
             {showAssignAction && onAssignToggle && !completeExpanded && (
               <DeskTooltip
-                label={isAssignExpanded ? 'Cancel' : reassign ? 'Re-assign picker' : 'Assign picker'}
+                label={showAssignExpanded ? 'Cancel' : reassign ? 'Re-assign picker' : 'Assign picker'}
                 side="bottom"
               >
                 <button
@@ -225,13 +234,13 @@ export function DeskOrderRowCard({
                   }}
                   className={`
                     ${deskBtn.action} ${deskType.btn}
-                    ${isAssignExpanded
+                    ${showAssignExpanded
                       ? 'text-[var(--content-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-subtle)]'
                       : 'text-[var(--content-secondary)] bg-[var(--bg-secondary)] border border-[var(--border-subtle)] hover:border-[var(--border-opaque)] hover:text-[var(--content-primary)]'
                     }
                   `}
                 >
-                  {isAssignExpanded ? (
+                  {showAssignExpanded ? (
                     <>
                       <X size={14} weight="bold" />
                       Cancel
@@ -246,7 +255,7 @@ export function DeskOrderRowCard({
               </DeskTooltip>
             )}
 
-            {showVerifyAction && !isAssignExpanded && !completeExpanded && (
+            {showVerifyAction && !showAssignExpanded && !completeExpanded && (
               <DeskTooltip label="Review bill and line prices" side="bottom">
                 <button
                   type="button"
@@ -262,7 +271,7 @@ export function DeskOrderRowCard({
               </DeskTooltip>
             )}
 
-            {!isAssignExpanded && !completeExpanded && (
+            {!showAssignExpanded && !completeExpanded && (
               <DeskOrderQuickActions order={order} pickers={pickers} />
             )}
           </div>
@@ -276,7 +285,7 @@ export function DeskOrderRowCard({
         />
       )}
 
-      {isAssignExpanded && showAssignAction && onAssignToggle && (
+      {showAssignExpanded && showAssignAction && onAssignToggle && (
         <AssignPickerStage
           order={order}
           pickers={pickers}
