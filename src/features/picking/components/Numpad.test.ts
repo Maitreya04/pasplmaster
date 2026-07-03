@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyNumKey, nextNumKey } from './Numpad';
+import { applyNumKey } from './Numpad';
 
 describe('applyNumKey', () => {
   it('replaces prefilled buffer on first digit then appends', () => {

@@ -34,6 +34,8 @@ import {
   resolvePickLineStatus,
   resolveQueueSheetLineStatus,
 } from '../../lib/picking/pickLineStatus';
+import { ensurePendingItem } from '../../lib/billing/ensurePendingItem';
+import { deskLineIssueCategory } from '../../lib/billing/deskLineFlagKind';
 import { orderItemUnitPrice } from '../../lib/picking/pickLineListDisplay';
 import { JumpListSheet } from '../../components/picking/JumpListSheet';
 import { TransportChip } from '../../components/picking/TransportChip';
@@ -1004,30 +1006,19 @@ export function PickFlowPanel({
         if (target) {
           const qtyPending = pickQuantityTarget(target);
           if (qtyPending > 0) {
-            // Avoid duplicate pending rows for same order+item while status is pending
-            const { data: existing, error: existingError } = await supabase
-              .from('pending_items')
-              .select('id')
-              .eq('order_id', order.id)
-              .eq('item_id', target.item_id)
-              .eq('status', 'pending')
-              .eq('source', 'picking')
-              .limit(1)
-              .maybeSingle();
-            if (!existingError && !existing) {
-              await supabase.from('pending_items').insert({
-                order_id: order.id,
-                order_number: order.order_number,
-                customer_id: order.customer_id,
-                customer_name: order.customer_name,
-                item_id: target.item_id,
-                item_name: target.item_name,
-                qty_pending: qtyPending,
-                source: 'picking',
-                created_by: userName || 'Picker',
-                note: notes || null,
-              });
-            }
+            await ensurePendingItem({
+              orderId: order.id,
+              orderNumber: order.order_number,
+              customerId: order.customer_id,
+              customerName: order.customer_name,
+              itemId: target.item_id,
+              itemName: target.item_name,
+              qtyPending,
+              source: 'picking',
+              createdBy: userName || 'Picker',
+              note: notes || null,
+              issueCategory: deskLineIssueCategory(reason),
+            });
           }
         }
       }

@@ -81,10 +81,12 @@ export default function PickPreviewPage(): React.JSX.Element | null {
     }
   }, [alreadyStarted, isFetching, isLoading, navigate, orderId]);
 
+  const orderItems = order?.items;
+
   const rows = useMemo(() => {
-    if (!order?.items?.length) return [];
-    return sortPickWalkOrder(pickableOrderItems(order.items));
-  }, [order?.items]);
+    if (!orderItems?.length) return [];
+    return sortPickWalkOrder(pickableOrderItems(orderItems));
+  }, [orderItems]);
 
   const brandSections = useMemo(
     () => buildPickWalkBrandSections(rows, pickQuantityTarget),
@@ -151,7 +153,7 @@ export default function PickPreviewPage(): React.JSX.Element | null {
       return `Assigned to ${order.picker_name}.`;
     }
     return 'Review the pick list before you start.';
-  }, [handoffSummary?.assignedBy, isAssignedToMe, isPoolOrder, order?.picker_name, source, userName]);
+  }, [handoffSummary, isAssignedToMe, isPoolOrder, order, source, userName]);
 
   const knownClaimId = useMemo(() => {
     const mine = myActive.find((o) => o.id === orderId);

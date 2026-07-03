@@ -51,7 +51,6 @@ function pickProgressFromItems(items: OrderItem[]): PickLineProgress {
 function progressPct(
   progress: PickLineProgress,
   deskStatus: DeskOrderRow['deskStatus'],
-  _warningTint: boolean,
 ): number {
   if (deskStatus === 'checking') return 100;
   if (progress.total === 0) return 0;
@@ -89,7 +88,7 @@ function PickingProgressHeader({
   const fulfillment = summarizeBillFulfillment(items, pendingByItemId);
   const ratio = progress.total > 0 ? progress.done / progress.total : 0;
   const pickerFirst = orderDetail.picker_name?.split(/\s+/)[0] ?? orderDetail.picker_name ?? null;
-  const pct = progressPct(progress, order.deskStatus, monitor.progressWarningTint);
+  const pct = progressPct(progress, order.deskStatus);
   const statusLine = monitor.progressStatusLine(progress, pickerFirst);
 
   return (

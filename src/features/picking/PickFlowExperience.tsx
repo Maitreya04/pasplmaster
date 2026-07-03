@@ -850,29 +850,19 @@ export function PickFlowExperience({
           if (payload.reason === 'Out of Stock') {
             const qtyPending = lineTargetQty;
             if (qtyPending > 0) {
-              const { data: existing, error: existingError } = await supabase
-                .from('pending_items')
-                .select('id')
-                .eq('order_id', order.id)
-                .eq('item_id', currentItem.item_id)
-                .eq('status', 'pending')
-                .eq('source', 'picking')
-                .limit(1)
-                .maybeSingle();
-              if (!existingError && !existing) {
-                await supabase.from('pending_items').insert({
-                  order_id: order.id,
-                  order_number: order.order_number,
-                  customer_id: order.customer_id,
-                  customer_name: order.customer_name,
-                  item_id: currentItem.item_id,
-                  item_name: currentItem.item_name,
-                  qty_pending: qtyPending,
-                  source: 'picking',
-                  created_by: userName || 'Picker',
-                  note: payload.notes || null,
-                });
-              }
+              await ensurePendingItem({
+                orderId: order.id,
+                orderNumber: order.order_number,
+                customerId: order.customer_id,
+                customerName: order.customer_name,
+                itemId: currentItem.item_id,
+                itemName: currentItem.item_name,
+                qtyPending,
+                source: 'picking',
+                createdBy: userName || 'Picker',
+                note: payload.notes || null,
+                issueCategory: deskLineIssueCategory(payload.reason),
+              });
             }
           }
 

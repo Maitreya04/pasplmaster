@@ -40,6 +40,7 @@ import { promoteBillingVerifiedLabelMrp } from '../lib/picking/recordPickerLabel
 import { BILLING_ACCEPT_ALL_LABEL } from '../lib/billing/mrpWorkflowCopy';
 import { BILLING_VERIFIED_MRP_QUERY_KEY } from '../lib/billing/billingVerifiedMrp';
 import { STOCK_MRP_HISTORY_QUERY_KEY } from '../lib/stockMrpwise';
+import { formatSupabaseUserMessage } from '../lib/supabase/formatUserMessage';
 import {
   billableQtyForTotal,
   deriveBillLineFulfillment,
@@ -82,6 +83,10 @@ function buildDeskNotifyLines(
       qtyPending: authoritativePending,
     };
   });
+}
+
+function throwIfSupabaseError(error: unknown): void {
+  if (error) throw new Error(formatSupabaseUserMessage(error));
 }
 
 function initEdits(items: OrderItem[]): Record<number, OverlayLineEdit> {
@@ -470,7 +475,11 @@ export function useBillSheetEdits({
               issueCategory,
             });
           }
-          await supabase.from('order_items').delete().eq('id', item.id);
+          const { error: deleteError } = await supabase
+            .from('order_items')
+            .delete()
+            .eq('id', item.id);
+          throwIfSupabaseError(deleteError);
           continue;
         }
 
@@ -490,7 +499,11 @@ export function useBillSheetEdits({
           patch.flag_box_price = null;
         }
 
-        await supabase.from('order_items').update(patch).eq('id', item.id);
+        const { error: updateItemError } = await supabase
+          .from('order_items')
+          .update(patch)
+          .eq('id', item.id);
+        throwIfSupabaseError(updateItemError);
 
         if (edit.resolution === 'accept_price' && item.flag_reason === 'Price Mismatch') {
           await promoteBillingVerifiedLabelMrp(item.id, edit.priceQuoted);
@@ -498,7 +511,7 @@ export function useBillSheetEdits({
       }
 
       const nextItemCount = visibleItems.length;
-      await supabase
+      const { error: updateTotalsError } = await supabase
         .from('orders')
         .update({
           item_count: nextItemCount,
@@ -509,6 +522,7 @@ export function useBillSheetEdits({
               : orderDetail.notes,
         })
         .eq('id', orderDetail.id);
+      throwIfSupabaseError(updateTotalsError);
 
       const shouldNotifySales =
         resolvingFlags ||
@@ -559,12 +573,13 @@ export function useBillSheetEdits({
         });
       } else if (resolvingFlags) {
         if (orderDetail.workflow_status === 'picking') {
-          await supabase
+          const { error: reviewerError } = await supabase
             .from('orders')
             .update({ reviewer_name: reviewer })
             .eq('id', orderDetail.id);
+          throwIfSupabaseError(reviewerError);
         } else if (orderDetail.workflow_status === 'flagged') {
-          await supabase
+          const { error: completeFlaggedError } = await supabase
             .from('orders')
             .update({
               reviewer_name: reviewer,
@@ -575,23 +590,26 @@ export function useBillSheetEdits({
               fulfillment_path: 'direct_bill',
             })
             .eq('id', orderDetail.id);
+          throwIfSupabaseError(completeFlaggedError);
         } else if (orderDetail.workflow_status === 'completed') {
-          await supabase
+          const { error: completedReviewerError } = await supabase
             .from('orders')
             .update({
               reviewer_name: reviewer,
               approved_at: orderDetail.approved_at ?? nowIso,
             })
             .eq('id', orderDetail.id);
+          throwIfSupabaseError(completedReviewerError);
         }
       } else {
-        await supabase
+        const { error: reviewerError } = await supabase
           .from('orders')
           .update({
             reviewer_name: reviewer,
             approved_at: orderDetail.approved_at ?? nowIso,
           })
           .eq('id', orderDetail.id);
+        throwIfSupabaseError(reviewerError);
       }
 
       if (notifyPickerAfterSave) {

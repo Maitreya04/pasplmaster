@@ -134,7 +134,8 @@ export function useBillingFlow() {
     setLineEdits((prev) => {
       const cur = prev[orderItemId];
       if (!cur) return prev;
-      const { removed: _removed, ...rest } = cur;
+      const rest = { ...cur };
+      delete rest.removed;
       const next = { ...prev };
       if (Object.keys(rest).length === 0) {
         delete next[orderItemId];

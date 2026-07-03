@@ -4,7 +4,6 @@ import {
   buildHandoffScanSteps,
   formatHandoffDuration,
   hasHandoffContent,
-  mergeOrderHandoffSummary,
   parseOrderHandoffRpc,
 } from './orderHandoffFromEvents';
 

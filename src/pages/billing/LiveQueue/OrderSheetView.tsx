@@ -111,7 +111,6 @@ export function OrderSheetView({
   notes,
   city,
   itemCount,
-  totalValue: _totalValue,
   priority,
   createdAt,
   stockLocationCode,
@@ -128,7 +127,6 @@ export function OrderSheetView({
   onFlagPartial,
   onClearFlag,
   onEditLineQty,
-  onEditLineRate: _onEditLineRate,
   onRemoveLine,
   onRestoreLine,
   onApplyLiveStock,
@@ -327,7 +325,7 @@ export function OrderSheetView({
         rowRefs.current[rowIndex]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
       });
     },
-    [mergedVisibleRows],
+    [mergedVisibleRows, setActiveRow],
   );
 
   useEffect(() => {
@@ -351,7 +349,7 @@ export function OrderSheetView({
     setShowHints(true);
     if (hintsTimeoutRef.current) clearTimeout(hintsTimeoutRef.current);
     hintsTimeoutRef.current = setTimeout(() => setShowHints(false), 10_000);
-  }, []);
+  }, [setShowHints]);
 
   const handleFinishAttempt = useCallback(() => {
     if (isClaiming) return;

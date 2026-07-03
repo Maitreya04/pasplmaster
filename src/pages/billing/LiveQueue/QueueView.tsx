@@ -214,7 +214,10 @@ export function QueueView({
   );
 
   // Keyboard navigation includes frozen rows (visible but not selectable via Enter)
-  const navigable = [...myActive, ...available, ...stale, ...salesLocked];
+  const navigable = useMemo(
+    () => [...myActive, ...available, ...stale, ...salesLocked],
+    [myActive, available, stale, salesLocked],
+  );
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   useEffect(() => {

@@ -83,7 +83,7 @@ export default function OfflinePickConflictsPage(): React.JSX.Element | null {
     },
   });
 
-  const rows = data ?? [];
+  const rows = useMemo(() => data ?? [], [data]);
   const counts = useMemo(() => {
     let conflict = 0;
     let failed = 0;

@@ -748,10 +748,11 @@ export default function CompactQueuePage() {
   const parkMutation = useMutation({
     mutationFn: async () => {
       if (!order) throw new Error('No order');
-      await supabase
+      const { error } = await supabase
         .from('orders')
         .update({ workflow_status: 'flagged', notes: 'Parked by Billing operator for review' })
         .eq('id', order.id);
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });

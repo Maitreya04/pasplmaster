@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, XCircle, Hourglass, Warning, Printer } from '@phosphor-icons/react';
@@ -62,7 +62,10 @@ export default function ReviewPage(): React.JSX.Element | null {
   const [prePickConfirmOpen, setPrePickConfirmOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const rejectNavigateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [fulfillmentPath, setFulfillmentPath] = useState<FulfillmentPath>('warehouse_pick');
+  const [fulfillmentPathOverride, setFulfillmentPathOverride] = useState<{
+    orderId: number;
+    path: FulfillmentPath;
+  } | null>(null);
 
   useEffect(() => {
     if (!orderId) {
@@ -78,23 +81,39 @@ export default function ReviewPage(): React.JSX.Element | null {
     };
   }, []);
 
+  const orderItems = order?.items;
+
   const pickLineCount = useMemo(
-    () => countPickableOrderLines(order?.items ?? []),
-    [order?.items],
+    () => countPickableOrderLines(orderItems ?? []),
+    [orderItems],
   );
 
-  useEffect(() => {
-    if (!order) return;
-    setFulfillmentPath(
-      defaultFulfillmentPath(order.stock_location_code, order.pick_line_count ?? pickLineCount),
-    );
-  }, [order?.id, order?.stock_location_code, order?.pick_line_count, pickLineCount]);
+  const defaultPath = useMemo(
+    () =>
+      order
+        ? defaultFulfillmentPath(order.stock_location_code, order.pick_line_count ?? pickLineCount)
+        : 'warehouse_pick',
+    [order, pickLineCount],
+  );
+
+  const fulfillmentPath =
+    order && fulfillmentPathOverride?.orderId === order.id
+      ? fulfillmentPathOverride.path
+      : defaultPath;
+
+  const setFulfillmentPath = useCallback(
+    (path: FulfillmentPath) => {
+      if (!order) return;
+      setFulfillmentPathOverride({ orderId: order.id, path });
+    },
+    [order],
+  );
 
   const pickingSummary = useMemo(() => {
-    if (!order?.items) {
+    if (!orderItems?.length) {
       return null;
     }
-    const progress = computePickLineProgress(order.items);
+    const progress = computePickLineProgress(orderItems);
     return {
       totalLines: progress.total,
       picked: progress.picked,
@@ -102,7 +121,7 @@ export default function ReviewPage(): React.JSX.Element | null {
       remaining: progress.remaining,
       done: progress.done,
     };
-  }, [order?.items]);
+  }, [orderItems]);
 
   const rejectMutation = useMutation({
     mutationFn: async () => {
@@ -110,13 +129,14 @@ export default function ReviewPage(): React.JSX.Element | null {
       const trimmedReason = rejectReason.trim();
       if (!trimmedReason) throw new Error('Rejection reason is required');
 
-      await supabase
+      const { error: rejectError } = await supabase
         .from('orders')
         .update({
           workflow_status: 'flagged',
           notes: trimmedReason,
         })
         .eq('id', order.id);
+      if (rejectError) throw rejectError;
 
       await sendInternalNotification({
         eventType: 'order_update_for_sales',
@@ -147,19 +167,24 @@ export default function ReviewPage(): React.JSX.Element | null {
               clearTimeout(rejectNavigateTimeoutRef.current);
               rejectNavigateTimeoutRef.current = null;
             }
-            supabase
-              .from('orders')
-              .update({
-                workflow_status: 'submitted',
-                notes: previousNotes,
-              })
-              .eq('id', order!.id)
-              .then(() => {
+            void (async () => {
+              try {
+                const { error: undoError } = await supabase
+                  .from('orders')
+                  .update({
+                    workflow_status: 'submitted',
+                    notes: previousNotes,
+                  })
+                  .eq('id', order!.id);
+                if (undoError) throw undoError;
                 queryClient.invalidateQueries({ queryKey: ['orders'] });
                 queryClient.invalidateQueries({ queryKey: ['order', orderId] });
                 void invalidateLocationwiseStockQueries(queryClient);
                 toast.success('Rejection undone');
-              });
+              } catch {
+                toast.error('Failed to undo rejection');
+              }
+            })();
           },
         },
       });
@@ -424,7 +449,7 @@ export default function ReviewPage(): React.JSX.Element | null {
 interface ReviewOrderContentProps {
   order: OrderWithItems;
   fulfillmentPath: FulfillmentPath;
-  setFulfillmentPath: Dispatch<SetStateAction<FulfillmentPath>>;
+  setFulfillmentPath: (path: FulfillmentPath) => void;
   pickLineCount: number;
   pickingClaim: ReturnType<typeof usePickingClaim>['data'];
   pickingSummary: {
