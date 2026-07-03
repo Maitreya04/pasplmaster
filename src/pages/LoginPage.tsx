@@ -21,7 +21,15 @@ const ROLE_HOME: Record<string, string> = {
 type LoginMode = 'quick' | 'full';
 
 export default function LoginPage(): React.JSX.Element | null {
-  const { loginWithPhone, isAuthenticated, role, authMode, authReady, canSwitchRoles } = useAuth();
+  const {
+    loginWithPhone,
+    isAuthenticated,
+    role,
+    authMode,
+    authReady,
+    canSwitchRoles,
+    authRecoveryMessage,
+  } = useAuth();
 
   const savedDevice = loadDeviceProfile();
   const [mode, setMode] = useState<LoginMode>(savedDevice ? 'quick' : 'full');
@@ -29,6 +37,7 @@ export default function LoginPage(): React.JSX.Element | null {
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const displayError = error ?? authRecoveryMessage;
 
   const handleQuickUnlock = useCallback(
     async (candidatePin: string): Promise<boolean> => {
@@ -89,6 +98,11 @@ export default function LoginPage(): React.JSX.Element | null {
   };
 
   const quickDevice = mode === 'quick' ? savedDevice ?? loadDeviceProfile() : null;
+  const loginSubtitle = authRecoveryMessage
+    ? 'Enter your PIN again to reconnect'
+    : mode === 'quick' && quickDevice
+      ? `Welcome back, ${quickDevice.displayName}`
+      : 'Sign in with phone + PIN';
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] flex flex-col items-center justify-between px-6 py-12 select-none relative overflow-hidden">
@@ -98,9 +112,7 @@ export default function LoginPage(): React.JSX.Element | null {
       <div className="text-center relative z-10 pt-4">
         <h1 className="text-3xl font-bold tracking-tight text-[var(--content-primary)]">PASPL Master</h1>
         <p className="text-sm font-medium text-[var(--content-secondary)] mt-2">
-          {mode === 'quick' && quickDevice
-            ? `Welcome back, ${quickDevice.displayName}`
-            : 'Sign in with phone + PIN'}
+          {loginSubtitle}
         </p>
         {mode === 'quick' && quickDevice && (
           <p className="text-xs text-[var(--content-tertiary)] mt-1">Enter your PIN to continue</p>
@@ -109,6 +121,11 @@ export default function LoginPage(): React.JSX.Element | null {
 
       {mode === 'quick' && quickDevice ? (
         <div className="w-full max-w-xs relative z-10 flex flex-col items-center">
+          {authRecoveryMessage && !error && (
+            <p className="mb-4 text-center text-sm leading-5 text-[var(--content-negative)]">
+              {authRecoveryMessage}
+            </p>
+          )}
           <PinPad
             onSubmit={handleQuickUnlock}
             disabled={submitting || !authReady}
@@ -121,7 +138,7 @@ export default function LoginPage(): React.JSX.Element | null {
               onClick={switchToFullLogin}
               className="text-sm text-[var(--content-secondary)] hover:text-[var(--content-primary)]"
             >
-              Not you? Sign in differently
+              Use another mobile number
             </button>
             <p className="text-sm text-[var(--content-secondary)]">
               Forgot PIN?{' '}
@@ -167,7 +184,7 @@ export default function LoginPage(): React.JSX.Element | null {
             />
           </label>
 
-          {error && <p className="text-sm text-[var(--content-negative)]">{error}</p>}
+          {displayError && <p className="text-sm text-[var(--content-negative)]">{displayError}</p>}
 
           <button
             type="submit"

@@ -8,6 +8,7 @@ import { useWorkClaim } from '../../../hooks/useWorkClaim';
 import { useAuth } from '../../../context/AuthContext';
 import { useToast } from '../../../context/ToastContext';
 import { sendPickerReadyNotification } from '../../../lib/pickerPush';
+import { isSupabaseAuthError } from '../../../lib/supabase/authError';
 import { applyBillingApprove } from '../../../lib/billing/applyBillingApprove';
 import { completeBillingWithClaim } from '../../../lib/billing/completeBilling';
 import { shouldNotifyPickers } from '../../../lib/billing/fulfillmentPath';
@@ -76,7 +77,7 @@ export function LiveQueueWorkspace({
 }: LiveQueueWorkspaceProps): React.JSX.Element {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { userName, userId } = useAuth();
+  const { userName, userId, recoverLogin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // ── URL-driven order pre-selection (e.g. from Dashboard click) ──
@@ -85,7 +86,16 @@ export function LiveQueueWorkspace({
     : null;
 
   // 1. Queue Data
-  const { available, myActive, otherActive, stale, salesLocked, isLoading: queueLoading, isError: queueError } = useClaimableOrders({
+  const {
+    available,
+    myActive,
+    otherActive,
+    stale,
+    salesLocked,
+    isLoading: queueLoading,
+    isError: queueError,
+    error: queueFetchError,
+  } = useClaimableOrders({
     stage: 'billing',
     workflowStatus: 'submitted',
   });
@@ -97,8 +107,14 @@ export function LiveQueueWorkspace({
 
   useEffect(() => {
     if (!queueError || queueLoading) return;
+    if (isSupabaseAuthError(queueFetchError)) {
+      const message = 'Your login expired. Enter your PIN to continue.';
+      toast.error(message);
+      void recoverLogin(message);
+      return;
+    }
     toast.error('Could not load the billing queue. Check your connection and reload.');
-  }, [queueError, queueLoading, toast]);
+  }, [queueError, queueFetchError, queueLoading, recoverLogin, toast]);
 
   const [currentOrderId, setCurrentOrderId] = useState<number | null>(null);
 
@@ -155,20 +171,29 @@ export function LiveQueueWorkspace({
   // 4. New 3-state machine
   const flow = useBillingFlow();
   const flowRef = useRef(flow);
-  flowRef.current = flow;
 
   /** qty_shippable / qty_po when the sheet was opened — used to restore cleared lines on draft save. */
   const draftBaselineRef = useRef<Map<number, { qty_shippable: number; qty_po: number }>>(new Map());
   const hydratedSessionRef = useRef<{ orderId: number } | null>(null);
   const itemsRef = useRef<OrderItem[]>([]);
   const orderRef = useRef(order);
-  itemsRef.current = items;
-  orderRef.current = order;
 
   const [addLineOpen, setAddLineOpen] = useState(false);
   const [sessionNewOrderItemIds, setSessionNewOrderItemIds] = useState<Set<number>>(() => new Set());
+  const [billingReportSnapshot, setBillingReportSnapshot] =
+    useState<BillingReportSnapshot | null>(null);
 
-  const billingReportSnapshotRef = useRef<BillingReportSnapshot | null>(null);
+  useEffect(() => {
+    flowRef.current = flow;
+  }, [flow]);
+
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  useEffect(() => {
+    orderRef.current = order;
+  }, [order]);
 
   useEffect(() => {
     setSessionNewOrderItemIds(new Set());
@@ -630,7 +655,7 @@ export function LiveQueueWorkspace({
       return reportSnapshot;
     },
     onSuccess: async (snapshot) => {
-      billingReportSnapshotRef.current = snapshot;
+      setBillingReportSnapshot(snapshot);
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', snapshot.orderId] });
@@ -643,7 +668,7 @@ export function LiveQueueWorkspace({
 
       if (embedded && sentToPick && onApprovedForAssign) {
         clearBusyEnteredIds(snapshot.orderId);
-        billingReportSnapshotRef.current = null;
+        setBillingReportSnapshot(null);
 
         if (claimId && userId) {
           try {
@@ -700,8 +725,8 @@ export function LiveQueueWorkspace({
 
   // ── Handle next from report (release claim, move to next order or queue) ──
   const handleNext = useCallback(async () => {
-    const completedOrderId = billingReportSnapshotRef.current?.orderId ?? effectiveOrderId;
-    billingReportSnapshotRef.current = null;
+    const completedOrderId = billingReportSnapshot?.orderId ?? effectiveOrderId;
+    setBillingReportSnapshot(null);
 
     if (claimId && userId) {
       try {
@@ -726,7 +751,7 @@ export function LiveQueueWorkspace({
     } else {
       flow.nextOrder();
     }
-  }, [claimId, userId, release, queue, effectiveOrderId, flow]);
+  }, [billingReportSnapshot, claimId, userId, release, queue, effectiveOrderId, flow]);
 
   const shellClass = embedded
     ? 'h-full min-h-0 flex flex-col overflow-hidden bg-[var(--bg-secondary)]'
@@ -841,7 +866,7 @@ export function LiveQueueWorkspace({
   }
 
   if (flow.state === 'report') {
-    const snap = billingReportSnapshotRef.current;
+    const snap = billingReportSnapshot;
     const completedId = snap?.orderId ?? effectiveOrderId;
     return (
       <div className={shellClass}>

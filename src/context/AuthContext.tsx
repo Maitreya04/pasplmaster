@@ -12,10 +12,10 @@ import { supabase } from '../lib/supabase/client';
 import { clearCartDraft } from '../lib/cartDraftStorage';
 import { warmPickQueueRoute } from '../lib/picking/warmPickQueue';
 import { phoneToAuthEmail, normalizePhoneInput, saveDeviceProfile } from '../lib/auth/phoneAuth';
+import { isSupabaseAuthError, isTransientSupabaseError } from '../lib/supabase/authError';
 import {
   clearTestAdminSession,
   isTestAdminPhone,
-  isTestAdminSession,
   markTestAdminSession,
 } from '../lib/auth/testAdmin';
 import type { StockLocationCode, UserRole } from '../types';
@@ -38,6 +38,7 @@ export interface ImpersonationTarget {
 interface AuthContextValue {
   isAuthenticated: boolean;
   authMode: AuthMode;
+  authRecoveryMessage: string | null;
   role: Role;
   userName: string | null;
   userId: number | null;
@@ -52,6 +53,7 @@ interface AuthContextValue {
   actualUserId: number | null;
   actualUserName: string | null;
   loginWithPhone: (phone: string, pin: string) => Promise<PhoneLoginResult>;
+  recoverLogin: (message?: string) => Promise<void>;
   unlockAdmin: (code: string) => boolean;
   selectRole: (role: NonNullable<Role>, name?: string, partnerCompanyId?: number) => void;
   startImpersonation: (target: ImpersonationTarget) => boolean;
@@ -77,6 +79,12 @@ const LS_KEYS = {
 
 /** Admin section passcode (separate from app access code). */
 const ADMIN_PASSCODE = '0807';
+const USER_PROFILE_SELECT = 'id, full_name, role, stock_location_code, phone, is_active';
+const SESSION_EXPIRED_MESSAGE = 'Your previous login expired. Enter your PIN to continue.';
+const SESSION_VERIFY_FAILED_MESSAGE =
+  'We could not verify your saved login. Enter your PIN again to reconnect.';
+const PROFILE_MISSING_MESSAGE =
+  'This login is no longer linked to an active staff profile. Sign in again or contact admin.';
 
 function safeLocalStorageGet(key: string): string | null {
   if (typeof window === 'undefined') return null;
@@ -209,6 +217,45 @@ interface UserProfileRow {
   role: UserRole;
   stock_location_code: StockLocationCode | null;
   phone: string | null;
+  is_active?: boolean | null;
+}
+
+function withVerifiedUser(nextSession: Session, user: SupabaseUser): Session {
+  return {
+    ...nextSession,
+    user,
+  };
+}
+
+function formatPhoneLoginError(message: string | undefined): string {
+  if (!message) return 'Sign in failed. Check your connection and try again.';
+  if (/invalid login credentials/i.test(message)) return 'Phone number or PIN is incorrect.';
+  if (/network|fetch|failed to fetch/i.test(message)) {
+    return 'Could not reach the server. Check the connection and try again.';
+  }
+  return message;
+}
+
+function getCachedProfileForGrace(initial: ReturnType<typeof loadFromStorage>): UserProfileRow | null {
+  if (
+    initial.authMode !== 'supabase' ||
+    !initial.isAuthenticated ||
+    !initial.role ||
+    initial.role === 'partner' ||
+    !initial.userName ||
+    initial.userId == null
+  ) {
+    return null;
+  }
+
+  return {
+    id: initial.userId,
+    full_name: initial.userName,
+    role: initial.role,
+    stock_location_code: initial.branch,
+    phone: null,
+    is_active: true,
+  };
 }
 
 function activateTestAdminSession(setTestAdminSession: (value: boolean) => void): void {
@@ -246,25 +293,28 @@ function unlockAdminForTesting(setAdminUnlocked: (value: boolean) => void): void
 }
 
 export function AuthProvider({ children }: { children: ReactNode }): React.JSX.Element | null {
-  const initial = loadFromStorage();
+  const [initial] = useState(() => {
+    const stored = loadFromStorage();
+    return {
+      ...stored,
+      hadCachedSupabaseAuth: stored.authMode === 'supabase' && stored.isAuthenticated,
+    };
+  });
   const [authReady, setAuthReady] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(initial.isAuthenticated);
-  const [authMode, setAuthMode] = useState<AuthMode>(initial.authMode);
-  const [actualRole, setActualRole] = useState<Role>(initial.role);
-  const [actualUserName, setActualUserName] = useState<string | null>(initial.userName);
-  const [actualUserId, setActualUserId] = useState<number | null>(initial.userId);
-  const [actualBranch, setActualBranch] = useState<StockLocationCode | null>(initial.branch);
-  const [impersonation, setImpersonation] = useState<StoredImpersonation | null>(
-    initial.impersonation,
-  );
-  const [partnerCompanyId, setPartnerCompanyId] = useState<number | null>(
-    initial.partnerCompanyId,
-  );
-  const [adminUnlocked, setAdminUnlocked] = useState(initial.adminUnlocked);
-  const [testAdminSession, setTestAdminSession] = useState(isTestAdminSession);
+  const [authRecoveryMessage, setAuthRecoveryMessage] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>(null);
+  const [actualRole, setActualRole] = useState<Role>(null);
+  const [actualUserName, setActualUserName] = useState<string | null>(null);
+  const [actualUserId, setActualUserId] = useState<number | null>(null);
+  const [actualBranch, setActualBranch] = useState<StockLocationCode | null>(null);
+  const [impersonation, setImpersonation] = useState<StoredImpersonation | null>(null);
+  const [partnerCompanyId, setPartnerCompanyId] = useState<number | null>(null);
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [testAdminSession, setTestAdminSession] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
-  const authModeRef = useRef<AuthMode>(initial.authMode);
+  const authModeRef = useRef<AuthMode>(null);
 
   useEffect(() => {
     authModeRef.current = authMode;
@@ -302,7 +352,9 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     setSession(nextSession);
     setSupabaseUser(nextSession.user);
     setAuthMode('supabase');
+    authModeRef.current = 'supabase';
     setIsAuthenticated(true);
+    setAuthRecoveryMessage(null);
     setPartnerCompanyId(null);
     persistProfile(profile);
 
@@ -318,9 +370,10 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     safeLocalStorageRemove(LS_KEYS.partnerCompanyId);
   }, [persistProfile]);
 
-  const clearAuthState = useCallback(() => {
+  const clearAuthState = useCallback((recoveryMessage: string | null = null) => {
     setIsAuthenticated(false);
     setAuthMode(null);
+    authModeRef.current = null;
     setActualRole(null);
     setActualUserName(null);
     setActualUserId(null);
@@ -342,32 +395,73 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     safeSessionStorageRemove(LS_KEYS.impersonation);
     clearTestAdminSession();
     setTestAdminSession(false);
+    setAuthRecoveryMessage(recoveryMessage);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     const hydrateFromSession = async (nextSession: Session | null) => {
-      if (!nextSession?.user) return false;
+      if (!nextSession?.user) {
+        return { success: false, message: SESSION_EXPIRED_MESSAGE };
+      }
+
+      const { data: verifiedUserData, error: verifiedUserError } = await supabase.auth.getUser();
+      if (cancelled) return { success: false, message: null };
+      if (
+        verifiedUserError ||
+        !verifiedUserData.user ||
+        verifiedUserData.user.id !== nextSession.user.id
+      ) {
+        if (verifiedUserError) console.error('auth user verification failed', verifiedUserError);
+        if (verifiedUserError && isTransientSupabaseError(verifiedUserError)) {
+          const cachedProfile = getCachedProfileForGrace(initial);
+          if (cachedProfile) {
+            applySupabaseProfile(cachedProfile, nextSession);
+            return { success: true, message: null };
+          }
+          return { success: false, message: null };
+        }
+        if (verifiedUserError && !isSupabaseAuthError(verifiedUserError)) {
+          return { success: false, message: SESSION_VERIFY_FAILED_MESSAGE };
+        }
+        try {
+          await supabase.auth.signOut();
+        } catch {
+          // Local auth state is cleared by the caller.
+        }
+        return { success: false, message: SESSION_VERIFY_FAILED_MESSAGE };
+      }
+
+      const verifiedSession = withVerifiedUser(nextSession, verifiedUserData.user);
 
       const { data: profile, error } = await supabase
         .from('users')
-        .select('id, full_name, role, stock_location_code, phone')
-        .eq('auth_id', nextSession.user.id)
+        .select(USER_PROFILE_SELECT)
+        .eq('auth_id', verifiedSession.user.id)
+        .eq('is_active', true)
         .maybeSingle();
 
-      if (cancelled) return false;
+      if (cancelled) return { success: false, message: null };
       if (error) {
         console.error('users lookup by auth_id', error);
-        return false;
+        if (isTransientSupabaseError(error)) {
+          const cachedProfile = getCachedProfileForGrace(initial);
+          if (cachedProfile) {
+            applySupabaseProfile(cachedProfile, verifiedSession);
+            return { success: true, message: null };
+          }
+          return { success: false, message: null };
+        }
+        return { success: false, message: SESSION_VERIFY_FAILED_MESSAGE };
       }
       if (!profile) {
-        console.error('users lookup by auth_id: profile missing for auth user');
+        console.error('users lookup by auth_id: active profile missing for auth user');
         await supabase.auth.signOut();
-        return false;
+        return { success: false, message: PROFILE_MISSING_MESSAGE };
       }
 
-      applySupabaseProfile(profile as UserProfileRow, nextSession);
+      applySupabaseProfile(profile as UserProfileRow, verifiedSession);
       if (isTestAdminPhone(profile.phone ?? '')) {
         activateTestAdminSession(setTestAdminSession);
         unlockAdminForTesting(setAdminUnlocked);
@@ -376,26 +470,50 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
         .from('users')
         .update({ last_login_at: new Date().toISOString() })
         .eq('id', profile.id);
-      return true;
+      return { success: true, message: null };
     };
 
     void (async () => {
-      const { data } = await supabase.auth.getSession();
+      const { data, error } = await supabase.auth.getSession();
       if (cancelled) return;
 
+      if (error) {
+        console.error('auth session lookup failed', error);
+        if (initial.hadCachedSupabaseAuth) {
+          clearAuthState(SESSION_VERIFY_FAILED_MESSAGE);
+        }
+        setAuthReady(true);
+        return;
+      }
+
       if (data.session) {
-        await hydrateFromSession(data.session);
-      } else if (initial.authMode === 'supabase' && initial.isAuthenticated) {
-        clearAuthState();
+        const result = await hydrateFromSession(data.session);
+        if (!cancelled && !result.success && result.message) {
+          clearAuthState(result.message);
+        }
+      } else if (initial.hadCachedSupabaseAuth) {
+        clearAuthState(SESSION_EXPIRED_MESSAGE);
       }
       setAuthReady(true);
     })();
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (cancelled) return;
       if (nextSession) {
+        if (event === 'INITIAL_SESSION') return;
+        if (event === 'TOKEN_REFRESHED' && authModeRef.current === 'supabase') {
+          setSession(nextSession);
+          setSupabaseUser(nextSession.user);
+          return;
+        }
         window.setTimeout(() => {
-          if (!cancelled) void hydrateFromSession(nextSession);
+          if (!cancelled) {
+            void hydrateFromSession(nextSession).then((result) => {
+              if (!cancelled && !result.success && result.message) {
+                clearAuthState(result.message);
+              }
+            });
+          }
         }, 0);
       } else if (authModeRef.current === 'supabase') {
         clearAuthState();
@@ -406,7 +524,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
       cancelled = true;
       subscription.subscription.unsubscribe();
     };
-  }, [applySupabaseProfile, clearAuthState]);
+  }, [applySupabaseProfile, clearAuthState, initial]);
 
   useEffect(() => {
     if (role !== 'picking') return;
@@ -415,22 +533,25 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
 
   const loginWithPhone = useCallback(
     async (phone: string, pin: string): Promise<PhoneLoginResult> => {
+      setAuthRecoveryMessage(null);
       const email = phoneToAuthEmail(phone);
       const { data, error } = await supabase.auth.signInWithPassword({ email, password: pin });
 
       if (error || !data.session) {
-        return { success: false, error: error?.message ?? 'Sign in failed' };
+        return { success: false, error: formatPhoneLoginError(error?.message) };
       }
 
       const { data: profile, error: profileError } = await supabase
         .from('users')
-        .select('id, full_name, role, stock_location_code, phone')
+        .select(USER_PROFILE_SELECT)
         .eq('auth_id', data.user.id)
+        .eq('is_active', true)
         .maybeSingle();
 
       if (profileError || !profile) {
         await supabase.auth.signOut();
-        return { success: false, error: 'User profile not found' };
+        if (profileError) console.error('users lookup by auth_id after login', profileError);
+        return { success: false, error: PROFILE_MISSING_MESSAGE };
       }
 
       applySupabaseProfile(profile as UserProfileRow, data.session);
@@ -456,6 +577,20 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
       return { success: true };
     },
     [applySupabaseProfile],
+  );
+
+  const recoverLogin = useCallback(
+    async (message = SESSION_VERIFY_FAILED_MESSAGE): Promise<void> => {
+      if (authModeRef.current === 'supabase' || session) {
+        try {
+          await supabase.auth.signOut();
+        } catch {
+          // Local auth state is still cleared below so the user can sign in again.
+        }
+      }
+      clearAuthState(message);
+    },
+    [clearAuthState, session],
   );
 
   const unlockAdmin = useCallback((code: string): boolean => {
@@ -597,6 +732,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
       value={{
         isAuthenticated,
         authMode,
+        authRecoveryMessage,
         role,
         userName,
         userId,
@@ -611,6 +747,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
         actualUserId,
         actualUserName,
         loginWithPhone,
+        recoverLogin,
         unlockAdmin,
         selectRole,
         startImpersonation,

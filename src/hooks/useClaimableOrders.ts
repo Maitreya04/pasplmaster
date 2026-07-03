@@ -99,6 +99,8 @@ interface UseClaimableOrdersReturn {
   isLoading: boolean;
   /** True when the latest fetch failed */
   isError: boolean;
+  /** The latest fetch error, when present */
+  error: Error | null;
 }
 
 type BillingRealtimeStatus = 'disabled' | 'connected' | 'disconnected';
@@ -754,6 +756,7 @@ export function useClaimableOrders(
     ...categorized,
     isLoading: result.isLoading,
     isError: result.isError,
+    error: result.error,
   };
 }
 
