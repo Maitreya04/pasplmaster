@@ -22,6 +22,7 @@ import {
 } from '../../../lib/billing/liveQueueDraft';
 import { billingClaimFailureMessage } from '../../../lib/billing/claimFailureMessage';
 import { clearBusyEnteredIds } from '../../../lib/billing/busyEntrySession';
+import { refreshWorkflowQueues } from '../../../lib/queueRefresh';
 import { sortBillLines } from '../../../lib/billing/sortBillLines';
 
 import { useBillingFlow } from '../../../hooks/useBillingFlow';
@@ -656,8 +657,8 @@ export function LiveQueueWorkspace({
     },
     onSuccess: async (snapshot) => {
       setBillingReportSnapshot(snapshot);
+      await refreshWorkflowQueues(queryClient);
       queryClient.invalidateQueries({ queryKey: ['orders'] });
-      queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
       queryClient.invalidateQueries({ queryKey: ['order', snapshot.orderId] });
       void invalidateLocationwiseStockQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: ['billing-stock-freshness'] });

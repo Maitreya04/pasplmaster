@@ -25,6 +25,7 @@ import {
   pickNoLongerActiveMessage,
 } from '../../lib/picking/pickSessionErrors';
 import { appHaptics } from '../../lib/haptics';
+import { refreshWorkflowQueues, patchPickFinalisedInCache } from '../../lib/queueRefresh';
 import { clearPickFlowSession } from '../../features/picking/lib/pickFlowSession';
 import { PickCompleteScreen } from './PickCompleteScreen';
 
@@ -199,7 +200,11 @@ export default function PickFinalisePage(): React.JSX.Element | null {
       if (orderId != null) {
         clearPickFlowSession(orderId, isLab ? 'lab' : 'production');
       }
-      if (!isLab && !offlinePickActive) {
+      if (!isLab && !offlinePickActive && orderId != null) {
+        patchPickFinalisedInCache(queryClient, orderId, {
+          hasFlags: counts.hasFlagged,
+        });
+        void refreshWorkflowQueues(queryClient);
         void queryClient.invalidateQueries({ queryKey: ['orders'] });
         void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
         void queryClient.invalidateQueries({ queryKey: ['picker-daily-stats'] });
@@ -222,6 +227,7 @@ export default function PickFinalisePage(): React.JSX.Element | null {
       const snapshot = pendingCompletionSnapshotRef.current;
       if (isReceiptCompatible && snapshot) {
         setCompletionSnapshot(withPickCompletionSaveState(snapshot, 'already_saved'));
+        void refreshWorkflowQueues(queryClient);
         void queryClient.invalidateQueries({ queryKey: ['order', orderId] });
         void queryClient.invalidateQueries({ queryKey: ['orders'] });
         void queryClient.invalidateQueries({ queryKey: ['picker-completed-orders'] });

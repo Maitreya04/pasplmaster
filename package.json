@@ -14,6 +14,8 @@
     "test:final-bill-copy": "node --import tsx src/lib/billing/finalBillCopy.test.ts",
     "test:busy-line-split": "node --import tsx src/lib/billing/busyLineSplit.test.ts",
     "test:derive-operator-stage": "node --import tsx src/lib/billing/deriveBillingOperatorStage.test.ts",
+    "test:workflow-lifecycle": "node --import tsx src/lib/billing/workflowLifecycle.test.ts",
+    "test:queue-refresh": "node --import tsx src/lib/queueRefresh.test.ts",
     "test:order-age-tier": "node --import tsx src/lib/billing/orderAgeTier.test.ts",
     "test:stage-bar-presentation": "node --import tsx src/lib/billing/deriveStageBarPresentation.test.ts",
     "test:order-handoff": "node --import tsx src/lib/billing/orderHandoffFromEvents.test.ts",

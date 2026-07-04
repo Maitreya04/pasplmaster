@@ -54,8 +54,8 @@ export function useDeskPickProgress(orderIds: number[]) {
       }
       return result;
     },
-    staleTime: 10_000,
-    refetchInterval: 15_000,
+    staleTime: 5_000,
+    refetchInterval: 10_000,
     refetchIntervalInBackground: false,
   });
 }

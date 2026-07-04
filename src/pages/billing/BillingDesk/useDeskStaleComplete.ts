@@ -8,6 +8,7 @@ import {
   forceCompletePrePickErrorMessage,
   stalePickingCompleteErrorMessage,
 } from '../../../lib/billing/completeStalePicking';
+import { refreshWorkflowQueues } from '../../../lib/queueRefresh';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 import { getDeskStaleCompleteKind } from './deskStaleComplete';
 
@@ -17,11 +18,9 @@ export function useDeskStaleComplete(order: DeskOrderRow | null) {
   const queryClient = useQueryClient();
 
   const invalidate = useCallback(() => {
+    void refreshWorkflowQueues(queryClient);
     queryClient.invalidateQueries({ queryKey: ['orders'] });
-    queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-    queryClient.invalidateQueries({ queryKey: ['billing-desk-picking-stale'] });
     queryClient.invalidateQueries({ queryKey: ['picking-claims-stale'] });
-    queryClient.invalidateQueries({ queryKey: ['desk-picker-flags'] });
     if (order) {
       queryClient.invalidateQueries({ queryKey: ['order', order.id] });
       queryClient.invalidateQueries({ queryKey: ['picking-claim', order.id] });

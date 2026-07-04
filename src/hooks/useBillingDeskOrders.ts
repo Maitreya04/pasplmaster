@@ -114,7 +114,7 @@ export function useBillingDeskOrders() {
       return { stale, active };
     },
     staleTime: 0,
-    refetchInterval: 30_000,
+    refetchInterval: 10_000,
     refetchIntervalInBackground: false,
   });
 

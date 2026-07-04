@@ -12,6 +12,10 @@ import {
 } from '../../../lib/pickerPush';
 import type { DeskOrderRow } from '../../../hooks/useBillingDeskOrders';
 import type { PickerLoadInfo } from '../../../hooks/usePickerLoad';
+import {
+  patchPickerAssignedInCache,
+  refreshWorkflowQueues,
+} from '../../../lib/queueRefresh';
 import { canAssignPicker, isPickerReassign } from './deskPickerAssign';
 
 export function useDeskPickerAssign(
@@ -22,13 +26,13 @@ export function useDeskPickerAssign(
   const toast = useToast();
   const queryClient = useQueryClient();
 
-  const invalidate = useCallback(() => {
+  const refreshQueues = useCallback(() => {
+    void refreshWorkflowQueues(queryClient);
     queryClient.invalidateQueries({ queryKey: ['orders'] });
-    queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-    queryClient.invalidateQueries({ queryKey: ['billing-desk-picking-stale'] });
-    queryClient.invalidateQueries({ queryKey: ['picker-load-counts'] });
-    queryClient.invalidateQueries({ queryKey: ['desk-picker-flags'] });
-  }, [queryClient]);
+    if (order) {
+      queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+    }
+  }, [order, queryClient]);
 
   const notifyPickerInBackground = useCallback(
     (picker: PickerLoadInfo) => {
@@ -66,13 +70,19 @@ export function useDeskPickerAssign(
       }
       return picker;
     },
+    onMutate: async (picker) => {
+      if (!order) return;
+      await queryClient.cancelQueries({ queryKey: ['claimable-orders'] });
+      patchPickerAssignedInCache(queryClient, order.id, picker.name);
+    },
     onSuccess: (picker) => {
       options?.onSuccess?.();
-      invalidate();
+      refreshQueues();
       notifyPickerInBackground(picker);
       toast.success(`Assigned to ${picker.firstName} — notifying`);
     },
     onError: (err: unknown) => {
+      refreshQueues();
       toast.error(err instanceof Error ? err.message : 'Failed to assign picker');
     },
   });
@@ -92,13 +102,19 @@ export function useDeskPickerAssign(
       }
       return picker;
     },
+    onMutate: async (picker) => {
+      if (!order) return;
+      await queryClient.cancelQueries({ queryKey: ['claimable-orders'] });
+      patchPickerAssignedInCache(queryClient, order.id, picker.name);
+    },
     onSuccess: (picker) => {
       options?.onSuccess?.();
-      invalidate();
+      refreshQueues();
       notifyPickerInBackground(picker);
       toast.success(`Re-assigned to ${picker.firstName} — notifying`);
     },
     onError: (err: unknown) => {
+      refreshQueues();
       toast.error(err instanceof Error ? err.message : 'Failed to re-assign');
     },
   });

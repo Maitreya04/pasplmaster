@@ -30,6 +30,7 @@ import { pickQuantityTarget } from '../lib/cartSupply';
 import { needsPostPickBillingClaim } from '../lib/billing/postPickBillingClaim';
 import { shouldNotifyPickerBillReady } from '../lib/picking/pickerBillReadyNotify';
 import { notifyPickerBillReadyToCollect, sendPickerReadyNotification } from '../lib/pickerPush';
+import { patchBillingFinalisedInCache, refreshWorkflowQueues } from '../lib/queueRefresh';
 import { flagsFromOrderItems } from '../lib/billing/liveQueueDraft';
 import type { BillingLineEdit } from '../lib/billing/liveQueueDraft';
 import { sortBillLines } from '../lib/billing/sortBillLines';
@@ -628,9 +629,14 @@ export function useBillSheetEdits({
     },
     onSuccess: () => {
       setStep('saved');
+      const statusAtSave = orderDetail.workflow_status;
+      if (statusAtSave === 'completed' || statusAtSave === 'flagged') {
+        patchBillingFinalisedInCache(queryClient, orderDetail.id, userName ?? 'Billing', {
+          fromFlagged: statusAtSave === 'flagged' && resolvingFlags,
+        });
+      }
+      void refreshWorkflowQueues(queryClient);
       queryClient.invalidateQueries({ queryKey: ['orders'] });
-      queryClient.invalidateQueries({ queryKey: ['claimable-orders'] });
-      queryClient.invalidateQueries({ queryKey: ['desk-picker-flags'] });
       queryClient.invalidateQueries({ queryKey: ['order', orderDetail.id] });
       queryClient.invalidateQueries({ queryKey: ['pending-items'] });
       queryClient.invalidateQueries({ queryKey: [STOCK_MRP_HISTORY_QUERY_KEY] });
