@@ -19,9 +19,19 @@ export async function fetchTodayWorkday(userId: number | null): Promise<WorkdayS
 export async function startWorkday(
   userId: number | null,
 ): Promise<WorkdayState> {
-  const { data, error } = await supabase.rpc('start_workday', {
+  // Prefer the clean no-geo signature. If PostgREST still has the temporary
+  // lat/lng compatibility overload, retry with explicit null geo args so the
+  // call uniquely resolves (PGRST203).
+  let { data, error } = await supabase.rpc('start_workday', {
     ...actorParam(userId),
   });
+  if (error?.code === 'PGRST203') {
+    ({ data, error } = await supabase.rpc('start_workday', {
+      p_lat: null,
+      p_lng: null,
+      ...actorParam(userId),
+    }));
+  }
   if (error) throw error;
   const payload = data as { success?: boolean; workday?: WorkdayState };
   if (!payload?.success) throw new Error('Could not start workday');
@@ -58,11 +68,25 @@ export interface StartVisitResult {
 }
 
 export async function startCustomerVisit(params: StartVisitParams): Promise<StartVisitResult> {
-  const { data, error } = await supabase.rpc('start_customer_visit', {
+  const baseArgs = {
     p_customer_id: params.customerId,
     p_interaction_type: params.interactionType ?? 'field',
     ...actorParam(params.userId),
-  });
+  };
+
+  // Prefer the clean no-geo signature. Retry with ignored geo args when the
+  // temporary compatibility overload still makes PostgREST ambiguous.
+  let { data, error } = await supabase.rpc('start_customer_visit', baseArgs);
+  if (error?.code === 'PGRST203') {
+    ({ data, error } = await supabase.rpc('start_customer_visit', {
+      ...baseArgs,
+      p_lat: null,
+      p_lng: null,
+      p_accuracy_m: null,
+      p_acknowledge_warn: false,
+      p_override_reason: null,
+    }));
+  }
   if (error) throw error;
 
   const payload = data as {
