@@ -18,6 +18,7 @@ export interface UserActivationRow {
   invite_code: string | null;
   invite_code_expires_at: string | null;
   is_active: boolean;
+  current_fy_target_lakhs?: number | null;
 }
 
 interface RpcResult {

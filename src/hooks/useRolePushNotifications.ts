@@ -10,7 +10,7 @@ import {
   registerPushServiceWorker,
   vapidPublicKeyToUint8Array,
 } from '../lib/push';
-import type { PushCapabilityState, PushSubscriptionRecord } from '../types';
+import type { PushCapabilityState } from '../types';
 
 export type AppRole = 'sales' | 'billing' | 'picking' | 'admin' | 'partner';
 
@@ -49,21 +49,12 @@ export function useRolePushNotifications({
       }
 
       const keys = parseSubscriptionKeys(subscription);
-      const payload: Omit<PushSubscriptionRecord, 'id' | 'created_at' | 'updated_at'> = {
-        user_id: userId,
-        user_name: userName,
-        role: role as Exclude<typeof role, 'partner'>,
-        device_id: getPushDeviceId(),
-        endpoint: keys.endpoint,
-        p256dh: keys.p256dh,
-        auth: keys.auth,
-        enabled: true,
-        last_seen_at: new Date().toISOString(),
-      };
-
-      const { error } = await supabase
-        .from('push_subscriptions')
-        .upsert(payload, { onConflict: 'endpoint' });
+      const { error } = await supabase.rpc('sync_push_subscription', {
+        p_device_id: getPushDeviceId(),
+        p_endpoint: keys.endpoint,
+        p_p256dh: keys.p256dh,
+        p_auth: keys.auth,
+      });
 
       if (error) {
         throw error;

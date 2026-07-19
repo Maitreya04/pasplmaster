@@ -25,17 +25,26 @@ export interface Item {
 export interface Customer {
   id: number;
   name: string;
+  busy_code?: number | null;
   address?: string | null;
   address1?: string | null;
   address2?: string | null;
   address3?: string | null;
+  address4?: string | null;
   mobile: string | null;
+  contact?: string | null;
+  email?: string | null;
   parent_group: string | null;
   city: string | null;
   station?: string | null;
+  state?: string | null;
+  pincode?: string | null;
   salesman: string | null;
   gstin: string | null;
+  gstno?: string | null;
   dealer_type: string | null;
+  creditlimitamt?: number | null;
+  creditsalesdays?: number | null;
   is_active: boolean;
 }
 

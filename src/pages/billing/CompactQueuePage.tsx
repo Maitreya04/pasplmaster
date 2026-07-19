@@ -869,13 +869,15 @@ export default function CompactQueuePage() {
           notifySales: true,
         });
         if (vars?.salesDraftText?.trim() && vars.salesDraftText.trim() !== messageText) {
-          await sendInternalNotification({
+          void sendInternalNotification({
             eventType: 'order_update_for_sales',
             orderId: order.id,
             orderNumber: order.order_number,
             customerName: order.customer_name,
             salespersonName: order.salesperson_name,
             messageBody: vars.salesDraftText.trim(),
+          }).catch((err: unknown) => {
+            console.error('[CompactQueue] custom sales draft notification failed', err);
           });
         }
       } catch (e) {
@@ -902,18 +904,16 @@ export default function CompactQueuePage() {
       }
 
       if (shouldNotifyPickers(resolvedFulfillmentPath)) {
-        try {
-          await sendPickerReadyNotification({
-            eventType: 'order_ready_to_pick',
-            orderId: order.id,
-            orderNumber: order.order_number,
-            customerName: order.customer_name,
-            priority: order.priority,
-            approvedAt: new Date().toISOString(),
-          });
-        } catch {
-          /* silent */
-        }
+        void sendPickerReadyNotification({
+          eventType: 'order_ready_to_pick',
+          orderId: order.id,
+          orderNumber: order.order_number,
+          customerName: order.customer_name,
+          priority: order.priority,
+          approvedAt: new Date().toISOString(),
+        }).catch((err: unknown) => {
+          console.error('[CompactQueue] picker notification failed', err);
+        });
       }
 
       return order.order_number;

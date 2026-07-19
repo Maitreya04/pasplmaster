@@ -14,7 +14,7 @@ import {
   Warehouse,
   Truck,
   ShoppingBag,
-  MapTrifold,
+  ClipboardText,
   UsersThree,
 } from '@phosphor-icons/react';
 import { useAuth } from '../../context/AuthContext';
@@ -52,12 +52,12 @@ export default function AdminPage(): React.JSX.Element | null {
             className="w-full flex items-center gap-4 p-4 rounded-2xl bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors border border-[var(--border-subtle)]"
           >
             <div className="w-12 h-12 rounded-xl bg-[var(--role-primary-subtle)] flex items-center justify-center">
-              <MapTrifold size={22} weight="regular" className="text-[var(--role-primary)]" />
+              <ClipboardText size={22} weight="regular" className="text-[var(--role-primary)]" />
             </div>
             <div className="text-left">
               <p className="font-semibold text-[var(--content-primary)]">Field activity</p>
               <p className="text-sm text-[var(--content-tertiary)]">
-                Sales workdays, visit routes, and geofence overrides
+                Sales workdays, customer visits, outcomes, and notes
               </p>
             </div>
           </button>

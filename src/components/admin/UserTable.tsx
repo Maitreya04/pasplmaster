@@ -6,6 +6,7 @@ import type { UserActivationRow } from '../../hooks/useUserActivationStatus';
 
 export type UserRowAction =
   | 'edit'
+  | 'manage_targets'
   | 'login_as'
   | 'revoke_access'
   | 'deactivate'
@@ -42,6 +43,10 @@ function actionItems(row: UserActivationRow): Array<{ action: UserRowAction; lab
     { action: 'edit', label: 'Edit details' },
   ];
 
+  if (row.role === 'sales') {
+    items.push({ action: 'manage_targets', label: 'Manage targets' });
+  }
+
   if (status === 'activated') {
     items.push({ action: 'login_as', label: 'Login as user' });
     items.push({ action: 'revoke_access', label: 'Revoke access', danger: true });
@@ -49,6 +54,13 @@ function actionItems(row: UserActivationRow): Array<{ action: UserRowAction; lab
 
   items.push({ action: 'deactivate', label: 'Deactivate user', danger: true });
   return items;
+}
+
+function formatTargetLakhs(value: number | null | undefined): string {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return '-';
+  if (n >= 100) return `${(n / 100).toFixed(1)}Cr`;
+  return `${n.toFixed(1)}L`;
 }
 
 export function UserTable({
@@ -90,6 +102,7 @@ export function UserTable({
             <th className="px-3 py-2 font-medium">Branch</th>
             <th className="px-3 py-2 font-medium">Status</th>
             <th className="px-3 py-2 font-medium">Phone</th>
+            <th className="px-3 py-2 font-medium">FY Target</th>
             <th className="px-3 py-2 font-medium">Actions</th>
           </tr>
         </thead>
@@ -111,6 +124,9 @@ export function UserTable({
                   <span className={status.className}>{status.text}</span>
                 </td>
                 <td className="px-3 py-2 font-mono">{row.phone ?? '—'}</td>
+                <td className="px-3 py-2 font-mono">
+                  {row.role === 'sales' ? formatTargetLakhs(row.current_fy_target_lakhs) : '-'}
+                </td>
                 <td className="px-3 py-2">
                   {items.length === 0 ? (
                     <span className="text-[var(--content-secondary)]">—</span>

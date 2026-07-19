@@ -131,6 +131,8 @@ export function inviteCodeErrorMessage(error: string | undefined): string {
       return 'This account is already activated. Sign in with phone + PIN.';
     case 'code_expired':
       return 'Verification code expired. Start again from Get started.';
+    case 'code_consumed':
+      return 'Verification code was already used. Start again from Get started.';
     case 'phone_already_used':
       return 'This phone number is already registered.';
     case 'pin_must_be_4_to_6_digits':
@@ -193,6 +195,8 @@ export function resetPinErrorMessage(error: string | undefined): string {
       return 'Reset code is invalid. Go back and try again.';
     case 'code_expired':
       return 'Reset code expired. Go back and generate a new one.';
+    case 'code_consumed':
+      return 'Reset code was already used. Go back and generate a new one.';
     case 'phone_mismatch':
       return 'Phone number does not match our records.';
     case 'not_activated':

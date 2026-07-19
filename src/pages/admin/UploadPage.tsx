@@ -121,7 +121,7 @@ export default function UploadPage(): React.JSX.Element | null {
       // Invalidate dashboard + smart suggestions when targets or sales history change
       if (detection.type === 'sales_plan') {
         // Sales targets updated – refresh any salesperson dashboards
-        void queryClient.invalidateQueries({ queryKey: ['sales-dashboard'] });
+        void queryClient.invalidateQueries({ queryKey: ['sales-dashboard-v2'] });
       }
       if (detection.type === 'sales_history') {
         // Sales history aggregates updated – refresh dashboard & frequently bought data

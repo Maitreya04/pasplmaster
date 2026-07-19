@@ -1,202 +1,234 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
-import type { Order } from '../types';
-import {
-  ORDERS_SELECT_WITH_ITEM_LINE_COUNT,
-  normalizeOrderListBusyItemCount,
-  type OrderRowWithEmbed,
-} from '../lib/orderItemCount';
 
-// Targets are stored with financial year label "2025-26"
-const TARGET_YEAR = '2025-26';
-// Imported history in salesperson_fy_sales uses "2025" for FY 2025-26
-const HISTORY_FYEAR_KEY = '2025';
+export type SalesPacePeriod = 'month' | 'quarter' | 'fy';
+export type SalesPaceRpcPeriod = 'today' | SalesPacePeriod;
 
-interface ProductGroupTarget {
-  product_group: string;
-  annual_target_lakhs: number;
-  achieved: number; // rupees, 0 for now
+export interface SalesPeriodMetric {
+  actual: number;
+  expected: number;
 }
 
-interface SalesDashboardData {
-  annualTargetLakhs: number;
-  fyAchievement: number; // sum of total_value in FY
-  monthlyTargetLakhs: number;
-  thisMonthOrders: number;
-  thisMonthValue: number;
-  topProductGroups: ProductGroupTarget[];
-  recentOrders: Order[];
-  lastUpdatedAt: string | null;
+export interface SalesCategoryPace {
+  segmentId: number;
+  name: string;
+  isUnmapped: boolean;
+  annualTarget: number;
+  today: SalesPeriodMetric;
+  month: SalesPeriodMetric;
+  quarter: SalesPeriodMetric;
+  fy: SalesPeriodMetric;
+  fyContributionPercent: number;
 }
 
-function getMonthStartEnd(): { start: string; end: string } {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const start = new Date(y, m, 1);
-  const end = new Date(y, m + 1, 0, 23, 59, 59, 999);
-  return {
-    start: start.toISOString().slice(0, 19) + 'Z',
-    end: end.toISOString(),
+export interface SalesDashboardData {
+  status: 'ready' | 'targets_missing' | 'financial_year_missing';
+  asOfDate: string;
+  financialYear: {
+    id: number;
+    label: string;
+    startsOn: string;
+    endsOn: string;
+  } | null;
+  workingDays: {
+    total: number;
+    elapsedFy: number;
+    elapsedMonth: number;
+    elapsedQuarter: number;
+    month: number;
+    quarter: number;
+    remainingMonth: number;
+    remainingQuarter: number;
+    remaining: number;
+    isTodayWorkingDay: boolean;
+  };
+  periodWindows: Record<SalesPacePeriod, { startsOn: string; endsOn: string } | null>;
+  annualTarget: number;
+  remainingAnnual: number;
+  requiredDailyRunRate: number;
+  periods: Record<SalesPaceRpcPeriod, SalesPeriodMetric>;
+  categories: SalesCategoryPace[];
+  freshness: {
+    aggregatedAt: string | null;
+    sourceMaxVoucherDate: string | null;
+    isStale: boolean;
+    unmappedRows: number;
+    unmappedValue: number;
   };
 }
 
-export function useSalesDashboard(salespersonName: string | null) {
-  return useQuery<SalesDashboardData>({
-    queryKey: ['sales-dashboard', salespersonName],
-    queryFn: async () => {
-      if (!salespersonName) {
-        return {
-          annualTargetLakhs: 0,
-          fyAchievement: 0,
-          monthlyTargetLakhs: 0,
-          thisMonthOrders: 0,
-          thisMonthValue: 0,
-          topProductGroups: [],
-          recentOrders: [],
-          lastUpdatedAt: null,
-        };
-      }
+interface PaceRpcCategory {
+  segment_id?: number;
+  name?: string;
+  is_unmapped?: boolean;
+  annual_target?: number | string;
+  today_actual?: number | string;
+  today_expected?: number | string;
+  month_actual?: number | string;
+  month_expected?: number | string;
+  quarter_actual?: number | string;
+  quarter_expected?: number | string;
+  fy_actual?: number | string;
+  fy_expected?: number | string;
+  fy_contribution_percent?: number | string;
+}
 
-      // 1. Fetch sales targets for this person (year 2025-26)
-      const { data: targets, error: targetsErr } = await supabase
-        .from('sales_targets')
-        .select('product_group, annual_target_lakhs')
-        .eq('salesperson_name', salespersonName)
-        .eq('year', TARGET_YEAR);
+interface PaceRpcPayload {
+  status?: SalesDashboardData['status'];
+  as_of_date?: string;
+  financial_year?: {
+    id?: number;
+    label?: string;
+    starts_on?: string;
+    ends_on?: string;
+  };
+  working_days?: {
+    total?: number;
+    elapsed_fy?: number;
+    elapsed_month?: number;
+    elapsed_quarter?: number;
+    month?: number;
+    quarter?: number;
+    remaining_month?: number;
+    remaining_quarter?: number;
+    remaining?: number;
+    is_today_working_day?: boolean;
+  };
+  period_windows?: Partial<
+    Record<SalesPacePeriod, { starts_on?: string; ends_on?: string }>
+  >;
+  annual_target?: number | string;
+  remaining_annual?: number | string;
+  required_daily_run_rate?: number | string;
+  periods?: Partial<Record<SalesPaceRpcPeriod, { actual?: number | string; expected?: number | string }>>;
+  categories?: PaceRpcCategory[];
+  freshness?: {
+    aggregated_at?: string | null;
+    source_max_voucher_date?: string | null;
+    is_stale?: boolean;
+    unmapped_rows?: number;
+    unmapped_value?: number | string;
+  };
+}
 
-      if (targetsErr) throw targetsErr;
+const numberValue = (value: number | string | null | undefined): number => {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
-      const annualTargetLakhs =
-        (targets ?? []).reduce((sum, r) => sum + Number(r.annual_target_lakhs || 0), 0) || 0;
-      const monthlyTargetLakhs = annualTargetLakhs / 12;
+function parsePeriod(payload: PaceRpcPayload, period: SalesPaceRpcPeriod): SalesPeriodMetric {
+  const value = payload.periods?.[period];
+  return {
+    actual: numberValue(value?.actual),
+    expected: numberValue(value?.expected),
+  };
+}
 
-      // 1b. Product group achievements from history for this FY
-      const { data: pgRows, error: pgErr } = await supabase
-        .from('salesperson_product_group_sales')
-        .select('product_group, total_value')
-        .eq('salesperson_name', salespersonName)
-        .eq('fyear', HISTORY_FYEAR_KEY);
+function parsePeriodWindow(
+  payload: PaceRpcPayload,
+  period: SalesPacePeriod,
+  fallbackStartsOn?: string,
+  fallbackEndsOn?: string,
+): { startsOn: string; endsOn: string } | null {
+  const window = payload.period_windows?.[period];
+  const startsOn = window?.starts_on ?? fallbackStartsOn;
+  const endsOn = window?.ends_on ?? fallbackEndsOn;
+  if (!startsOn || !endsOn) return null;
+  return { startsOn, endsOn };
+}
 
-      if (pgErr) throw pgErr;
+function parsePace(payload: PaceRpcPayload): SalesDashboardData {
+  const fy = payload.financial_year;
+  const financialYear = fy?.id && fy.label && fy.starts_on && fy.ends_on
+    ? { id: fy.id, label: fy.label, startsOn: fy.starts_on, endsOn: fy.ends_on }
+    : null;
 
-      const achievedByGroup = new Map<string, number>();
-      for (const row of pgRows ?? []) {
-        const key = String(row.product_group ?? '');
-        if (!key) continue;
-        const prev = achievedByGroup.get(key) ?? 0;
-        achievedByGroup.set(key, prev + Number(row.total_value || 0));
-      }
-
-      // Build list with achieved mapped in rupees
-      const withAchieved: ProductGroupTarget[] = (targets ?? []).map((t) => {
-        const pg = t.product_group;
-        const achieved = achievedByGroup.get(pg) ?? 0;
-        return {
-          product_group: pg,
-          annual_target_lakhs: Number(t.annual_target_lakhs || 0),
-          achieved,
-        };
-      });
-
-      // Sort by largest gap first (target - achieved), so biggest problems are on top
-      withAchieved.sort((a, b) => {
-        const aGap = a.annual_target_lakhs * 100000 - (achievedByGroup.get(a.product_group) ?? 0);
-        const bGap = b.annual_target_lakhs * 100000 - (achievedByGroup.get(b.product_group) ?? 0);
-        return bGap - aGap;
-      });
-
-      const topProductGroups = withAchieved.slice(0, 5);
-
-      // 2. Fetch total sales achievement for this salesperson for FY 2025-26
-      // from imported history (salesperson_fy_sales)
-      const { data: fyRows, error: fyErr } = await supabase
-        .from('salesperson_fy_sales')
-        .select('total_value')
-        .eq('salesperson_name', salespersonName)
-        .eq('fyear', HISTORY_FYEAR_KEY);
-
-      if (fyErr) throw fyErr;
-
-      const fyAchievement =
-        (fyRows ?? []).reduce((sum, r) => sum + Number(r.total_value || 0), 0) || 0;
-
-      // 2b. "Last updated" timestamp so salesperson knows data freshness
-      // We take the latest of targets.updated_at and salesperson_fy_sales.updated_at
-      const { data: targetMeta, error: targetMetaErr } = await supabase
-        .from('sales_targets')
-        .select('updated_at')
-        .eq('salesperson_name', salespersonName)
-        .eq('year', TARGET_YEAR)
-        .order('updated_at', { ascending: false })
-        .limit(1);
-
-      if (targetMetaErr) throw targetMetaErr;
-
-      const { data: historyMeta, error: historyMetaErr } = await supabase
-        .from('salesperson_fy_sales')
-        .select('updated_at')
-        .eq('salesperson_name', salespersonName)
-        .eq('fyear', HISTORY_FYEAR_KEY)
-        .order('updated_at', { ascending: false })
-        .limit(1);
-
-      if (historyMetaErr) throw historyMetaErr;
-
-      const latestTargetUpdatedAt = targetMeta?.[0]?.updated_at as string | undefined;
-      const latestHistoryUpdatedAt = historyMeta?.[0]?.updated_at as string | undefined;
-
-      let lastUpdatedAt: string | null = null;
-      if (latestTargetUpdatedAt && latestHistoryUpdatedAt) {
-        lastUpdatedAt =
-          latestTargetUpdatedAt > latestHistoryUpdatedAt
-            ? latestTargetUpdatedAt
-            : latestHistoryUpdatedAt;
-      } else {
-        lastUpdatedAt = (latestTargetUpdatedAt ?? latestHistoryUpdatedAt) ?? null;
-      }
-
-      // 3. This month's orders
-      const { start: monthStart, end: monthEnd } = getMonthStartEnd();
-      const { data: monthOrders, error: monthErr } = await supabase
-        .from('orders')
-        .select('id, total_value')
-        .eq('salesperson_name', salespersonName)
-        .gte('created_at', monthStart)
-        .lte('created_at', monthEnd);
-
-      if (monthErr) throw monthErr;
-
-      const thisMonthOrders = (monthOrders ?? []).length;
-      const thisMonthValue =
-        (monthOrders ?? []).reduce((sum, o) => sum + Number(o.total_value || 0), 0) || 0;
-
-      // 4. Last 3 orders
-      const { data: recentRaw, error: recentErr } = await supabase
-        .from('orders')
-        .select(ORDERS_SELECT_WITH_ITEM_LINE_COUNT)
-        .eq('salesperson_name', salespersonName)
-        .order('created_at', { ascending: false })
-        .limit(3);
-
-      if (recentErr) throw recentErr;
-
-      const recentOrders = normalizeOrderListBusyItemCount(
-        (recentRaw ?? []) as OrderRowWithEmbed[],
-      );
-
-      return {
-        annualTargetLakhs,
-        fyAchievement,
-        monthlyTargetLakhs,
-        thisMonthOrders,
-        thisMonthValue,
-        topProductGroups,
-        recentOrders,
-        lastUpdatedAt,
-      };
+  return {
+    status: payload.status ?? 'financial_year_missing',
+    asOfDate: payload.as_of_date ?? new Date().toISOString().slice(0, 10),
+    financialYear,
+    workingDays: {
+      total: payload.working_days?.total ?? 0,
+      elapsedFy: payload.working_days?.elapsed_fy ?? 0,
+      elapsedMonth: payload.working_days?.elapsed_month ?? 0,
+      elapsedQuarter: payload.working_days?.elapsed_quarter ?? 0,
+      month: payload.working_days?.month ?? payload.working_days?.elapsed_month ?? 0,
+      quarter: payload.working_days?.quarter ?? payload.working_days?.elapsed_quarter ?? 0,
+      remainingMonth: payload.working_days?.remaining_month ?? 0,
+      remainingQuarter: payload.working_days?.remaining_quarter ?? 0,
+      remaining: payload.working_days?.remaining ?? 0,
+      isTodayWorkingDay: payload.working_days?.is_today_working_day ?? false,
     },
-    enabled: !!salespersonName,
+    periodWindows: {
+      month: parsePeriodWindow(payload, 'month'),
+      quarter: parsePeriodWindow(payload, 'quarter'),
+      fy: parsePeriodWindow(
+        payload,
+        'fy',
+        financialYear?.startsOn,
+        financialYear?.endsOn,
+      ),
+    },
+    annualTarget: numberValue(payload.annual_target),
+    remainingAnnual: numberValue(payload.remaining_annual),
+    requiredDailyRunRate: numberValue(payload.required_daily_run_rate),
+    periods: {
+      today: parsePeriod(payload, 'today'),
+      month: parsePeriod(payload, 'month'),
+      quarter: parsePeriod(payload, 'quarter'),
+      fy: parsePeriod(payload, 'fy'),
+    },
+    categories: (payload.categories ?? []).map((category) => ({
+      segmentId: category.segment_id ?? 0,
+      name: category.name ?? 'Unmapped',
+      isUnmapped: category.is_unmapped ?? false,
+      annualTarget: numberValue(category.annual_target),
+      today: {
+        actual: numberValue(category.today_actual),
+        expected: numberValue(category.today_expected),
+      },
+      month: {
+        actual: numberValue(category.month_actual),
+        expected: numberValue(category.month_expected),
+      },
+      quarter: {
+        actual: numberValue(category.quarter_actual),
+        expected: numberValue(category.quarter_expected),
+      },
+      fy: {
+        actual: numberValue(category.fy_actual),
+        expected: numberValue(category.fy_expected),
+      },
+      fyContributionPercent: numberValue(category.fy_contribution_percent),
+    })),
+    freshness: {
+      aggregatedAt: payload.freshness?.aggregated_at ?? null,
+      sourceMaxVoucherDate: payload.freshness?.source_max_voucher_date ?? null,
+      isStale: payload.freshness?.is_stale ?? true,
+      unmappedRows: payload.freshness?.unmapped_rows ?? 0,
+      unmappedValue: numberValue(payload.freshness?.unmapped_value),
+    },
+  };
+}
+
+export function useSalesDashboard(salespersonName: string | null, salespersonUserId?: number | null) {
+  return useQuery<SalesDashboardData>({
+    // Bump the cache contract whenever the RPC's aggregation/mapping semantics
+    // change so persisted/offline clients cannot keep rendering stale results.
+    queryKey: ['sales-dashboard-v4', salespersonUserId ?? null, salespersonName],
+    queryFn: async () => {
+      const paceResult = await supabase.rpc('get_my_sales_pace', {
+        p_as_of_date: null,
+        p_salesperson_user_id: salespersonUserId!,
+      });
+
+      if (paceResult.error) throw paceResult.error;
+      return parsePace((paceResult.data ?? {}) as PaceRpcPayload);
+    },
+    enabled: salespersonUserId != null && !!salespersonName,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     staleTime: 60 * 1000,
+    refetchInterval: 3 * 60 * 1000,
   });
 }

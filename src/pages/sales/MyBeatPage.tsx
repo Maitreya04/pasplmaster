@@ -160,7 +160,7 @@ export default function MyBeatPage(): React.JSX.Element {
           <Card className="flex items-center gap-3">
             <UsersThree size={24} className="text-[var(--role-primary)]" />
             <p className="text-sm text-[var(--content-secondary)]">
-              Start a visit from a customer card to build location history and enable geofence checks.
+              Open a customer, start the visit, then end it with an outcome and optional notes.
             </p>
           </Card>
         )}

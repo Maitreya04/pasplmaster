@@ -1,4 +1,5 @@
 import type { StockLocationCode, UserRole } from '../../types';
+import { supabase } from '../supabase/client';
 
 const PASPL_AUTH_EMAIL_DOMAIN = 'paspl.local';
 
@@ -68,11 +69,17 @@ export async function callAdminUserAuth(params: {
   phone?: string;
   authId?: string | null;
 }): Promise<AdminUserAuthResponse> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) {
+    return { error: 'unauthorized' };
+  }
+
   const response = await fetch(`${params.supabaseUrl}/functions/v1/admin-update-user-auth`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${params.anonKey}`,
+      Authorization: `Bearer ${accessToken}`,
       apikey: params.anonKey,
     },
     body: JSON.stringify({

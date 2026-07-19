@@ -453,34 +453,40 @@ export function useBillSheetEdits({
       const reviewer = userName ?? 'Billing';
       const nowIso = new Date().toISOString();
 
+      const itemSaveTasks: Promise<void>[] = [];
+
       for (const item of items) {
         const edit = edits[item.id];
         if (!edit) continue;
 
         if (edit.removed) {
-          if (item.state === 'flagged') {
-            const qtyPending = pickQuantityTarget(item);
-            const issueCategory = deskLineIssueCategory(item.flag_reason);
-            await ensurePendingItem({
-              orderId: orderDetail.id,
-              orderNumber: orderDetail.order_number,
-              customerId: orderDetail.customer_id,
-              customerName: orderDetail.customer_name,
-              itemId: item.item_id,
-              itemName: item.item_name,
-              qtyPending,
-              createdBy: reviewer,
-              note: item.flag_reason
-                ? `Billing desk confirmed — ${item.flag_reason}`
-                : 'Billing desk confirmed removal',
-              issueCategory,
-            });
-          }
-          const { error: deleteError } = await supabase
-            .from('order_items')
-            .delete()
-            .eq('id', item.id);
-          throwIfSupabaseError(deleteError);
+          itemSaveTasks.push(
+            (async () => {
+              if (item.state === 'flagged') {
+                const qtyPending = pickQuantityTarget(item);
+                const issueCategory = deskLineIssueCategory(item.flag_reason);
+                await ensurePendingItem({
+                  orderId: orderDetail.id,
+                  orderNumber: orderDetail.order_number,
+                  customerId: orderDetail.customer_id,
+                  customerName: orderDetail.customer_name,
+                  itemId: item.item_id,
+                  itemName: item.item_name,
+                  qtyPending,
+                  createdBy: reviewer,
+                  note: item.flag_reason
+                    ? `Billing desk confirmed — ${item.flag_reason}`
+                    : 'Billing desk confirmed removal',
+                  issueCategory,
+                });
+              }
+              const { error: deleteError } = await supabase
+                .from('order_items')
+                .delete()
+                .eq('id', item.id);
+              throwIfSupabaseError(deleteError);
+            })(),
+          );
           continue;
         }
 
@@ -500,16 +506,22 @@ export function useBillSheetEdits({
           patch.flag_box_price = null;
         }
 
-        const { error: updateItemError } = await supabase
-          .from('order_items')
-          .update(patch)
-          .eq('id', item.id);
-        throwIfSupabaseError(updateItemError);
+        itemSaveTasks.push(
+          (async () => {
+            const { error: updateItemError } = await supabase
+              .from('order_items')
+              .update(patch)
+              .eq('id', item.id);
+            throwIfSupabaseError(updateItemError);
 
-        if (edit.resolution === 'accept_price' && item.flag_reason === 'Price Mismatch') {
-          await promoteBillingVerifiedLabelMrp(item.id, edit.priceQuoted);
-        }
+            if (edit.resolution === 'accept_price' && item.flag_reason === 'Price Mismatch') {
+              await promoteBillingVerifiedLabelMrp(item.id, edit.priceQuoted);
+            }
+          })(),
+        );
       }
+
+      await Promise.all(itemSaveTasks);
 
       const nextItemCount = visibleItems.length;
       const { error: updateTotalsError } = await supabase
@@ -531,22 +543,20 @@ export function useBillSheetEdits({
         orderDetail.workflow_status === 'completed';
 
       if (shouldNotifySales && visibleItems.length > 0) {
-        try {
-          await persistAndNotifySalesOrderUpdate({
-            orderId: orderDetail.id,
-            orderNumber: orderDetail.order_number,
-            customerName: orderDetail.customer_name,
-            salespersonName: orderDetail.salesperson_name,
-            createdBy: reviewer,
-            lines: buildDeskNotifyLines(visibleItems, pendingByItemId),
-            notifySales: true,
-          });
-        } catch (e) {
+        void persistAndNotifySalesOrderUpdate({
+          orderId: orderDetail.id,
+          orderNumber: orderDetail.order_number,
+          customerName: orderDetail.customer_name,
+          salespersonName: orderDetail.salesperson_name,
+          createdBy: reviewer,
+          lines: buildDeskNotifyLines(visibleItems, pendingByItemId),
+          notifySales: true,
+        }).catch((e: unknown) => {
           console.error('order_update_for_sales', e);
           toast.error(
             `Sales notification failed: ${formatInternalNotificationError(e)}`,
           );
-        }
+        });
       }
 
       if (orderDetail.workflow_status === 'submitted') {
@@ -572,6 +582,19 @@ export function useBillSheetEdits({
           isResolvingFlags: false,
           fulfillmentPath: resolvedPath,
         });
+
+        if (shouldNotifyPickers(resolvedPath)) {
+          void sendPickerReadyNotification({
+            eventType: 'order_ready_to_pick',
+            orderId: orderDetail.id,
+            orderNumber: orderDetail.order_number,
+            customerName: orderDetail.customer_name,
+            priority: orderDetail.priority,
+            approvedAt: new Date().toISOString(),
+          }).catch((err: unknown) => {
+            console.error('[BillingDesk] send-to-pick picker notification failed', err);
+          });
+        }
       } else if (resolvingFlags) {
         if (orderDetail.workflow_status === 'picking') {
           const { error: reviewerError } = await supabase
@@ -614,17 +637,15 @@ export function useBillSheetEdits({
       }
 
       if (notifyPickerAfterSave) {
-        try {
-          await notifyPickerBillReadyToCollect({
-            eventType: 'bill_ready_to_collect',
-            orderId: orderDetail.id,
-            orderNumber: orderDetail.order_number,
-            customerName: orderDetail.customer_name,
-            billingPersonName: reviewer,
-          });
-        } catch {
-          // Save succeeded — picker can still collect from billing desk.
-        }
+        void notifyPickerBillReadyToCollect({
+          eventType: 'bill_ready_to_collect',
+          orderId: orderDetail.id,
+          orderNumber: orderDetail.order_number,
+          customerName: orderDetail.customer_name,
+          billingPersonName: reviewer,
+        }).catch((err: unknown) => {
+          console.error('[BillingDesk] bill-ready-to-collect notification failed', err);
+        });
       }
     },
     onSuccess: () => {

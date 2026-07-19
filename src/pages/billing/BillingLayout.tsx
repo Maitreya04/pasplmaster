@@ -9,6 +9,7 @@ import {
   Prohibit,
   Desk,
   CloudWarning,
+  ChartLineUp,
 } from '@phosphor-icons/react';
 import { BottomNav } from '../../components/shared';
 import type { BottomNavItem } from '../../components/shared/BottomNav';
@@ -17,6 +18,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useRolePushNotifications } from '../../hooks/useRolePushNotifications';
 import { NotificationBell } from '../../components/notifications/NotificationBell';
 import { PushAlertsCompact } from '../../components/notifications/PushAlertsCompact';
+import { useSalesAttributionAccess } from '../../hooks/useSalesAttributionAccess';
 
 const preloadDashboard = () => import('./DashboardPage');
 const preloadNeedsReview = () => import('./NeedsReviewPage');
@@ -27,6 +29,7 @@ const preloadLiveQueue = () => import('./LiveQueuePage');
 const preloadBillingDesk = () => import('./BillingDeskPage');
 const preloadNewOrder = () => import('./BillingNewOrderLayout');
 const preloadOfflinePicks = () => import('./OfflinePickConflictsPage');
+const preloadMySales = () => import('./MySalesPage');
 
 const NAV_ITEMS: BottomNavItem[] = [
   { icon: SquaresFour, label: 'Dashboard', path: '/billing', preload: preloadDashboard },
@@ -75,7 +78,19 @@ export default function BillingLayout(): React.JSX.Element | null {
   const location = useLocation();
   const navigate = useNavigate();
   const { userId, userName, role } = useAuth();
+  const { data: hasSalesAttribution = false } = useSalesAttributionAccess(role === 'billing');
   const push = useRolePushNotifications({ role, userId, userName });
+  const navItems = hasSalesAttribution
+    ? [
+        ...NAV_ITEMS,
+        {
+          icon: ChartLineUp,
+          label: 'My Sales',
+          path: '/billing/my-sales',
+          preload: preloadMySales,
+        },
+      ]
+    : NAV_ITEMS;
 
   return (
     <div className="role-billing min-h-screen lg:h-[100dvh] lg:overflow-hidden bg-[var(--bg-primary)] relative">
@@ -91,7 +106,7 @@ export default function BillingLayout(): React.JSX.Element | null {
               <PushAlertsCompact label="Billing alerts" push={push} />
             </div>
           </div>
-          {NAV_ITEMS.map(({ icon: IconCmp, label, path, match }) => {
+          {navItems.map(({ icon: IconCmp, label, path, match }) => {
             const active = match
               ? match(location.pathname, location.search)
               : location.pathname === path;
@@ -129,7 +144,7 @@ export default function BillingLayout(): React.JSX.Element | null {
 
       {/* Bottom nav — mobile only */}
       <div className="lg:hidden">
-        <BottomNav items={NAV_ITEMS.filter((item) => !item.desktopOnly)} />
+        <BottomNav items={navItems.filter((item) => !item.desktopOnly)} />
       </div>
       <DevRoleSwitcher />
     </div>

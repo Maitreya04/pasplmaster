@@ -1308,12 +1308,14 @@ select {
   --ds-radius: 0.5rem;     /*  8px — inputs, rows */
   --ds-row-h: 3rem;        /* 48px — min row/item height */
   --ds-font-micro: 0.625rem;   /* 10px — kbd hints, tiny badges */
-  --ds-font-label: 0.6875rem;  /* 11px — ALL-CAPS labels */
-  --ds-font-caption: 0.75rem;  /* 12px — helper/error text */
-  --ds-font-body: 0.875rem;    /* 14px — table cell, helper text */
+  --ds-font-label: 0.6875rem;  /* 11px — ALL-CAPS labels / eyebrows */
+  --ds-font-caption: 0.75rem;  /* 12px — helper/error text / meta */
+  --ds-font-body: 0.875rem;    /* 14px — table cell, bucket amounts */
   --ds-font-prose: 0.8125rem;  /* 13px — dense preview / secondary prose */
-  --ds-font-lead: 0.9375rem;   /* 15px — emphasized list titles, embed body */
-  --ds-font-stat: 1.375rem;    /* 22px — card hero numbers (tabular) */
+  --ds-font-lead: 0.9375rem;   /* 15px — ledger row titles + amounts */
+  --ds-font-stat: 1.375rem;    /* 22px — secondary hero / sheet totals */
+  --ds-font-title: 1.5rem;     /* 24px — customer / page identity */
+  --ds-font-display: 2rem;     /* 32px — outstanding display number */
 }
 
 .density-compact {
@@ -1330,6 +1332,8 @@ select {
   --ds-font-prose: 0.75rem;    /* 12px */
   --ds-font-lead: 0.875rem;    /* 14px */
   --ds-font-stat: 1.25rem;     /* 20px */
+  --ds-font-title: 1.25rem;    /* 20px */
+  --ds-font-display: 1.75rem;  /* 28px */
   --ds-page-pad-x: 0.75rem;
   --ds-page-pad-y: 0.75rem;
   --ds-stack: 0.75rem;
@@ -2928,6 +2932,110 @@ table.ds-table.ds-table--billing td.billing-col-qty {
 .font-ds-stat {
   font-size: var(--ds-font-stat);
   line-height: 1.2;
+}
+.font-ds-title {
+  font-size: var(--ds-font-title);
+  line-height: 1.2;
+}
+.font-ds-display {
+  font-size: var(--ds-font-display);
+  line-height: 1.1;
+}
+
+/*
+  Account / receivables typescale (Dan Mall hierarchy)
+  1. Display  — outstanding amount (one glance decision)
+  2. Title    — customer identity
+  3. Lead     — ledger row title + amount (paired equals)
+  4. Body     — aging bucket amounts
+  5. Caption  — city · terms · risk caption
+  6. Eyebrow  — OUTSTANDING / LEDGER / bucket ranges
+*/
+.ds-type-eyebrow {
+  font-size: var(--ds-font-label);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.3;
+  text-transform: uppercase;
+  color: var(--content-tertiary);
+}
+.ds-type-title {
+  font-size: var(--ds-font-title);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--content-primary);
+}
+.ds-type-display {
+  font-size: var(--ds-font-display);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--content-primary);
+}
+.ds-type-display--clear {
+  color: var(--content-positive);
+}
+.ds-type-meta {
+  font-size: var(--ds-font-caption);
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--content-tertiary);
+}
+.ds-type-caption {
+  font-size: var(--ds-font-caption);
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--content-tertiary);
+}
+.ds-type-row-title {
+  font-size: var(--ds-font-lead);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--content-primary);
+}
+.ds-type-row-amount {
+  font-size: var(--ds-font-lead);
+  font-weight: 600;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  color: var(--content-primary);
+}
+.ds-type-row-amount--credit {
+  color: var(--content-positive);
+}
+.ds-type-bucket-label {
+  font-size: var(--ds-font-label);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--content-tertiary);
+}
+.ds-type-bucket-amount {
+  font-size: var(--ds-font-body);
+  font-weight: 600;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.ds-type-bucket-meta {
+  font-size: var(--ds-font-label);
+  font-weight: 400;
+  line-height: 1.3;
+  color: var(--content-tertiary);
+}
+.ds-type-month {
+  font-size: var(--ds-font-caption);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--content-tertiary);
+}
+.ds-type-stat {
+  font-size: var(--ds-font-stat);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  color: var(--content-primary);
 }
 
 .text-content-signal-ok {

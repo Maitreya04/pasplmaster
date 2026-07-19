@@ -26,7 +26,8 @@ export type StockLocationRow = {
   latest_stock_updated_at?: string | null;
 };
 
-const POLL_INTERVAL_MS = 30_000;
+/** How long cached per-SKU stock qty stays fresh before refetching. */
+const STOCK_CACHE_TTL_MS = 5 * 60 * 1000;
 const STOCK_FETCH_TIMEOUT_MS = 10_000;
 const IDB_KEY = 'locationwise-stock-cache-v1';
 const CACHE_VERSION = 2;
@@ -73,7 +74,7 @@ export function busyCodesQueryKey(busyCodes: number[]): string {
 
 function isCacheFresh(busyCode: number, now = Date.now()): boolean {
   const entry = stockByBusyCodeCache.get(busyCode);
-  return entry != null && now - entry.fetchedAt < POLL_INTERVAL_MS;
+  return entry != null && now - entry.fetchedAt < STOCK_CACHE_TTL_MS;
 }
 
 async function hydrateLocationwiseStockCache(): Promise<void> {
@@ -329,7 +330,7 @@ export function useLocationwiseStock(busyCodes: Array<number | null | undefined>
     queryKey: ['stock_locationwise', busyCodesKey],
     queryFn: () => fetchLocationwiseStock(normalizedBusyCodes),
     enabled: normalizedBusyCodes.length > 0,
-    staleTime: POLL_INTERVAL_MS,
+    staleTime: STOCK_CACHE_TTL_MS,
     placeholderData: () => {
       const cached = snapshotLocationwiseStockFromCache(normalizedBusyCodes);
       if (Object.keys(cached).length === 0 && !hydratedFromIdb) {
@@ -337,9 +338,9 @@ export function useLocationwiseStock(busyCodes: Array<number | null | undefined>
       }
       return Object.keys(cached).length > 0 ? cached : undefined;
     },
-    refetchInterval: POLL_INTERVAL_MS,
+    refetchInterval: STOCK_CACHE_TTL_MS,
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     refetchOnReconnect: true,
     retry: false,
   });

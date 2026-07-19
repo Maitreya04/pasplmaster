@@ -4,6 +4,7 @@ import { ArrowLeft, Plus, UsersThree } from '@phosphor-icons/react';
 import { AddUserModal } from '../../components/admin/AddUserModal';
 import { ConfirmDialog } from '../../components/admin/ConfirmDialog';
 import { EditUserModal } from '../../components/admin/EditUserModal';
+import { SalesTargetsModal } from '../../components/admin/SalesTargetsModal';
 import { UserTable, type UserRowAction } from '../../components/admin/UserTable';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -51,6 +52,7 @@ export default function UserManagementPage(): React.JSX.Element {
   const [statusFilter, setStatusFilter] = useState<'all' | UserManagementStatus>('all');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingUser, setEditingUser] = useState<UserActivationRow | null>(null);
+  const [targetUser, setTargetUser] = useState<UserActivationRow | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm>(null);
 
   const existingNames = useMemo(() => rows.map((row) => row.full_name), [rows]);
@@ -151,6 +153,9 @@ export default function UserManagementPage(): React.JSX.Element {
     switch (action) {
       case 'edit':
         setEditingUser(row);
+        return;
+      case 'manage_targets':
+        setTargetUser(row);
         return;
       case 'login_as':
         handleLoginAs(row);
@@ -323,6 +328,13 @@ export default function UserManagementPage(): React.JSX.Element {
           isSubmitting={updateUser.isPending}
           onClose={() => setEditingUser(null)}
           onSubmit={handleUpdateUser}
+        />
+      )}
+
+      {targetUser && (
+        <SalesTargetsModal
+          user={targetUser}
+          onClose={() => setTargetUser(null)}
         />
       )}
 

@@ -70,6 +70,7 @@ serve(async (req) => {
 
     const authId = validation.auth_id as string;
     const userId = validation.user_id as number;
+    const resetId = typeof validation.reset_id === 'number' ? validation.reset_id as number : null;
 
     const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(authId, {
       password: normalizedPin,
@@ -91,6 +92,23 @@ serve(async (req) => {
     if (clearError) {
       console.error('invite code clear failed', clearError);
     }
+
+    if (resetId) {
+      await supabaseAdmin.rpc('consume_reset_code', {
+        p_reset_id: resetId,
+      });
+    }
+
+    await supabaseAdmin.rpc('log_user_security_event', {
+      p_actor_user_id: null,
+      p_target_user_id: userId,
+      p_event_type: 'pin_reset_completed',
+      p_risk_level: 'warning',
+      p_metadata: {
+        reset_id: resetId,
+        auth_id: authId,
+      },
+    });
 
     return jsonResponse({
       success: true,

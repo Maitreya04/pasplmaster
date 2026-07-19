@@ -78,7 +78,7 @@ export async function assignPickerAndNotify(options: {
     return result;
   }
 
-  await sendPickerReadyNotification({
+  void sendPickerReadyNotification({
     eventType: 'order_ready_to_pick',
     orderId: options.orderId,
     orderNumber: options.orderNumber,
@@ -86,6 +86,8 @@ export async function assignPickerAndNotify(options: {
     priority: options.priority,
     approvedAt: options.approvedAt,
     targetUserId: options.pickerUserId,
+  }).catch((err: unknown) => {
+    console.error('[assignPickerAndNotify] picker notification failed', err);
   });
 
   return result;

@@ -1,414 +1,587 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CloudArrowUp, PlusCircle, ListBullets, HourglassHigh, MapPin, WifiSlash } from '@phosphor-icons/react';
-import { useAuth } from '../../context/AuthContext';
-import { useSalesDashboard } from '../../hooks/useSalesDashboard';
-import { useSalesPendingRecovery } from '../../hooks/useSalesPendingRecovery';
-import { useOfflineSalesOrderStats } from '../../hooks/useOfflineSalesOrders';
-import { getSalesOfflineReadiness } from '../../lib/offlineReadiness';
+import {
+  CaretDown,
+  HourglassHigh,
+  ListBullets,
+  MapPin,
+  Plus,
+  Warning,
+  WifiSlash,
+} from '@phosphor-icons/react';
 import { Card, Skeleton } from '../../components/shared';
-import type { Order } from '../../types';
+import { useAuth } from '../../context/AuthContext';
+import {
+  useSalesDashboard,
+  type SalesCategoryPace,
+  type SalesDashboardData,
+  type SalesPacePeriod,
+  type SalesPeriodMetric,
+} from '../../hooks/useSalesDashboard';
+import { getSalesOfflineReadiness } from '../../lib/offlineReadiness';
+import {
+  compactSalesCurrency,
+  remainingWorkingDays,
+  salesGap,
+  salesPeriodLabel,
+  salesPeriodTargetLabel,
+  salesProgress,
+  sortSalesCategoriesByTarget,
+} from '../../lib/sales/salesGapPresentation';
+import { formatTimeAgo } from '../../utils/formatters';
 
-function formatLakhs(n: number): string {
-  if (n >= 100) return `${(n / 100).toFixed(1)}Cr`;
-  return `${n.toFixed(1)}L`;
+const PERIOD_LABELS: Record<SalesPacePeriod, string> = {
+  month: 'This month',
+  quarter: 'This quarter',
+  fy: 'This FY',
+};
+
+const TOP_CATEGORY_COUNT = 5;
+
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
 }
-
-import { formatCurrency, formatTimeAgo } from '../../utils/formatters';
 
 function todayFormatted(): string {
   return new Date().toLocaleDateString('en-IN', {
-    weekday: 'long',
+    weekday: 'short',
     day: 'numeric',
-    month: 'long',
+    month: 'short',
+    year: 'numeric',
   });
 }
 
-function CircularProgress({ pct }: { pct: number }) {
-  const clamped = Math.min(100, Math.max(0, pct));
-  const r = 45;
-  const c = 2 * Math.PI * r;
-  const stroke = (clamped / 100) * c;
-
-  return (
-    <svg viewBox="0 0 100 100" className="w-32 h-32 -rotate-90">
-      {/* Track: soft so it doesn’t feel stark */}
-      <circle
-        cx="50"
-        cy="50"
-        r={r}
-        fill="none"
-        stroke="rgba(255,255,255,0.25)"
-        strokeWidth="8"
-      />
-      <circle
-        cx="50"
-        cy="50"
-        r={r}
-        fill="none"
-        stroke="white"
-        strokeWidth="8"
-        strokeDasharray={`${stroke} ${c}`}
-        strokeLinecap="round"
-        className="transition-all duration-700 ease-out"
-      />
-    </svg>
-  );
+function formatFyDate(value: string): string {
+  return new Date(`${value}T12:00:00`).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
-function HeroCard({
-  annualTargetLakhs,
-  fyAchievement,
-  monthlyTargetLakhs,
-  isLoading,
-  lastUpdatedAt,
-}: {
-  annualTargetLakhs: number;
-  fyAchievement: number;
-  monthlyTargetLakhs: number;
-  isLoading: boolean;
-  lastUpdatedAt: string | null;
-}) {
-  const targetRupees = annualTargetLakhs * 100000;
-  const pct = targetRupees > 0 ? (fyAchievement / targetRupees) * 100 : 0;
-  const achievedLakhs = fyAchievement / 100000;
+function asOfLabel(asOfDate: string): string {
+  return new Date(`${asOfDate}T12:00:00`).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+  });
+}
 
-  if (isLoading) {
-    return (
-      <Card className="bg-[var(--role-hero-bg,var(--role-primary))] border border-[var(--role-hero-bg,var(--role-primary))]">
-        <div className="flex flex-col items-center gap-4 py-4">
-          <div className="w-32 h-32 rounded-full bg-white/20 animate-pulse" />
-          <div className="space-y-2 w-40">
-            <div className="h-4 rounded-xl bg-white/20 animate-pulse" />
-            <div className="h-3 rounded-xl bg-white/20 animate-pulse w-3/4 mx-auto" />
-          </div>
-        </div>
-      </Card>
-    );
+function periodPressureLabel(
+  period: SalesPacePeriod,
+  data: SalesDashboardData,
+): string {
+  const window = data.periodWindows[period];
+  const billedTill = asOfLabel(data.asOfDate);
+  const daysLeft = remainingWorkingDays(data, period);
+  const closesOn = window ? asOfLabel(window.endsOn) : null;
+  const dayPart =
+    daysLeft > 0
+      ? `${daysLeft} working day${daysLeft === 1 ? '' : 's'} left`
+      : 'Period closed';
+
+  if (closesOn) {
+    return `Billed till ${billedTill} · closes ${closesOn} · ${dayPart}`;
   }
 
-  return (
-    <Card className="bg-[var(--role-hero-bg,var(--role-primary))] border border-[var(--role-hero-bg,var(--role-primary))]">
-      <div className="relative flex flex-col items-center gap-3 pt-6 pb-3">
-        {lastUpdatedAt && (
-          <div className="absolute left-0 top-0">
-            <span className="inline-flex items-center rounded-full border border-white/30 bg-white/10 px-2 py-0.5 text-xs font-medium text-white/90 backdrop-blur-sm">
-              As of{' '}
-              {new Date(lastUpdatedAt).toLocaleDateString('en-IN', {
-                day: 'numeric',
-                month: 'short',
-                year: 'numeric',
-              })}
-            </span>
-          </div>
-        )}
-        <div className="relative mt-1">
-          <CircularProgress pct={pct} />
-          <span className="absolute inset-0 flex items-center justify-center font-mono text-2xl font-bold text-white">
-            {pct.toFixed(0)}%
-          </span>
-        </div>
-        <div className="text-center">
-          <p className="font-mono text-white text-sm">
-            ₹{formatLakhs(achievedLakhs)} of ₹{formatLakhs(annualTargetLakhs)}
-          </p>
-          <p className="text-white/80 text-xs mt-0.5">
-            Monthly target: ₹{formatLakhs(monthlyTargetLakhs)}
-          </p>
-        </div>
-      </div>
-    </Card>
-  );
+  return `Billed till ${billedTill} · ${dayPart}`;
 }
 
-function ThisMonthCard({
-  orders,
+function gapTone(metric: SalesPeriodMetric): string {
+  return salesGap(metric).state === 'ahead'
+    ? 'text-[var(--content-signal-ok)]'
+    : 'text-[var(--content-negative)]';
+}
+
+function PeriodControl({
   value,
-  monthlyTargetLakhs,
-  isLoading,
+  onChange,
 }: {
-  orders: number;
-  value: number;
-  monthlyTargetLakhs: number;
-  isLoading: boolean;
+  value: SalesPacePeriod;
+  onChange: (period: SalesPacePeriod) => void;
 }) {
-  const monthlyTargetRupees = monthlyTargetLakhs * 100000;
-  const pct = monthlyTargetRupees > 0 ? (value / monthlyTargetRupees) * 100 : 0;
-
-  if (isLoading) {
-    return (
-      <Card>
-        <Skeleton variant="text" lines={4} />
-      </Card>
-    );
-  }
-
   return (
-    <Card>
-      <h3 className="text-sm font-semibold text-[var(--content-secondary)] mb-3">This Month</h3>
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="font-mono text-xl font-bold text-[var(--content-primary)]">{orders}</p>
-          <p className="text-xs text-[var(--content-tertiary)]">orders</p>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex justify-between text-xs mb-1">
-            <span className="font-mono text-[var(--content-secondary)]">
-              {formatCurrency(value)}
-            </span>
-            <span className="font-mono text-[var(--content-tertiary)]">
-              of ₹{formatLakhs(monthlyTargetLakhs)}
-            </span>
-          </div>
-          <div className="h-2 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
-            <div
-              className="h-full bg-[var(--role-primary)] rounded-full transition-all duration-500"
-              style={{ width: `${Math.min(100, pct)}%` }}
-            />
-          </div>
-        </div>
-      </div>
-    </Card>
+    <div
+      className="grid grid-cols-3 gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-1 shadow-[var(--shadow-card)]"
+      role="radiogroup"
+      aria-label="Sales period"
+    >
+      {(Object.keys(PERIOD_LABELS) as SalesPacePeriod[]).map((period) => {
+        const selected = value === period;
+
+        return (
+          <button
+            key={period}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange(period)}
+            className={`min-h-10 rounded-lg px-2 text-[12px] font-semibold transition-[background-color,color,box-shadow] duration-150 ease-out active:scale-[0.98] ${
+              selected
+                ? 'bg-[var(--bg-inverse-primary)] text-[var(--content-inverse-primary)] shadow-sm'
+                : 'bg-transparent text-[var(--content-tertiary)]'
+            }`}
+          >
+            {PERIOD_LABELS[period]}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
-function ProductGroupBar({
-  group,
-  target,
-  achieved,
+function ProgressBar({
+  metric,
+  size = 'md',
 }: {
-  group: string;
-  target: number;
-  achieved: number;
+  metric: SalesPeriodMetric;
+  size?: 'sm' | 'md';
 }) {
-  const targetLakhs = target; // already in lakhs
-  const achievedLakhs = achieved / 100000; // rupees -> lakhs
-  const pct = targetLakhs > 0 ? (achievedLakhs / targetLakhs) * 100 : 0;
-  const gapLakhs = Math.max(targetLakhs - achievedLakhs, 0);
-  const pctRounded = Math.round(Math.min(100, Math.max(0, pct)));
+  const { actualPercent } = salesProgress(metric);
+  const ahead = metric.actual >= metric.expected;
+  const height = size === 'sm' ? 'h-1.5' : 'h-2.5';
 
   return (
-    <div className="space-y-1.5">
-      <div className="flex justify-between items-baseline gap-2">
-        <span className="text-sm font-medium text-[var(--content-primary)] truncate">{group}</span>
-        <span className="font-mono text-xs text-[var(--content-tertiary)] shrink-0">
-          Target ₹{formatLakhs(targetLakhs)}
-        </span>
-      </div>
-      <div className="h-1.25 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
-        <div
-          className="h-full bg-[var(--role-primary)] rounded-full transition-all duration-300"
-          style={{ width: `${Math.min(100, pct)}%` }}
-        />
-      </div>
-      <p className="text-xs mt-1">
-        <span className="font-semibold text-[var(--content-secondary)]">
-          Gap <span className="font-mono">₹{formatLakhs(gapLakhs)}</span>
-        </span>
-        <span className="ml-2 text-[var(--content-tertiary)] font-mono">
-          Done ₹{formatLakhs(Math.max(achievedLakhs, 0))} ({pctRounded}%)
-        </span>
+    <div
+      className={`relative overflow-hidden rounded-full bg-[var(--gray-2)] ${height}`}
+      aria-hidden="true"
+    >
+      <div
+        className={`absolute inset-y-0 left-0 rounded-full transition-[width] duration-300 ease-out ${
+          ahead ? 'bg-[var(--content-signal-ok)]' : 'bg-[var(--bg-negative)]'
+        }`}
+        style={{ width: `${Math.max(actualPercent, actualPercent > 0 ? 2 : 0)}%` }}
+      />
+    </div>
+  );
+}
+
+function MetricTile({
+  label,
+  value,
+  valueClassName,
+  tone = 'neutral',
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+  tone?: 'neutral' | 'short' | 'ahead';
+}) {
+  const surface =
+    tone === 'short'
+      ? 'bg-[var(--bg-negative-subtle)] ring-1 ring-[var(--border-negative)]'
+      : tone === 'ahead'
+        ? 'bg-[var(--bg-positive-subtle)] ring-1 ring-[var(--border-positive)]'
+        : 'bg-[var(--bg-primary)]';
+
+  return (
+    <div className={`min-w-0 rounded-xl px-3 py-3 ${surface}`}>
+      <p className="text-[11px] font-medium leading-tight text-[var(--content-tertiary)]">{label}</p>
+      <p
+        className={`mt-1 truncate text-lg font-bold tracking-tight ${
+          valueClassName ?? 'text-[var(--content-primary)]'
+        }`}
+      >
+        {value}
       </p>
     </div>
   );
 }
 
-function RecentOrderCard({ order }: { order: Order }) {
+function SalesHero({
+  data,
+  period,
+}: {
+  data: SalesDashboardData;
+  period: SalesPacePeriod;
+}) {
+  const metric = data.periods[period];
+  const gap = salesGap(metric);
+  const targetsPublished = data.status === 'ready';
+  const periodLabel = salesPeriodLabel(period, data.asOfDate, data.financialYear?.label ?? null);
+  const targetLabel = salesPeriodTargetLabel(period, data.asOfDate);
+  const pressureLabel = periodPressureLabel(period, data);
+  const achievementPercent =
+    metric.expected > 0 ? Math.round((metric.actual / metric.expected) * 100) : null;
+  const showAnnualFooter = targetsPublished && data.annualTarget > 0 && period !== 'fy';
+
   return (
-    <Link to={`/sales/orders`}>
-      <Card pressable className="py-3">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-mono text-sm text-[var(--content-secondary)]">{order.order_number}</span>
-          <span className="text-xs text-[var(--content-tertiary)]">{formatTimeAgo(order.created_at)}</span>
+    <div className="overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] shadow-[var(--shadow-card)]">
+      <div className="px-4 pb-4 pt-4 sm:px-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+              {periodLabel}
+            </p>
+            <p className="mt-0.5 text-[11px] leading-snug text-[var(--content-quaternary)]">
+              {pressureLabel}
+            </p>
+          </div>
+          {targetsPublished && achievementPercent != null && (
+            <span
+              className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                gap.state === 'ahead'
+                  ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-signal-ok)]'
+                  : 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]'
+              }`}
+            >
+              {achievementPercent}% closed
+            </span>
+          )}
         </div>
-        <p className="font-medium text-[var(--content-primary)] truncate mt-0.5">{order.customer_name}</p>
-        <p className="font-mono text-xs text-[var(--content-secondary)] mt-0.5">
-          {order.item_count} items · {formatCurrency(order.total_value)}
-        </p>
-      </Card>
-    </Link>
+
+        <div className="mt-4">
+          <p className="text-[13px] font-medium text-[var(--content-tertiary)]">Billed so far</p>
+          <p className="mt-0.5 text-[2.5rem] font-bold leading-none tracking-tight text-[var(--content-primary)]">
+            {compactSalesCurrency(metric.actual)}
+          </p>
+        </div>
+
+        {targetsPublished ? (
+          <>
+            <div className="mt-5">
+              <ProgressBar metric={metric} />
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <MetricTile
+                label={targetLabel}
+                value={compactSalesCurrency(metric.expected)}
+              />
+              <MetricTile
+                label={gap.verbLabel}
+                value={compactSalesCurrency(gap.amount)}
+                tone={gap.state}
+                valueClassName={
+                  gap.state === 'ahead'
+                    ? 'text-[var(--content-signal-ok)]'
+                    : 'text-[var(--content-negative)]'
+                }
+              />
+            </div>
+          </>
+        ) : (
+          <div className="mt-5 rounded-xl bg-[var(--bg-primary)] px-3 py-3">
+            <p className="text-sm font-semibold text-[var(--content-tertiary)]">
+              Targets not published yet
+            </p>
+            <p className="mt-0.5 text-xs text-[var(--content-quaternary)]">
+              Billed sales still show from Busy.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {showAnnualFooter && (
+        <div className="flex items-center justify-between gap-3 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 py-3 sm:px-5">
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium text-[var(--content-tertiary)]">
+              Full-year target
+              {data.financialYear ? ` · FY ${data.financialYear.label}` : ''}
+            </p>
+            <p className="mt-0.5 text-sm font-semibold text-[var(--content-secondary)]">
+              {compactSalesCurrency(data.annualTarget)}
+            </p>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="text-[11px] font-medium text-[var(--content-tertiary)]">Left this year</p>
+            <p className="mt-0.5 text-sm font-semibold text-[var(--content-secondary)]">
+              {compactSalesCurrency(Math.max(data.remainingAnnual, 0))}
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
-export default function SalesHome(): React.JSX.Element | null {
+function CategoryRow({
+  category,
+  period,
+  targetsPublished,
+}: {
+  category: SalesCategoryPace;
+  period: SalesPacePeriod;
+  targetsPublished: boolean;
+}) {
+  const metric = category[period];
+  const hasTarget = targetsPublished && category.annualTarget > 0;
+  const gap = salesGap(metric);
+
+  return (
+    <div className="grid min-h-[60px] grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3.5 py-3">
+      <div className="min-w-0">
+        <p
+          className="truncate text-[13px] font-semibold leading-tight text-[var(--content-primary)]"
+          title={category.name}
+        >
+          {category.name}
+        </p>
+        <div className="mt-1.5">
+          {hasTarget ? (
+            <ProgressBar metric={metric} size="sm" />
+          ) : (
+            <div className="h-1.5 rounded-full bg-[var(--gray-2)]" />
+          )}
+        </div>
+        <p className="mt-1.5 flex min-w-0 items-baseline gap-1.5 font-mono text-[11px] leading-tight">
+          <span className="font-semibold text-[var(--content-primary)]">
+            {compactSalesCurrency(metric.actual)}
+          </span>
+          <span className="text-[var(--content-quaternary)]">/</span>
+          <span className="truncate text-[var(--content-tertiary)]">
+            {hasTarget ? compactSalesCurrency(metric.expected) : 'no target'}
+          </span>
+        </p>
+      </div>
+
+      <p
+        className={`min-w-[3.25rem] text-right font-mono text-[12px] font-semibold ${
+          hasTarget ? gapTone(metric) : 'text-[var(--content-tertiary)]'
+        }`}
+      >
+        {hasTarget ? gap.signedLabel : '—'}
+      </p>
+    </div>
+  );
+}
+
+function CategoryBreakdown({
+  data,
+  period,
+}: {
+  data: SalesDashboardData;
+  period: SalesPacePeriod;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const categories = useMemo(
+    () => sortSalesCategoriesByTarget(data.categories, period),
+    [data.categories, period],
+  );
+  const visible = expanded ? categories : categories.slice(0, TOP_CATEGORY_COUNT);
+  const hiddenCount = Math.max(categories.length - TOP_CATEGORY_COUNT, 0);
+  const outsideAssigned = useMemo(() => {
+    const rows = data.categories.filter(
+      (category) => category.annualTarget <= 0 && category[period].actual !== 0,
+    );
+    return {
+      amount: rows.reduce((sum, category) => sum + category[period].actual, 0),
+      names: rows.map((category) => category.name),
+    };
+  }, [data.categories, period]);
+
+  return (
+    <section className="space-y-2.5">
+      {outsideAssigned.amount !== 0 && (
+        <div className="rounded-xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3.5 py-3">
+          <p className="text-sm font-semibold text-[var(--content-warning-on-light)]">
+            {compactSalesCurrency(outsideAssigned.amount)} billed outside assigned targets
+          </p>
+          <p className="mt-0.5 text-xs text-[var(--content-secondary)]">
+            Included in billed total, not in category progress:{' '}
+            {outsideAssigned.names.join(', ')}.
+          </p>
+        </div>
+      )}
+
+      <div className="overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] shadow-[var(--shadow-card)]">
+        <div className="flex items-end justify-between gap-3 border-b border-[var(--border-subtle)] px-3.5 py-3">
+          <div>
+            <h2 className="text-[13px] font-semibold text-[var(--content-primary)]">
+              Top categories by target
+            </h2>
+            <p className="mt-0.5 text-[11px] text-[var(--content-tertiary)]">
+              Biggest plan lines · vs full {period === 'fy' ? 'year' : period} target
+            </p>
+          </div>
+          {categories.length > 0 && (
+            <p className="shrink-0 text-[11px] font-medium text-[var(--content-quaternary)]">
+              {categories.length} assigned
+            </p>
+          )}
+        </div>
+
+        {categories.length > 0 ? (
+          <>
+            <div className="divide-y divide-[var(--border-subtle)]">
+              {visible.map((category) => (
+                <CategoryRow
+                  key={category.segmentId}
+                  category={category}
+                  period={period}
+                  targetsPublished={data.status === 'ready'}
+                />
+              ))}
+            </div>
+
+            {hiddenCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setExpanded((current) => !current)}
+                className="flex min-h-11 w-full items-center justify-center gap-1.5 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] text-[12px] font-semibold text-[var(--content-secondary)] transition-colors duration-150 ease-out active:scale-[0.99] active:bg-[var(--bg-tertiary)]"
+                aria-expanded={expanded}
+              >
+                {expanded ? 'Show less' : `Show ${hiddenCount} more`}
+                <CaretDown
+                  size={14}
+                  weight="bold"
+                  className={`transition-transform duration-200 ease-out ${
+                    expanded ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+            )}
+          </>
+        ) : (
+          <p className="px-3.5 py-6 text-sm text-[var(--content-tertiary)]">
+            Category mappings are not ready for this financial year.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function UnifiedSalesModule({
+  data,
+  period,
+  onPeriodChange,
+}: {
+  data: SalesDashboardData;
+  period: SalesPacePeriod;
+  onPeriodChange: (period: SalesPacePeriod) => void;
+}) {
+  return (
+    <section className="space-y-3">
+      <PeriodControl value={period} onChange={onPeriodChange} />
+      <SalesHero data={data} period={period} />
+      <CategoryBreakdown data={data} period={period} />
+    </section>
+  );
+}
+
+function ModuleSkeleton() {
+  return (
+    <Card className="min-h-[520px] overflow-hidden p-0" aria-label="Loading sales performance">
+      <div className="p-4">
+        <Skeleton variant="text" lines={2} />
+      </div>
+      <div className="min-h-[180px] border-y border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4">
+        <Skeleton variant="text" lines={5} />
+      </div>
+      <div className="p-4">
+        <Skeleton variant="text" lines={8} />
+      </div>
+    </Card>
+  );
+}
+
+const HOME_ACTIONS = [
+  { label: 'New order', path: '/sales/new', icon: Plus, primary: true },
+  { label: 'My orders', path: '/sales/orders', icon: ListBullets, primary: false },
+  { label: 'My beat', path: '/sales/beat', icon: MapPin, primary: false },
+  { label: 'Pending', path: '/sales/pending-recovery', icon: HourglassHigh, primary: false },
+] as const;
+
+function QuickActions() {
+  return (
+    <section aria-labelledby="sales-home-actions" className="space-y-2">
+      <h2 id="sales-home-actions" className="px-1 text-[13px] font-semibold text-[var(--content-primary)]">
+        Quick actions
+      </h2>
+      <div className="grid grid-cols-2 gap-2">
+        {HOME_ACTIONS.map(({ label, path, icon: Icon, primary }) => (
+          <Link
+            key={path}
+            to={path}
+            className={`flex min-h-11 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition-[transform,background-color,border-color] duration-150 ease-out active:scale-[0.98] ${
+              primary
+                ? 'border-[var(--border-accent)] bg-[var(--role-primary-subtle)] text-[var(--role-content)]'
+                : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-secondary)] shadow-[var(--shadow-card)]'
+            }`}
+          >
+            <Icon size={18} weight={primary ? 'bold' : 'regular'} className="shrink-0" />
+            <span>{label}</span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export default function SalesHome({
+  showQuickActions = true,
+}: {
+  showQuickActions?: boolean;
+} = {}): React.JSX.Element | null {
   const { userId, userName } = useAuth();
-  const { data, isLoading } = useSalesDashboard(userName);
-  const { data: pendingRecovery = [] } = useSalesPendingRecovery(userId, userName);
-  const offlineStats = useOfflineSalesOrderStats();
+  const { data, isLoading, isError } = useSalesDashboard(userName, userId);
   const [offlineReady, setOfflineReady] = useState<boolean | null>(null);
+  const [period, setPeriod] = useState<SalesPacePeriod>('month');
 
   useEffect(() => {
     void getSalesOfflineReadiness().then((readiness) => setOfflineReady(readiness.ready));
   }, []);
 
-  const actionableRecoveryCount = pendingRecovery.filter(
-    (item) => item.recovery_status === 'back_in_stock' || item.recovery_status === 'needs_checked',
-  ).length;
-
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--content-primary)]">
-      <div className="p-4 pb-6 space-y-6">
-        {/* Top: Greeting + date — use content tokens so readable on light bg */}
+      <div className="mx-auto max-w-2xl space-y-3.5 p-4 pb-6">
         <header>
-          <h1 className="text-2xl font-bold text-[var(--content-primary)]">
-            Hey, {userName ?? 'there'}
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--content-primary)]">
+            {greeting()}, {userName ?? 'there'}
           </h1>
-          <p className="text-sm text-[var(--content-tertiary)] mt-0.5">{todayFormatted()}</p>
+          <p className="mt-0.5 text-sm text-[var(--content-tertiary)]">{todayFormatted()}</p>
+          {data?.financialYear && (
+            <p className="mt-1 text-[11px] text-[var(--content-quaternary)]">
+              FY {data.financialYear.label} · {formatFyDate(data.financialYear.startsOn)} –{' '}
+              {formatFyDate(data.financialYear.endsOn)}
+            </p>
+          )}
         </header>
 
         {offlineReady === false && (
-          <Card className="border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]">
+          <Card className="p-3">
             <div className="flex items-center gap-3">
-              <WifiSlash size={22} weight="bold" className="shrink-0 text-[var(--content-warning)]" />
-              <div className="min-w-0">
-                <p className="font-semibold text-[var(--content-primary)]">Not offline-ready yet</p>
-                <p className="mt-0.5 text-xs text-[var(--content-secondary)]">
-                  Open the app online once so items, customers, and stock cache on this device.
-                </p>
+              <WifiSlash size={20} weight="bold" className="shrink-0 text-[var(--content-warning-on-light)]" />
+              <p className="text-sm font-medium">Open once online to cache catalog and stock.</p>
+            </div>
+          </Card>
+        )}
+
+        {isError && (
+          <Card className="border-[var(--border-negative)] bg-[var(--bg-negative-subtle)] p-3">
+            <div className="flex items-center gap-3">
+              <Warning size={20} weight="fill" className="shrink-0 text-[var(--content-negative)]" />
+              <p className="text-sm font-semibold">Sales performance is temporarily unavailable.</p>
+            </div>
+          </Card>
+        )}
+
+        {data?.status === 'targets_missing' && (
+          <Card className="border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] p-3">
+            <div className="flex items-start gap-3">
+              <Warning size={20} weight="fill" className="mt-0.5 shrink-0 text-[var(--content-warning-on-light)]" />
+              <div>
+                <p className="text-sm font-semibold">Targets are not published for this FY.</p>
+                <p className="mt-0.5 text-xs text-[var(--content-secondary)]">Busy billed sales are still shown.</p>
               </div>
             </div>
           </Card>
         )}
 
-        {offlineReady === true && (
-          <Card className="border-[var(--border-accent)] bg-[var(--bg-accent-subtle)]">
-            <p className="text-sm font-semibold text-[var(--content-accent)]">
-              Offline-ready — catalog and stock cached on this device
-            </p>
-          </Card>
+        {isLoading ? <ModuleSkeleton /> : data ? (
+          <UnifiedSalesModule data={data} period={period} onPeriodChange={setPeriod} />
+        ) : null}
+
+        {showQuickActions && <QuickActions />}
+
+        {data?.freshness.aggregatedAt && (
+          <p className="text-center text-xs text-[var(--content-tertiary)]">
+            Busy summary refreshed {formatTimeAgo(data.freshness.aggregatedAt)}
+          </p>
         )}
-
-        {/* Hero: Annual target ring */}
-        <HeroCard
-          annualTargetLakhs={data?.annualTargetLakhs ?? 0}
-          fyAchievement={data?.fyAchievement ?? 0}
-          monthlyTargetLakhs={data?.monthlyTargetLakhs ?? 0}
-          isLoading={isLoading}
-          lastUpdatedAt={data?.lastUpdatedAt ?? null}
-        />
-
-        {(offlineStats.active > 0 || offlineStats.partial > 0 || offlineStats.noStock > 0 || offlineStats.failed > 0) && (
-          <Link to="/sales/orders">
-            <Card pressable className="border-[var(--border-warning)] bg-[var(--bg-warning-subtle)]">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-white/70 flex items-center justify-center">
-                  <CloudArrowUp size={24} weight="duotone" className="text-[var(--content-warning)]" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-[var(--content-primary)]">
-                    Offline sync
-                  </p>
-                  <p className="text-xs text-[var(--content-secondary)]">
-                    {offlineStats.active > 0
-                      ? `${offlineStats.active} order${offlineStats.active === 1 ? '' : 's'} waiting to sync`
-                      : `${offlineStats.partial + offlineStats.noStock + offlineStats.failed} recent sync update${offlineStats.partial + offlineStats.noStock + offlineStats.failed === 1 ? '' : 's'}`}
-                  </p>
-                </div>
-              </div>
-            </Card>
-          </Link>
-        )}
-
-        {/* This Month */}
-        <ThisMonthCard
-          orders={data?.thisMonthOrders ?? 0}
-          value={data?.thisMonthValue ?? 0}
-          monthlyTargetLakhs={data?.monthlyTargetLakhs ?? 0}
-          isLoading={isLoading}
-        />
-
-        {/* Top 5 product groups */}
-        {data && data.topProductGroups.length > 0 && (
-          <div>
-            <h2 className="text-sm font-semibold text-[var(--content-secondary)] mb-3">
-              Top 5 product groups
-            </h2>
-            <Card>
-              <div className="space-y-4">
-                {data.topProductGroups.map((pg) => (
-                  <ProductGroupBar
-                    key={pg.product_group}
-                    group={pg.product_group}
-                    target={pg.annual_target_lakhs}
-                    achieved={pg.achieved}
-                  />
-                ))}
-              </div>
-            </Card>
-          </div>
-        )}
-
-        {/* Quick actions */}
-        <div>
-          <h2 className="text-sm font-semibold text-[var(--content-secondary)] mb-3">
-            Quick actions
-          </h2>
-          <div className="grid grid-cols-2 gap-3">
-            <Link to="/sales/new">
-              <Card pressable className="flex items-center gap-3 py-4">
-                <div className="w-10 h-10 rounded-xl bg-[var(--role-primary-subtle)] flex items-center justify-center">
-                  <PlusCircle size={24} weight="duotone" className="text-[var(--role-content)]" />
-                </div>
-                <span className="font-semibold text-[var(--content-primary)]">New Order</span>
-              </Card>
-            </Link>
-            <Link to="/sales/orders">
-              <Card pressable className="flex items-center gap-3 py-4">
-                <div className="w-10 h-10 rounded-xl bg-[var(--role-primary-subtle)] flex items-center justify-center">
-                  <ListBullets size={24} weight="duotone" className="text-[var(--role-content)]" />
-                </div>
-                <span className="font-semibold text-[var(--content-primary)]">My Orders</span>
-              </Card>
-            </Link>
-            <Link to="/sales/beat">
-              <Card pressable className="flex items-center gap-3 py-4">
-                <div className="w-10 h-10 rounded-xl bg-[var(--role-primary-subtle)] flex items-center justify-center">
-                  <MapPin size={24} weight="duotone" className="text-[var(--role-content)]" />
-                </div>
-                <span className="font-semibold text-[var(--content-primary)]">My Beat</span>
-              </Card>
-            </Link>
-            <Link to="/sales/pending-recovery">
-              <Card pressable className="flex items-center gap-3 py-4">
-                <div className="w-10 h-10 rounded-xl bg-[var(--bg-warning-subtle)] flex items-center justify-center">
-                  <HourglassHigh size={24} weight="duotone" className="text-[var(--content-warning)]" />
-                </div>
-                <div className="min-w-0">
-                  <span className="block font-semibold text-[var(--content-primary)]">Pending Follow-up</span>
-                  <span className="block text-xs text-[var(--content-secondary)]">
-                    {actionableRecoveryCount > 0
-                      ? `${actionableRecoveryCount} action needed`
-                      : 'Track back-in-stock lines'}
-                  </span>
-                </div>
-              </Card>
-            </Link>
-          </div>
-        </div>
-
-        {/* Recent orders */}
-        <div>
-          <h2 className="text-sm font-semibold text-[var(--content-secondary)] mb-3">
-            Recent orders
-          </h2>
-          {isLoading ? (
-            <div className="space-y-2">
-              <Skeleton variant="text" lines={3} />
-              <Skeleton variant="text" lines={3} />
-              <Skeleton variant="text" lines={3} />
-            </div>
-          ) : data?.recentOrders?.length ? (
-            <div className="space-y-2">
-              {data.recentOrders.map((order) => (
-                <RecentOrderCard key={order.id} order={order} />
-              ))}
-            </div>
-          ) : (
-            <Card>
-              <p className="text-sm text-[var(--content-tertiary)]">No orders yet</p>
-            </Card>
-          )}
-        </div>
       </div>
     </div>
   );

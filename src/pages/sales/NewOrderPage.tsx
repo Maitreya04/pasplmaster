@@ -10,7 +10,7 @@ import {
   type TouchEvent as ReactTouchEvent,
   type ReactNode,
 } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   Plus,
   ShoppingCart,
@@ -22,6 +22,14 @@ import {
   MagnifyingGlass,
   CaretLeft,
   Gift,
+  FileText,
+  Receipt,
+  ShareNetwork,
+  WarningCircle,
+  UsersThree,
+  Wallet,
+  ArrowsOut,
+  X,
 } from '@phosphor-icons/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useItems } from '../../hooks/useItems';
@@ -41,6 +49,31 @@ import { useToast } from '../../context/ToastContext';
 import { useCustomers } from '../../hooks/useCustomers';
 import { usePendingItems } from '../../hooks/usePendingItems';
 import {
+  useCustomerCollectionSnapshot,
+  useCustomerCollectionSnapshots,
+  useCustomerLedgerStatement,
+  useCustomerOsBucket,
+  useCustomerPaymentSignal,
+} from '../../hooks/useCustomerReceivables';
+import { YourCustomerRailCard } from '../../components/sales/YourCustomerRailCard';
+import { useCopyToClipboard } from '../../hooks/useCopyToClipboard';
+import {
+  AGING_BUCKETS,
+  agingPresentationForDays,
+  agingPresentationForKey,
+  buildLedgerStatementMessage,
+  formatAgingSnapshotCaption,
+  whatsappUrlForCustomer,
+  type AgingBucketFilter,
+  type AgingTone,
+  type CollectionSnapshot,
+  type LedgerRow,
+  type LedgerStatement,
+  type OutstandingBill,
+  type OsBucketResult,
+  type PaymentSignal,
+} from '../../lib/receivables';
+import {
   searchItems,
   normalizeQuery,
   detectCodeLike,
@@ -49,7 +82,7 @@ import {
 import type { SearchResult, MatchedField } from '../../lib/search/itemSearch';
 import { buildNarrowIndex } from '../../lib/search/narrowSuggestions';
 import { buildSearchIndex } from '../../lib/search/searchIndex';
-import { formatCurrency, formatShortDate } from '../../utils/formatters';
+import { formatCurrency, formatCurrencyRaw, formatShortDate } from '../../utils/formatters';
 import { supabase } from '../../lib/supabase/client';
 import {
   buildCustomerDuplicateNameSet,
@@ -228,6 +261,7 @@ const EMPTY_TRENDING: TrendingRow[] = [];
 
 interface SmartLandingProps {
   items: Item[];
+  selectedCustomer: Customer | null;
   onCustomerSelect: (customer: Customer | null) => void;
   onQuickReorderApply: (customer: Customer | null, entries: { item: Item; qty: number }[]) => void;
   scrollToSearch: () => void;
@@ -301,11 +335,955 @@ const TrendingAddControl = memo(function TrendingAddControl({
   );
 });
 
-function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSearch }: SmartLandingProps) {
+type NewOrderLedgerPreset = 'fy' | '90d';
+
+const NEW_ORDER_LEDGER_LIMIT = 100;
+
+function isoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function getNewOrderLedgerRange(preset: NewOrderLedgerPreset) {
+  const today = new Date();
+  if (preset === '90d') return { fromDate: isoDate(addDays(today, -90)), toDate: isoDate(today) };
+
+  const year = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
+  return { fromDate: isoDate(new Date(year, 3, 1)), toDate: isoDate(today) };
+}
+
+function moneyRaw(amount: number | null | undefined): string {
+  return formatCurrencyRaw(Math.round(Number(amount ?? 0)));
+}
+
+function moneyCompact(amount: number | null | undefined): string {
+  const value = Math.round(Number(amount ?? 0));
+  const abs = Math.abs(value);
+  const sign = value < 0 ? '-' : '';
+  if (abs >= 10_000_000) return `${sign}₹${(abs / 10_000_000).toFixed(abs >= 100_000_000 ? 0 : 1)}Cr`;
+  if (abs >= 100_000) return `${sign}₹${(abs / 100_000).toFixed(abs >= 1_000_000 ? 0 : 1)}L`;
+  if (abs >= 1_000) return `${sign}₹${(abs / 1_000).toFixed(abs >= 10_000 ? 0 : 1)}K`;
+  return `${sign}₹${abs.toLocaleString('en-IN')}`;
+}
+
+function openWhatsAppDraft(url: string): boolean {
+  return Boolean(window.open(url, '_blank', 'noopener,noreferrer'));
+}
+
+function hasStaleBusyReport(reportDate: string | null): boolean {
+  if (!reportDate) return false;
+  const date = new Date(reportDate);
+  if (Number.isNaN(date.getTime())) return false;
+  return Date.now() - date.getTime() > 36 * 60 * 60 * 1000;
+}
+
+function toneTextClass(tone: AgingTone, active = true): string {
+  if (!active) return 'text-[var(--content-primary)]';
+  if (tone === 'critical') return 'text-[var(--content-negative)]';
+  if (tone === 'late') return 'text-[var(--content-warning-on-light)]';
+  if (tone === 'watch') return 'text-[var(--content-accent)]';
+  return 'text-[var(--content-primary)]';
+}
+
+function toneDotClass(tone: AgingTone): string {
+  if (tone === 'critical') return 'bg-[var(--bg-negative)]';
+  if (tone === 'late') return 'bg-[var(--bg-warning)]';
+  if (tone === 'watch') return 'bg-[var(--content-accent)]';
+  return 'bg-[var(--bg-positive)]';
+}
+
+function tonePillClass(tone: AgingTone): string {
+  if (tone === 'critical') {
+    return 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)] border border-[var(--border-negative)]';
+  }
+  if (tone === 'late') {
+    return 'bg-[var(--bg-warning-subtle)] text-[var(--content-warning-on-light)] border border-[var(--border-warning)]';
+  }
+  if (tone === 'watch') {
+    return 'bg-[var(--bg-accent-subtle)] text-[var(--content-accent)] border border-[var(--border-accent)]';
+  }
+  return 'bg-[var(--bg-positive-subtle)] text-[var(--content-positive)] border border-[var(--border-positive)]';
+}
+
+function accountIdentityMeta(parts: {
+  city: string | null | undefined;
+  creditDays: number | null | undefined;
+  outstanding: number;
+  oldestDays: number | null | undefined;
+}): string {
+  const bits: string[] = [];
+  if (parts.city) bits.push(parts.city);
+  if (parts.creditDays != null && parts.creditDays > 0) {
+    bits.push(`${parts.creditDays}-day terms`);
+  }
+  if (parts.outstanding <= 0) bits.push('Clear');
+  else if ((parts.oldestDays ?? 0) > 0) {
+    bits.push(agingPresentationForDays(parts.oldestDays ?? 0).meaning);
+  }
+  return bits.join(' · ');
+}
+
+function daysAgoLabel(dateValue: string | null | undefined): string | null {
+  if (!dateValue) return null;
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return null;
+  const days = Math.max(0, Math.floor((Date.now() - date.getTime()) / (24 * 60 * 60 * 1000)));
+  if (days === 0) return 'today';
+  return `${days}d ago`;
+}
+
+function bucketSheetTitle(bucket: AgingBucketFilter | null): string {
+  if (bucket == null) return 'Outstanding bills';
+  if (bucket === 'all') return 'All outstanding';
+  if (bucket === 'credits') return 'Credits';
+  if (bucket === 'over_terms') return 'Older bills';
+  return agingPresentationForKey(bucket).title;
+}
+
+function isPaymentLedgerRow(row: LedgerRow): boolean {
+  const type = (row.voucher_type ?? '').toLowerCase();
+  return /receipt|payment|recv|cr\.?\s*note|credit\s*note/.test(type) || (row.amount ?? 0) < 0;
+}
+
+function isBillLedgerRow(row: LedgerRow): boolean {
+  const type = (row.voucher_type ?? '').toLowerCase();
+  return /sale|invoice|bill|debit/.test(type) || ((row.amount ?? 0) > 0 && !isPaymentLedgerRow(row));
+}
+
+function matchesBillSearch(bill: OutstandingBill, query: string): boolean {
+  if (!query) return true;
+  const haystack = [
+    bill.bill_no,
+    bill.refcode,
+    bill.type,
+    formatShortDate(bill.bill_date),
+    formatShortDate(bill.due_date),
+    String(bill.pending_amount),
+    moneyRaw(bill.pending_amount),
+    moneyCompact(bill.pending_amount),
+    `${bill.days}`,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
+function matchesLedgerSearch(row: LedgerRow, query: string): boolean {
+  if (!query) return true;
+  const haystack = [
+    row.voucher_type,
+    row.doc_no,
+    row.account_name,
+    row.narration,
+    formatShortDate(row.date),
+    String(row.amount ?? ''),
+    moneyRaw(row.amount),
+    moneyCompact(row.amount),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
+function monthKeyFromDate(value: string | null | undefined): string {
+  if (!value) return 'Unknown';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+}
+
+function CustomerSnapshotEmptyState() {
+  return (
+    <section className="rounded-2xl border border-dashed border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-10 text-center">
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[var(--bg-tertiary)] text-[var(--content-tertiary)]">
+        <UsersThree size={24} weight="duotone" />
+      </div>
+      <p className="mt-4 text-base font-semibold text-[var(--content-primary)]">Select a customer to begin</p>
+      <p className="mt-1 text-sm text-[var(--content-tertiary)]">
+        Outstanding, bill age, and quick reorder appear here
+      </p>
+    </section>
+  );
+}
+
+function AccountSnapshotCard({
+  customer,
+  snapshot,
+  snapshotLoading,
+  onBucket,
+  onCollect,
+  onOpenLedger,
+  onExpand,
+  onClear,
+}: {
+  customer: Customer;
+  snapshot: CollectionSnapshot | undefined;
+  snapshotLoading: boolean;
+  onBucket: (bucket: AgingBucketFilter) => void;
+  onCollect: () => void;
+  onOpenLedger: () => void;
+  onExpand: () => void;
+  onClear: () => void;
+}) {
+  if (snapshotLoading) {
+    return (
+      <section className="space-y-3">
+        <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+          <Skeleton variant="text" lines={7} />
+        </div>
+      </section>
+    );
+  }
+
+  if (!snapshot) {
+    return (
+      <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+        <div className="flex items-start gap-3">
+          <WarningCircle size={20} className="mt-0.5 shrink-0 text-amber-500" />
+          <div>
+            <p className="text-sm font-semibold text-[var(--content-primary)]">Account snapshot unavailable</p>
+            <p className="mt-1 text-xs text-[var(--content-tertiary)]">Ordering stays available.</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const city = getCustomerCity(customer) ?? snapshot.customer.city;
+  const isStale = hasStaleBusyReport(snapshot.meta.busy_report_date);
+  const lastPayment = snapshot.last_payment;
+  const lastAgo = daysAgoLabel(lastPayment?.date ?? null);
+  const outstanding = snapshot.summary.total_pending;
+  const isClear = outstanding <= 0;
+  const agingCaption = formatAgingSnapshotCaption(snapshot.summary, snapshot.buckets);
+  const identityMeta = accountIdentityMeta({
+    city,
+    creditDays: snapshot.customer.credit_days ?? customer.creditsalesdays,
+    outstanding,
+    oldestDays: snapshot.summary.oldest_days,
+  });
+
+  return (
+    <section className="space-y-3">
+      <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="ds-type-title truncate">{customer.name}</p>
+            <p className="ds-type-meta mt-1 truncate">
+              {identityMeta}
+              {identityMeta ? ' · ' : ''}
+              {isStale
+                ? `Stale ${formatShortDate(snapshot.meta.busy_report_date)}`
+                : `Busy ${formatShortDate(snapshot.meta.busy_report_date)}`}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={onExpand}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)] text-[var(--content-secondary)] transition-transform duration-[160ms] ease-out active:scale-[0.97]"
+              aria-label="Open full customer account"
+            >
+              <ArrowsOut size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={onClear}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)] text-[var(--content-secondary)] transition-transform duration-[160ms] ease-out active:scale-[0.97]"
+              aria-label="Clear selected customer"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="ds-type-eyebrow">Outstanding</p>
+              <p className={`ds-type-display mt-1 ${isClear ? 'ds-type-display--clear' : ''}`}>
+                {isClear ? 'Clear' : moneyRaw(outstanding)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onCollect}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-[length:var(--ds-font-body)] font-semibold text-[var(--content-primary)] transition-transform duration-[160ms] ease-out active:scale-[0.97]"
+            >
+              <Wallet size={16} />
+              Collect
+            </button>
+          </div>
+
+          <div className="mt-3 flex items-start justify-between gap-3">
+            <p className="ds-type-caption min-w-0">{agingCaption}</p>
+            <p className="ds-type-caption shrink-0 text-right">
+              {lastPayment?.date
+                ? `Last: ${moneyCompact(lastPayment.amount)}${lastAgo ? ` · ${lastAgo}` : ''}`
+                : 'No recent payment'}
+            </p>
+          </div>
+
+          <div className="mt-4 border-t border-[var(--border-subtle)] pt-3">
+            <div className="grid grid-cols-4 gap-0">
+              {AGING_BUCKETS.map((bucket, index) => {
+                const summary = snapshot.buckets[bucket.key];
+                const presentation = agingPresentationForKey(bucket.key);
+                const hasAmount = summary.amount > 0;
+                const emphasize = hasAmount && presentation.tone !== 'ok';
+                return (
+                  <button
+                    key={bucket.key}
+                    type="button"
+                    onClick={() => onBucket(bucket.key)}
+                    aria-label={`${presentation.title}: ${moneyCompact(summary.amount)}, ${summary.count} bills`}
+                    className={`min-w-0 px-1.5 text-left transition-opacity active:opacity-70 ${
+                      index > 0 ? 'border-l border-[var(--border-subtle)]' : ''
+                    }`}
+                  >
+                    <span className="ds-type-bucket-label flex items-center gap-1">
+                      {emphasize ? <span className={`h-1.5 w-1.5 rounded-full ${toneDotClass(presentation.tone)}`} /> : null}
+                      {presentation.rangeLabel}d
+                    </span>
+                    <span className={`ds-type-bucket-amount mt-1 block truncate ${toneTextClass(presentation.tone, hasAmount)}`}>
+                      {moneyCompact(summary.amount)}
+                    </span>
+                    <span className="ds-type-bucket-meta mt-0.5 block truncate">
+                      {hasAmount ? `${summary.count} bills` : presentation.meaning}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={onOpenLedger}
+            className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-[length:var(--ds-font-body)] font-semibold text-[var(--content-primary)] transition-transform duration-[160ms] ease-out active:scale-[0.98]"
+          >
+            <FileText size={17} />
+            Ledger
+          </button>
+          <button
+            type="button"
+            onClick={() => onBucket('all')}
+            className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-[length:var(--ds-font-body)] font-semibold text-[var(--content-primary)] transition-transform duration-[160ms] ease-out active:scale-[0.98]"
+          >
+            <Receipt size={17} />
+            All bills
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AccountBillsSheet({
+  bucket,
+  result,
+  isLoading,
+  isError,
+  onClose,
+  onOpenLedger,
+}: {
+  bucket: AgingBucketFilter | null;
+  result: OsBucketResult | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  onClose: () => void;
+  onOpenLedger: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [sortNewest, setSortNewest] = useState(true);
+  const deferredSearch = useDeferredValue(search.trim().toLowerCase());
+
+  useEffect(() => {
+    if (bucket == null) {
+      setSearch('');
+      setSortNewest(true);
+    }
+  }, [bucket]);
+
+  const filteredRows = useMemo(() => {
+    const rows = (result?.rows ?? []).filter((bill) => matchesBillSearch(bill, deferredSearch));
+    rows.sort((a, b) => {
+      const aTime = a.bill_date ? new Date(a.bill_date).getTime() : 0;
+      const bTime = b.bill_date ? new Date(b.bill_date).getTime() : 0;
+      return sortNewest ? bTime - aTime : aTime - bTime;
+    });
+    return rows;
+  }, [deferredSearch, result?.rows, sortNewest]);
+
+  const groupedRows = useMemo(() => {
+    const groups = new Map<string, OutstandingBill[]>();
+    for (const bill of filteredRows) {
+      const key = monthKeyFromDate(bill.bill_date);
+      const list = groups.get(key) ?? [];
+      list.push(bill);
+      groups.set(key, list);
+    }
+    return Array.from(groups.entries());
+  }, [filteredRows]);
+
+  return (
+    <BottomSheet isOpen={bucket != null} onClose={onClose} title={bucketSheetTitle(bucket)}>
+      <div className="space-y-4">
+        <div className="relative">
+          <MagnifyingGlass
+            size={18}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--content-tertiary)]"
+          />
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Bill no., date, amount…"
+            className="w-full min-h-12 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] pl-10 pr-4 text-sm text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+          />
+        </div>
+
+        {isLoading && <Skeleton variant="text" lines={8} />}
+        {isError && (
+          <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-700">
+            Could not load bills.
+          </p>
+        )}
+        {!isLoading && !isError && result && (
+          <>
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <p className="ds-type-stat">{moneyRaw(result.total_amount)}</p>
+                <p className="ds-type-caption mt-1">
+                  {result.count} bills{result.is_truncated ? ' · showing first 250' : ''}
+                  {deferredSearch ? ` · ${filteredRows.length} match` : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSortNewest((prev) => !prev)}
+                className="rounded-full border border-[var(--border-subtle)] px-3 py-1.5 text-[length:var(--ds-font-caption)] font-semibold text-[var(--content-secondary)]"
+              >
+                {sortNewest ? 'Newest first' : 'Oldest first'}
+              </button>
+            </div>
+
+            {filteredRows.length === 0 ? (
+              <p className="rounded-xl bg-[var(--bg-tertiary)] px-3 py-3 text-[length:var(--ds-font-body)] text-[var(--content-secondary)]">
+                {deferredSearch ? 'No bills match that search.' : 'No bills in this view.'}
+              </p>
+            ) : (
+              <div className="space-y-4">
+                <p className="ds-type-eyebrow">
+                  Ledger · {filteredRows.length} entries
+                </p>
+                {groupedRows.map(([month, bills]) => (
+                  <div key={month} className="space-y-0">
+                    <p className="ds-type-month mb-2">{month}</p>
+                    {bills.map((bill) => {
+                      const presentation = agingPresentationForDays(bill.days);
+                      return (
+                        <div
+                          key={`${bill.refcode ?? bill.bill_no}-${bill.days}-${bill.pending_amount}`}
+                          className="border-b border-[var(--border-subtle)] py-3 last:border-b-0"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="ds-type-row-title truncate">
+                                {bill.type ? `${bill.type} ` : 'Sale '}
+                                #{bill.bill_no || bill.refcode || '—'}
+                              </p>
+                              <p className="ds-type-caption mt-1">
+                                {formatShortDate(bill.bill_date)}
+                                {bill.due_date ? ` · due ${formatShortDate(bill.due_date)}` : ''}
+                              </p>
+                            </div>
+                            <p className={`ds-type-row-amount shrink-0 ${toneTextClass(presentation.tone)}`}>
+                              {moneyRaw(bill.pending_amount)}
+                            </p>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            <span className={`rounded-full px-2 py-0.5 text-[length:var(--ds-font-label)] font-semibold ${tonePillClass(presentation.tone)}`}>
+                              {presentation.meaning}
+                            </span>
+                            <span className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-2 py-0.5 text-[length:var(--ds-font-label)] font-semibold text-[var(--content-secondary)]">
+                              {bill.days}d old
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={onOpenLedger}
+              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[var(--border-subtle)] px-3 text-sm font-semibold text-[var(--content-primary)]"
+            >
+              <FileText size={17} />
+              Open full ledger
+            </button>
+          </>
+        )}
+      </div>
+    </BottomSheet>
+  );
+}
+
+function PaymentHistorySheet({
+  isOpen,
+  signal,
+  isLoading,
+  isError,
+  onClose,
+  onShareLedger,
+  onOpenFullLedger,
+}: {
+  isOpen: boolean;
+  signal: PaymentSignal | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  onClose: () => void;
+  onShareLedger: () => void;
+  onOpenFullLedger: () => void;
+}) {
+  return (
+    <BottomSheet isOpen={isOpen} onClose={onClose} title="Payment history">
+      <div className="space-y-4">
+        {isLoading && <Skeleton variant="text" lines={8} />}
+        {isError && (
+          <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-700">
+            Payment history unavailable. Ordering stays available.
+          </p>
+        )}
+        {!isLoading && !isError && signal && (
+          <>
+            <div className="grid grid-cols-3 gap-2 rounded-xl border border-[var(--border-subtle)] px-3 py-3 text-center">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.08em] text-[var(--content-tertiary)]">Received</p>
+                <p className="mt-1 text-sm font-semibold text-emerald-600">{moneyCompact(signal.total_received)}</p>
+              </div>
+              <div className="border-x border-[var(--border-subtle)]">
+                <p className="text-[11px] uppercase tracking-[0.08em] text-[var(--content-tertiary)]">Receipts</p>
+                <p className="mt-1 text-sm font-semibold text-[var(--content-primary)]">{signal.receipt_count}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.08em] text-[var(--content-tertiary)]">Avg gap</p>
+                <p className="mt-1 text-sm font-semibold text-[var(--content-primary)]">
+                  {signal.average_receipt_gap_days == null ? '—' : `${Math.round(signal.average_receipt_gap_days)}d`}
+                </p>
+              </div>
+            </div>
+
+            {signal.rows.length === 0 ? (
+              <p className="rounded-xl bg-[var(--bg-tertiary)] px-3 py-3 text-sm text-[var(--content-secondary)]">
+                No receipts found in the last {signal.window_days} days.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {signal.rows.map((row) => (
+                  <div key={`${row.id}-${row.date}-${row.doc_no}`} className="flex items-start justify-between gap-3 rounded-xl border border-[var(--border-subtle)] px-3 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[var(--content-primary)]">
+                        {row.doc_no || 'Receipt'} · {moneyRaw(row.amount)}
+                      </p>
+                      <p className="mt-1 text-xs text-[var(--content-tertiary)]">
+                        {formatShortDate(row.date)}{row.account_name ? ` · ${row.account_name}` : ''}
+                      </p>
+                    </div>
+                    <p className="shrink-0 text-sm font-semibold text-emerald-600">{moneyCompact(row.amount)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={onShareLedger}
+                className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[var(--border-subtle)] px-3 text-sm font-semibold text-[var(--content-primary)]"
+              >
+                <ShareNetwork size={17} />
+                Share ledger
+              </button>
+              <button
+                type="button"
+                onClick={onOpenFullLedger}
+                className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[var(--bg-accent)] px-3 text-sm font-semibold text-[var(--content-on-color)]"
+              >
+                <FileText size={17} />
+                Full ledger
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </BottomSheet>
+  );
+}
+
+function LedgerShareSheet({
+  isOpen,
+  range,
+  statement,
+  snapshot,
+  customer,
+  isLoading,
+  isError,
+  onPreset,
+  onClose,
+  onShare,
+}: {
+  isOpen: boolean;
+  range: { fromDate: string; toDate: string };
+  statement: LedgerStatement | undefined;
+  snapshot: CollectionSnapshot | undefined;
+  customer: Customer | null;
+  isLoading: boolean;
+  isError: boolean;
+  onPreset: (preset: NewOrderLedgerPreset) => void;
+  onClose: () => void;
+  onShare: (statement: LedgerStatement) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [tab, setTab] = useState<'all' | 'bills' | 'payments'>('all');
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [sortNewest, setSortNewest] = useState(true);
+  const deferredSearch = useDeferredValue(search.trim().toLowerCase());
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSearch('');
+      setTab('all');
+      setFilterOpen(false);
+      setSortNewest(true);
+    }
+  }, [isOpen]);
+
+  const filteredRows = useMemo(() => {
+    const rows = (statement?.rows ?? []).filter((row) => {
+      if (tab === 'bills' && !isBillLedgerRow(row)) return false;
+      if (tab === 'payments' && !isPaymentLedgerRow(row)) return false;
+      return matchesLedgerSearch(row, deferredSearch);
+    });
+    rows.sort((a, b) => {
+      const aTime = a.date ? new Date(a.date).getTime() : 0;
+      const bTime = b.date ? new Date(b.date).getTime() : 0;
+      return sortNewest ? bTime - aTime : aTime - bTime;
+    });
+    return rows;
+  }, [deferredSearch, sortNewest, statement?.rows, tab]);
+
+  const groupedRows = useMemo(() => {
+    const groups = new Map<string, LedgerRow[]>();
+    for (const row of filteredRows) {
+      const key = monthKeyFromDate(row.date);
+      const list = groups.get(key) ?? [];
+      list.push(row);
+      groups.set(key, list);
+    }
+    return Array.from(groups.entries());
+  }, [filteredRows]);
+
+  const billCount = useMemo(
+    () => (statement?.rows ?? []).filter((row) => isBillLedgerRow(row)).length,
+    [statement?.rows],
+  );
+  const paymentCount = useMemo(
+    () => (statement?.rows ?? []).filter((row) => isPaymentLedgerRow(row)).length,
+    [statement?.rows],
+  );
+
+  return (
+    <>
+      <BottomSheet isOpen={isOpen} onClose={onClose} title={customer?.name ?? 'Ledger'}>
+        <div className="space-y-4">
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
+            {(
+              [
+                ['all', `All`],
+                ['bills', `Bills${billCount ? ` · ${billCount}` : ''}`],
+                ['payments', `Payments${paymentCount ? ` · ${paymentCount}` : ''}`],
+              ] as Array<['all' | 'bills' | 'payments', string]>
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setTab(id)}
+                className={`shrink-0 rounded-full px-3.5 py-2 text-sm font-semibold transition-colors ${
+                  tab === id
+                    ? 'bg-[var(--bg-accent)] text-[var(--content-on-color)]'
+                    : 'border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-secondary)]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <MagnifyingGlass
+                size={18}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--content-tertiary)]"
+              />
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Bill no., date, amount…"
+                className="w-full min-h-12 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] pl-10 pr-4 text-sm text-[var(--content-primary)] placeholder:text-[var(--content-quaternary)] outline-none focus:ring-1 focus:ring-[var(--border-opaque)]"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setFilterOpen(true)}
+              className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-primary)]"
+              aria-label="Filter ledger entries"
+            >
+              <FunnelSimple size={18} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => onPreset('90d')}
+              className={`min-h-10 rounded-xl border px-3 text-sm font-semibold ${
+                range.fromDate === getNewOrderLedgerRange('90d').fromDate
+                  ? 'border-[var(--role-primary)] bg-[var(--role-primary-subtle)] text-[var(--content-primary)]'
+                  : 'border-[var(--border-subtle)] text-[var(--content-primary)]'
+              }`}
+            >
+              Last 90 days
+            </button>
+            <button
+              type="button"
+              onClick={() => onPreset('fy')}
+              className={`min-h-10 rounded-xl border px-3 text-sm font-semibold ${
+                range.fromDate === getNewOrderLedgerRange('fy').fromDate
+                  ? 'border-[var(--role-primary)] bg-[var(--role-primary-subtle)] text-[var(--content-primary)]'
+                  : 'border-[var(--border-subtle)] text-[var(--content-primary)]'
+              }`}
+            >
+              This FY
+            </button>
+          </div>
+
+          {isLoading && <Skeleton variant="text" lines={8} />}
+          {isError && (
+            <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-sm text-amber-700">
+              Could not load ledger.
+            </p>
+          )}
+          {!isLoading && !isError && statement && (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <p className="ds-type-eyebrow">
+                  Ledger · {filteredRows.length} entries
+                </p>
+                <p className="ds-type-caption font-semibold">
+                  {sortNewest ? 'Newest first' : 'Oldest first'}
+                </p>
+              </div>
+
+              {filteredRows.length === 0 ? (
+                <p className="rounded-xl bg-[var(--bg-tertiary)] px-3 py-3 text-[length:var(--ds-font-body)] text-[var(--content-secondary)]">
+                  {deferredSearch || tab !== 'all'
+                    ? 'No entries match these filters.'
+                    : 'No ledger entries in this range.'}
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {groupedRows.map(([month, rows]) => (
+                    <div key={month} className="space-y-0">
+                      <p className="ds-type-month mb-2">{month}</p>
+                      {rows.map((row) => {
+                        const payment = isPaymentLedgerRow(row);
+                        return (
+                          <div
+                            key={`${row.id}-${row.date}-${row.doc_no}`}
+                            className="border-b border-[var(--border-subtle)] py-3 last:border-b-0"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="ds-type-row-title truncate">
+                                  {row.voucher_type || 'Ledger'}
+                                  {row.doc_no ? ` #${row.doc_no}` : ''}
+                                </p>
+                                <p className="ds-type-caption mt-1">
+                                  {formatShortDate(row.date)}
+                                  {row.is_future_dated ? ' · future dated' : ''}
+                                </p>
+                              </div>
+                              <p
+                                className={`ds-type-row-amount shrink-0 ${
+                                  payment ? 'ds-type-row-amount--credit' : ''
+                                }`}
+                              >
+                                {payment && (row.amount ?? 0) > 0 ? '+' : ''}
+                                {moneyRaw(row.amount)}
+                              </p>
+                            </div>
+                            {row.narration && (
+                              <p className="ds-type-caption mt-1.5 line-clamp-2 text-[var(--content-secondary)]">
+                                {row.narration}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                type="button"
+                disabled={!snapshot || statement.rows.length === 0}
+                onClick={() => onShare(statement)}
+                className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--bg-accent)] px-4 text-sm font-semibold text-[var(--content-on-color)] disabled:opacity-50"
+              >
+                <ShareNetwork size={18} />
+                Share WhatsApp draft
+              </button>
+            </>
+          )}
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
+        isOpen={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        title="Filter entries"
+        rootClassName="z-[70]"
+      >
+        <div className="space-y-5">
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+              Sort by
+            </p>
+            {(
+              [
+                [true, 'Newest first', 'Most recent entries at top'],
+                [false, 'Oldest first', 'Oldest entries appear first'],
+              ] as Array<[boolean, string, string]>
+            ).map(([value, label, hint]) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setSortNewest(value)}
+                className={`flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left ${
+                  sortNewest === value
+                    ? 'border-[var(--role-primary)] bg-[var(--role-primary-subtle)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)]'
+                }`}
+              >
+                <span>
+                  <span className="block text-sm font-semibold text-[var(--content-primary)]">{label}</span>
+                  <span className="mt-0.5 block text-xs text-[var(--content-tertiary)]">{hint}</span>
+                </span>
+                {sortNewest === value ? <Check size={18} className="text-[var(--role-primary)]" weight="bold" /> : null}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+              Status
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  ['all', 'All entries'],
+                  ['bills', 'Bills only'],
+                  ['payments', 'Payments only'],
+                ] as Array<['all' | 'bills' | 'payments', string]>
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setTab(id)}
+                  className={`rounded-full px-3.5 py-2 text-sm font-semibold ${
+                    tab === id
+                      ? 'bg-[var(--bg-accent)] text-[var(--content-on-color)]'
+                      : 'border border-[var(--border-subtle)] text-[var(--content-secondary)]'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--content-tertiary)]">
+              Period
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onPreset('90d')}
+                className={`rounded-full px-3.5 py-2 text-sm font-semibold ${
+                  range.fromDate === getNewOrderLedgerRange('90d').fromDate
+                    ? 'bg-[var(--bg-accent)] text-[var(--content-on-color)]'
+                    : 'border border-[var(--border-subtle)] text-[var(--content-secondary)]'
+                }`}
+              >
+                Last 90 days
+              </button>
+              <button
+                type="button"
+                onClick={() => onPreset('fy')}
+                className={`rounded-full px-3.5 py-2 text-sm font-semibold ${
+                  range.fromDate === getNewOrderLedgerRange('fy').fromDate
+                    ? 'bg-[var(--bg-accent)] text-[var(--content-on-color)]'
+                    : 'border border-[var(--border-subtle)] text-[var(--content-secondary)]'
+                }`}
+              >
+                This FY
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setFilterOpen(false)}
+            className="flex min-h-12 w-full items-center justify-center rounded-xl bg-[var(--bg-accent)] px-4 text-sm font-semibold text-[var(--content-on-color)]"
+          >
+            Apply filters
+          </button>
+        </div>
+      </BottomSheet>
+    </>
+  );
+}
+
+function SmartLanding({
+  items,
+  selectedCustomer,
+  onCustomerSelect,
+  onQuickReorderApply,
+  scrollToSearch,
+}: SmartLandingProps) {
   const { userName } = useOrderAuthor();
   const { data: customers = [] } = useCustomers();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const { copy } = useCopyToClipboard();
   const [customerSheetOpen, setCustomerSheetOpen] = useState(false);
   const [customerSheetMode, setCustomerSheetMode] = useState<CustomerSheetMode>('search');
   const [customerQuery, setCustomerQuery] = useState('');
@@ -314,6 +1292,10 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
   const [draftMobile, setDraftMobile] = useState('');
   const [draftGstin, setDraftGstin] = useState('');
   const [draftAddress, setDraftAddress] = useState('');
+  const [selectedReceivablesBucket, setSelectedReceivablesBucket] = useState<AgingBucketFilter | null>(null);
+  const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
+  const [ledgerShareOpen, setLedgerShareOpen] = useState(false);
+  const [ledgerRange, setLedgerRange] = useState(() => getNewOrderLedgerRange('90d'));
 
   const { data: topCustomers = EMPTY_TOP_CUSTOMERS, isLoading: topCustomersLoading } = useQuery<TopCustomer[]>({
     queryKey: ['salesperson_top_customers', userName],
@@ -340,7 +1322,6 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
     },
   });
 
-  const [activeCustomerId, setActiveCustomerId] = useState<number | null>(null);
   const [quickReorderItems, setQuickReorderItems] = useState<
     { item: Item; suggestedQty: number; checked: boolean; orderCount: number; mostCommonQty: number | null }[]
   >([]);
@@ -354,10 +1335,32 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
     return map;
   }, [items]);
 
-  const activeCustomer = activeCustomerId != null
-    ? customers.find((customer) => customer.id === activeCustomerId) ?? null
+  const activeCustomer = selectedCustomer?.id != null
+    ? customers.find((customer) => customer.id === selectedCustomer.id) ?? selectedCustomer
     : null;
+  const activeCustomerId = activeCustomer?.id ?? null;
   const activeCustomerName = activeCustomer?.name ?? null;
+  const activeCustomerReceivablesId = activeCustomer?.id ?? 0;
+
+  const snapshotQuery = useCustomerCollectionSnapshot(activeCustomerReceivablesId);
+  const paymentSignalQuery = useCustomerPaymentSignal({
+    customerId: activeCustomerReceivablesId,
+    enabled: Boolean(activeCustomer?.id && paymentSheetOpen),
+    windowDays: 180,
+    limit: 5,
+  });
+  const bucketQuery = useCustomerOsBucket(
+    activeCustomerReceivablesId,
+    selectedReceivablesBucket ?? 'all',
+    Boolean(activeCustomer?.id && selectedReceivablesBucket),
+  );
+  const ledgerStatementQuery = useCustomerLedgerStatement({
+    customerId: activeCustomerReceivablesId,
+    fromDate: ledgerRange.fromDate,
+    toDate: ledgerRange.toDate,
+    enabled: Boolean(activeCustomer?.id && ledgerShareOpen),
+    limit: NEW_ORDER_LEDGER_LIMIT,
+  });
 
   const {
     data: quickReorderStats = EMPTY_CUSTOMER_QUICK_REORDER,
@@ -436,6 +1439,30 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
       ...topCustomers,
     ];
   }, [activeCustomerName, topCustomers]);
+
+  const customerRailResolved = useMemo(() => {
+    return customerRail.map((row) => {
+      const matchingCustomers = customers.filter((customer) => customer.name === row.customer_name);
+      return {
+        row,
+        matchingCustomers,
+        customer: matchingCustomers.length === 1 ? matchingCustomers[0] : null,
+        hasDuplicateName: matchingCustomers.length > 1,
+        isActive: matchingCustomers.some((customer) => customer.id === activeCustomerId),
+      };
+    });
+  }, [activeCustomerId, customerRail, customers]);
+
+  const railCustomerIds = useMemo(
+    () =>
+      customerRailResolved
+        .map((entry) => entry.customer?.id)
+        .filter((id): id is number => typeof id === 'number' && id > 0),
+    [customerRailResolved],
+  );
+
+  const { byId: railSnapshotsById, loadingIds: railSnapshotLoadingIds } =
+    useCustomerCollectionSnapshots(railCustomerIds);
 
   const { data: pendingItemsForCustomer = [] } = usePendingItems({
     status: 'pending',
@@ -519,9 +1546,37 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
   }, [customerQuery, customers]);
 
   const selectCustomer = useCallback((customer: Customer | null) => {
-    setActiveCustomerId(customer?.id ?? null);
     onCustomerSelect(customer);
   }, [onCustomerSelect]);
+
+  const openFullLedger = useCallback(() => {
+    if (!activeCustomer) return;
+    navigate(`/sales/customer/${activeCustomer.id}`, {
+      state: { openLedger: true },
+    });
+  }, [activeCustomer, navigate]);
+
+  const shareLedgerStatement = useCallback((statement: LedgerStatement) => {
+    const snapshot = snapshotQuery.data;
+    if (!snapshot || !activeCustomer) {
+      toast.info('Ledger is still loading');
+      return;
+    }
+
+    const message = buildLedgerStatementMessage(snapshot, statement);
+    const url = whatsappUrlForCustomer(activeCustomer.mobile ?? snapshot.customer.mobile, message);
+    const opened = openWhatsAppDraft(url);
+
+    if (opened) {
+      toast.success('WhatsApp draft opened');
+      return;
+    }
+
+    void copy(message, 'new-order-ledger-share').then((ok) => {
+      if (ok) toast.success('Ledger message copied');
+      else toast.error('Could not open WhatsApp');
+    });
+  }, [activeCustomer, copy, snapshotQuery.data, toast]);
 
   const createCustomerMutation = useMutation({
     mutationFn: async () => {
@@ -618,69 +1673,82 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
           <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--content-tertiary)]">
             Your Customers
           </h3>
+          <Link
+            to="/sales/beat"
+            className="text-[var(--ds-font-caption)] font-semibold text-[var(--content-accent)] transition-opacity active:opacity-70"
+          >
+            See all
+          </Link>
         </div>
         <div className="flex gap-3 overflow-x-auto pb-1 pt-1 scrollbar-none">
           <button
             type="button"
             onClick={() => openCustomerSheet('search')}
-            className="min-w-44 max-w-56 px-3 py-3 rounded-lg text-left flex flex-col justify-between bg-[var(--bg-secondary)] border border-[var(--border-subtle)]"
+            className="flex min-w-44 max-w-56 shrink-0 flex-col justify-between rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-3 text-left transition-transform duration-[160ms] ease-out active:scale-[0.98]"
           >
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--bg-tertiary)] text-[var(--content-accent)]">
               <Plus size={16} weight="bold" />
             </div>
             <div className="pt-6">
-              <p className="font-semibold text-[var(--content-accent)] line-clamp-2 leading-snug">
+              <p className="line-clamp-2 font-semibold leading-snug text-[var(--content-accent)]">
                 Select customer
               </p>
               <div className="mt-2 flex items-center justify-between gap-2 text-xs text-[var(--content-tertiary)]">
-                <span>Recent + new</span>
+                <span>Search or add</span>
                 <CaretRight size={16} className="shrink-0 text-[var(--content-quaternary)]" />
               </div>
             </div>
           </button>
-          {customerRail.map((c) => {
-            const matchingCustomers = customers.filter((customer) => customer.name === c.customer_name);
-            const hasDuplicateName = matchingCustomers.length > 1;
-            const isActive = matchingCustomers.some((customer) => customer.id === activeCustomerId);
+          {customerRailResolved.map(({ row, matchingCustomers, customer, hasDuplicateName, isActive }) => {
+            const customerId = customer?.id;
+            const snapshot = customerId != null ? railSnapshotsById.get(customerId) : undefined;
+            const snapshotLoading =
+              customerId != null && !snapshot && railSnapshotLoadingIds.has(customerId);
+
             return (
-              <button
-                key={`${c.customer_name}-${c.last_order_date ?? 'none'}`}
-                type="button"
+              <YourCustomerRailCard
+                key={`${row.customer_name}-${row.last_order_date ?? 'none'}-${customerId ?? 'dup'}`}
+                name={row.customer_name}
+                customer={customer}
+                snapshot={snapshot}
+                snapshotLoading={snapshotLoading}
+                orderCount={row.order_count}
+                isActive={isActive}
+                hasDuplicateName={hasDuplicateName}
                 onClick={() => {
                   if (matchingCustomers.length === 1) {
                     selectCustomer(matchingCustomers[0]);
                     return;
                   }
-                  setCustomerQuery(c.customer_name);
+                  setCustomerQuery(row.customer_name);
                   setCustomerSheetOpen(true);
                   setCustomerSheetMode('search');
                 }}
-                className={`min-w-44 max-w-56 px-3 py-3 rounded-lg text-left flex flex-col justify-between gap-1.5 ${
-                  isActive
-                    ? 'bg-[var(--role-primary-subtle)] border border-[var(--role-primary)] shadow-sm'
-                    : 'bg-[var(--bg-secondary)] border border-[var(--border-subtle)]'
-                }`}
-              >
-                <p className="font-semibold text-[var(--content-primary)] line-clamp-2 leading-snug">
-                  {c.customer_name}
-                </p>
-                <p className="text-xs text-[var(--content-secondary)]">
-                  {c.order_count > 0
-                    ? `${c.order_count} order${c.order_count === 1 ? '' : 's'}`
-                    : hasDuplicateName
-                      ? 'Choose branch'
-                    : isActive
-                      ? 'Selected customer'
-                      : 'Customer'}
-                </p>
-                <p className="text-xs text-[var(--content-tertiary)] mt-1">
-                  {c.last_order_date ? `Last order ${formatShortDate(c.last_order_date)}` : isActive ? 'Ready for reorder' : 'No recent orders'}
-                </p>
-              </button>
+              />
             );
           })}
         </div>
       </section>
+
+      {activeCustomer ? (
+        <AccountSnapshotCard
+          customer={activeCustomer}
+          snapshot={snapshotQuery.data}
+          snapshotLoading={snapshotQuery.isLoading}
+          onBucket={setSelectedReceivablesBucket}
+          onCollect={() => setPaymentSheetOpen(true)}
+          onOpenLedger={() => {
+            setLedgerRange(getNewOrderLedgerRange('90d'));
+            setLedgerShareOpen(true);
+          }}
+          onExpand={() => {
+            navigate(`/sales/customer/${activeCustomer.id}`);
+          }}
+          onClear={() => selectCustomer(null)}
+        />
+      ) : (
+        <CustomerSnapshotEmptyState />
+      )}
 
       <BottomSheet
         isOpen={customerSheetOpen}
@@ -888,6 +1956,45 @@ function SmartLanding({ items, onCustomerSelect, onQuickReorderApply, scrollToSe
           </form>
         )}
       </BottomSheet>
+
+      <AccountBillsSheet
+        bucket={selectedReceivablesBucket}
+        result={bucketQuery.data}
+        isLoading={bucketQuery.isLoading}
+        isError={bucketQuery.isError}
+        onClose={() => setSelectedReceivablesBucket(null)}
+        onOpenLedger={() => {
+          setSelectedReceivablesBucket(null);
+          setLedgerRange(getNewOrderLedgerRange('90d'));
+          setLedgerShareOpen(true);
+        }}
+      />
+
+      <PaymentHistorySheet
+        isOpen={paymentSheetOpen}
+        signal={paymentSignalQuery.data}
+        isLoading={paymentSignalQuery.isLoading}
+        isError={paymentSignalQuery.isError}
+        onClose={() => setPaymentSheetOpen(false)}
+        onShareLedger={() => {
+          setLedgerRange(getNewOrderLedgerRange('90d'));
+          setLedgerShareOpen(true);
+        }}
+        onOpenFullLedger={openFullLedger}
+      />
+
+      <LedgerShareSheet
+        isOpen={ledgerShareOpen}
+        range={ledgerRange}
+        statement={ledgerStatementQuery.data}
+        snapshot={snapshotQuery.data}
+        customer={activeCustomer}
+        isLoading={ledgerStatementQuery.isLoading}
+        isError={ledgerStatementQuery.isError}
+        onPreset={(preset) => setLedgerRange(getNewOrderLedgerRange(preset))}
+        onClose={() => setLedgerShareOpen(false)}
+        onShare={shareLedgerStatement}
+      />
 
       {/* Section 2 — Pending from last orders */}
       {activeCustomer && pendingSuggestions.length > 0 && (
@@ -2199,6 +3306,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
     removeItem,
     totalCount,
     totalValue,
+    selectedCustomer,
     setSelectedCustomer,
   } = useCart();
 
@@ -2686,6 +3794,7 @@ export default function NewOrderPage(): React.JSX.Element | null {
           ) : !effectiveQuery && !selectedBrand ? (
             <SmartLanding
               items={items}
+              selectedCustomer={selectedCustomer}
               onCustomerSelect={customer => {
                 setSelectedCustomer(customer);
               }}

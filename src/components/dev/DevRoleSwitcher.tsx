@@ -28,6 +28,7 @@ export function DevRoleSwitcher(): React.JSX.Element | null {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const { data: pickingUsers } = useTeamUsers('picking');
+  const { data: salesUsers } = useTeamUsers('sales');
 
   const isDev = !import.meta.env.PROD;
 
@@ -41,12 +42,31 @@ export function DevRoleSwitcher(): React.JSX.Element | null {
     );
   }, [pickingUsers]);
 
+  const devSalesTarget = useMemo(() => {
+    const users = salesUsers ?? [];
+    return (
+      users.find((user) => user.full_name === 'Satish') ??
+      users.find((user) => user.full_name === 'Demo Sales') ??
+      users[0] ??
+      null
+    );
+  }, [salesUsers]);
+
   if (!isAuthenticated) return null;
   if (!isDev && !canSwitchRoles) return null;
 
   const handleSwitch = (target: RoleKey) => {
     if (target === 'sales') {
-      selectRole('sales', 'Demo Sales');
+      if (actualRole === 'admin' && adminUnlocked && devSalesTarget) {
+        startImpersonation({
+          userId: devSalesTarget.id,
+          userName: devSalesTarget.full_name,
+          role: 'sales',
+          branch: devSalesTarget.stock_location_code ?? null,
+        });
+      } else {
+        selectRole('sales', devSalesTarget?.full_name ?? 'Demo Sales');
+      }
     } else if (target === 'picking') {
       if (actualRole === 'admin' && adminUnlocked && devPickerTarget) {
         startImpersonation({

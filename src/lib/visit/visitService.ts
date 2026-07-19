@@ -2,11 +2,7 @@ import { supabase } from '../supabase/client';
 import type {
   ActiveVisit,
   FieldActivityDashboard,
-  GeofenceEvaluation,
-  NearbyGeofencedCustomer,
   VisitOutcome,
-  VisitOverrideReason,
-  VisitRoutePoint,
   WorkdayState,
 } from '../../types/visit';
 
@@ -22,12 +18,8 @@ export async function fetchTodayWorkday(userId: number | null): Promise<WorkdayS
 
 export async function startWorkday(
   userId: number | null,
-  lat?: number | null,
-  lng?: number | null,
 ): Promise<WorkdayState> {
   const { data, error } = await supabase.rpc('start_workday', {
-    p_lat: lat ?? null,
-    p_lng: lng ?? null,
     ...actorParam(userId),
   });
   if (error) throw error;
@@ -53,30 +45,9 @@ export async function fetchActiveVisit(
   return payload?.active && payload.visit ? payload.visit : null;
 }
 
-export async function evaluateVisitGeofence(
-  customerId: number,
-  lat: number,
-  lng: number,
-  accuracyM: number | null,
-): Promise<GeofenceEvaluation> {
-  const { data, error } = await supabase.rpc('evaluate_visit_geofence', {
-    p_customer_id: customerId,
-    p_lat: lat,
-    p_lng: lng,
-    p_accuracy_m: accuracyM,
-  });
-  if (error) throw error;
-  return data as GeofenceEvaluation;
-}
-
 export interface StartVisitParams {
   userId: number | null;
   customerId: number;
-  lat?: number | null;
-  lng?: number | null;
-  accuracyM?: number | null;
-  acknowledgeWarn?: boolean;
-  overrideReason?: VisitOverrideReason;
   interactionType?: 'field' | 'phone' | 'walkin';
 }
 
@@ -84,17 +55,11 @@ export interface StartVisitResult {
   success: boolean;
   visitId?: string;
   error?: string;
-  evaluation?: GeofenceEvaluation;
 }
 
 export async function startCustomerVisit(params: StartVisitParams): Promise<StartVisitResult> {
   const { data, error } = await supabase.rpc('start_customer_visit', {
     p_customer_id: params.customerId,
-    p_lat: params.lat ?? null,
-    p_lng: params.lng ?? null,
-    p_accuracy_m: params.accuracyM ?? null,
-    p_acknowledge_warn: params.acknowledgeWarn ?? false,
-    p_override_reason: params.overrideReason ?? null,
     p_interaction_type: params.interactionType ?? 'field',
     ...actorParam(params.userId),
   });
@@ -104,18 +69,16 @@ export async function startCustomerVisit(params: StartVisitParams): Promise<Star
     success?: boolean;
     visit_id?: string;
     error?: string;
-    evaluation?: GeofenceEvaluation;
   };
 
   if (!payload.success) {
     return {
       success: false,
       error: payload.error,
-      evaluation: payload.evaluation,
     };
   }
 
-  return { success: true, visitId: payload.visit_id, evaluation: payload.evaluation };
+  return { success: true, visitId: payload.visit_id };
 }
 
 export async function endCustomerVisit(params: {
@@ -141,40 +104,10 @@ export async function endCustomerVisit(params: {
   if (!payload?.success) throw new Error('Could not end visit');
 }
 
-export async function fetchNearbyGeofencedCustomers(
-  userId: number | null,
-  lat: number,
-  lng: number,
-  radiusM = 200,
-): Promise<NearbyGeofencedCustomer[]> {
-  const { data, error } = await supabase.rpc('check_nearby_geofenced_customers', {
-    p_lat: lat,
-    p_lng: lng,
-    p_radius_m: radiusM,
-    ...actorParam(userId),
-  });
-  if (error) throw error;
-  const payload = data as { customers?: NearbyGeofencedCustomer[] };
-  return payload.customers ?? [];
-}
-
 export async function fetchFieldActivityDashboard(date: string): Promise<FieldActivityDashboard> {
   const { data, error } = await supabase.rpc('get_field_activity_dashboard', { p_date: date });
   if (error) throw error;
   return data as FieldActivityDashboard;
-}
-
-export async function fetchSalespersonVisitRoute(
-  salesmanUserId: number,
-  date: string,
-): Promise<VisitRoutePoint[]> {
-  const { data, error } = await supabase.rpc('get_salesperson_visit_route', {
-    p_salesman_user_id: salesmanUserId,
-    p_date: date,
-  });
-  if (error) throw error;
-  const payload = data as { points?: VisitRoutePoint[] };
-  return payload.points ?? [];
 }
 
 export async function fetchCustomerLastVisit(

@@ -25,12 +25,17 @@ function phoneToAuthEmail(phone: string): string {
 
 async function assertAdminActor(
   supabaseAdmin: ReturnType<typeof createClient>,
-  actorUserId: number,
+  accessToken: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: authData, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
+  if (authError || !authData.user) {
+    return { ok: false, error: 'unauthorized' };
+  }
+
   const { data, error } = await supabaseAdmin
     .from('users')
     .select('id')
-    .eq('id', actorUserId)
+    .eq('auth_id', authData.user.id)
     .eq('role', 'admin')
     .eq('is_active', true)
     .maybeSingle();
@@ -56,8 +61,10 @@ serve(async (req) => {
     const action = String(body.action ?? '');
     const actorUserId = Number(body.actor_user_id);
     const targetUserId = Number(body.user_id);
+    const authHeader = req.headers.get('Authorization') ?? '';
+    const accessToken = authHeader.replace(/^Bearer\s+/i, '').trim();
 
-    if (!action || !Number.isFinite(actorUserId) || !Number.isFinite(targetUserId)) {
+    if (!action || !Number.isFinite(actorUserId) || !Number.isFinite(targetUserId) || !accessToken) {
       return jsonResponse({ error: 'missing_fields' }, 400);
     }
 
@@ -71,7 +78,7 @@ serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const adminCheck = await assertAdminActor(supabaseAdmin, actorUserId);
+    const adminCheck = await assertAdminActor(supabaseAdmin, accessToken);
     if (!adminCheck.ok) {
       return jsonResponse({ error: adminCheck.error }, 403);
     }

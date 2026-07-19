@@ -18,6 +18,7 @@ const CustomerVisitPage = lazy(() => import('./pages/sales/CustomerVisitPage'));
 const PendingRecoveryPage = lazy(() => import('./pages/sales/PendingRecoveryPage'));
 
 const BillingLayout = lazy(() => import('./pages/billing/BillingLayout'));
+const BillingMySalesPage = lazy(() => import('./pages/billing/MySalesPage'));
 const DashboardPage = lazy(() => import('./pages/billing/DashboardPage'));
 const NeedsReviewPage = lazy(() => import('./pages/billing/NeedsReviewPage'));
 const ReviewPage = lazy(() => import('./pages/billing/ReviewPage'));
@@ -180,6 +181,7 @@ export default function App(): React.JSX.Element | null {
           }
         >
           <Route index element={<DashboardPage />} />
+          <Route path="my-sales" element={<BillingMySalesPage />} />
           <Route path="queue" element={<LiveQueuePage />} />
           <Route path="desk" element={<BillingDeskPage />} />
           <Route path="needs-review" element={<NeedsReviewPage />} />

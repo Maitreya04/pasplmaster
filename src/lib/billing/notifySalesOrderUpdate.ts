@@ -17,6 +17,11 @@ export type NotifySalesOrderUpdateParams = {
   lines: BillingCustomerUpdateLineInput[];
   /** When false, only persists billing_customer_updates (no inbox/push). */
   notifySales?: boolean;
+  /**
+   * When true, waits for inbox/push delivery before resolving.
+   * Default false — billing actions should not block on notifications.
+   */
+  awaitNotify?: boolean;
 };
 
 export type NotifySalesOrderUpdateResult = {
@@ -55,21 +60,30 @@ export async function persistAndNotifySalesOrderUpdate(
     return { customerUpdateId, messageText };
   }
 
-  const notifyResult = await sendInternalNotification({
-    eventType: 'order_update_for_sales',
+  const notifyPayload = {
+    eventType: 'order_update_for_sales' as const,
     orderId: params.orderId,
     orderNumber: params.orderNumber,
     customerName: params.customerName,
     salespersonName: params.salespersonName,
     messageBody: messageText,
     billingCustomerUpdateId: customerUpdateId,
+  };
+
+  if (params.awaitNotify) {
+    const notifyResult = await sendInternalNotification(notifyPayload);
+    return {
+      customerUpdateId,
+      messageText,
+      inboxCount: notifyResult?.inboxCount,
+    };
+  }
+
+  void sendInternalNotification(notifyPayload).catch((err: unknown) => {
+    console.error('[notifySalesOrderUpdate] background notification failed', err);
   });
 
-  return {
-    customerUpdateId,
-    messageText,
-    inboxCount: notifyResult?.inboxCount,
-  };
+  return { customerUpdateId, messageText };
 }
 
 export { formatInternalNotificationError };

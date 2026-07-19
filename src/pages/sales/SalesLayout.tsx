@@ -6,10 +6,9 @@ import type { BottomNavItem } from '../../components/shared/BottomNav';
 import { OfflineStatusBanner } from '../../components/shared/OfflineStatusBanner';
 import { DevRoleSwitcher } from '../../components/dev/DevRoleSwitcher';
 import { CartProvider } from '../../context/CartContext';
-import { fetchAllItems, prefetchItems } from '../../hooks/useItems';
+import { prefetchItems } from '../../hooks/useItems';
 import { prefetchCustomers } from '../../hooks/useCustomers';
 import { prefetchTransports } from '../../hooks/useTransports';
-import { prefetchLocationwiseStockForItems } from '../../hooks/useLocationwiseStock';
 import {
   useOfflineSalesOrderStats,
   useOfflineSalesOrderSync,
@@ -18,8 +17,6 @@ import { useAuth } from '../../context/AuthContext';
 import { useRolePushNotifications } from '../../hooks/useRolePushNotifications';
 import { NotificationBell } from '../../components/notifications/NotificationBell';
 import { PushAlertsCompact } from '../../components/notifications/PushAlertsCompact';
-import { NearbyGeofencePrompt } from '../../components/sales/NearbyGeofencePrompt';
-import { useGeofenceProximity } from '../../hooks/useGeofenceProximity';
 import { SalesChromeProvider, useSalesChrome } from './SalesChromeContext';
 
 const preloadSalesHome = () => import('./SalesHome');
@@ -63,11 +60,6 @@ export default function SalesLayout(): React.JSX.Element | null {
   useEffect(() => {
     const warmSalesCaches = () => {
       prefetchItems();
-      void fetchAllItems()
-        .then(prefetchLocationwiseStockForItems)
-        .catch((err) => {
-          console.warn('[sales] stock snapshot warmup skipped', err);
-        });
     };
 
     warmSalesCaches();
@@ -89,8 +81,6 @@ export default function SalesLayout(): React.JSX.Element | null {
   const push = useRolePushNotifications({ role, userId, userName });
   const offlineStats = useOfflineSalesOrderStats();
   useOfflineSalesOrderSync();
-  const { nearbyCustomer, dismissNearby } = useGeofenceProximity();
-
   return (
     <SalesChromeProvider>
       <CartProvider key={`${userId ?? 'anon'}:${userName ?? 'guest'}`}>
@@ -101,11 +91,6 @@ export default function SalesLayout(): React.JSX.Element | null {
             syncing={offlineStats.syncing > 0}
             failedCount={offlineStats.failed}
           />
-          {nearbyCustomer && (
-            <div className="pt-2">
-              <NearbyGeofencePrompt customer={nearbyCustomer} onDismiss={dismissNearby} />
-            </div>
-          )}
           <div className="pb-[6.5rem]">
             <Outlet />
           </div>

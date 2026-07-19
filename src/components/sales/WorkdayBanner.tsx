@@ -1,5 +1,4 @@
 import { Clock, Play } from '@phosphor-icons/react';
-import { captureCurrentPosition } from '../../lib/geo/geolocation';
 import { useWorkday } from '../../hooks/useWorkday';
 
 export function WorkdayBanner(): React.JSX.Element | null {
@@ -37,14 +36,7 @@ export function WorkdayBanner(): React.JSX.Element | null {
       <button
         type="button"
         disabled={isStarting}
-        onClick={async () => {
-          try {
-            const pos = await captureCurrentPosition();
-            await startWorkday({ lat: pos.latitude, lng: pos.longitude });
-          } catch {
-            await startWorkday(undefined);
-          }
-        }}
+        onClick={() => void startWorkday()}
         className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-[var(--role-primary)] px-3 py-2 text-xs font-semibold text-white"
       >
         <Play size={14} weight="fill" />

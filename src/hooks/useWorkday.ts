@@ -24,8 +24,7 @@ export function useWorkday() {
   });
 
   const startMutation = useMutation({
-    mutationFn: async (coords?: { lat: number; lng: number }) =>
-      startWorkday(userId, coords?.lat, coords?.lng),
+    mutationFn: async () => startWorkday(userId),
     onSuccess: (workday) => {
       queryClient.setQueryData([...WORKDAY_KEY, userId], workday satisfies WorkdayState);
     },

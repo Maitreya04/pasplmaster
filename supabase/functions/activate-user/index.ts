@@ -65,6 +65,7 @@ serve(async (req) => {
     }
 
     const userId = validation.user_id as number;
+    const inviteId = typeof validation.invite_id === 'number' ? validation.invite_id as number : null;
     const email = `${normalizedPhone}@paspl.local`;
 
     const { data: existingPhone, error: phoneLookupError } = await supabaseAdmin
@@ -89,6 +90,9 @@ serve(async (req) => {
       user_metadata: {
         full_name: validation.full_name,
         phone: normalizedPhone,
+      },
+      app_metadata: {
+        app_user_id: userId,
         role: validation.role,
         branch: validation.branch,
       },
@@ -115,6 +119,24 @@ serve(async (req) => {
       await supabaseAdmin.auth.admin.deleteUser(authUser.user.id);
       return jsonResponse({ error: 'user_update_failed' }, 500);
     }
+
+    if (inviteId) {
+      await supabaseAdmin.rpc('consume_invite_code', {
+        p_invite_id: inviteId,
+        p_auth_id: authUser.user.id,
+      });
+    }
+
+    await supabaseAdmin.rpc('log_user_security_event', {
+      p_actor_user_id: null,
+      p_target_user_id: userId,
+      p_event_type: 'account_activated',
+      p_risk_level: 'info',
+      p_metadata: {
+        auth_id: authUser.user.id,
+        phone: normalizedPhone,
+      },
+    });
 
     return jsonResponse({
       success: true,
