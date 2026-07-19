@@ -479,31 +479,38 @@ function ModuleSkeleton() {
 }
 
 const HOME_ACTIONS = [
-  { label: 'New order', path: '/sales/new', icon: Plus, primary: true },
-  { label: 'My orders', path: '/sales/orders', icon: ListBullets, primary: false },
-  { label: 'My beat', path: '/sales/beat', icon: MapPin, primary: false },
-  { label: 'Pending', path: '/sales/pending-recovery', icon: HourglassHigh, primary: false },
+  { label: 'New order', path: '/sales/new', icon: Plus },
+  { label: 'My orders', path: '/sales/orders', icon: ListBullets },
+  { label: 'My beat', path: '/sales/beat', icon: MapPin },
+  { label: 'Pending', path: '/sales/pending-recovery', icon: HourglassHigh },
 ] as const;
 
 function QuickActions() {
   return (
-    <section aria-labelledby="sales-home-actions" className="space-y-2">
-      <h2 id="sales-home-actions" className="px-1 text-[13px] font-semibold text-[var(--content-primary)]">
+    <section
+      aria-labelledby="sales-home-actions"
+      className="rounded-2xl border border-[color-mix(in_srgb,var(--role-primary)_16%,var(--border-subtle))] p-4 shadow-[var(--shadow-card)]"
+      style={{
+        background:
+          'linear-gradient(135deg, color-mix(in srgb, var(--role-primary) 16%, var(--bg-secondary)), color-mix(in srgb, var(--role-primary) 7%, var(--bg-secondary)))',
+      }}
+    >
+      <h2 id="sales-home-actions" className="text-[15px] font-semibold text-[var(--content-primary)]">
         Quick actions
       </h2>
-      <div className="grid grid-cols-2 gap-2">
-        {HOME_ACTIONS.map(({ label, path, icon: Icon, primary }) => (
+      <div className="mt-4 grid grid-cols-4 gap-2">
+        {HOME_ACTIONS.map(({ label, path, icon: Icon }) => (
           <Link
             key={path}
             to={path}
-            className={`flex min-h-11 items-center gap-2 rounded-xl border px-3 text-sm font-medium transition-[transform,background-color,border-color] duration-150 ease-out active:scale-[0.98] ${
-              primary
-                ? 'border-[var(--border-accent)] bg-[var(--role-primary-subtle)] text-[var(--role-content)]'
-                : 'border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-secondary)] shadow-[var(--shadow-card)]'
-            }`}
+            className="flex flex-col items-center gap-2 rounded-xl px-1 py-1 text-center transition-transform duration-150 ease-out active:scale-[0.96] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--role-primary)]"
           >
-            <Icon size={18} weight={primary ? 'bold' : 'regular'} className="shrink-0" />
-            <span>{label}</span>
+            <span className="flex size-12 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--content-primary)] shadow-sm">
+              <Icon size={22} weight="regular" />
+            </span>
+            <span className="max-w-[4.75rem] text-[11px] font-medium leading-tight text-[var(--content-primary)]">
+              {label}
+            </span>
           </Link>
         ))}
       </div>
@@ -571,11 +578,11 @@ export default function SalesHome({
           </Card>
         )}
 
+        {showQuickActions && <QuickActions />}
+
         {isLoading ? <ModuleSkeleton /> : data ? (
           <UnifiedSalesModule data={data} period={period} onPeriodChange={setPeriod} />
         ) : null}
-
-        {showQuickActions && <QuickActions />}
 
         {data?.freshness.aggregatedAt && (
           <p className="text-center text-xs text-[var(--content-tertiary)]">
