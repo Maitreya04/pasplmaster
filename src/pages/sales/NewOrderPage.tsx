@@ -61,6 +61,7 @@ import {
   AGING_BUCKETS,
   agingPresentationForDays,
   agingPresentationForKey,
+  buildCollectionReminderMessage,
   buildLedgerStatementMessage,
   formatAgingSnapshotCaption,
   whatsappUrlForCustomer,
@@ -695,6 +696,7 @@ function AccountBillsSheet({
   isError,
   onClose,
   onOpenLedger,
+  onShare,
 }: {
   bucket: AgingBucketFilter | null;
   result: OsBucketResult | undefined;
@@ -702,6 +704,7 @@ function AccountBillsSheet({
   isError: boolean;
   onClose: () => void;
   onOpenLedger: () => void;
+  onShare: (rows: OutstandingBill[]) => void;
 }) {
   const [search, setSearch] = useState('');
   const [sortNewest, setSortNewest] = useState(true);
@@ -768,13 +771,25 @@ function AccountBillsSheet({
                   {deferredSearch ? ` · ${filteredRows.length} match` : ''}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setSortNewest((prev) => !prev)}
-                className="rounded-full border border-[var(--border-subtle)] px-3 py-1.5 text-[length:var(--ds-font-caption)] font-semibold text-[var(--content-secondary)]"
-              >
-                {sortNewest ? 'Newest first' : 'Oldest first'}
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                {filteredRows.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onShare(filteredRows)}
+                    className="flex items-center gap-2 rounded-xl bg-[var(--role-primary)] px-3 py-2 text-[length:var(--ds-font-body)] font-semibold text-[var(--content-on-color)]"
+                  >
+                    <ShareNetwork size={16} />
+                    Share
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSortNewest((prev) => !prev)}
+                  className="rounded-full border border-[var(--border-subtle)] px-3 py-1.5 text-[length:var(--ds-font-caption)] font-semibold text-[var(--content-secondary)]"
+                >
+                  {sortNewest ? 'Newest first' : 'Oldest first'}
+                </button>
+              </div>
             </div>
 
             {filteredRows.length === 0 ? (
@@ -934,6 +949,95 @@ function PaymentHistorySheet({
   );
 }
 
+function OpeningBalanceBillsSheet({
+  isOpen,
+  openingBalance,
+  bills,
+  onClose,
+}: {
+  isOpen: boolean;
+  openingBalance: LedgerStatement['opening_balance'];
+  bills: OutstandingBill[];
+  onClose: () => void;
+}) {
+  const groupedBills = useMemo(() => {
+    const groups = new Map<string, OutstandingBill[]>();
+    for (const bill of bills) {
+      const key = monthKeyFromDate(bill.bill_date);
+      const list = groups.get(key) ?? [];
+      list.push(bill);
+      groups.set(key, list);
+    }
+    return Array.from(groups.entries());
+  }, [bills]);
+
+  return (
+    <BottomSheet
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Opening balance breakdown"
+      rootClassName="z-[70]"
+    >
+      <div className="space-y-4">
+        <div>
+          <p className="ds-type-stat">{moneyRaw(openingBalance.amount)}</p>
+          <p className="ds-type-caption mt-1">
+            {openingBalance.count} bills before {formatShortDate(openingBalance.as_of)}
+            {openingBalance.is_truncated ? ' · showing first 100' : ''}
+          </p>
+        </div>
+
+        {bills.length === 0 ? (
+          <p className="rounded-xl bg-[var(--bg-tertiary)] px-3 py-3 text-[length:var(--ds-font-body)] text-[var(--content-secondary)]">
+            No brought-forward bills for this range.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {groupedBills.map(([month, monthBills]) => (
+              <div key={month} className="space-y-0">
+                <p className="ds-type-month mb-2">{month}</p>
+                {monthBills.map((bill) => {
+                  const presentation = agingPresentationForDays(bill.days);
+                  return (
+                    <div
+                      key={`${bill.refcode ?? bill.bill_no}-${bill.days}-${bill.pending_amount}`}
+                      className="border-b border-[var(--border-subtle)] py-3 last:border-b-0"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="ds-type-row-title truncate">
+                            {bill.type ? `${bill.type} ` : 'Sale '}
+                            #{bill.bill_no || bill.refcode || '—'}
+                          </p>
+                          <p className="ds-type-caption mt-1">
+                            {formatShortDate(bill.bill_date)}
+                            {bill.due_date ? ` · due ${formatShortDate(bill.due_date)}` : ''}
+                          </p>
+                        </div>
+                        <p className={`ds-type-row-amount shrink-0 ${toneTextClass(presentation.tone)}`}>
+                          {moneyRaw(bill.pending_amount)}
+                        </p>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <span className={`rounded-full px-2 py-0.5 text-[length:var(--ds-font-label)] font-semibold ${tonePillClass(presentation.tone)}`}>
+                          {presentation.meaning}
+                        </span>
+                        <span className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-2 py-0.5 text-[length:var(--ds-font-label)] font-semibold text-[var(--content-secondary)]">
+                          {bill.days}d old
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </BottomSheet>
+  );
+}
+
 function LedgerShareSheet({
   isOpen,
   range,
@@ -960,6 +1064,7 @@ function LedgerShareSheet({
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<'all' | 'bills' | 'payments'>('all');
   const [filterOpen, setFilterOpen] = useState(false);
+  const [openingBillsOpen, setOpeningBillsOpen] = useState(false);
   const [sortNewest, setSortNewest] = useState(true);
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
 
@@ -968,6 +1073,7 @@ function LedgerShareSheet({
       setSearch('');
       setTab('all');
       setFilterOpen(false);
+      setOpeningBillsOpen(false);
       setSortNewest(true);
     }
   }, [isOpen]);
@@ -1090,6 +1196,21 @@ function LedgerShareSheet({
           )}
           {!isLoading && !isError && statement && (
             <>
+              {statement.opening_balance.count > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setOpeningBillsOpen(true)}
+                  className="flex w-full items-center justify-between gap-3 rounded-2xl bg-amber-500/15 px-4 py-3 text-left"
+                >
+                  <span className="min-w-0 text-sm font-semibold text-amber-800 dark:text-amber-200">
+                    Opening balance breakdown · {statement.opening_balance.count}{' '}
+                    {statement.opening_balance.count === 1 ? 'bill' : 'bills'} ·{' '}
+                    {moneyRaw(statement.opening_balance.amount)}
+                  </span>
+                  <CaretRight size={18} className="shrink-0 text-amber-700 dark:text-amber-300" />
+                </button>
+              )}
+
               <div className="flex items-center justify-between gap-3">
                 <p className="ds-type-eyebrow">
                   Ledger · {filteredRows.length} entries
@@ -1163,6 +1284,13 @@ function LedgerShareSheet({
           )}
         </div>
       </BottomSheet>
+
+      <OpeningBalanceBillsSheet
+        isOpen={openingBillsOpen}
+        openingBalance={statement?.opening_balance ?? { amount: 0, count: 0, as_of: range.fromDate, is_truncated: false }}
+        bills={statement?.opening_bills ?? []}
+        onClose={() => setOpeningBillsOpen(false)}
+      />
 
       <BottomSheet
         isOpen={filterOpen}
@@ -1578,6 +1706,28 @@ function SmartLanding({
     });
   }, [activeCustomer, copy, snapshotQuery.data, toast]);
 
+  const shareCollectionReminder = useCallback((bills: OutstandingBill[]) => {
+    const snapshot = snapshotQuery.data;
+    if (!snapshot || !activeCustomer) {
+      toast.info('Account summary is still loading');
+      return;
+    }
+
+    const message = buildCollectionReminderMessage(snapshot, bills);
+    const url = whatsappUrlForCustomer(activeCustomer.mobile ?? snapshot.customer.mobile, message);
+    const opened = openWhatsAppDraft(url);
+
+    if (opened) {
+      toast.success('WhatsApp draft opened');
+      return;
+    }
+
+    void copy(message, 'new-order-collection-reminder').then((ok) => {
+      if (ok) toast.success('Reminder message copied');
+      else toast.error('Could not open WhatsApp');
+    });
+  }, [activeCustomer, copy, snapshotQuery.data, toast]);
+
   const createCustomerMutation = useMutation({
     mutationFn: async () => {
       const name = draftName.trim().replace(/\s+/g, ' ');
@@ -1968,6 +2118,7 @@ function SmartLanding({
           setLedgerRange(getNewOrderLedgerRange('90d'));
           setLedgerShareOpen(true);
         }}
+        onShare={shareCollectionReminder}
       />
 
       <PaymentHistorySheet

@@ -35,6 +35,16 @@ function stripTrailingZero(value: number): string {
   return value.toFixed(1).replace(/\.0$/, '');
 }
 
+export interface SalesWorkingDaysPace {
+  total: number;
+  elapsedFy: number;
+  elapsedMonth: number;
+  elapsedQuarter: number;
+  month: number;
+  quarter: number;
+}
+
+/** Full-period destination gap (close the number). */
 export function salesGap(metric: SalesPeriodMetric): SalesGapPresentation {
   const gap = metric.actual - metric.expected;
   const state: SalesGapState = gap >= 0 ? 'ahead' : 'short';
@@ -45,8 +55,66 @@ export function salesGap(metric: SalesPeriodMetric): SalesGapPresentation {
     state,
     signedLabel: `${gap >= 0 ? '+' : '-'}${compactSalesCurrency(amount)}`,
     summaryLabel: `${compactSalesCurrency(amount)} ${state === 'ahead' ? 'up' : 'to close'}`,
-    /** Close-the-number framing for the hero snapshot. */
     verbLabel: state === 'ahead' ? 'Above target' : 'Left to close',
+  };
+}
+
+/** Till-date pace gap (ahead / behind where you should be by as-of). */
+export function salesPaceGap(metric: SalesPeriodMetric): SalesGapPresentation {
+  const gap = metric.actual - metric.expected;
+  const state: SalesGapState = gap >= 0 ? 'ahead' : 'short';
+  const amount = Math.abs(gap);
+
+  return {
+    amount,
+    state,
+    signedLabel: `${gap >= 0 ? '+' : '-'}${compactSalesCurrency(amount)}`,
+    summaryLabel: `${compactSalesCurrency(amount)} ${state === 'ahead' ? 'ahead' : 'behind'}`,
+    verbLabel: state === 'ahead' ? 'Ahead' : 'Behind',
+  };
+}
+
+export function periodWorkingDays(
+  workingDays: SalesWorkingDaysPace,
+  period: SalesPacePeriod,
+): number {
+  if (period === 'month') return workingDays.month;
+  if (period === 'quarter') return workingDays.quarter;
+  return workingDays.total;
+}
+
+export function elapsedWorkingDays(
+  workingDays: SalesWorkingDaysPace,
+  period: SalesPacePeriod,
+): number {
+  if (period === 'month') return workingDays.elapsedMonth;
+  if (period === 'quarter') return workingDays.elapsedQuarter;
+  return workingDays.elapsedFy;
+}
+
+/**
+ * Working-day prorata of the full period target through as-of.
+ * periodTarget is the destination (July / Q / FY), not YTD.
+ */
+export function paceExpected(
+  periodTarget: number,
+  workingDays: SalesWorkingDaysPace,
+  period: SalesPacePeriod,
+): number {
+  const daysInPeriod = periodWorkingDays(workingDays, period);
+  if (periodTarget <= 0 || daysInPeriod <= 0) return 0;
+  const elapsed = Math.min(Math.max(elapsedWorkingDays(workingDays, period), 0), daysInPeriod);
+  return (periodTarget * elapsed) / daysInPeriod;
+}
+
+export function paceMetric(
+  metric: SalesPeriodMetric,
+  workingDays: SalesWorkingDaysPace,
+  period: SalesPacePeriod,
+): SalesPeriodMetric {
+  return {
+    actual: metric.actual,
+    expected: paceExpected(metric.expected, workingDays, period),
   };
 }
 
@@ -66,21 +134,29 @@ function clampPercent(value: number): number {
 }
 
 function assignedTargetCategories(categories: SalesCategoryPace[]): SalesCategoryPace[] {
-  // The target workbook defines each salesperson's portfolio. Busy may
-  // contain sales in other segments, but those must not appear as assigned
-  // target categories on the salesperson dashboard.
+  // Plan workbook rows for this salesperson.
   return categories.filter((category) => !category.isUnmapped && category.annualTarget > 0);
 }
 
+function outsideAssignedCategories(
+  categories: SalesCategoryPace[],
+  period: SalesPacePeriod,
+): SalesCategoryPace[] {
+  // Billed in Busy but not on this salesperson's target plan. Shown after
+  // assigned rows so the list explains the hero total without a separate banner.
+  return categories.filter(
+    (category) => category.annualTarget <= 0 && category[period].actual !== 0,
+  );
+}
+
 /**
- * Snapshot ranking: biggest assigned targets first so the salesman sees
- * where the plan is heaviest, then period standing within that slice.
+ * Biggest assigned targets first, then outside-plan billing by period actual.
  */
 export function sortSalesCategoriesByTarget(
   categories: SalesCategoryPace[],
   period: SalesPacePeriod,
 ): SalesCategoryPace[] {
-  return assignedTargetCategories(categories)
+  const assigned = assignedTargetCategories(categories)
     .slice()
     .sort((a, b) => {
       const targetDifference = b.annualTarget - a.annualTarget;
@@ -91,6 +167,16 @@ export function sortSalesCategoriesByTarget(
       const bGap = b[period].actual - b[period].expected;
       return aGap - bGap || a.name.localeCompare(b.name);
     });
+
+  const outside = outsideAssignedCategories(categories, period)
+    .slice()
+    .sort((a, b) => {
+      const actualDifference = b[period].actual - a[period].actual;
+      if (actualDifference !== 0) return actualDifference;
+      return a.name.localeCompare(b.name);
+    });
+
+  return [...assigned, ...outside];
 }
 
 export function sortSalesCategoriesByGap(
@@ -128,6 +214,10 @@ export function salesPeriodTargetLabel(
   if (period === 'quarter') return `Q${fiscalQuarterNumber(asOfDate)} target`;
   const date = new Date(`${asOfDate}T12:00:00`);
   return `${date.toLocaleDateString('en-IN', { month: 'long' })} target`;
+}
+
+export function salesPaceTargetLabel(): string {
+  return 'Till-date target';
 }
 
 export function remainingWorkingDays(

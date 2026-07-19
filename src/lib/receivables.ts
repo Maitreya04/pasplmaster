@@ -320,6 +320,13 @@ export interface LedgerVoucherTotal {
   amount: number;
 }
 
+export interface LedgerOpeningBalance {
+  amount: number;
+  count: number;
+  as_of: string;
+  is_truncated: boolean;
+}
+
 export interface LedgerStatement {
   success: true;
   customer_id: number;
@@ -327,6 +334,8 @@ export interface LedgerStatement {
   to_date: string;
   row_count: number;
   is_truncated: boolean;
+  opening_balance: LedgerOpeningBalance;
+  opening_bills: OutstandingBill[];
   voucher_totals: LedgerVoucherTotal[];
   rows: LedgerRow[];
   meta: {
@@ -504,14 +513,27 @@ function normalizeBucketResult(payload: RpcPayload): OsBucketResult {
   };
 }
 
-function normalizeLedgerStatement(payload: RpcPayload): LedgerStatement {
+function normalizeOpeningBalance(raw: unknown, fallbackAsOf: string): LedgerOpeningBalance {
+  const row = (raw ?? {}) as Record<string, unknown>;
+  return {
+    amount: toNumber(row.amount),
+    count: toNumber(row.count),
+    as_of: toStringOrNull(row.as_of) ?? fallbackAsOf,
+    is_truncated: Boolean(row.is_truncated),
+  };
+}
+
+export function parseLedgerStatementPayload(payload: RpcPayload): LedgerStatement {
+  const fromDate = toStringOrNull(payload.from_date) ?? '';
   return {
     success: true,
     customer_id: toNumber(payload.customer_id),
-    from_date: toStringOrNull(payload.from_date) ?? '',
+    from_date: fromDate,
     to_date: toStringOrNull(payload.to_date) ?? '',
     row_count: toNumber(payload.row_count),
     is_truncated: Boolean(payload.is_truncated),
+    opening_balance: normalizeOpeningBalance(payload.opening_balance, fromDate),
+    opening_bills: Array.isArray(payload.opening_bills) ? payload.opening_bills.map(normalizeBill) : [],
     voucher_totals: Array.isArray(payload.voucher_totals)
       ? payload.voucher_totals.map((row) => {
           const total = (row ?? {}) as Record<string, unknown>;
@@ -603,7 +625,7 @@ export async function fetchCustomerLedgerStatement(params: {
     p_limit: params.limit ?? 100,
   });
   if (error) throw error;
-  return normalizeLedgerStatement(requireSuccess((data ?? null) as RpcPayload | null, 'Ledger statement'));
+  return parseLedgerStatementPayload(requireSuccess((data ?? null) as RpcPayload | null, 'Ledger statement'));
 }
 
 export async function fetchCustomerPaymentSignal(params: {
@@ -715,6 +737,12 @@ export function buildLedgerStatementMessage(
     `*Ledger summary* from ${dateForMessage(statement.from_date)} to ${dateForMessage(statement.to_date)}.`,
     `Current pending: *${moneyForMessage(snapshot.summary.total_pending)}*`,
   ];
+
+  if (statement.opening_balance.count > 0) {
+    chunks.push(
+      `Opening balance (before ${dateForMessage(statement.opening_balance.as_of)}): *${moneyForMessage(statement.opening_balance.amount)}* (${statement.opening_balance.count} bills)`,
+    );
+  }
 
   if (statement.voucher_totals.length > 0) {
     chunks.push('', '*Voucher totals:*');

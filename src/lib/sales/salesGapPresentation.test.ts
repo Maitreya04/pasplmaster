@@ -3,8 +3,12 @@ import type { SalesCategoryPace } from '../../hooks/useSalesDashboard';
 import {
   compactSalesCurrency,
   fiscalQuarterNumber,
+  paceExpected,
+  paceMetric,
   remainingWorkingDays,
   salesGap,
+  salesPaceGap,
+  salesPaceTargetLabel,
   salesPeriodLabel,
   salesPeriodTargetLabel,
   salesProgress,
@@ -43,6 +47,32 @@ assert.deepEqual(salesGap({ actual: 142_000, expected: 121_000 }), {
 });
 assert.equal(salesGap({ actual: -5_000, expected: 10_000 }).summaryLabel, '₹15K to close');
 assert.equal(salesGap({ actual: -5_000, expected: 10_000 }).verbLabel, 'Left to close');
+assert.deepEqual(salesPaceGap({ actual: 142_000, expected: 121_000 }), {
+  amount: 21_000,
+  state: 'ahead',
+  signedLabel: '+₹21K',
+  summaryLabel: '₹21K ahead',
+  verbLabel: 'Ahead',
+});
+assert.equal(salesPaceGap({ actual: 100_000, expected: 150_000 }).verbLabel, 'Behind');
+assert.equal(salesPaceTargetLabel(), 'Till-date target');
+
+const julyWorkdays = {
+  total: 300,
+  elapsedFy: 90,
+  elapsedMonth: 11,
+  elapsedQuarter: 40,
+  month: 22,
+  quarter: 65,
+};
+assert.equal(paceExpected(3_830_000, julyWorkdays, 'month'), 3_830_000 * (11 / 22));
+assert.equal(paceExpected(44_000_000, julyWorkdays, 'fy'), 44_000_000 * (90 / 300));
+assert.deepEqual(paceMetric({ actual: 1_430_000, expected: 3_830_000 }, julyWorkdays, 'month'), {
+  actual: 1_430_000,
+  expected: 3_830_000 * (11 / 22),
+});
+assert.equal(paceExpected(100, { ...julyWorkdays, month: 0 }, 'month'), 0);
+
 const overTargetProgress = salesProgress({ actual: 150, expected: 100 });
 assert.equal(overTargetProgress.actualPercent, 100);
 assert.ok(Math.abs(overTargetProgress.targetPercent - (100 / 1.5)) < 0.000_001);
@@ -74,8 +104,9 @@ assert.deepEqual(
     unmapped,
     busyOnly,
     category('Mid target', 9_000, 10_000, 500_000),
+    category('Quiet outside', 0, 0, 0),
   ], 'month').map((item) => item.name),
-  ['Biggest target', 'Mid target', 'Small target'],
+  ['Biggest target', 'Mid target', 'Small target', 'Busy only, not assigned'],
 );
 
 assert.deepEqual(

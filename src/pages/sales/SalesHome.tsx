@@ -21,8 +21,11 @@ import {
 import { getSalesOfflineReadiness } from '../../lib/offlineReadiness';
 import {
   compactSalesCurrency,
+  paceMetric,
   remainingWorkingDays,
   salesGap,
+  salesPaceGap,
+  salesPaceTargetLabel,
   salesPeriodLabel,
   salesPeriodTargetLabel,
   salesProgress,
@@ -90,7 +93,7 @@ function periodPressureLabel(
 }
 
 function gapTone(metric: SalesPeriodMetric): string {
-  return salesGap(metric).state === 'ahead'
+  return salesPaceGap(metric).state === 'ahead'
     ? 'text-[var(--content-signal-ok)]'
     : 'text-[var(--content-negative)]';
 }
@@ -140,8 +143,9 @@ function ProgressBar({
   size?: 'sm' | 'md';
 }) {
   const { actualPercent } = salesProgress(metric);
-  const ahead = metric.actual >= metric.expected;
   const height = size === 'sm' ? 'h-1.5' : 'h-2.5';
+  // Bar = progress only (green on neutral track). Urgency lives in the gap number, not here.
+  const achievedWidth = Math.max(actualPercent, actualPercent > 0 ? 2 : 0);
 
   return (
     <div
@@ -149,10 +153,8 @@ function ProgressBar({
       aria-hidden="true"
     >
       <div
-        className={`absolute inset-y-0 left-0 rounded-full transition-[width] duration-300 ease-out ${
-          ahead ? 'bg-[var(--content-signal-ok)]' : 'bg-[var(--bg-negative)]'
-        }`}
-        style={{ width: `${Math.max(actualPercent, actualPercent > 0 ? 2 : 0)}%` }}
+        className="absolute inset-y-0 left-0 rounded-full bg-[var(--content-signal-ok)] transition-[width] duration-300 ease-out"
+        style={{ width: `${achievedWidth}%` }}
       />
     </div>
   );
@@ -198,14 +200,16 @@ function SalesHero({
   period: SalesPacePeriod;
 }) {
   const metric = data.periods[period];
-  const gap = salesGap(metric);
+  const tillDate = paceMetric(metric, data.workingDays, period);
+  const paceGap = salesPaceGap(tillDate);
+  const destinationGap = salesGap(metric);
   const targetsPublished = data.status === 'ready';
   const periodLabel = salesPeriodLabel(period, data.asOfDate, data.financialYear?.label ?? null);
-  const targetLabel = salesPeriodTargetLabel(period, data.asOfDate);
   const pressureLabel = periodPressureLabel(period, data);
   const achievementPercent =
     metric.expected > 0 ? Math.round((metric.actual / metric.expected) * 100) : null;
-  const showAnnualFooter = targetsPublished && data.annualTarget > 0 && period !== 'fy';
+  const showDestinationFooter =
+    targetsPublished && (period === 'fy' ? metric.expected > 0 : data.annualTarget > 0);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] shadow-[var(--shadow-card)]">
@@ -222,7 +226,7 @@ function SalesHero({
           {targetsPublished && achievementPercent != null && (
             <span
               className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                gap.state === 'ahead'
+                paceGap.state === 'ahead'
                   ? 'bg-[var(--bg-positive-subtle)] text-[var(--content-signal-ok)]'
                   : 'bg-[var(--bg-negative-subtle)] text-[var(--content-negative)]'
               }`}
@@ -242,20 +246,21 @@ function SalesHero({
         {targetsPublished ? (
           <>
             <div className="mt-5">
+              {/* Progress vs full period destination; tiles below are till-date pace. */}
               <ProgressBar metric={metric} />
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-2">
               <MetricTile
-                label={targetLabel}
-                value={compactSalesCurrency(metric.expected)}
+                label={salesPaceTargetLabel()}
+                value={compactSalesCurrency(tillDate.expected)}
               />
               <MetricTile
-                label={gap.verbLabel}
-                value={compactSalesCurrency(gap.amount)}
-                tone={gap.state}
+                label={paceGap.verbLabel}
+                value={compactSalesCurrency(paceGap.amount)}
+                tone={paceGap.state}
                 valueClassName={
-                  gap.state === 'ahead'
+                  paceGap.state === 'ahead'
                     ? 'text-[var(--content-signal-ok)]'
                     : 'text-[var(--content-negative)]'
                 }
@@ -274,23 +279,53 @@ function SalesHero({
         )}
       </div>
 
-      {showAnnualFooter && (
+      {showDestinationFooter && (
         <div className="flex items-center justify-between gap-3 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 py-3 sm:px-5">
-          <div className="min-w-0">
-            <p className="text-[11px] font-medium text-[var(--content-tertiary)]">
-              Full-year target
-              {data.financialYear ? ` · FY ${data.financialYear.label}` : ''}
-            </p>
-            <p className="mt-0.5 text-sm font-semibold text-[var(--content-secondary)]">
-              {compactSalesCurrency(data.annualTarget)}
-            </p>
-          </div>
-          <div className="shrink-0 text-right">
-            <p className="text-[11px] font-medium text-[var(--content-tertiary)]">Left this year</p>
-            <p className="mt-0.5 text-sm font-semibold text-[var(--content-secondary)]">
-              {compactSalesCurrency(Math.max(data.remainingAnnual, 0))}
-            </p>
-          </div>
+          {period === 'fy' ? (
+            <>
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium text-[var(--content-tertiary)]">
+                  {salesPeriodTargetLabel('fy', data.asOfDate)}
+                  {data.financialYear ? ` · FY ${data.financialYear.label}` : ''}
+                </p>
+                <p className="mt-0.5 text-sm font-semibold text-[var(--content-secondary)]">
+                  {compactSalesCurrency(metric.expected)}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-[11px] font-medium text-[var(--content-tertiary)]">
+                  {destinationGap.verbLabel}
+                </p>
+                <p
+                  className={`mt-0.5 text-sm font-semibold ${
+                    destinationGap.state === 'ahead'
+                      ? 'text-[var(--content-signal-ok)]'
+                      : 'text-[var(--content-secondary)]'
+                  }`}
+                >
+                  {compactSalesCurrency(destinationGap.amount)}
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium text-[var(--content-tertiary)]">
+                  Full-year target
+                  {data.financialYear ? ` · FY ${data.financialYear.label}` : ''}
+                </p>
+                <p className="mt-0.5 text-sm font-semibold text-[var(--content-secondary)]">
+                  {compactSalesCurrency(data.annualTarget)}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-[11px] font-medium text-[var(--content-tertiary)]">Left this year</p>
+                <p className="mt-0.5 text-sm font-semibold text-[var(--content-secondary)]">
+                  {compactSalesCurrency(Math.max(data.remainingAnnual, 0))}
+                </p>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -301,14 +336,17 @@ function CategoryRow({
   category,
   period,
   targetsPublished,
+  workingDays,
 }: {
   category: SalesCategoryPace;
   period: SalesPacePeriod;
   targetsPublished: boolean;
+  workingDays: SalesDashboardData['workingDays'];
 }) {
   const metric = category[period];
   const hasTarget = targetsPublished && category.annualTarget > 0;
-  const gap = salesGap(metric);
+  const tillDate = paceMetric(metric, workingDays, period);
+  const gap = salesPaceGap(tillDate);
 
   return (
     <div className="grid min-h-[60px] grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3.5 py-3">
@@ -320,11 +358,11 @@ function CategoryRow({
           {category.name}
         </p>
         <div className="mt-1.5">
-          {hasTarget ? (
-            <ProgressBar metric={metric} size="sm" />
-          ) : (
-            <div className="h-1.5 rounded-full bg-[var(--gray-2)]" />
-          )}
+          {/* No-target billing: treat expected as 0 so any actual fills green (not an empty track). */}
+          <ProgressBar
+            metric={hasTarget ? metric : { actual: metric.actual, expected: 0 }}
+            size="sm"
+          />
         </div>
         <p className="mt-1.5 flex min-w-0 items-baseline gap-1.5 font-mono text-[11px] leading-tight">
           <span className="font-semibold text-[var(--content-primary)]">
@@ -339,7 +377,7 @@ function CategoryRow({
 
       <p
         className={`min-w-[3.25rem] text-right font-mono text-[12px] font-semibold ${
-          hasTarget ? gapTone(metric) : 'text-[var(--content-tertiary)]'
+          hasTarget ? gapTone(tillDate) : 'text-[var(--content-tertiary)]'
         }`}
       >
         {hasTarget ? gap.signedLabel : '—'}
@@ -360,45 +398,36 @@ function CategoryBreakdown({
     () => sortSalesCategoriesByTarget(data.categories, period),
     [data.categories, period],
   );
-  const visible = expanded ? categories : categories.slice(0, TOP_CATEGORY_COUNT);
-  const hiddenCount = Math.max(categories.length - TOP_CATEGORY_COUNT, 0);
-  const outsideAssigned = useMemo(() => {
-    const rows = data.categories.filter(
-      (category) => category.annualTarget <= 0 && category[period].actual !== 0,
-    );
-    return {
-      amount: rows.reduce((sum, category) => sum + category[period].actual, 0),
-      names: rows.map((category) => category.name),
-    };
-  }, [data.categories, period]);
+  const assigned = useMemo(
+    () => categories.filter((category) => category.annualTarget > 0),
+    [categories],
+  );
+  const outside = useMemo(
+    () => categories.filter((category) => category.annualTarget <= 0),
+    [categories],
+  );
+  // Keep outside-plan billing visible even when assigned rows are collapsed —
+  // those rows used to live in the banner.
+  const visibleAssigned = expanded ? assigned : assigned.slice(0, TOP_CATEGORY_COUNT);
+  const hiddenCount = Math.max(assigned.length - TOP_CATEGORY_COUNT, 0);
 
   return (
     <section className="space-y-2.5">
-      {outsideAssigned.amount !== 0 && (
-        <div className="rounded-xl border border-[var(--border-warning)] bg-[var(--bg-warning-subtle)] px-3.5 py-3">
-          <p className="text-sm font-semibold text-[var(--content-warning-on-light)]">
-            {compactSalesCurrency(outsideAssigned.amount)} billed outside assigned targets
-          </p>
-          <p className="mt-0.5 text-xs text-[var(--content-secondary)]">
-            Included in billed total, not in category progress:{' '}
-            {outsideAssigned.names.join(', ')}.
-          </p>
-        </div>
-      )}
-
       <div className="overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] shadow-[var(--shadow-card)]">
         <div className="flex items-end justify-between gap-3 border-b border-[var(--border-subtle)] px-3.5 py-3">
           <div>
             <h2 className="text-[13px] font-semibold text-[var(--content-primary)]">
-              Top categories by target
+              Categories
             </h2>
             <p className="mt-0.5 text-[11px] text-[var(--content-tertiary)]">
-              Biggest plan lines · vs full {period === 'fy' ? 'year' : period} target
+              Plan lines first · signed gap is till-date pace
             </p>
           </div>
           {categories.length > 0 && (
             <p className="shrink-0 text-[11px] font-medium text-[var(--content-quaternary)]">
-              {categories.length} assigned
+              {outside.length > 0
+                ? `${assigned.length} plan · ${outside.length} outside`
+                : `${assigned.length} plan`}
             </p>
           )}
         </div>
@@ -406,12 +435,13 @@ function CategoryBreakdown({
         {categories.length > 0 ? (
           <>
             <div className="divide-y divide-[var(--border-subtle)]">
-              {visible.map((category) => (
+              {visibleAssigned.map((category) => (
                 <CategoryRow
                   key={category.segmentId}
                   category={category}
                   period={period}
                   targetsPublished={data.status === 'ready'}
+                  workingDays={data.workingDays}
                 />
               ))}
             </div>
@@ -432,6 +462,20 @@ function CategoryBreakdown({
                   }`}
                 />
               </button>
+            )}
+
+            {outside.length > 0 && (
+              <div className="divide-y divide-[var(--border-subtle)] border-t border-[var(--border-subtle)]">
+                {outside.map((category) => (
+                  <CategoryRow
+                    key={category.segmentId}
+                    category={category}
+                    period={period}
+                    targetsPublished={data.status === 'ready'}
+                    workingDays={data.workingDays}
+                  />
+                ))}
+              </div>
             )}
           </>
         ) : (
