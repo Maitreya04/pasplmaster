@@ -392,6 +392,18 @@ type RpcPayload = Record<string, unknown> & {
   error?: string;
 };
 
+/** The server deliberately withholds receivables from sales users who do not own the account. */
+export class ReceivablesAccessDeniedError extends Error {
+  constructor() {
+    super('Receivables are not available for this customer.');
+    this.name = 'ReceivablesAccessDeniedError';
+  }
+}
+
+export function isReceivablesAccessDenied(error: unknown): boolean {
+  return error instanceof ReceivablesAccessDeniedError;
+}
+
 function toNumber(value: unknown, fallback = 0): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '') {
@@ -413,6 +425,9 @@ function toStringOrNull(value: unknown): string | null {
 
 function requireSuccess<T extends RpcPayload>(payload: T | null, label: string): T {
   if (!payload) throw new Error(`${label} returned no data`);
+  if (payload.success === false && payload.error === 'forbidden') {
+    throw new ReceivablesAccessDeniedError();
+  }
   if (payload.success === false) throw new Error(payload.error || `${label} failed`);
   return payload;
 }
@@ -598,6 +613,15 @@ export async function fetchCustomerCollectionSnapshot(customerId: number): Promi
   });
   if (error) throw error;
   return normalizeSnapshot(requireSuccess((data ?? null) as RpcPayload | null, 'Collection snapshot'));
+}
+
+/** Uses the same server-side ownership rule as the receivables RPCs. */
+export async function fetchCustomerReceivablesAccess(customerId: number): Promise<boolean> {
+  const { data, error } = await supabase.rpc('receivables_can_view_customer', {
+    p_customer_id: customerId,
+  });
+  if (error) throw error;
+  return data === true || data === 'true';
 }
 
 export async function fetchCustomerOsBucket(

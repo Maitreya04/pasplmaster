@@ -18,6 +18,7 @@ import { WorkdayBanner } from '../../components/sales/WorkdayBanner';
 import { useCustomers } from '../../hooks/useCustomers';
 import {
   useCustomerCollectionSnapshot,
+  useCustomerReceivablesAccess,
   useCustomerLedgerStatement,
   useCustomerOsBucket,
   useRecordCustomerCollectionEvent,
@@ -34,6 +35,7 @@ import {
   buildLedgerStatementMessage,
   compactAgingMoney,
   formatAgingSnapshotCaption,
+  isReceivablesAccessDenied,
   whatsappUrlForCustomer,
   type AgingBucketFilter,
   type AgingBucketKey,
@@ -170,6 +172,9 @@ export default function CustomerVisitPage(): React.JSX.Element {
     endVisit,
     isStarting,
     isEnding,
+    isLoadingVisit,
+    visitLoadFailed,
+    refreshVisit,
   } = useVisitTracking();
 
   const [endSheetOpen, setEndSheetOpen] = useState(false);
@@ -182,13 +187,19 @@ export default function CustomerVisitPage(): React.JSX.Element {
     navigate('.', { replace: true, state: {} });
   }, [navigate, openLedgerFromRoute]);
 
-  const snapshotQuery = useCustomerCollectionSnapshot(id);
-  const bucketQuery = useCustomerOsBucket(id, selectedBucket ?? 'all', selectedBucket != null);
+  const receivablesAccessQuery = useCustomerReceivablesAccess(id);
+  const canViewReceivables = receivablesAccessQuery.data === true;
+  const snapshotQuery = useCustomerCollectionSnapshot(id, canViewReceivables);
+  const bucketQuery = useCustomerOsBucket(
+    id,
+    selectedBucket ?? 'all',
+    selectedBucket != null && canViewReceivables,
+  );
   const ledgerQuery = useCustomerLedgerStatement({
     customerId: id,
     fromDate: ledgerRange.fromDate,
     toDate: ledgerRange.toDate,
-    enabled: ledgerOpen,
+    enabled: ledgerOpen && canViewReceivables,
     limit: LEDGER_LIMIT,
   });
   const recordEvent = useRecordCustomerCollectionEvent();
@@ -222,6 +233,10 @@ export default function CustomerVisitPage(): React.JSX.Element {
 
   const handleShareReminder = (bills?: OutstandingBill[]) => {
     const snapshot = snapshotQuery.data;
+    if (!canViewReceivables) {
+      toast.info('Account balance is managed by another salesperson.');
+      return;
+    }
     if (!snapshot) {
       toast.info('Collection snapshot is still loading');
       return;
@@ -240,6 +255,10 @@ export default function CustomerVisitPage(): React.JSX.Element {
   };
 
   const handleOpenLedger = () => {
+    if (!canViewReceivables) {
+      toast.info('Account balance is managed by another salesperson.');
+      return;
+    }
     setLedgerOpen(true);
     void recordEvent.mutateAsync({
       customerId: id,
@@ -253,6 +272,10 @@ export default function CustomerVisitPage(): React.JSX.Element {
 
   const handleShareLedger = (statement: LedgerStatement) => {
     const snapshot = snapshotQuery.data;
+    if (!canViewReceivables) {
+      toast.info('Account balance is managed by another salesperson.');
+      return;
+    }
     if (!snapshot) {
       toast.info('Collection snapshot is still loading');
       return;
@@ -271,27 +294,35 @@ export default function CustomerVisitPage(): React.JSX.Element {
   };
 
   const handleStartVisit = async () => {
-    const result = await requestStartVisit(id, 'field');
-    if (result.status === 'started') {
-      toast.success('Visit started');
-      return;
+    try {
+      const result = await requestStartVisit(id, 'field');
+      if (result.status === 'started') {
+        toast.success('Visit started');
+        return;
+      }
+      if (result.status === 'already_active') {
+        toast.info('End your current visit using the visit card above, then start this visit.');
+        return;
+      }
+      toast.error('Could not start visit');
+    } catch {
+      toast.error('Could not start visit. Check your connection and try again.');
     }
-    if (result.status === 'already_active') {
-      toast.info('You already have a visit in progress');
-      return;
-    }
-    toast.error('Could not start visit');
   };
 
   const handleEndVisit = async (payload: { outcome: VisitOutcome; notes: string }) => {
-    if (!visitForCustomer) return;
-    await endVisit({
-      visitId: visitForCustomer.id,
-      outcome: payload.outcome,
-      notes: payload.notes,
-    });
-    setEndSheetOpen(false);
-    toast.success('Visit completed');
+    if (!activeVisit) return;
+    try {
+      await endVisit({
+        visitId: activeVisit.id,
+        outcome: payload.outcome,
+        notes: payload.notes,
+      });
+      setEndSheetOpen(false);
+      toast.success('Visit completed');
+    } catch {
+      toast.error('Could not end visit. Check your connection and try again.');
+    }
   };
 
   if (isLoading) {
@@ -336,29 +367,47 @@ export default function CustomerVisitPage(): React.JSX.Element {
           </div>
         </Card>
 
-        {visitForCustomer && (
-          <VisitBar visit={visitForCustomer} onEndVisit={() => setEndSheetOpen(true)} />
+        {activeVisit && (
+          <VisitBar visit={activeVisit} onEndVisit={() => setEndSheetOpen(true)} />
+        )}
+
+        {activeVisit && !visitForCustomer && (
+          <p className="text-sm text-[var(--content-secondary)]">
+            End the visit to {activeVisit.customer_name} above before starting a visit here.
+          </p>
+        )}
+        {visitLoadFailed && (
+          <Card>
+            <p>Could not check your current visit.</p>
+            <button type="button" onClick={() => void refreshVisit()} className="mt-2 font-semibold">Try again</button>
+          </Card>
         )}
 
         <CollectionPanel
+          onRetry={() => {
+            void receivablesAccessQuery.refetch();
+            if (canViewReceivables) void snapshotQuery.refetch();
+          }}
           snapshot={snapshotQuery.data}
-          isLoading={snapshotQuery.isLoading}
+          isLoading={receivablesAccessQuery.isLoading || snapshotQuery.isLoading}
           isError={snapshotQuery.isError}
+          accessDenied={receivablesAccessQuery.data === false || isReceivablesAccessDenied(snapshotQuery.error)}
+          accessCheckFailed={receivablesAccessQuery.isError}
           onBucketClick={setSelectedBucket}
           onShareReminder={() => handleShareReminder()}
           onOpenLedger={handleOpenLedger}
         />
 
         <div className="grid grid-cols-2 gap-3">
-          {!visitForCustomer ? (
+          {!activeVisit ? (
             <button
               type="button"
-              disabled={isStarting}
+              disabled={isStarting || isLoadingVisit || visitLoadFailed}
               onClick={() => void handleStartVisit()}
               className="col-span-2 flex items-center justify-center gap-2 rounded-xl bg-[var(--role-primary)] px-4 py-4 text-sm font-semibold text-white disabled:opacity-50"
             >
               <Play size={18} weight="fill" />
-              Start visit
+              {isLoadingVisit ? 'Checking current visit…' : 'Start visit'}
             </button>
           ) : null}
 
@@ -385,8 +434,9 @@ export default function CustomerVisitPage(): React.JSX.Element {
 
           <button
             type="button"
+            disabled={!canViewReceivables}
             onClick={handleOpenLedger}
-            className="flex flex-col items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-4"
+            className="flex flex-col items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-4 disabled:opacity-50"
           >
             <FileText size={22} className="text-[var(--role-primary)]" />
             <span className="text-sm font-semibold text-[var(--content-primary)]">Ledger</span>
@@ -415,7 +465,7 @@ export default function CustomerVisitPage(): React.JSX.Element {
       </div>
 
       <BucketBillsSheet
-        bucket={selectedBucket}
+        bucket={canViewReceivables ? selectedBucket : null}
         result={bucketQuery.data}
         isLoading={bucketQuery.isLoading}
         isError={bucketQuery.isError}
@@ -424,7 +474,7 @@ export default function CustomerVisitPage(): React.JSX.Element {
       />
 
       <LedgerStatementSheet
-        isOpen={ledgerOpen}
+        isOpen={ledgerOpen && canViewReceivables}
         range={ledgerRange}
         statement={ledgerQuery.data}
         isLoading={ledgerQuery.isLoading}
@@ -435,11 +485,12 @@ export default function CustomerVisitPage(): React.JSX.Element {
         onShare={handleShareLedger}
       />
 
-      {visitForCustomer && (
+      {activeVisit && (
         <EndVisitSheet
+          key={activeVisit.id}
           isOpen={endSheetOpen}
           onClose={() => setEndSheetOpen(false)}
-          startedAt={visitForCustomer.started_at}
+          startedAt={activeVisit.started_at}
           onComplete={handleEndVisit}
           isSubmitting={isEnding}
         />
@@ -450,16 +501,22 @@ export default function CustomerVisitPage(): React.JSX.Element {
 }
 
 function CollectionPanel({
+  onRetry,
   snapshot,
   isLoading,
   isError,
+  accessDenied,
+  accessCheckFailed,
   onBucketClick,
   onShareReminder,
   onOpenLedger,
 }: {
+  onRetry: () => void;
   snapshot: CollectionSnapshot | undefined;
   isLoading: boolean;
   isError: boolean;
+  accessDenied: boolean;
+  accessCheckFailed: boolean;
   onBucketClick: (bucket: AgingBucketKey) => void;
   onShareReminder: () => void;
   onOpenLedger: () => void;
@@ -472,6 +529,34 @@ function CollectionPanel({
     );
   }
 
+  if (accessDenied) {
+    return (
+      <Card className="space-y-3">
+        <div className="flex items-start gap-3">
+          <WarningCircle size={22} className="mt-0.5 text-amber-500" />
+          <div>
+            <p className="font-semibold text-[var(--content-primary)]">Account balance is managed by another salesperson</p>
+            <p className="text-sm text-[var(--content-secondary)]">You can still place an order and record your visit.</p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  if (accessCheckFailed) {
+    return (
+      <Card className="space-y-3">
+        <div className="flex items-start gap-3">
+          <WarningCircle size={22} className="mt-0.5 text-amber-500" />
+          <div>
+            <p className="font-semibold text-[var(--content-primary)]">Could not check account access</p>
+            <p className="text-sm text-[var(--content-secondary)]">Check your connection and try again.</p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
   if (isError || !snapshot) {
     return (
       <Card className="space-y-3">
@@ -480,6 +565,7 @@ function CollectionPanel({
           <div>
             <p className="font-semibold text-[var(--content-primary)]">Collection unavailable</p>
             <p className="text-sm text-[var(--content-secondary)]">Receivables could not be loaded.</p>
+            <button type="button" onClick={onRetry} className="mt-2 font-semibold">Try again</button>
           </div>
         </div>
       </Card>

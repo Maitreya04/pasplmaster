@@ -1,6 +1,7 @@
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import {
   fetchCustomerCollectionSnapshot,
+  fetchCustomerReceivablesAccess,
   fetchCustomerLedgerStatement,
   fetchCustomerOsBucket,
   fetchCustomerPaymentSignal,
@@ -13,10 +14,27 @@ import {
 const CUSTOMER_SNAPSHOT_STALE_MS = 5 * 60 * 1000;
 const CUSTOMER_DETAIL_STALE_MS = 5 * 60 * 1000;
 
-export function useCustomerCollectionSnapshot(customerId: number) {
+export function useCustomerCollectionSnapshot(customerId: number, enabled = true) {
   return useQuery({
     queryKey: ['receivables', 'customer', customerId, 'snapshot'],
     queryFn: () => fetchCustomerCollectionSnapshot(customerId),
+    enabled: enabled && Number.isFinite(customerId) && customerId > 0,
+    staleTime: CUSTOMER_SNAPSHOT_STALE_MS,
+    gcTime: 10 * 60 * 1000,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  });
+}
+
+/**
+ * Resolve access before loading a financial snapshot. This prevents a known
+ * permission denial from being rendered as a transient data-loading failure.
+ */
+export function useCustomerReceivablesAccess(customerId: number) {
+  return useQuery({
+    queryKey: ['receivables', 'customer', customerId, 'access'],
+    queryFn: () => fetchCustomerReceivablesAccess(customerId),
     enabled: Number.isFinite(customerId) && customerId > 0,
     staleTime: CUSTOMER_SNAPSHOT_STALE_MS,
     gcTime: 10 * 60 * 1000,

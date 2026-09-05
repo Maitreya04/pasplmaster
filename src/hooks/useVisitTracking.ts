@@ -11,7 +11,7 @@ import { useActiveVisit } from './useWorkday';
 
 export function useVisitTracking() {
   const { userId } = useAuth();
-  const { activeVisit, invalidate, setActiveVisit } = useActiveVisit();
+  const { activeVisit, invalidate, setActiveVisit, isLoading, isError, refetch } = useActiveVisit();
   const startMutation = useMutation({
     mutationFn: async (params: {
       customerId: number;
@@ -23,8 +23,9 @@ export function useVisitTracking() {
         interactionType: params.interactionType,
       });
     },
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       if (result.success) {
+        await refetch();
         invalidate();
       }
     },
@@ -64,17 +65,21 @@ export function useVisitTracking() {
       }
 
       if (result.error === 'visit_already_active') {
+        await refetch();
         invalidate();
         return { status: 'already_active' as const };
       }
 
       return { status: 'error' as const, error: result.error };
     },
-    [invalidate, startMutation],
+    [invalidate, refetch, startMutation],
   );
 
   return {
     activeVisit,
+    isLoadingVisit: isLoading,
+    visitLoadFailed: isError,
+    refreshVisit: refetch,
     requestStartVisit,
     endVisit: endMutation.mutateAsync,
     isStarting: startMutation.isPending,

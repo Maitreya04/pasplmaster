@@ -71,7 +71,8 @@ export function useActiveVisit() {
 
   return {
     activeVisit: query.data ?? null,
-    isLoading: query.isLoading,
+    isLoading: query.isPending,
+    isError: query.isError,
     refetch: query.refetch,
     setActiveVisit,
     invalidate,
