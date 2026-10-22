@@ -52,6 +52,9 @@ export interface SalesDashboardData {
     aggregatedAt: string | null;
     sourceMaxVoucherDate: string | null;
     isStale: boolean;
+    lastFullRefreshStatus: 'completed' | 'failed' | 'running' | 'missing';
+    lastFullRefreshAt: string | null;
+    lastFullRefreshError: string | null;
     unmappedRows: number;
     unmappedValue: number;
   };
@@ -106,6 +109,9 @@ interface PaceRpcPayload {
     aggregated_at?: string | null;
     source_max_voucher_date?: string | null;
     is_stale?: boolean;
+    last_full_refresh_status?: 'completed' | 'failed' | 'running' | 'missing';
+    last_full_refresh_at?: string | null;
+    last_full_refresh_error?: string | null;
     unmapped_rows?: number;
     unmapped_value?: number | string;
   };
@@ -205,6 +211,9 @@ function parsePace(payload: PaceRpcPayload): SalesDashboardData {
       aggregatedAt: payload.freshness?.aggregated_at ?? null,
       sourceMaxVoucherDate: payload.freshness?.source_max_voucher_date ?? null,
       isStale: payload.freshness?.is_stale ?? true,
+      lastFullRefreshStatus: payload.freshness?.last_full_refresh_status ?? 'missing',
+      lastFullRefreshAt: payload.freshness?.last_full_refresh_at ?? null,
+      lastFullRefreshError: payload.freshness?.last_full_refresh_error ?? null,
       unmappedRows: payload.freshness?.unmapped_rows ?? 0,
       unmappedValue: numberValue(payload.freshness?.unmapped_value),
     },
