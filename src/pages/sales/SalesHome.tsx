@@ -98,6 +98,43 @@ function gapTone(metric: SalesPeriodMetric): string {
     : 'text-[var(--content-negative)]';
 }
 
+function SalesDataHealthWarning({
+  freshness,
+}: {
+  freshness: SalesDashboardData['freshness'];
+}) {
+  const refreshFailed = freshness.lastFullRefreshStatus === 'failed';
+  const lastAttempt = freshness.lastFullRefreshAt ?? freshness.aggregatedAt;
+  const reason = refreshFailed && freshness.lastFullRefreshError === 'source_volume_guard'
+    ? 'The Busy source volume changed unexpectedly, so the full sales validation was stopped.'
+    : refreshFailed
+      ? 'The latest full sales validation failed.'
+      : 'The latest successful full sales validation is out of date.';
+
+  return (
+    <Card
+      className="border-[var(--border-negative)] bg-[var(--bg-negative-subtle)] p-3"
+      role="alert"
+    >
+      <div className="flex items-start gap-3">
+        <Warning size={20} weight="fill" className="mt-0.5 shrink-0 text-[var(--content-negative)]" />
+        <div>
+          <p className="text-sm font-semibold text-[var(--content-negative)]">Sales data needs verification</p>
+          <p className="mt-0.5 text-xs leading-relaxed text-[var(--content-secondary)]">
+            {reason} Dashboard totals may be incomplete. Do not use these figures for targets,
+            incentives, or stock decisions until the Busy sync is checked.
+          </p>
+          {lastAttempt && (
+            <p className="mt-1 text-[11px] font-medium text-[var(--content-secondary)]">
+              Last full refresh attempt {formatTimeAgo(lastAttempt)}.
+            </p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function PeriodControl({
   value,
   onChange,
@@ -622,13 +659,15 @@ export default function SalesHome({
           </Card>
         )}
 
+        {data?.freshness.isStale && <SalesDataHealthWarning freshness={data.freshness} />}
+
         {showQuickActions && <QuickActions />}
 
         {isLoading ? <ModuleSkeleton /> : data ? (
           <UnifiedSalesModule data={data} period={period} onPeriodChange={setPeriod} />
         ) : null}
 
-        {data?.freshness.aggregatedAt && (
+        {data?.freshness.aggregatedAt && !data.freshness.isStale && (
           <p className="text-center text-xs text-[var(--content-tertiary)]">
             Busy summary refreshed {formatTimeAgo(data.freshness.aggregatedAt)}
           </p>
