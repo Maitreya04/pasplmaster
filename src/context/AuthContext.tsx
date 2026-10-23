@@ -83,8 +83,30 @@ const USER_PROFILE_SELECT = 'id, full_name, role, stock_location_code, phone, is
 const SESSION_EXPIRED_MESSAGE = 'Your previous login expired. Enter your PIN to continue.';
 const SESSION_VERIFY_FAILED_MESSAGE =
   'We could not verify your saved login. Enter your PIN again to reconnect.';
+const SERVICE_UNAVAILABLE_MESSAGE =
+  'The server is taking longer than expected to respond. Please try again in a moment.';
 const PROFILE_MISSING_MESSAGE =
   'This login is no longer linked to an active staff profile. Sign in again or contact admin.';
+const AUTH_REQUEST_TIMEOUT_MS = 12_000;
+
+function withAuthTimeout<T>(request: PromiseLike<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      reject(new Error(`Supabase auth request timed out after ${AUTH_REQUEST_TIMEOUT_MS}ms`));
+    }, AUTH_REQUEST_TIMEOUT_MS);
+
+    void request.then(
+      (value) => {
+        window.clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error: unknown) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      },
+    );
+  });
+}
 
 function safeLocalStorageGet(key: string): string | null {
   if (typeof window === 'undefined') return null;
@@ -406,7 +428,21 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
         return { success: false, message: SESSION_EXPIRED_MESSAGE };
       }
 
-      const { data: verifiedUserData, error: verifiedUserError } = await supabase.auth.getUser();
+      let verifiedUserResult: Awaited<ReturnType<typeof supabase.auth.getUser>>;
+      try {
+        verifiedUserResult = await withAuthTimeout(supabase.auth.getUser());
+      } catch (error) {
+        if (cancelled) return { success: false, message: null };
+        console.error('auth user verification did not complete', error);
+        const cachedProfile = getCachedProfileForGrace(initial);
+        if (cachedProfile) {
+          applySupabaseProfile(cachedProfile, nextSession);
+          return { success: true, message: null };
+        }
+        return { success: false, message: SERVICE_UNAVAILABLE_MESSAGE };
+      }
+
+      const { data: verifiedUserData, error: verifiedUserError } = verifiedUserResult;
       if (cancelled) return { success: false, message: null };
       if (
         verifiedUserError ||
@@ -435,12 +471,28 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
 
       const verifiedSession = withVerifiedUser(nextSession, verifiedUserData.user);
 
-      const { data: profile, error } = await supabase
-        .from('users')
-        .select(USER_PROFILE_SELECT)
-        .eq('auth_id', verifiedSession.user.id)
-        .eq('is_active', true)
-        .maybeSingle();
+      let profileResult;
+      try {
+        profileResult = await withAuthTimeout(
+          supabase
+            .from('users')
+            .select(USER_PROFILE_SELECT)
+            .eq('auth_id', verifiedSession.user.id)
+            .eq('is_active', true)
+            .maybeSingle(),
+        );
+      } catch (error) {
+        if (cancelled) return { success: false, message: null };
+        console.error('users lookup by auth_id did not complete', error);
+        const cachedProfile = getCachedProfileForGrace(initial);
+        if (cachedProfile) {
+          applySupabaseProfile(cachedProfile, verifiedSession);
+          return { success: true, message: null };
+        }
+        return { success: false, message: SERVICE_UNAVAILABLE_MESSAGE };
+      }
+
+      const { data: profile, error } = profileResult;
 
       if (cancelled) return { success: false, message: null };
       if (error) {
@@ -474,7 +526,18 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     };
 
     void (async () => {
-      const { data, error } = await supabase.auth.getSession();
+      let sessionResult: Awaited<ReturnType<typeof supabase.auth.getSession>>;
+      try {
+        sessionResult = await withAuthTimeout(supabase.auth.getSession());
+      } catch (error) {
+        if (cancelled) return;
+        console.error('auth session lookup did not complete', error);
+        clearAuthState(SERVICE_UNAVAILABLE_MESSAGE);
+        setAuthReady(true);
+        return;
+      }
+
+      const { data, error } = sessionResult;
       if (cancelled) return;
 
       if (error) {
@@ -535,18 +598,38 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     async (phone: string, pin: string): Promise<PhoneLoginResult> => {
       setAuthRecoveryMessage(null);
       const email = phoneToAuthEmail(phone);
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password: pin });
+      let loginResult: Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>;
+      try {
+        loginResult = await withAuthTimeout(
+          supabase.auth.signInWithPassword({ email, password: pin }),
+        );
+      } catch (error) {
+        console.error('auth sign-in did not complete', error);
+        return { success: false, error: SERVICE_UNAVAILABLE_MESSAGE };
+      }
+
+      const { data, error } = loginResult;
 
       if (error || !data.session) {
         return { success: false, error: formatPhoneLoginError(error?.message) };
       }
 
-      const { data: profile, error: profileError } = await supabase
-        .from('users')
-        .select(USER_PROFILE_SELECT)
-        .eq('auth_id', data.user.id)
-        .eq('is_active', true)
-        .maybeSingle();
+      let profileResult;
+      try {
+        profileResult = await withAuthTimeout(
+          supabase
+            .from('users')
+            .select(USER_PROFILE_SELECT)
+            .eq('auth_id', data.user.id)
+            .eq('is_active', true)
+            .maybeSingle(),
+        );
+      } catch (error) {
+        console.error('users lookup by auth_id after login did not complete', error);
+        return { success: false, error: SERVICE_UNAVAILABLE_MESSAGE };
+      }
+
+      const { data: profile, error: profileError } = profileResult;
 
       if (profileError || !profile) {
         await supabase.auth.signOut();

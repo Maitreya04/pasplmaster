@@ -51,6 +51,7 @@ import { usePendingItems } from '../../hooks/usePendingItems';
 import {
   useCustomerCollectionSnapshot,
   useCustomerCollectionSnapshots,
+  useCustomerReceivablesAccess,
   useCustomerLedgerStatement,
   useCustomerOsBucket,
   useCustomerPaymentSignal,
@@ -64,6 +65,7 @@ import {
   buildCollectionReminderMessage,
   buildLedgerStatementMessage,
   formatAgingSnapshotCaption,
+  isReceivablesAccessDenied,
   whatsappUrlForCustomer,
   type AgingBucketFilter,
   type AgingTone,
@@ -517,6 +519,9 @@ function CustomerSnapshotEmptyState() {
 function AccountSnapshotCard({
   customer,
   snapshot,
+  accessLoading,
+  accessDenied,
+  accessCheckFailed,
   snapshotLoading,
   onBucket,
   onCollect,
@@ -526,6 +531,9 @@ function AccountSnapshotCard({
 }: {
   customer: Customer;
   snapshot: CollectionSnapshot | undefined;
+  accessLoading: boolean;
+  accessDenied: boolean;
+  accessCheckFailed: boolean;
   snapshotLoading: boolean;
   onBucket: (bucket: AgingBucketFilter) => void;
   onCollect: () => void;
@@ -533,11 +541,39 @@ function AccountSnapshotCard({
   onExpand: () => void;
   onClear: () => void;
 }) {
-  if (snapshotLoading) {
+  if (accessLoading || snapshotLoading) {
     return (
       <section className="space-y-3">
         <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
           <Skeleton variant="text" lines={7} />
+        </div>
+      </section>
+    );
+  }
+
+  if (accessDenied) {
+    return (
+      <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+        <div className="flex items-start gap-3">
+          <WarningCircle size={20} className="mt-0.5 shrink-0 text-amber-500" />
+          <div>
+            <p className="text-sm font-semibold text-[var(--content-primary)]">Account balance is managed by another salesperson</p>
+            <p className="mt-1 text-xs text-[var(--content-tertiary)]">You can still place an order for this customer.</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (accessCheckFailed) {
+    return (
+      <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+        <div className="flex items-start gap-3">
+          <WarningCircle size={20} className="mt-0.5 shrink-0 text-amber-500" />
+          <div>
+            <p className="text-sm font-semibold text-[var(--content-primary)]">Could not check account access</p>
+            <p className="mt-1 text-xs text-[var(--content-tertiary)]">Check your connection and try again. Ordering stays available.</p>
+          </div>
         </div>
       </section>
     );
@@ -549,8 +585,8 @@ function AccountSnapshotCard({
         <div className="flex items-start gap-3">
           <WarningCircle size={20} className="mt-0.5 shrink-0 text-amber-500" />
           <div>
-            <p className="text-sm font-semibold text-[var(--content-primary)]">Account snapshot unavailable</p>
-            <p className="mt-1 text-xs text-[var(--content-tertiary)]">Ordering stays available.</p>
+            <p className="text-sm font-semibold text-[var(--content-primary)]">Could not load account balance</p>
+            <p className="mt-1 text-xs text-[var(--content-tertiary)]">Check your connection and try again. Ordering stays available.</p>
           </div>
         </div>
       </section>
@@ -1470,23 +1506,25 @@ function SmartLanding({
   const activeCustomerName = activeCustomer?.name ?? null;
   const activeCustomerReceivablesId = activeCustomer?.id ?? 0;
 
-  const snapshotQuery = useCustomerCollectionSnapshot(activeCustomerReceivablesId);
+  const receivablesAccessQuery = useCustomerReceivablesAccess(activeCustomerReceivablesId);
+  const canViewReceivables = receivablesAccessQuery.data === true;
+  const snapshotQuery = useCustomerCollectionSnapshot(activeCustomerReceivablesId, canViewReceivables);
   const paymentSignalQuery = useCustomerPaymentSignal({
     customerId: activeCustomerReceivablesId,
-    enabled: Boolean(activeCustomer?.id && paymentSheetOpen),
+    enabled: Boolean(activeCustomer?.id && paymentSheetOpen && canViewReceivables),
     windowDays: 180,
     limit: 5,
   });
   const bucketQuery = useCustomerOsBucket(
     activeCustomerReceivablesId,
     selectedReceivablesBucket ?? 'all',
-    Boolean(activeCustomer?.id && selectedReceivablesBucket),
+    Boolean(activeCustomer?.id && selectedReceivablesBucket && canViewReceivables),
   );
   const ledgerStatementQuery = useCustomerLedgerStatement({
     customerId: activeCustomerReceivablesId,
     fromDate: ledgerRange.fromDate,
     toDate: ledgerRange.toDate,
-    enabled: Boolean(activeCustomer?.id && ledgerShareOpen),
+    enabled: Boolean(activeCustomer?.id && ledgerShareOpen && canViewReceivables),
     limit: NEW_ORDER_LEDGER_LIMIT,
   });
 
@@ -1585,8 +1623,12 @@ function SmartLanding({
     () =>
       customerRailResolved
         .map((entry) => entry.customer?.id)
-        .filter((id): id is number => typeof id === 'number' && id > 0),
-    [customerRailResolved],
+        .filter((id): id is number =>
+          typeof id === 'number' &&
+          id > 0 &&
+          (id !== activeCustomerId || canViewReceivables),
+        ),
+    [activeCustomerId, canViewReceivables, customerRailResolved],
   );
 
   const { byId: railSnapshotsById, loadingIds: railSnapshotLoadingIds } =
@@ -1853,7 +1895,10 @@ function SmartLanding({
             const customerId = customer?.id;
             const snapshot = customerId != null ? railSnapshotsById.get(customerId) : undefined;
             const snapshotLoading =
-              customerId != null && !snapshot && railSnapshotLoadingIds.has(customerId);
+              customerId != null &&
+              !snapshot &&
+              (railSnapshotLoadingIds.has(customerId) ||
+                (isActive && receivablesAccessQuery.isLoading));
 
             return (
               <YourCustomerRailCard
@@ -1884,6 +1929,9 @@ function SmartLanding({
         <AccountSnapshotCard
           customer={activeCustomer}
           snapshot={snapshotQuery.data}
+          accessLoading={receivablesAccessQuery.isLoading}
+          accessDenied={receivablesAccessQuery.data === false || isReceivablesAccessDenied(snapshotQuery.error)}
+          accessCheckFailed={receivablesAccessQuery.isError}
           snapshotLoading={snapshotQuery.isLoading}
           onBucket={setSelectedReceivablesBucket}
           onCollect={() => setPaymentSheetOpen(true)}
@@ -2108,7 +2156,7 @@ function SmartLanding({
       </BottomSheet>
 
       <AccountBillsSheet
-        bucket={selectedReceivablesBucket}
+        bucket={canViewReceivables ? selectedReceivablesBucket : null}
         result={bucketQuery.data}
         isLoading={bucketQuery.isLoading}
         isError={bucketQuery.isError}
@@ -2122,7 +2170,7 @@ function SmartLanding({
       />
 
       <PaymentHistorySheet
-        isOpen={paymentSheetOpen}
+        isOpen={paymentSheetOpen && canViewReceivables}
         signal={paymentSignalQuery.data}
         isLoading={paymentSignalQuery.isLoading}
         isError={paymentSignalQuery.isError}
@@ -2135,7 +2183,7 @@ function SmartLanding({
       />
 
       <LedgerShareSheet
-        isOpen={ledgerShareOpen}
+        isOpen={ledgerShareOpen && canViewReceivables}
         range={ledgerRange}
         statement={ledgerStatementQuery.data}
         snapshot={snapshotQuery.data}

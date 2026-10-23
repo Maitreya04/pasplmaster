@@ -1,18 +1,15 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { subscribeToTable, type ChangePayload } from '../lib/realtime';
-import {
-  isDirectTableRealtimeEnabled,
-  isSupabasePostgresChangesEnabled,
-} from '../lib/realtimePolicy';
+import { isSupabasePostgresChangesEnabled } from '../lib/realtimePolicy';
 import type { UserNotification } from '../types';
 
 const PAGE_SIZE = 50;
 /** Inbox only loads recent rows — matches prune_user_notifications unread window. */
 const INBOX_DAYS = 180;
 const REALTIME_ON = isSupabasePostgresChangesEnabled();
-const DIRECT_TABLE_REALTIME_ON = isDirectTableRealtimeEnabled();
-const POLL_MS = 10_000;
+/** WebSocket fallback only; push notifications cover urgent delivery. */
+const POLL_MS = 60_000;
 const REFETCH_DEBOUNCE_MS = 750;
 
 const NOTIFICATION_COLUMNS =
@@ -121,7 +118,10 @@ export function useUserNotifications(userId: number | null) {
   useEffect(() => {
     if (!userId) return;
 
-    const useRealtime = REALTIME_ON && DIRECT_TABLE_REALTIME_ON;
+    // Notifications are a low-churn, user-filtered table that is already in
+    // the Realtime publication. Do not tie this feed to the opt-in switch for
+    // high-churn direct table subscriptions, otherwise every open app polls it.
+    const useRealtime = REALTIME_ON;
 
     if (!useRealtime) {
       const id = window.setInterval(() => {

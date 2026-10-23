@@ -18,13 +18,14 @@ export function isSupabasePostgresChangesEnabled(): boolean {
 /**
  * Use the low-volume queue event stream + compact billing snapshot RPC.
  *
- * Keep this behind a flag so production can roll the DB migration first. When
- * enabled, queue UIs subscribe to `queue_events` instead of high-churn tables
- * like `orders`, `order_items`, `work_claims`, and stock sync tables.
+ * Queue-event migrations are now part of the production baseline, so this is
+ * on by default. Set the flag to `false` only when diagnosing a deployment.
+ * Queue UIs subscribe to `queue_events` instead of high-churn tables like
+ * `orders`, `order_items`, `work_claims`, and stock sync tables.
  */
 export function isBillingQueueEventsEnabled(): boolean {
   const v = import.meta.env.VITE_BILLING_QUEUE_EVENTS;
-  return v === 'true' || v === '1';
+  return v !== 'false' && v !== '0';
 }
 
 /**
