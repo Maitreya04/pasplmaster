@@ -17,11 +17,7 @@ import {
   isTransientSupabaseError,
   registerSessionRecoveryHandler,
 } from '../lib/supabase/authError';
-import {
-  clearTestAdminSession,
-  isTestAdminPhone,
-  markTestAdminSession,
-} from '../lib/auth/testAdmin';
+import { clearTestAdminSession } from '../lib/auth/testAdmin';
 import type { StockLocationCode, UserRole } from '../types';
 
 type Role = 'sales' | 'billing' | 'picking' | 'admin' | 'partner' | null;
@@ -81,8 +77,6 @@ const LS_KEYS = {
   impersonation: 'paspl_impersonation',
 } as const;
 
-/** Admin section passcode (separate from app access code). */
-const ADMIN_PASSCODE = '0807';
 const USER_PROFILE_SELECT = 'id, full_name, role, stock_location_code, phone, is_active';
 const SESSION_EXPIRED_MESSAGE = 'Your previous login expired. Enter your PIN to continue.';
 const SESSION_VERIFY_FAILED_MESSAGE =
@@ -284,40 +278,6 @@ function getCachedProfileForGrace(initial: ReturnType<typeof loadFromStorage>): 
   };
 }
 
-function activateTestAdminSession(setTestAdminSession: (value: boolean) => void): void {
-  markTestAdminSession();
-  setTestAdminSession(true);
-}
-
-function clearSelectedRoleForTesting(
-  setters: {
-    setActualRole: (value: Role) => void;
-    setActualUserName: (value: string | null) => void;
-    setActualUserId: (value: number | null) => void;
-    setActualBranch: (value: StockLocationCode | null) => void;
-    setPartnerCompanyId: (value: number | null) => void;
-    setImpersonation: (value: StoredImpersonation | null) => void;
-  },
-): void {
-  setters.setActualRole(null);
-  setters.setActualUserName(null);
-  setters.setActualUserId(null);
-  setters.setActualBranch(null);
-  setters.setPartnerCompanyId(null);
-  setters.setImpersonation(null);
-  safeLocalStorageRemove(LS_KEYS.role);
-  safeLocalStorageRemove(LS_KEYS.userName);
-  safeLocalStorageRemove(LS_KEYS.userId);
-  safeLocalStorageRemove(LS_KEYS.branch);
-  safeLocalStorageRemove(LS_KEYS.partnerCompanyId);
-  safeSessionStorageRemove(LS_KEYS.impersonation);
-}
-
-function unlockAdminForTesting(setAdminUnlocked: (value: boolean) => void): void {
-  setAdminUnlocked(true);
-  safeSessionStorageSet(LS_KEYS.adminUnlocked, 'true');
-}
-
 export function AuthProvider({ children }: { children: ReactNode }): React.JSX.Element | null {
   const [initial] = useState(() => {
     const stored = loadFromStorage();
@@ -337,7 +297,6 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   const [impersonation, setImpersonation] = useState<StoredImpersonation | null>(null);
   const [partnerCompanyId, setPartnerCompanyId] = useState<number | null>(null);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
-  const [testAdminSession, setTestAdminSession] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
   const authModeRef = useRef<AuthMode>(null);
@@ -383,6 +342,10 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     setAuthRecoveryMessage(null);
     setPartnerCompanyId(null);
     persistProfile(profile);
+    if (profile.role === 'admin') {
+      setAdminUnlocked(true);
+      safeSessionStorageSet(LS_KEYS.adminUnlocked, 'true');
+    }
 
     if (canRestoreImpersonation) {
       setImpersonation(storedImpersonation);
@@ -420,7 +383,6 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     safeSessionStorageRemove(LS_KEYS.adminUnlocked);
     safeSessionStorageRemove(LS_KEYS.impersonation);
     clearTestAdminSession();
-    setTestAdminSession(false);
     setAuthRecoveryMessage(recoveryMessage);
   }, []);
 
@@ -518,9 +480,9 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
       }
 
       applySupabaseProfile(profile as UserProfileRow, verifiedSession);
-      if (isTestAdminPhone(profile.phone ?? '')) {
-        activateTestAdminSession(setTestAdminSession);
-        unlockAdminForTesting(setAdminUnlocked);
+      if ((profile as UserProfileRow).role === 'admin') {
+        setAdminUnlocked(true);
+        safeSessionStorageSet(LS_KEYS.adminUnlocked, 'true');
       }
       void supabase
         .from('users')
@@ -644,17 +606,9 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
       applySupabaseProfile(profile as UserProfileRow, data.session);
       const normalizedPhone = normalizePhoneInput(phone);
       saveDeviceProfile({ phone: normalizedPhone, displayName: profile.full_name });
-      if (isTestAdminPhone(normalizedPhone)) {
-        activateTestAdminSession(setTestAdminSession);
-        unlockAdminForTesting(setAdminUnlocked);
-        clearSelectedRoleForTesting({
-          setActualRole,
-          setActualUserName,
-          setActualUserId,
-          setActualBranch,
-          setPartnerCompanyId,
-          setImpersonation,
-        });
+      if (profile.role === 'admin') {
+        setAdminUnlocked(true);
+        safeSessionStorageSet(LS_KEYS.adminUnlocked, 'true');
       }
       void supabase
         .from('users')
@@ -689,13 +643,12 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   }, [isAuthenticated, recoverLogin, session]);
 
   const unlockAdmin = useCallback((code: string): boolean => {
-    if (code === ADMIN_PASSCODE) {
-      setAdminUnlocked(true);
-      safeSessionStorageSet(LS_KEYS.adminUnlocked, 'true');
-      return true;
-    }
-    return false;
-  }, []);
+    void code;
+    if (actualRole !== 'admin') return false;
+    setAdminUnlocked(true);
+    safeSessionStorageSet(LS_KEYS.adminUnlocked, 'true');
+    return true;
+  }, [actualRole]);
 
   const startImpersonation = useCallback(
     (target: ImpersonationTarget): boolean => {
@@ -849,7 +802,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
         exitImpersonation,
         logout,
         switchRole,
-        canSwitchRoles: testAdminSession,
+        canSwitchRoles: import.meta.env.DEV,
       }}
     >
       {children}
