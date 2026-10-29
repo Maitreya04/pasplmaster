@@ -46,7 +46,6 @@ const ActivePicksPage = lazy(() => import('./pages/picking/ActivePicksPage'));
 
 const AdminPage = lazy(() => import('./pages/admin/AdminPage'));
 const UserManagementPage = lazy(() => import('./pages/admin/UserManagementPage'));
-const AdminPasscodePage = lazy(() => import('./pages/admin/AdminPasscodePage'));
 const UploadPage = lazy(() => import('./pages/admin/UploadPage'));
 const LabelStudioPage = lazy(() => import('./pages/admin/LabelStudioPage'));
 const PackCatalogPage = lazy(() => import('./pages/admin/PackCatalogPage'));
@@ -106,8 +105,9 @@ function RequireRole({ children }: { children: React.ReactNode }) {
 }
 
 function RequireAdminUnlock({ children }: { children: React.ReactNode }) {
-  const { role, adminUnlocked } = useAuth();
-  if (role === 'admin' && !adminUnlocked) return <Navigate to="/admin-passcode" replace />;
+  const { role, authReady } = useAuth();
+  if (!authReady) return <AuthBootScreen />;
+  if (role !== 'admin') return <Navigate to="/select-role" replace />;
   return <>{children}</>;
 }
 
@@ -223,15 +223,6 @@ export default function App(): React.JSX.Element | null {
           <Route path="pick/:id/finish" element={<PickFinalisePage />} />
           <Route path="preview/:id" element={<PickPreviewPage />} />
         </Route>
-
-        <Route
-          path="/admin-passcode"
-          element={
-            <RequireAuth>
-              <AdminPasscodePage />
-            </RequireAuth>
-          }
-        />
 
         {/* Admin */}
         <Route
