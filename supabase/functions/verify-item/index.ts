@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { assertActiveStaff } from '../_shared/assertStaff.ts'
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
 const GEMINI_FAST_MODEL = 'gemini-2.5-flash'
@@ -84,6 +85,14 @@ serve(async (req) => {
   }
 
   try {
+    const auth = await assertActiveStaff(req)
+    if (!auth.ok) {
+      return new Response(
+        JSON.stringify({ match: false, confidence: 0, reason: auth.error }),
+        { status: auth.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     const { imageBase64, expectedItem } = await req.json()
 
     if (!imageBase64 || !expectedItem) {
