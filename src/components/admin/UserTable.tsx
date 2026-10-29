@@ -63,6 +63,15 @@ function formatTargetLakhs(value: number | null | undefined): string {
   return `${n.toFixed(1)}L`;
 }
 
+function activeManagerCode(row: UserActivationRow): string | null {
+  if (!row.invite_code) return null;
+  if (row.invite_code_expires_at) {
+    const expiresAt = Date.parse(row.invite_code_expires_at);
+    if (Number.isFinite(expiresAt) && expiresAt < Date.now()) return null;
+  }
+  return row.invite_code;
+}
+
 export function UserTable({
   rows,
   pendingActionUserId,
@@ -102,6 +111,7 @@ export function UserTable({
             <th className="px-3 py-2 font-medium">Branch</th>
             <th className="px-3 py-2 font-medium">Status</th>
             <th className="px-3 py-2 font-medium">Phone</th>
+            <th className="px-3 py-2 font-medium">Setup / reset code</th>
             <th className="px-3 py-2 font-medium">FY Target</th>
             <th className="px-3 py-2 font-medium">Actions</th>
           </tr>
@@ -111,6 +121,7 @@ export function UserTable({
             const status = statusLabel(row);
             const items = actionItems(row);
             const isBusy = pendingActionUserId === row.id;
+            const managerCode = activeManagerCode(row);
 
             return (
               <tr
@@ -124,6 +135,7 @@ export function UserTable({
                   <span className={status.className}>{status.text}</span>
                 </td>
                 <td className="px-3 py-2 font-mono">{row.phone ?? '—'}</td>
+                <td className="px-3 py-2 font-mono tracking-wider">{managerCode ?? '—'}</td>
                 <td className="px-3 py-2 font-mono">
                   {row.role === 'sales' ? formatTargetLakhs(row.current_fy_target_lakhs) : '-'}
                 </td>
