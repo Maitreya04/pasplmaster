@@ -12,7 +12,11 @@ import { supabase } from '../lib/supabase/client';
 import { clearCartDraft } from '../lib/cartDraftStorage';
 import { warmPickQueueRoute } from '../lib/picking/warmPickQueue';
 import { phoneToAuthEmail, normalizePhoneInput, saveDeviceProfile } from '../lib/auth/phoneAuth';
-import { isSupabaseAuthError, isTransientSupabaseError } from '../lib/supabase/authError';
+import {
+  isSupabaseAuthError,
+  isTransientSupabaseError,
+  registerSessionRecoveryHandler,
+} from '../lib/supabase/authError';
 import {
   clearTestAdminSession,
   isTestAdminPhone,
@@ -663,7 +667,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   );
 
   const recoverLogin = useCallback(
-    async (message = SESSION_VERIFY_FAILED_MESSAGE): Promise<void> => {
+    async (message = SESSION_EXPIRED_MESSAGE): Promise<void> => {
       if (authModeRef.current === 'supabase' || session) {
         try {
           await supabase.auth.signOut();
@@ -675,6 +679,14 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     },
     [clearAuthState, session],
   );
+
+  useEffect(() => {
+    registerSessionRecoveryHandler((message) => {
+      if (!isAuthenticated && !session) return;
+      void recoverLogin(message || SESSION_EXPIRED_MESSAGE);
+    });
+    return () => registerSessionRecoveryHandler(null);
+  }, [isAuthenticated, recoverLogin, session]);
 
   const unlockAdmin = useCallback((code: string): boolean => {
     if (code === ADMIN_PASSCODE) {
