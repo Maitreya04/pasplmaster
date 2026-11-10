@@ -198,11 +198,13 @@ export function resetPinErrorMessage(error: string | undefined): string {
     case 'code_consumed':
       return 'Reset code was already used. Go back and generate a new one.';
     case 'phone_mismatch':
-      return 'Phone number does not match our records.';
+      return 'Phone number does not match the number on file for this account.';
     case 'not_activated':
       return 'This account is not set up yet. Use Get started instead.';
     case 'phone_not_registered':
-      return 'No phone on file for this account. Contact admin.';
+      return 'No phone is registered for this account. Ask admin to set your phone first.';
+    case 'user_not_found':
+      return 'Account not found. Ask your manager to check your name.';
     case 'pin_must_be_4_to_6_digits':
       return 'PIN must be 4–6 digits.';
     case 'invalid_phone':

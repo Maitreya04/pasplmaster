@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase/client';
@@ -43,6 +43,7 @@ export default function GetStartedPage(): React.JSX.Element | null {
   const [search, setSearch] = useState('');
   const [selectedUser, setSelectedUser] = useState<PendingUser | null>(null);
   const [phone, setPhone] = useState('');
+  const [codeRequested, setCodeRequested] = useState(false);
   const [inviteCode, setInviteCode] = useState('');
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -60,38 +61,6 @@ export default function GetStartedPage(): React.JSX.Element | null {
     if (!query) return pendingUsers;
     return pendingUsers.filter((user) => user.full_name.toLowerCase().includes(query));
   }, [pendingUsers, search]);
-
-  useEffect(() => {
-    if (step !== 'phone' || !selectedUser) return;
-
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    void (async () => {
-      const { data, error: rpcError } = await supabase.rpc('generate_self_service_invite_code', {
-        p_user_id: selectedUser.id,
-      });
-      if (cancelled) return;
-      setLoading(false);
-
-      if (rpcError) {
-        setError('Could not generate verification code. Try again.');
-        return;
-      }
-
-      if (!data?.success) {
-        setError(inviteCodeErrorMessage(data?.error));
-        return;
-      }
-
-      setInviteCode(data.invite_code as string);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [step, selectedUser]);
 
   if (authReady && isAuthenticated && authMode === 'supabase' && role && ROLE_HOME[role]) {
     return <Navigate to={ROLE_HOME[role]} replace />;
@@ -112,14 +81,33 @@ export default function GetStartedPage(): React.JSX.Element | null {
     setStep('phone');
   };
 
+  const requestInviteCode = async () => {
+    if (!selectedUser) return;
+    setLoading(true);
+    setError(null);
+    const { data, error: rpcError } = await supabase.rpc('generate_self_service_invite_code', {
+      p_user_id: selectedUser.id,
+    });
+    setLoading(false);
+    if (rpcError) {
+      setError('Could not generate verification code. Try again.');
+      return;
+    }
+    if (!data?.success) {
+      setError(inviteCodeErrorMessage(data?.error));
+      return;
+    }
+    setCodeRequested(true);
+    setInviteCode('');
+  };
+
   const continueFromPhone = () => {
-    const normalizedPhone = normalizePhoneInput(phone);
-    if (!isValidPhone(normalizedPhone)) {
+    if (!isValidPhone(phone)) {
       setError('Enter a valid 10-digit mobile number');
       return;
     }
-    if (!inviteCode) {
-      setError('Waiting for verification code. Please try again.');
+    if (!codeRequested || !inviteCode.trim()) {
+      setError('Request a verification code, then enter the code from your manager.');
       return;
     }
     setError(null);
@@ -297,25 +285,35 @@ export default function GetStartedPage(): React.JSX.Element | null {
               />
             </label>
 
-            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-2">
-              <p className="text-sm text-[var(--content-secondary)]">Your verification code</p>
-              {loading && !inviteCode ? (
-                <p className="text-sm text-[var(--content-secondary)]">Generating code…</p>
-              ) : (
-                <p className="font-mono text-2xl font-bold tracking-wider text-[var(--content-primary)]">
-                  {inviteCode || '—'}
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void requestInviteCode()}
+              className="w-full rounded-xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] font-semibold py-3 disabled:opacity-50"
+            >
+              {loading ? 'Requesting…' : codeRequested ? 'Request code again' : 'Request verification code'}
+            </button>
+
+            {codeRequested && (
+              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-3">
+                <p className="text-sm text-[var(--content-secondary)]">
+                  Ask your manager for the verification code (Admin → Users). It is not shown here.
                 </p>
-              )}
-              <p className="text-xs text-[var(--content-tertiary)]">
-                Show this code to your manager so they can confirm your identity.
-              </p>
-            </div>
+                <input
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                  placeholder="Manager verification code"
+                  autoCapitalize="characters"
+                  className="w-full rounded-xl border border-[var(--border-opaque)] bg-[var(--bg-primary)] px-4 py-3 font-mono text-lg tracking-wider"
+                />
+              </div>
+            )}
 
             {error && <p className="text-sm text-[var(--content-negative)]">{error}</p>}
 
             <button
               type="button"
-              disabled={loading || !inviteCode}
+              disabled={loading || !codeRequested || !inviteCode.trim() || !isValidPhone(phone)}
               onClick={continueFromPhone}
               className="w-full rounded-xl bg-[var(--content-accent)] text-white font-semibold py-3 disabled:opacity-50"
             >
@@ -328,6 +326,7 @@ export default function GetStartedPage(): React.JSX.Element | null {
                 setStep('name');
                 setInviteCode('');
                 setPhone('');
+                setCodeRequested(false);
                 setError(null);
               }}
               className="w-full text-sm text-[var(--content-tertiary)]"
