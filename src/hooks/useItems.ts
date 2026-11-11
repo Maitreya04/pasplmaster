@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase/client';
+import { getRestoredSession } from '../lib/supabase/sessionGate';
 import { queryClient } from '../lib/queryClient';
 import { idbGet, idbSet } from '../lib/idb';
 import type { Item } from '../types';
@@ -301,6 +302,17 @@ export const ITEMS_QUERY_KEY = ['items'] as const;
 async function fetchAllItemsInternal(): Promise<Item[]> {
   await hydrateFromIdb();
 
+  const session = await getRestoredSession();
+  if (!session) {
+    // Never hit PostgREST as anon. Return IDB snapshot if present; otherwise fail
+    // without caching so a later authenticated call can load the catalog.
+    if (cachedItems.size > 0) {
+      lastReturnedArray = Array.from(cachedItems.values());
+      return lastReturnedArray;
+    }
+    throw new Error('Items catalog requires an authenticated session');
+  }
+
   const hasWarmCatalog = cachedItems.size > 0 && watermark != null;
 
   if (hasWarmCatalog) {
@@ -355,9 +367,12 @@ export function useItems() {
 
 /** Fire-and-forget prefetch — call early so items are warm before user needs them. */
 export function prefetchItems(): void {
-  void queryClient.prefetchQuery({
-    queryKey: ITEMS_QUERY_KEY,
-    queryFn: fetchAllItems,
-    staleTime: STOCK_SYNC_INTERVAL_MS,
+  void getRestoredSession().then((session) => {
+    if (!session) return;
+    void queryClient.prefetchQuery({
+      queryKey: ITEMS_QUERY_KEY,
+      queryFn: fetchAllItems,
+      staleTime: STOCK_SYNC_INTERVAL_MS,
+    });
   });
 }

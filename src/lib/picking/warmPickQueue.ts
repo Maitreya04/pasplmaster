@@ -1,4 +1,5 @@
 import { prefetchClaimableOrders } from '../../hooks/useClaimableOrders';
+import { getRestoredSession } from '../supabase/sessionGate';
 import type { WorkflowStatus } from '../../types';
 
 const PICK_QUEUE_OPTIONS = {
@@ -17,7 +18,10 @@ export function prefetchPickQueueData(
   userId: number | null,
   pickerBranch: 'main_store' | 'jabalpur' | null = null,
 ): void {
-  prefetchClaimableOrders(PICK_QUEUE_OPTIONS, userId, pickerBranch);
+  void getRestoredSession().then((session) => {
+    if (!session) return;
+    prefetchClaimableOrders(PICK_QUEUE_OPTIONS, userId, pickerBranch);
+  });
 }
 
 /** Warm both route chunks and queue data — call as early as possible for pickers. */

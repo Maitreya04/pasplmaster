@@ -9,6 +9,7 @@ import {
   parsePackPickPayload,
 } from '../lib/scanner/qrPayload';
 import { supabase } from '../lib/supabase/client';
+import { getRestoredSession } from '../lib/supabase/sessionGate';
 
 export interface ScanCatalogItem extends Item {
   itemCode: string;
@@ -130,11 +131,22 @@ export async function initializeItemScanIndex(): Promise<void> {
   if (state.status === 'ready') return;
   if (initializePromise) return initializePromise;
 
-  state.setLoading();
+  // item_barcodes / items require an authenticated JWT after the anon lockdown.
+  // Wait for session restore; leave status idle so a later login/retry can run.
+  const session = await getRestoredSession();
+  if (!session) return;
+
+  const latest = useItemScanIndexStore.getState();
+  if (latest.status === 'ready') return;
+  if (initializePromise) return initializePromise;
+
+  latest.setLoading();
   initializePromise = Promise.all([
     queryClient.ensureQueryData({
       queryKey: ITEMS_QUERY_KEY,
       queryFn: fetchAllItems,
+      // Successful catalog loads stay warm; failures are not stored as success,
+      // so the next ensureQueryData after session exists will refetch.
       staleTime: Number.POSITIVE_INFINITY,
     }),
     fetchBarcodeMappings(),
@@ -144,6 +156,8 @@ export async function initializeItemScanIndex(): Promise<void> {
     })
     .catch((error: unknown) => {
       const message = error instanceof Error ? error.message : 'Failed to load scan index';
+      // Leave status as error (not ready) so the next caller retries once a session exists.
+      // Do not remove a successful items cache if only barcode mappings failed.
       useItemScanIndexStore.getState().setError(message);
       throw error;
     })
