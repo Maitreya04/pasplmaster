@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.57.4';
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import webpush from 'npm:web-push@3.6.7';
+import { assertActiveStaff } from '../_shared/assertStaff.ts';
 
 type OrderPriority = 'normal' | 'urgent';
 
@@ -305,12 +306,12 @@ serve(async (req) => {
   const pushConfigured = !!(vapidSubject && vapidPublicKey && vapidPrivateKey);
 
   try {
+    const auth = await assertActiveStaff(req);
+    if (!auth.ok) return json(auth.status, { error: auth.error });
+    const admin = auth.admin;
+
     const raw = (await req.json()) as Record<string, unknown>;
     const eventType = raw.eventType as string | undefined;
-
-    const admin = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
 
     const cutoffIso = new Date(Date.now() - CUTOFF_MS).toISOString();
 
