@@ -63,13 +63,30 @@ export function isTransientSupabaseError(error: unknown): boolean {
 const DEFAULT_RECOVERY = 'Your previous login expired. Enter your PIN to continue.';
 let recoveryHandler: ((message: string) => void) | null = null;
 let recoveryBusyUntil = 0;
+/** When false (auth still booting), 401s from pre-session races must not sign the user out. */
+let recoveryArmed = false;
 
 export function registerSessionRecoveryHandler(handler: ((message: string) => void) | null): void {
   recoveryHandler = handler;
 }
 
+/** Arm only after AuthProvider has finished the initial session restore attempt. */
+export function setSessionRecoveryArmed(armed: boolean): void {
+  recoveryArmed = armed;
+}
+
 export function requestSessionRecovery(message: string = DEFAULT_RECOVERY): void {
-  if (!recoveryHandler || Date.now() < recoveryBusyUntil) return;
+  if (!recoveryHandler || !recoveryArmed || Date.now() < recoveryBusyUntil) return;
   recoveryBusyUntil = Date.now() + 2000;
-  recoveryHandler(message);
+
+  const handler = recoveryHandler;
+  void (async () => {
+    // Lazy-import so auth error classification stays usable without a live client.
+    const { getRestoredSession, isSessionLocallyValid } = await import('./sessionGate');
+    // A valid stored session means this 401 likely raced session restore (or was
+    // an anon request). Do not sign the user out — gated warmers will retry.
+    const session = await getRestoredSession();
+    if (isSessionLocallyValid(session)) return;
+    handler(message);
+  })();
 }

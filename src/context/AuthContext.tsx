@@ -16,6 +16,7 @@ import {
   isSupabaseAuthError,
   isTransientSupabaseError,
   registerSessionRecoveryHandler,
+  setSessionRecoveryArmed,
 } from '../lib/supabase/authError';
 import {
   clearTestAdminSession,
@@ -681,12 +682,24 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   );
 
   useEffect(() => {
+    // Ignore QueryCache 401s until boot finishes — pre-session catalog warmers
+    // used to race restore and sign out a still-valid stored session.
+    if (!authReady) {
+      setSessionRecoveryArmed(false);
+      registerSessionRecoveryHandler(null);
+      return;
+    }
+
+    setSessionRecoveryArmed(true);
     registerSessionRecoveryHandler((message) => {
       if (!isAuthenticated && !session) return;
       void recoverLogin(message || SESSION_EXPIRED_MESSAGE);
     });
-    return () => registerSessionRecoveryHandler(null);
-  }, [isAuthenticated, recoverLogin, session]);
+    return () => {
+      setSessionRecoveryArmed(false);
+      registerSessionRecoveryHandler(null);
+    };
+  }, [authReady, isAuthenticated, recoverLogin, session]);
 
   const unlockAdmin = useCallback((code: string): boolean => {
     if (code === ADMIN_PASSCODE) {

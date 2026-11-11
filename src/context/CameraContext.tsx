@@ -16,6 +16,7 @@ import {
   applyContinuousCameraEnhancements,
 } from '../lib/scanner/acquireCamera';
 import { initializeItemScanIndex } from '../stores/itemScanIndex';
+import { useAuth } from './AuthContext';
 
 export type BarcodeDetectorResult = {
   rawValue?: string | null;
@@ -182,6 +183,7 @@ export function useCameraPermissionWarmup(): {
 }
 
 export function CameraProvider({ children }: { children: ReactNode }): React.JSX.Element {
+  const { authReady, isAuthenticated } = useAuth();
   const [stream, setStream] = useState<MediaStream | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [enginesReady, setEnginesReady] = useState(false);
@@ -202,12 +204,13 @@ export function CameraProvider({ children }: { children: ReactNode }): React.JSX
     return next;
   }, []);
 
-  /** Warm item-scan catalog (used after decode) ASAP in parallel with camera engines. */
+  /** Warm item-scan catalog only after auth restore — anon can no longer read items. */
   useEffect(() => {
+    if (!authReady || !isAuthenticated) return;
     void initializeItemScanIndex().catch(() => {
       /* surface via itemScanIndexStore */
     });
-  }, []);
+  }, [authReady, isAuthenticated]);
 
   /** Warm native detector or WASM worker once per picking session */
   useEffect(() => {

@@ -17,7 +17,8 @@ const Analytics = lazy(() =>
   import('@vercel/analytics/react').then((m) => ({ default: m.Analytics })),
 );
 
-// Returning pickers: warm queue route + data before React mounts so /picking opens on cache.
+// Returning pickers: preload route chunks immediately; queue data waits for session
+// inside warmPickQueueRoute so we never hit PostgREST as anon after the lockdown.
 const pickerSession = readStoredPickerSession();
 if (pickerSession.isPicker) {
   warmPickQueueRoute(pickerSession.userId);
