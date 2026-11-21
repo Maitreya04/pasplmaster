@@ -1,12 +1,11 @@
 import { ArrowLeft, CheckCircle, WarningCircle } from '@phosphor-icons/react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useItems } from '../../hooks/useItems';
 import { useToast } from '../../context/ToastContext';
-import { imageToBase64 } from '../../lib/ocr/geminiOCR';
-import { processOrderImage } from '../../lib/ocr/pipeline';
+import { processOrderText } from '../../lib/ocr/pipeline';
 import { supabase } from '../../lib/supabase/client';
-import type { OcrStageItem, OcrStageRun, OcrRunSummary, OcrStageScreen, LoadedOcrImage } from './ocr-lab/types';
+import type { OcrStageItem, OcrStageRun, OcrRunSummary, OcrStageScreen } from './ocr-lab/types';
 import { itemStatusComplete, recentRunFromStage, toStageProduct, toStageRun } from './ocr-lab/helpers';
 import { OcrLabEditDrawer } from './ocr-lab/OcrLabEditDrawer';
 import { OcrLabHomeScreen } from './ocr-lab/OcrLabHomeScreen';
@@ -40,22 +39,6 @@ function StageShell({ children }: { children: React.ReactNode }): React.JSX.Elem
   );
 }
 
-async function getImageDimensions(file: File): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
-    const image = new Image();
-    image.onload = () => {
-      resolve({ width: image.naturalWidth, height: image.naturalHeight });
-      URL.revokeObjectURL(objectUrl);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error('Could not inspect image dimensions'));
-    };
-    image.src = objectUrl;
-  });
-}
-
 function StageInspector({
   run,
   selectedItem,
@@ -85,7 +68,7 @@ function StageInspector({
             </div>
           </div>
         ) : (
-          <p className="mt-4 text-sm text-[var(--content-tertiary)]">Run a staged scan to inspect strategies, customer resolution, and candidate quality before wiring this into sales.</p>
+          <p className="mt-4 text-sm text-[var(--content-tertiary)]">Paste order lines to inspect strategies, customer resolution, and candidate quality before wiring this into sales.</p>
         )}
       </div>
 
@@ -102,7 +85,7 @@ function StageInspector({
             <p className="rounded-2xl bg-[var(--bg-primary)] p-4 text-xs leading-6 text-[var(--content-secondary)]">{selectedItem.source.match_explanation}</p>
           </div>
         ) : (
-          <p className="mt-4 text-sm text-[var(--content-tertiary)]">Select an OCR dot in review to inspect why it matched the way it did.</p>
+          <p className="mt-4 text-sm text-[var(--content-tertiary)]">Select a matched line in review to inspect why it matched the way it did.</p>
         )}
       </div>
     </div>
@@ -116,15 +99,11 @@ export default function OcrOrderLabPage(): React.JSX.Element {
   const catalog = useMemo(() => items.map(toStageProduct), [items]);
 
   const [screen, setScreen] = useState<OcrStageScreen>('home');
-  const [image, setImage] = useState<LoadedOcrImage | null>(null);
+  const [orderText, setOrderText] = useState('');
   const [customerId, setCustomerId] = useState('');
   const [run, setRun] = useState<OcrStageRun | null>(null);
   const [recentRuns, setRecentRuns] = useState<OcrRunSummary[]>(INITIAL_RUNS);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-
-  useEffect(() => () => {
-    if (image?.previewUrl) URL.revokeObjectURL(image.previewUrl);
-  }, [image]);
 
   const selectedItem = useMemo(
     () => run?.items.find((item) => item.id === selectedItemId) ?? null,
@@ -135,54 +114,30 @@ export default function OcrOrderLabPage(): React.JSX.Element {
     [run],
   );
 
-  const handleFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    try {
-      const base64 = await imageToBase64(file, 1400);
-      const dimensions = await getImageDimensions(file);
-      const previewUrl = URL.createObjectURL(file);
-      setImage((current) => {
-        if (current?.previewUrl) URL.revokeObjectURL(current.previewUrl);
-        return {
-          name: file.name,
-          mimeType: file.type || 'image/jpeg',
-          base64,
-          previewUrl,
-          width: dimensions.width,
-          height: dimensions.height,
-        };
-      });
-      toast.success('Image ready for staging');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not read image');
-    }
-  }, [toast]);
-
   const handleStartScan = useCallback(async () => {
-    if (!image) {
-      toast.warning('Choose a WhatsApp order image first');
+    if (!orderText.trim()) {
+      toast.warning('Paste at least one order line first');
       return;
     }
     setScreen('scanning');
     const startedAt = Date.now();
     try {
-      const result = await processOrderImage(image.base64, image.mimeType, supabase, customerId.trim() || undefined);
+      const result = await processOrderText(orderText, supabase, customerId.trim() || undefined);
       const nextRun = toStageRun(result, catalog);
       const elapsed = Date.now() - startedAt;
-      if (elapsed < 1400) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1400 - elapsed));
+      if (elapsed < 600) {
+        await new Promise((resolve) => window.setTimeout(resolve, 600 - elapsed));
       }
       setRun(nextRun);
       setSelectedItemId(nextRun.items[0]?.id ?? null);
       setRecentRuns((prev) => [recentRunFromStage(nextRun), ...prev].slice(0, 4));
       setScreen('review');
-      toast.success('OCR staging run ready for review');
+      toast.success('Catalog matching ready for review');
     } catch (error) {
       setScreen('upload');
-      toast.error(error instanceof Error ? error.message : 'OCR staging failed');
+      toast.error(error instanceof Error ? error.message : 'Matching failed');
     }
-  }, [catalog, customerId, image, toast]);
+  }, [catalog, customerId, orderText, toast]);
 
   const handleUpdateItem = useCallback((product: OcrStageItem['matchedProduct'], quantity: number) => {
     if (!run || !selectedItemId) return;
@@ -210,6 +165,7 @@ export default function OcrOrderLabPage(): React.JSX.Element {
     setRun(null);
     setSelectedItemId(null);
     setCustomerId('');
+    setOrderText('');
     setScreen('home');
   }, []);
 
@@ -221,19 +177,50 @@ export default function OcrOrderLabPage(): React.JSX.Element {
             <ArrowLeft size={24} weight="bold" />
           </button>
           <div>
-            <h1 className="text-2xl font-bold text-[var(--content-primary)]">OCR Sales Flow Staging</h1>
-            <p className="text-sm text-[var(--content-tertiary)]">Admin-only mobile prototype backed by the live OCR and matching pipeline.</p>
+            <h1 className="text-2xl font-bold text-[var(--content-primary)]">Order Match Lab</h1>
+            <p className="text-sm text-[var(--content-tertiary)]">
+              Admin-only prototype for typed order lines against the live catalog matcher (no photo AI).
+            </p>
           </div>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[420px_1fr] lg:items-start">
           <StageShell>
             {screen === 'home' ? <OcrLabHomeScreen recentRuns={recentRuns} onNavigate={() => setScreen('upload')} /> : null}
-            {screen === 'upload' ? <OcrLabUploadScreen image={image} customerId={customerId} catalogReady={!catalogLoading} onBack={() => setScreen('home')} onCustomerIdChange={setCustomerId} onFileChange={handleFileChange} onScan={() => void handleStartScan()} /> : null}
-            {screen === 'scanning' ? <OcrLabScanningScreen image={image} /> : null}
-            {screen === 'review' && run ? <OcrLabReviewScreen image={image} run={run} selectedItemId={selectedItemId} allConfirmed={allConfirmed} onBack={() => setScreen('home')} onItemClick={setSelectedItemId} onProceed={() => setScreen('summary')} /> : null}
+            {screen === 'upload' ? (
+              <OcrLabUploadScreen
+                orderText={orderText}
+                customerId={customerId}
+                catalogReady={!catalogLoading}
+                onBack={() => setScreen('home')}
+                onCustomerIdChange={setCustomerId}
+                onOrderTextChange={setOrderText}
+                onScan={() => void handleStartScan()}
+              />
+            ) : null}
+            {screen === 'scanning' ? <OcrLabScanningScreen /> : null}
+            {screen === 'review' && run ? (
+              <OcrLabReviewScreen
+                run={run}
+                selectedItemId={selectedItemId}
+                allConfirmed={allConfirmed}
+                onBack={() => setScreen('home')}
+                onItemClick={setSelectedItemId}
+                onProceed={() => setScreen('summary')}
+              />
+            ) : null}
             {screen === 'summary' && run ? <OcrLabSummaryScreen run={run} onBack={() => setScreen('review')} onFinish={resetFlow} /> : null}
-            {screen === 'review' && run && selectedItem ? <OcrLabEditDrawer item={selectedItem} itemIndex={run.items.findIndex((item) => item.id === selectedItem.id)} totalItems={run.items.length} catalog={catalog} onClose={() => setSelectedItemId(null)} onConfirm={handleUpdateItem} onNavigate={handleNavigateItem} /> : null}
+            {screen === 'review' && run && selectedItem ? (
+              <OcrLabEditDrawer
+                item={selectedItem}
+                itemIndex={run.items.findIndex((item) => item.id === selectedItem.id)}
+                totalItems={run.items.length}
+                catalog={catalog}
+                onClose={() => setSelectedItemId(null)}
+                onConfirm={handleUpdateItem}
+                onNavigate={handleNavigateItem}
+              />
+            ) : null}
           </StageShell>
 
           <StageInspector run={run} selectedItem={selectedItem} />

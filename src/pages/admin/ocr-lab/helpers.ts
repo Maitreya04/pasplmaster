@@ -14,17 +14,6 @@ function normalizeCatalogSearch(value: string): string {
   return value.trim().toLowerCase().replace(/o/g, '0');
 }
 
-function coordinateForIndex(index: number, total: number): { top: string; left: string } {
-  const safeTotal = Math.max(total, 1);
-  const start = 16;
-  const end = 78;
-  const step = safeTotal > 1 ? (end - start) / (safeTotal - 1) : 0;
-  return {
-    top: `${start + step * index}%`,
-    left: '8%',
-  };
-}
-
 export function toStageProduct(item: Pick<Item, 'id' | 'name' | 'alias' | 'alias1' | 'sales_price' | 'main_group'>): OcrStageProduct {
   return {
     id: String(item.id),
@@ -62,7 +51,6 @@ export function toStageRun(
   result: OCROrderResult,
   catalog: OcrStageProduct[],
 ): OcrStageRun {
-  const total = result.items.length;
   return {
     customerName: result.customer_name,
     customerContext: result.customer_context,
@@ -75,7 +63,6 @@ export function toStageRun(
       quantity: item.qty,
       confidence: confidenceScore(item.confidence, item.match_strategy),
       confidenceLabel: item.confidence,
-      coordinates: coordinateForIndex(index, total),
       status: 'pending',
       source: item,
     })),

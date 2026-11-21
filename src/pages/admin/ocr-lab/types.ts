@@ -3,15 +3,6 @@ import type { MatchedItem, MatchConfidence, OCROrderResult } from '../../../lib/
 export type OcrStageScreen = 'home' | 'upload' | 'scanning' | 'review' | 'summary';
 export type OcrStageStatus = 'pending' | 'confirmed' | 'edited';
 
-export interface LoadedOcrImage {
-  name: string;
-  mimeType: string;
-  base64: string;
-  previewUrl: string;
-  width: number;
-  height: number;
-}
-
 export interface OcrStageProduct {
   id: string;
   name: string;
@@ -28,10 +19,6 @@ export interface OcrStageItem {
   quantity: number;
   confidence: number;
   confidenceLabel: MatchConfidence;
-  coordinates: {
-    top: string;
-    left: string;
-  };
   status: OcrStageStatus;
   source: MatchedItem;
 }

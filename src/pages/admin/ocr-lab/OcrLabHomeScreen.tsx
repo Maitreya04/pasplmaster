@@ -1,4 +1,4 @@
-import { Camera, ClockCounterClockwise, Package, User } from '@phosphor-icons/react';
+import { ClockCounterClockwise, NotePencil, Package, User } from '@phosphor-icons/react';
 import type { OcrRunSummary } from './types';
 
 export function OcrLabHomeScreen({
@@ -13,9 +13,11 @@ export function OcrLabHomeScreen({
       <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-5">
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <p className="font-ds-micro text-[var(--content-tertiary)]">OCR Sales Flow</p>
+            <p className="font-ds-micro text-[var(--content-tertiary)]">Order Match Lab</p>
             <h2 className="mt-1 text-xl font-bold text-[var(--content-primary)]">Stage before shipping</h2>
-            <p className="mt-1 text-sm text-[var(--content-tertiary)]">Use the live OCR pipeline, but keep the workflow safely inside admin.</p>
+            <p className="mt-1 text-sm text-[var(--content-tertiary)]">
+              Paste typed lines and exercise the live catalog matcher inside admin.
+            </p>
           </div>
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--bg-tertiary)]">
             <User size={20} className="text-[var(--content-secondary)]" />
@@ -28,11 +30,11 @@ export function OcrLabHomeScreen({
         >
           <div className="flex items-center gap-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/15">
-              <Camera size={24} className="text-[var(--content-on-color)]" />
+              <NotePencil size={24} className="text-[var(--content-on-color)]" />
             </div>
             <div className="text-left">
-              <h2 className="text-lg font-semibold">Start OCR Review</h2>
-              <p className="text-xs text-white/80">Upload a WhatsApp bill photo and walk it through the staged review flow.</p>
+              <h2 className="text-lg font-semibold">Start line matching</h2>
+              <p className="text-xs text-white/80">Paste order text and walk it through the staged review flow.</p>
             </div>
           </div>
         </button>
@@ -40,7 +42,7 @@ export function OcrLabHomeScreen({
 
       <div className="flex-1 overflow-y-auto px-5 py-5">
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-[var(--content-secondary)]">Recent staged scans</h3>
+          <h3 className="text-sm font-semibold text-[var(--content-secondary)]">Recent staged runs</h3>
           <span className="rounded-full bg-[var(--bg-tertiary)] px-3 py-1 text-xs font-medium text-[var(--content-tertiary)]">
             Admin only
           </span>
@@ -75,7 +77,7 @@ export function OcrLabHomeScreen({
             <div>
               <p className="text-sm font-semibold text-[var(--content-primary)]">How it fits the app</p>
               <p className="mt-1 text-xs leading-5 text-[var(--content-tertiary)]">
-                This mirrors the future sales flow: upload photo, inspect extracted lines, confirm matches, then finalize the order draft.
+                Paste lines, inspect matches, confirm products and quantities, then finalize the order draft later in sales.
               </p>
             </div>
           </div>

@@ -1,7 +1,7 @@
 // Normalizes raw OCR line items into searchable codes, descriptions, and review metadata.
 import { ABBREVIATIONS } from '../abbreviations';
 import { BRAND_PREFIXES } from '../search/itemSearch';
-import type { GeminiRawItem, NormalizedItem } from './types';
+import type { RawOrderItem, NormalizedItem } from './types';
 
 const VARIANT_RULES: Array<{ flag: string; pattern: RegExp }> = [
   { flag: 'STD', pattern: /\bSTD\b/gi },
@@ -177,7 +177,7 @@ function classifyTokenType(rawText: string): {
   };
 }
 
-function normalizeSingleItem(item: GeminiRawItem): NormalizedItem {
+function normalizeSingleItem(item: RawOrderItem): NormalizedItem {
   const qtyStripped = stripKnownQty(item.raw_text, item.qty, item.qty_unit);
   const { flags, text: variantStripped } = extractVariantFlags(qtyStripped);
   const { pricingNote, text: pricingStripped } = extractPricingNote(variantStripped);
@@ -199,6 +199,6 @@ function normalizeSingleItem(item: GeminiRawItem): NormalizedItem {
   };
 }
 
-export function normalizeItems(rawItems: GeminiRawItem[]): NormalizedItem[] {
+export function normalizeItems(rawItems: RawOrderItem[]): NormalizedItem[] {
   return rawItems.map(normalizeSingleItem);
 }

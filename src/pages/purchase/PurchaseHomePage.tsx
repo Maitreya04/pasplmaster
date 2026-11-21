@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, FilePdf, FileXls, Plus } from '@phosphor-icons/react';
+import { ArrowLeft, FileXls, Plus } from '@phosphor-icons/react';
 import { BigButton } from '../../components/shared';
 import { fetchPurchaseOrders, PURCHASE_ORDERS_QUERY_KEY } from '../../lib/purchase/purchaseApi';
 
@@ -27,7 +27,7 @@ export default function PurchaseHomePage(): React.JSX.Element {
             </button>
             <h1 className="text-2xl font-bold text-[var(--content-primary)]">Purchase orders</h1>
             <p className="mt-1 text-sm text-[var(--content-tertiary)]">
-              Start from Excel (Description + ORD/Qty, or Part no / Alias columns), from a supplier invoice PDF (creates a sent PO), attach OCR on an existing PO, then open a receiving job.
+              Start from Excel (Description + ORD/Qty, or Part no / Alias columns), then open a receiving job from the PO.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -39,15 +39,6 @@ export default function PurchaseHomePage(): React.JSX.Element {
             >
               <FileXls size={20} weight="bold" className="mr-1 inline" aria-hidden />
               New from Excel
-            </BigButton>
-            <BigButton
-              type="button"
-              variant="secondary"
-              className="min-h-11 shrink-0"
-              onClick={() => navigate('/purchase/invoice/new')}
-            >
-              <FilePdf size={20} weight="bold" className="mr-1 inline" aria-hidden />
-              New from Invoice PDF
             </BigButton>
             <BigButton type="button" variant="secondary" className="min-h-11" onClick={() => navigate('/admin/receiving')}>
               Receiving jobs
@@ -65,15 +56,6 @@ export default function PurchaseHomePage(): React.JSX.Element {
                 <BigButton type="button" variant="secondary" className="min-h-11" onClick={() => navigate('/purchase/new')}>
                   <Plus size={18} weight="bold" className="mr-1 inline" />
                   Create from Excel
-                </BigButton>
-                <BigButton
-                  type="button"
-                  variant="secondary"
-                  className="min-h-11"
-                  onClick={() => navigate('/purchase/invoice/new')}
-                >
-                  <FilePdf size={18} weight="bold" className="mr-1 inline" />
-                  Create from invoice PDF
                 </BigButton>
               </div>
             </div>

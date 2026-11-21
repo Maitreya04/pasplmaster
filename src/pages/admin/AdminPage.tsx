@@ -105,7 +105,7 @@ export default function AdminPage(): React.JSX.Element | null {
             <div className="text-left">
               <p className="font-semibold text-[var(--content-primary)]">Purchase</p>
               <p className="text-sm text-[var(--content-tertiary)]">
-                Excel PO upload, invoice PDF OCR, and receiving job handoff
+                Excel PO upload and receiving job handoff
               </p>
             </div>
           </button>
@@ -313,9 +313,9 @@ export default function AdminPage(): React.JSX.Element | null {
               <MagicWand size={22} weight="regular" className="text-[var(--content-accent)]" />
             </div>
             <div className="text-left">
-              <p className="font-semibold text-[var(--content-primary)]">OCR Order Lab</p>
+              <p className="font-semibold text-[var(--content-primary)]">Order Match Lab</p>
               <p className="text-sm text-[var(--content-tertiary)]">
-                Test handwritten order extraction and item matching
+                Paste typed order lines and test catalog matching
               </p>
             </div>
           </button>
