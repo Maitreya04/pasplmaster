@@ -1,16 +1,16 @@
 // Shared OCR types for extraction, normalization, matching, and admin-lab display.
 export type OCRQtyUnit = 'pcs' | 'set' | 'packet' | 'net' | 'box';
 
-export interface GeminiRawItem {
+export interface RawOrderItem {
   raw_text: string;
   qty: number;
   qty_unit: OCRQtyUnit;
   is_cancelled: boolean;
 }
 
-export interface GeminiRawOrder {
+export interface RawOrder {
   customer_name: string | null;
-  items: GeminiRawItem[];
+  items: RawOrderItem[];
 }
 
 export type OCRTokenType =
@@ -20,7 +20,7 @@ export type OCRTokenType =
   | 'description'
   | 'hindi';
 
-export interface NormalizedItem extends GeminiRawItem {
+export interface NormalizedItem extends RawOrderItem {
   token_type: OCRTokenType;
   clean_code: string | null;
   variant_flags: string[];

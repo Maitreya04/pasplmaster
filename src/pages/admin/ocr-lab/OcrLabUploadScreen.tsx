@@ -1,69 +1,51 @@
-import { ArrowLeft, Camera, ImageSquare, MagicWand } from '@phosphor-icons/react';
-import type { LoadedOcrImage } from './types';
+import { ArrowLeft, NotePencil } from '@phosphor-icons/react';
 
 export function OcrLabUploadScreen({
-  image,
+  orderText,
   customerId,
   catalogReady,
   onBack,
   onCustomerIdChange,
-  onFileChange,
+  onOrderTextChange,
   onScan,
 }: {
-  image: LoadedOcrImage | null;
+  orderText: string;
   customerId: string;
   catalogReady: boolean;
   onBack: () => void;
   onCustomerIdChange: (value: string) => void;
-  onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onOrderTextChange: (value: string) => void;
   onScan: () => void;
 }): React.JSX.Element {
+  const hasLines = orderText.trim().length > 0;
+
   return (
     <div className="flex h-full flex-col bg-[var(--bg-primary)]">
       <div className="flex items-center border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-4">
         <button onClick={onBack} className="-ml-2 rounded-full p-2 text-[var(--content-secondary)] hover:bg-[var(--bg-tertiary)]">
           <ArrowLeft size={20} />
         </button>
-        <h1 className="ml-2 text-base font-semibold text-[var(--content-primary)]">New Order Scan</h1>
+        <h1 className="ml-2 text-base font-semibold text-[var(--content-primary)]">Match order lines</h1>
       </div>
 
       <div className="flex flex-1 flex-col p-5">
         <p className="mb-4 text-sm text-[var(--content-secondary)]">
-          Upload a handwritten order photo from WhatsApp to stage extraction, matching, and review.
+          Paste typed order lines to stage catalog matching and review. Photo AI extraction is no longer available.
         </p>
 
-        <div className="flex-1 rounded-2xl border-2 border-dashed border-[var(--border-opaque)] bg-[var(--bg-tertiary)] p-4">
-          <div className="flex h-full flex-col items-center justify-center rounded-xl bg-[var(--bg-secondary)] p-6 text-center shadow-sm">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--role-primary-subtle)] text-[var(--role-content)]">
-              <ImageSquare size={28} />
-            </div>
-            <p className="mt-4 text-sm font-semibold text-[var(--content-primary)]">
-              {image ? image.name : 'Choose a WhatsApp order image'}
-            </p>
-            <p className="mt-1 text-xs text-[var(--content-tertiary)]">
-              {image ? `${image.mimeType} • ${image.width}×${image.height}` : 'JPG, PNG, or pasted screenshot'}
-            </p>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={onFileChange}
-              className="mt-4 block w-full text-sm text-[var(--content-tertiary)]"
-            />
-            {image ? (
-              <div className="mt-4 flex h-40 w-full items-center justify-center overflow-auto rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2">
-                <img
-                  src={image.previewUrl}
-                  alt={image.name}
-                  className="max-h-full w-full rounded-xl object-contain"
-                />
-              </div>
-            ) : (
-              <div className="mt-4 flex h-36 w-full items-center justify-center rounded-2xl bg-[var(--bg-tertiary)] text-[var(--content-quaternary)]">
-                <Camera size={28} />
-              </div>
-            )}
-          </div>
-        </div>
+        <label className="block text-sm text-[var(--content-secondary)]">
+          Order lines
+          <textarea
+            value={orderText}
+            onChange={(event) => onOrderTextChange(event.target.value)}
+            rows={10}
+            placeholder={'1896A03601 — 02\nCA275 STD — 01\nClutch Assly HH — 10'}
+            className="mt-2 w-full rounded-xl border border-[var(--border-opaque)] bg-[var(--bg-secondary)] px-4 py-3 font-mono text-sm text-[var(--content-primary)] outline-none ring-[var(--role-primary)] focus:ring-2"
+          />
+        </label>
+        <p className="mt-2 text-xs text-[var(--content-tertiary)]">
+          One line per item. Optional format: <span className="font-mono">part or description — qty</span>
+        </p>
 
         <label className="mt-4 block text-sm text-[var(--content-secondary)]">
           Optional customer ID
@@ -78,24 +60,19 @@ export function OcrLabUploadScreen({
         <div className="mt-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
           <p className="text-sm font-semibold text-[var(--content-primary)]">How this behaves in PASPL</p>
           <p className="mt-1 text-xs leading-5 text-[var(--content-tertiary)]">
-            This stage is designed like a pre-order checkpoint: upload the bill, review numbered matches, adjust product or quantity, then move the confirmed draft into sales later.
+            This stage is a pre-order checkpoint: paste lines, review numbered matches, adjust product or quantity, then
+            move the confirmed draft into sales later.
           </p>
         </div>
 
         <div className="mt-6 space-y-3 pb-2">
           <button
             onClick={onScan}
-            disabled={!image || !catalogReady}
+            disabled={!hasLines || !catalogReady}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--role-primary)] py-4 font-medium text-[var(--content-on-color)] shadow-sm transition-transform hover:opacity-95 disabled:cursor-not-allowed disabled:bg-[var(--bg-tertiary)] disabled:text-[var(--content-quaternary)]"
           >
-            <MagicWand size={18} />
-            <span>{catalogReady ? 'Scan with AI (Gemini)' : 'Loading catalog…'}</span>
-          </button>
-          <button
-            type="button"
-            className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] py-4 font-medium text-[var(--content-secondary)]"
-          >
-            Choose Different Photo
+            <NotePencil size={18} />
+            <span>{catalogReady ? 'Match lines to catalog' : 'Loading catalog…'}</span>
           </button>
         </div>
       </div>

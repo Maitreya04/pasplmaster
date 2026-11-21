@@ -435,7 +435,7 @@ export default function App(): React.JSX.Element | null {
           }
         />
 
-        {/* Purchase — PO Excel, invoice OCR, receiving handoff */}
+        {/* Purchase — PO Excel, receiving handoff */}
         <Route
           path="/purchase"
           element={

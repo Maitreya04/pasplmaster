@@ -6,7 +6,7 @@ Date: 2026-07-18. Scope: full working tree (`src/` 619 TS/TSX files, ~119k lines
 
 ## 1. Executive summary
 
-The app is in better shape than most codebases of its age: strict TypeScript with a clean typecheck and only 3 `any` usages, 41 pure-logic test files, disciplined bundle splitting (heavy deps like `xlsx`, `pdfjs`, `maplibre`, and the WASM scanners all live in lazy chunks), a hardened realtime helper with circuit breaking, and a strong docs culture.
+The app is in better shape than most codebases of its age: strict TypeScript with a clean typecheck and only 3 `any` usages, 41 pure-logic test files, disciplined bundle splitting (heavy deps like `xlsx`, `maplibre`, and the WASM scanners all live in lazy chunks), a hardened realtime helper with circuit breaking, and a strong docs culture.
 
 The risks are structural, and they compound with growth speed. The codebase **doubled in ~8 weeks** (284 files in the May audit → 619 now). The three biggest problems:
 
@@ -137,7 +137,7 @@ Per `ENGINEERING_STRATEGY_SUMMARY.md` §5: shared access code + client-side role
 
 ### 5.3 Config sprawl
 
-35 `import.meta.env.VITE_*` reads scattered across files, plus a `VITE_GEMINI_API_KEY` read in client code (verify this key is safe to expose in the browser bundle; if not, proxy through an edge function). Centralize into one `src/lib/env.ts` with parse-once validation, so a missing/misspelled flag fails loudly at boot instead of silently enabling a legacy code path.
+35 `import.meta.env.VITE_*` reads scattered across files. Centralize into one `src/lib/env.ts` with parse-once validation, so a missing/misspelled flag fails loudly at boot instead of silently enabling a legacy code path.
 
 ---
 
@@ -168,7 +168,7 @@ Per `ENGINEERING_STRATEGY_SUMMARY.md` §5: shared access code + client-side role
 | 2.1 | For each env flag (`VITE_BILLING_QUEUE_EVENTS`, `VITE_PICKER_V`, `VITE_PICK_MRP_SPLIT`, `VITE_PICK_TRANSITION_MODE`), decide the winner with the team; delete the losing path. `useClaimableOrders` should shrink dramatically |
 | 2.2 | Confirm with operators which billing surfaces are used; sunset unused routes among Dashboard/LiveQueue/CompactQueue/Desk |
 | 2.3 | Single `completeBilling`/approve path; replace both per-line `order_items` update loops with one set-based RPC |
-| 2.4 | Centralize env reads in `src/lib/env.ts`; verify the Gemini key exposure |
+| 2.4 | Centralize env reads in `src/lib/env.ts` |
 
 ### Phase 3 — Shared data layer (≈3–4 weeks, one domain at a time)
 

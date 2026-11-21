@@ -1,9 +1,8 @@
-// Orchestrates OCR extraction, normalization, matching, and summary stats for admin-lab testing.
+// Orchestrates text-order parsing, normalization, matching, and summary stats for admin-lab testing.
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { extractOrderFromImage } from './gemini-extract';
 import { matchItems } from './matcher';
 import { normalizeItems } from './normalizer';
-import type { GeminiRawItem, MatchedItem, OCROrderResult, OCRQtyUnit } from './types';
+import type { RawOrderItem, MatchedItem, OCROrderResult, OCRQtyUnit } from './types';
 
 const TEXT_LINE_REGEX = /^(.+?)\s*[-—]\s*(\d+)\s*(set|pcs|packet|net|box)?/i;
 
@@ -37,7 +36,7 @@ function normalizeQtyUnit(value?: string): OCRQtyUnit {
   }
 }
 
-export function parseTextOrderItems(rawText: string): GeminiRawItem[] {
+export function parseTextOrderItems(rawText: string): RawOrderItem[] {
   return rawText
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -136,26 +135,6 @@ export async function resolveCustomerContext(
   };
 }
 
-export async function processOrderImage(
-  base64Image: string,
-  mimeType: string,
-  supabase: SupabaseClient,
-  customer_id?: string,
-): Promise<OCROrderResult> {
-  const extracted = await extractOrderFromImage(base64Image, mimeType);
-  const activeItems = extracted.items.filter((item) => !item.is_cancelled);
-  const normalized = normalizeItems(activeItems);
-  const customerContext = await resolveCustomerContext(supabase, customer_id, extracted.customer_name);
-  const matched = await matchItems(normalized, supabase, customerContext.resolved_customer_id ?? undefined);
-
-  return {
-    customer_name: extracted.customer_name,
-    items: matched,
-    customer_context: customerContext,
-    stats: buildOrderStats(matched),
-  };
-}
-
 export async function processOrderText(
   rawText: string,
   supabase: SupabaseClient,
@@ -172,13 +151,3 @@ export async function processOrderText(
     stats: buildOrderStats(matched),
   };
 }
-
-/*
-Manual verification trace:
-- Input image header: "Rahul Dhamnod"
-- Line 1: "1896A03601 — 02" -> numeric_code clean_code "1896A03601", qty 2, exact alias/alias1 hit => high
-- Line 2: "CA275 STD — 01" -> brand/numeric-like code with variant ["STD"], qty 1, prefix or exact code hit => medium/high
-- Line 3: "Clutch Assly HH — 10" -> description, expanded_description "clutch assembly hero honda", vehicle_context "Hero Honda", qty 10 => low
-- Line 4: "12x1.5x045 — 100" struck through -> filtered out before normalization and matching
-- Final stats should be: { total: 3, high: 1, medium: 1, low: 1, none: 0 }
-*/

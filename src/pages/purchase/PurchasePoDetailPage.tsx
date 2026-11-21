@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Receipt } from '@phosphor-icons/react';
+import { ArrowLeft } from '@phosphor-icons/react';
 import { BigButton } from '../../components/shared';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -170,10 +170,6 @@ export default function PurchasePoDetailPage(): React.JSX.Element {
             >
               Mark PO sent
             </BigButton>
-            <BigButton type="button" variant="secondary" onClick={() => navigate(`/purchase/po/${poId}/invoice`)}>
-              <Receipt size={18} weight="bold" className="mr-1 inline" />
-              Invoice PDF & OCR
-            </BigButton>
             <BigButton
               type="button"
               variant="primary"
@@ -194,7 +190,8 @@ export default function PurchasePoDetailPage(): React.JSX.Element {
           </div>
           {!invoiceQuery.data?.id ? (
             <p className="mt-3 text-xs text-[var(--content-tertiary)]">
-              Save an invoice draft first to enable “Start receiving (invoice)”.
+              Invoice-triggered receiving is only available when a historical supplier invoice already exists on this PO.
+              Prefer “Start receiving (PO)”.
             </p>
           ) : (
             <p className="mt-3 text-xs text-[var(--content-secondary)]">
